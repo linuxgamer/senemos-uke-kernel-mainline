@@ -1,16 +1,21 @@
-# Kernel development architecture
+# Kernel source layout
 
-Product name: `senemos-uke-linux-kernel-mainline`. The historical generic base
-is Linux v7.2.8 at `9a66fdc0d7fd55f54235524a73435af99051e46f`. The reviewed
-Uke source port targets Linux v7.2.9 at
-`5fce161649b4d779d1b76d9fcd52dc77779774b8`, with eight subsystem patches and
-separate ARM64, Uke and Fedora config fragments. This repository's standalone
-`senemos.sh` entry builds the signed release source and records the resolved
-config, source/patch/toolchain identities and module ABI. Active development
-trees remain in `src/upstream/`; the earlier baseline is preserved.
+The normal build uses the signed Linux 7.2.9 release source, the 44 patches in
+`patches/7.2.9/series`, and the ARM64, Uke and Fedora config fragments in
+`configs/`. `manifests/linux-7.2.9.json` pins the source, patch and config
+identities. `build.sh` prepares the source and builds local RPMs in a pinned
+container. The experimental Linux 7.2.10 profile is separate.
 
-Keep pristine-baseline, donor-6.12 and forward-port builds separate. Record the final development commit, config hash, toolchain digest, source time and exported patch tree identity. Store reviewable patches under `patches/`; never develop in `referances/`.
+`src/boot/` contains the stock bootloader device-tree adaptation. It is used
+for a boot-specific image path and is not part of the ordinary 7.2.9 RPM patch
+series. `src/display/` contains the native display candidate; it is not enabled
+in the normal build. `tests/` contains host checks for individual contracts.
 
-Port binding/TLMM, clocks, RPMh/regulators/GDSC, USB interconnect, scoped SMMU handoff, eUSB2/repeater, WCD939x and DWC3 in dependency order. Test generic infrastructure changes on non-target configs as well as Uke. Review retry behavior and resource lifetimes rather than accepting a successful compile as sufficient.
+Keep reviewable changes in source, patches, configs and manifests. Keep
+downloaded upstream archives under ignored `referances/` and generated files
+under ignored build and artifact directories. Android 6.1 vendor modules cannot
+be used as Linux 7.2 modules.
 
-Stock-DTB transition profiles and standalone mainline DTS have separate checks. Preserve variant-specific reserved memory and framebuffer ownership. Android 6.1 vendor modules are not mainline 7.2 modules. Kernel code follows upstream C/assembly conventions; new companion device applications use C++.
+Source application, compilation, package tests and tablet operation are
+different checks. In particular, a compiled device tree does not prove that
+its hardware providers work on a tablet.

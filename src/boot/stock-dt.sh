@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Host-only stock image inspection; sourced by senemos.sh. No donor tool runs.
+# Host-only stock image inspection; sourced by build.sh. No donor tool runs.
 set -Eeuo pipefail
 stock_u32() { od -An -v --endian="$3" -tu4 -j "$2" -N4 "$1" | tr -d '[:space:]'; }
 stock_extract() {
@@ -71,7 +71,7 @@ stock_dt_main() {
         [[ ! -L $file && $(stat -c %s "$file") -ge 2128 && $(stat -c %s "$file") -le 134217728 ]] || die 'Stock inputs must be bounded regular files'
     done
     bootstrap
-    # shellcheck disable=SC2153 # Set by the sourcing senemos.sh bootstrap.
+    # shellcheck disable=SC2153 # Set by the sourcing build.sh bootstrap.
     engine=$ENGINE; arch=$(uname -m)
     [[ $arch == x86_64 || $arch == aarch64 ]] || die 'Unsupported stock inspection host'
     recipe=$(cat "$KERNEL/configs/host/Containerfile.rawhide" "$RULES" | sha256sum | cut -d ' ' -f1)

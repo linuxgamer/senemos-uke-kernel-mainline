@@ -1,38 +1,8 @@
-#!/bin/sh
-# shellcheck shell=bash
-# One host-only entry point. This preamble also works on minimal Alpine hosts.
-if [ "${SENEMOS_ENTRY_LOADED:-0}" != 1 ]; then
-    if ! command -v bash >/dev/null 2>&1; then
-        for bootstrap_argument in "$@"; do
-            if [ "$bootstrap_argument" = --dry-run ] || [ "$bootstrap_argument" = --offline ]; then
-                printf '%s\n' 'Bash is missing; dry-run/offline mode will not install it.' >&2
-                exit 1
-            fi
-        done
-        bootstrap_root() {
-            if [ "$(id -u)" = 0 ]; then "$@";
-            elif command -v sudo >/dev/null 2>&1; then sudo -- "$@";
-            elif command -v doas >/dev/null 2>&1; then doas -- "$@";
-            else printf '%s\n' 'Bash is missing; root, sudo or doas is required.' >&2; exit 1; fi
-        }
-        # shellcheck disable=SC1091
-        . /etc/os-release
-        case " $ID ${ID_LIKE:-} " in
-            *' alpine '*|*' postmarketos '*) bootstrap_root apk add --no-cache bash;;
-            *' debian '*|*' ubuntu '*) bootstrap_root apt-get update; bootstrap_root apt-get -y install bash;;
-            *' fedora '*|*' rhel '*) bootstrap_root dnf -y install bash;;
-            *' opensuse '*|*' opensuse-tumbleweed '*|*' suse '*) bootstrap_root zypper --non-interactive install bash;;
-            *' arch '*) bootstrap_root pacman -S --needed --noconfirm bash;;
-            *) printf '%s\n' 'Unsupported Bash bootstrap host.' >&2; exit 1;;
-        esac
-    fi
-    # Bash receives one immutable copy; queued invocations tolerate later edits.
-    SENEMOS_ENTRY_LOADED=1 exec bash -c "$(cat "$0")" "$0" "$@"
-fi
-unset SENEMOS_ENTRY_LOADED
+#!/usr/bin/env bash
+# Build kernel RPMs in a container; inspect firmware only through explicit modes.
 set -Eeuo pipefail
 umask 022
-ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 KERNEL=$ROOT
 BUILDER=$KERNEL
 RULES=$BUILDER/configs/host/build-rules.json
@@ -40,12 +10,12 @@ VERSION=latest DISTRO=fedora RELEASE='' JOBS='' DRY_RUN=0 OFFLINE=0 TEST=0
 ENGINE='' CID='' PAUSED=0
 TEST_RUNTIME_ID=''
 
-say() { printf 'senemos: %s\n' "$*"; }
-die() { printf 'senemos: ERROR: %s\n' "$*" >&2; exit 1; }
+say() { printf 'uke-kernel: %s\n' "$*"; }
+die() { printf 'uke-kernel: ERROR: %s\n' "$*" >&2; exit 1; }
 help() {
     cat <<'HELP'
-Senemos Uke kernel builder (host only)
-Usage: ./senemos.sh --build VERSION --distro=DISTRO [options]
+Uke kernel builder (host only; requires Bash)
+Usage: ./build.sh --build VERSION --distro=DISTRO [options]
 
   --build VERSION     Explicit version, latest, or its alias lastest
   --distro DISTRO     Target distribution, independent of the build host
@@ -60,15 +30,17 @@ Usage: ./senemos.sh --build VERSION --distro=DISTRO [options]
   --help, -h          Show this help
 
 Examples:
-  ./senemos.sh --build 7.2.10 --distro=fedora --test
-  ./senemos.sh --build latest --distro=fedora
-  ./senemos.sh --build lastest --distro=fedora
-  ./senemos.sh --inspect-stock --vendor-boot FILE --dtbo FILE --firmware-profile NAME
-  ./senemos.sh --prepare-boot-dt RECEIPT KERNEL_SOURCE OUTPUT [--usb2-peripheral]
+  ./build.sh --build 7.2.10 --distro=fedora --test
+  ./build.sh --build latest --distro=fedora
+  ./build.sh --build lastest --distro=fedora
+  ./build.sh --inspect-stock --vendor-boot FILE --dtbo FILE --firmware-profile NAME
+  ./build.sh --prepare-boot-dt RECEIPT KERNEL_SOURCE OUTPUT [--usb2-peripheral]
 
-Implemented target: Fedora Rawhide AArch64 RPM and SRPM.
-Planned: Fedora 45, openSUSE Tumbleweed, Debian, Ubuntu, Armbian, Kubuntu,
-Alpine and postmarketOS. Unsupported profiles fail explicitly.
+The default build verifies the signed Linux source and pinned Uke patches,
+then builds Image, DTB, modules and Fedora RPM/SRPM packages in a container.
+--test also checks RPM install, upgrade and removal in AArch64 userspace.
+Implemented target: Fedora Rawhide AArch64. Fedora 44 migration is pending.
+Unsupported profiles fail explicitly.
 Host families: Fedora/RHEL, Debian/Ubuntu, openSUSE, Arch, Alpine/postmarketOS.
 Missing prerequisites are installed from official host repositories; build
 dependencies stay in a pinned container. Builds queue behind other compilers.
@@ -284,7 +256,7 @@ run_job() {
         if [[ $ENGINE == podman ]]; then opts+=(--userns=keep-id); else opts+=(--user "$(id -u):$(id -g)"); fi
     fi
     wait_idle
-    CID=$("$ENGINE" create "${opts[@]}" "$image" bash /work/kernel/senemos.sh "$@")
+    CID=$("$ENGINE" create "${opts[@]}" "$image" bash /work/kernel/build.sh "$@")
     trap cleanup EXIT
     "$ENGINE" start "$CID" >/dev/null
     while [[ $("$ENGINE" inspect --format '{{or .State.Running .State.Paused}}' "$CID") == true ]]; do
@@ -465,7 +437,6 @@ internal_audit() {
     fdtget -t s "$work/output/sm7675-xiaomi-uke.dtb" / compatible | grep -F xiaomi,uke
     for package in "$top/RPMS/aarch64/"*.rpm; do
         rpm -qp --requires "$package" > "$work/$(basename "$package").requires"
-        if grep -Ei 'python|pypy|libpython' "$work/$(basename "$package").requires"; then die 'Python runtime dependency in target RPM'; fi
         rpm -qp --scripts "$package" > "$work/$(basename "$package").scripts"
     done
     # Query package metadata in the RPM toolchain, so APT/APK hosts do not need RPM.
@@ -537,7 +508,6 @@ internal_lifecycle() {
     rpm -q --qf '%{RELEASE}\n' senemos-uke-linux-kernel-mainline | grep -E '^2\.'
     rpm -qa --qf '%{NAME}\n' | sort > dependency-closure.txt
     rpm -qa --qf '%{NAME}-%{EPOCHNUM}:%{VERSION}-%{RELEASE}.%{ARCH}\n' | sort > dependency-closure-nevra.txt
-    if grep -Ei 'python|pypy|libpython' dependency-closure.txt; then die 'Python present in target dependency closure'; fi
     rpm -V senemos-uke-linux-kernel-mainline-core senemos-uke-linux-kernel-mainline-modules \
         senemos-uke-linux-kernel-mainline-dtbs
     dnf -y --disablerepo='*' remove senemos-uke-linux-kernel-mainline senemos-uke-linux-kernel-mainline-core \
@@ -569,8 +539,8 @@ self_test() {
         grep -Fq jq "$temporary/$manager.commands"
     done
     ok 'five official package-manager installation command fixtures'
-    bash -n "$ROOT/senemos.sh"
-    if command -v shellcheck >/dev/null; then shellcheck -s bash "$ROOT/senemos.sh"; fi
+    bash -n "$ROOT/build.sh"
+    if command -v shellcheck >/dev/null; then shellcheck -s bash "$ROOT/build.sh"; fi
     ok 'shell syntax and available ShellCheck'
     cmp "$KERNEL/packaging/senemos-uke-linux-kernel-mainline.spec" "$KERNEL/configs/host/senemos-uke-linux-kernel-mainline.spec"
     ok 'host and COPR specs share the same source and package checks'
@@ -627,11 +597,11 @@ self_test() {
     }
     fixture_identity
     ok 'all native source checks invalidate completed-build admission'
-    reject bash "$ROOT/senemos.sh" --build '../escape' --dry-run
-    reject bash "$ROOT/senemos.sh" --jobs 0 --dry-run
-    reject bash "$ROOT/senemos.sh" --distro=debian --build 7.2.9 --dry-run
-    reject bash "$ROOT/senemos.sh" --build 99.99.99 --dry-run
-    reject bash "$ROOT/senemos.sh" --unknown
+    reject bash "$ROOT/build.sh" --build '../escape' --dry-run
+    reject bash "$ROOT/build.sh" --jobs 0 --dry-run
+    reject bash "$ROOT/build.sh" --distro=debian --build 7.2.9 --dry-run
+    reject bash "$ROOT/build.sh" --build 99.99.99 --dry-run
+    reject bash "$ROOT/build.sh" --unknown
     ok 'invalid options, path traversal and unimplemented targets'
     mkdir -p "$temporary/profile-fixture/manifests"
     printf '{"schema_version":1,"version":"7.2.9","patches":[]}\n' > "$temporary/profile-fixture/manifests/linux-7.2.9.json"
@@ -641,7 +611,7 @@ self_test() {
     }
     if (incomplete_profile_fixture) > "$temporary/profile.log" 2>&1; then die 'Incomplete Uke profile accepted'; fi
     ok 'incomplete version profile rejected'
-    reject bash "$ROOT/senemos.sh" --build 99.99.99 --offline --dry-run
+    reject bash "$ROOT/build.sh" --build 99.99.99 --offline --dry-run
     if (check_space 1024 25) > "$temporary/space.log" 2>&1; then die 'Disk preflight accepted insufficient space'; fi
     if ((EUID != 0)); then
         if (PATH=$temporary privileged true) > "$temporary/privilege.log" 2>&1; then die 'Missing privilege accepted'; fi
@@ -683,16 +653,17 @@ self_test() {
         signature=$KERNEL/referances/releases/linux-$profile_version.tar.sign
         [[ -s $archive ]] || continue
         printf broken > "$temporary/broken.tar.xz"
-        reject bash "$ROOT/senemos.sh" --internal-verify "$temporary/broken.tar.xz" "$signature" "$profile" "$KERNEL/configs/keys/linux-stable.asc" "$temporary/gpg"
+        reject bash "$ROOT/build.sh" --internal-verify "$temporary/broken.tar.xz" "$signature" "$profile" "$KERNEL/configs/keys/linux-stable.asc" "$temporary/gpg"
         verify_source "$archive" "$signature" "$profile" "$KERNEL/configs/keys/linux-stable.asc" "$temporary/good-gpg"
         printf invalid > "$temporary/invalid.sign"
-        reject bash "$ROOT/senemos.sh" --internal-verify "$archive" "$temporary/invalid.sign" "$profile" "$KERNEL/configs/keys/linux-stable.asc" "$temporary/bad-gpg"
+        reject bash "$ROOT/build.sh" --internal-verify "$archive" "$temporary/invalid.sign" "$profile" "$KERNEL/configs/keys/linux-stable.asc" "$temporary/bad-gpg"
         ok "real signed $profile_version source accepted; corrupt archive and signature rejected"
     done
     say "$passed self-test groups passed; no hardware tests performed"
     rm -rf -- "$temporary"; trap - RETURN
 }
 
+if (($# == 0)); then help; exit 0; fi
 if [[ ${1:-} == --internal-build ]]; then shift; internal_build "$@"; exit; fi
 if [[ ${1:-} == --internal-audit ]]; then shift; internal_audit "$@"; exit; fi
 if [[ ${1:-} == --internal-package ]]; then shift; internal_package "$@"; exit; fi

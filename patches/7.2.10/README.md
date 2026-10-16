@@ -11,7 +11,8 @@ Prime domain. The stock-ABL GPU overlay separately supplies nine SM7675
 frequency/corner/bandwidth points. Native DPU/DSI work remains an isolated
 candidate under `src/display/`; it is not enabled by this release series.
 
-Own-device graphics results remain from the 7.2.9 RAM experiment. A clean source
-application, build, signed package check and matched 7.2.10 tablet boot are separate
-acceptance steps. Early GPU probing, full DVFS, thermal limits and suspend remain
-open; the independent Uke DTS and stock-ABL handoff are different boot paths.
+Tablet graphics results come from the separately tested 7.2.9 installation.
+The 7.2.10 adaptation still needs its own source application, build, package
+checks and matched tablet boot. Early GPU probing, full DVFS, thermal limits
+and suspend remain open; the independent Uke DTS and stock-ABL handoff are
+different boot paths.

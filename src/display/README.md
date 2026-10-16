@@ -3,7 +3,9 @@
 Recorded on 14 October 2026. This directory contains a Linux 7.2.10 source
 candidate for the Xiaomi Pad 7 O82 panel and SM7675 primary display pipeline.
 It is separate from the firmware framebuffer used by the normal boot recipe.
-**Native display has not been enabled or tested on Uke.**
+Native display remains outside the normal build. In an isolated tablet trial,
+the 60 Hz candidate registered a DRM connector and framebuffer, but the panel
+stayed black with DSI errors. The trial did not qualify native display output.
 
 The DPU catalog, panel, DISPCC, HLOS interconnect, DSI PHY and SMMU handoff
 objects compile for AArch64. The panel exposes seven fixed modes: 30, 48, 50,
@@ -64,7 +66,7 @@ writes, supply/GPIO failures, reverse-order cleanup, failed-disable retry and
 invalid mode state. The decoder rejects malformed/truncated DT and packet
 inputs without emitting a partial header. These are host results.
 
-Recovery on the connected tablet selects O82 42_02_0b. This identifies the
+Recovery on the tested tablet selected O82 42_02_0b. This identifies that
 observed unit; it does not remove variant selection for other tablets.
 Before native activation, finish binding checks, review display SMMU/VBIF
 drain/reset behavior, compare DSC PPS and PHY

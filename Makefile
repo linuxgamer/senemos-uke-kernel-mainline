@@ -43,4 +43,4 @@ srpm: validate
 # A standalone source clone also owns its host build entry and pinned rules.
 .PHONY: test-entry
 test-entry:
-	./senemos.sh --self-test
+	./build.sh --self-test

@@ -1,5 +1,8 @@
 # Linux 7.2.9 Uke adaptation
 
+These notes record the patch series as it grew. Early source and build results
+below do not describe the later, separately tested revision 1.39 installation.
+
 `0035` follows the upstream remoteproc PD-mapper preload proposal and addresses
 the exact Uke charger readiness, USB supplier lifetime and power-supply ABI.
 The host fixture executes bounded transient retries, terminal failures,
@@ -40,7 +43,7 @@ OEM effective tuning for both lanes, Gear 4/5 and Rate A/B. The UFS board node
 remains disabled until its GCC/GDSC, NoC, supplies, reset and SMMU chain has been
 ported and validated. The complete eight-patch Linux 7.2.9 build passed Image,
 DTB, 1,146 module, RPM/SRPM and AArch64 package lifecycle checks on October 6.
-See the [build record](../../reports/FIRST-CONSOLE-KERNEL-BUILD-2026-10-06.json).
+The detailed build record is not included in this checkout.
 This establishes buildability, not a working board UFS link.
 
 The target base is Linux `v7.2.9`, commit
@@ -155,8 +158,9 @@ remain successful. The source RPM runs fault injection into the actual startup
 functions. Duplicate SSR/PDR ownership, DMA teardown and DSP hardware acceptance
 remain open; ADSP stays manual and this does not enable audio or sensors.
 
-This is a **source-build candidate**. It is not a complete hardware port or a
-physically accepted UEFI boot image. The independent DTS contains Uke MPIDRs,
+At this stage the independent DTS was a **source-build candidate**. It was not
+a complete hardware port or a physically accepted UEFI boot image. The DTS
+contains Uke MPIDRs,
 GIC and firmware static reservations. TLMM is described but disabled pending
 profile-specific handoff acceptance. Storage, DRM, touchscreen, wireless,
 audio, sensors and charging need further Uke development. The future UEFI
@@ -165,10 +169,10 @@ by assuming the China source evidence matches the installed Global firmware.
 RPM scriptlets only update module dependency indexes, not Android partitions
 or the default boot entry.
 
-Host exceptions: Fedora's upstream RPM/package-management stack can pull in
-Python during toolchain construction. It is recorded in the build environment
-package inventory and never copied into target RPMs. Kernel compilation and
-project automation use Kbuild/C/Bash; no project-owned Python is introduced.
+In the recorded build, Fedora's RPM/package-management stack pulled in Python
+during toolchain construction. The build environment package inventory records
+it; the target RPMs did not contain Python. Kernel compilation and project
+automation in that build used Kbuild/C/Bash.
 
 The Uke callback runs outside the mailbox channel lock because SCMI notification
 acknowledgment can re-enter transmit. Shutdown synchronizes the IRQ before the
