@@ -75,10 +75,10 @@ stock_dt_main() {
     engine=$ENGINE; arch=$(uname -m)
     [[ $arch == x86_64 || $arch == aarch64 ]] || die 'Unsupported stock inspection host'
     recipe=$(cat "$KERNEL/configs/host/Containerfile.rawhide" "$RULES" | sha256sum | cut -d ' ' -f1)
-    case $arch in x86_64) arch=amd64;; aarch64) arch=arm64;; esac
-    image=localhost/senemos-uke-build:rawhide-$arch-${recipe:0:16}
-    "$engine" image inspect "$image" >/dev/null 2>&1 || die 'Run a kernel build once to prepare the pinned host toolchain'
-    dest=$KERNEL/referances/firmware/$profile
+    arch=${arch/x86_64/amd64}
+    image=localhost/senemos-uke-build:44-$arch-${recipe:0:16}
+    "$engine" image inspect "$image" >/dev/null 2>&1 || die 'Prepare the pinned host toolchain with ./build.sh --build 7.2.9 --release 44'
+    dest=$KERNEL/private/firmware/$profile
     [[ ! -e $dest ]] || die 'Stock inspection output already exists; preserve it and choose a new profile receipt name'
     mkdir -p "$dest/raw" "$dest/derived"
     cp --reflink=auto "$vendor" "$dest/raw/vendor_boot.img"

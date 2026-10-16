@@ -4,8 +4,12 @@ Kernel source adaptations, device trees and RPM packaging for Xiaomi Pad 7 and
 POCO Pad X1 (`uke`, Qualcomm SM7675). This repository is the kernel component of
 [uke-fedora](https://github.com/linuxgamer/uke-fedora).
 
-The implemented build target is Linux 7.2.9 for Fedora Rawhide AArch64. Fedora
-44 is the planned stable target; this repository does not build it yet.
+The kernel builder defaults to Fedora 44 AArch64 with Linux 7.2.9. Use
+`--release rawhide` for the earlier recipe. On 16 October 2026, the Fedora 44
+build produced four binary RPMs and one SRPM on an x86_64 host. Image, DTB,
+all 1,144 modules, payload and independent SRPM preparation checks passed.
+Installation, upgrade and removal passed in an emulated Fedora 44 AArch64
+container. These unsigned packages have not been booted on the tablet.
 
 ## Current status
 
@@ -33,11 +37,13 @@ Run the standalone builder from this directory. Bash is required; running
 The first command shows the plan without installing packages or building. The
 second may install host prerequisites, downloads the signed kernel source,
 builds in a container and tests RPM installation in a disposable AArch64
-environment. Local artifacts go to `artifacts/fedora-rawhide/7.2.9/`. They are
+environment. Local artifacts go to `artifacts/fedora-44/7.2.9/`, or
+`artifacts/fedora-rawhide/7.2.9/` with `--release rawhide`. They are
 unsigned development candidates; the builder does not flash a device or
 select a boot slot. See [building instructions](docs/BUILDING.md) before running
 it, especially for host requirements and offline builds. From the parent
 `uke-fedora` workspace, use `./build.sh kernel` followed by the same options.
+The workspace rootfs and boot recipes consume the Fedora 44 kernel artifacts.
 
 `make validate` checks the pinned patch and config hashes. `make srpm` prepares
 the source RPM from the signed upstream archive; it can download source files.

@@ -1,8 +1,11 @@
 # Build the Uke kernel
 
-Run commands from the root of `uke-mainline-linux`. The current implemented
-target is Linux 7.2.9 for Fedora Rawhide AArch64. Fedora 44 is planned, but the
-builder and pinned toolchain still target Rawhide.
+Run commands from the root of `uke-mainline-linux`. The builder defaults to
+Fedora 44 AArch64, using pinned Fedora 44 base images. The examples select
+the reviewed Linux 7.2.9 profile explicitly. On 16 October 2026, a full build,
+payload and SRPM checks, and emulated AArch64 RPM installation, upgrade and
+removal passed. No Fedora 44 tablet boot has been tested. The earlier
+Fedora Rawhide recipe remains available through `--release rawhide`.
 
 Bash is required. The standalone `./build.sh` displays help when run without
 arguments. From the parent `uke-fedora` workspace, use `./build.sh kernel`
@@ -12,6 +15,7 @@ followed by the same options.
 
 ```sh
 ./build.sh --build 7.2.9 --distro=fedora --dry-run
+./build.sh --build 7.2.9 --release rawhide --offline --dry-run
 ./build.sh --help
 ```
 
@@ -30,9 +34,17 @@ The entry can install missing host prerequisites from the host distribution's
 repositories. It needs a working Podman or Docker environment and at least
 25 GiB of free space. Compilation runs in a pinned Fedora container. Use
 `--jobs N` to set parallel jobs. The entry stores downloaded release archives
-under `referances/releases/`, reusable work under
-`build/fedora-rawhide/7.2.9/`, and results under
-`artifacts/fedora-rawhide/7.2.9/`. These directories are ignored by Git.
+under `private/releases/`, reusable work under
+`build/fedora-44/7.2.9/`, and results under
+`artifacts/fedora-44/7.2.9/`. With `--release rawhide`, work and results use
+`build/fedora-rawhide/7.2.9/` and `artifacts/fedora-rawhide/7.2.9/` instead.
+These directories are ignored by Git.
+
+The workspace rootfs and boot recipes target Fedora 44 and consume the default
+artifact paths.
+The container fallback for `--prepare-boot-dt` and the `--inspect-stock` helper
+also use Fedora 44. The inspection helper needs the cached Fedora 44 toolchain
+prepared by a normal kernel build.
 
 The results include four RPMs, an SRPM, Image, Uke DTB, config and build
 inventories. Local RPMs are unsigned development candidates. The builder
@@ -50,8 +62,8 @@ AArch64 test runtime.
 ```
 
 `--test` adds RPM install, upgrade and removal checks in a disposable AArch64
-Rawhide environment. On an x86_64 host, the entry may need to install and
-register QEMU user emulation. The test checks packages and their target payload;
+environment for the selected Fedora release. On an x86_64 host, the entry may
+need to install and register QEMU user emulation. The test checks packages and their target payload;
 it does not boot the tablet or qualify its hardware.
 
 `make validate` checks the pinned patch and config hashes without compiling.

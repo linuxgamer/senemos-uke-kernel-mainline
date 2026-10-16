@@ -11,7 +11,7 @@ validate:
 		test "$$(sha256sum "$$path" | cut -d ' ' -f1)" = "$$expected"
 	done < <(jq -r '.patches[], .configs[] | [.path,.sha256] | @tsv' manifests/linux-$(version).json)
 srpm: validate
-	cache="$(CURDIR)/referances/releases"
+	cache="$(CURDIR)/private/releases"
 	top="$$(realpath -m "$(outdir)/rpmbuild")"
 	mkdir -p "$$cache" "$$top"/{BUILD,BUILDROOT,RPMS,SRPMS,SOURCES,SPECS}
 	for name in linux-$(version).tar.xz linux-$(version).tar.sign; do

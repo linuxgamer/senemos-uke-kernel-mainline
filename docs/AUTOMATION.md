@@ -5,6 +5,10 @@
 needed, checks its SHA-256 hash and detached signature, then creates an SRPM.
 `build.sh` provides the local container build and optional AArch64 RPM
 installation test. See [BUILDING.md](BUILDING.md) for commands and limits.
+The default kernel recipe targets Fedora 44; `--release rawhide` retains the
+earlier build and artifact paths for explicit Rawhide builds. A full
+Fedora 44 Linux 7.2.9 build, payload and SRPM checks, and emulated AArch64 RPM
+lifecycle tests passed on 16 October 2026. Tablet boot remains untested.
 
 The former COPR source-generation Makefile and daily GitHub workflow are absent
 from this checkout. Updating the kernel does not currently trigger an automatic

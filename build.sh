@@ -19,7 +19,7 @@ Usage: ./build.sh --build VERSION --distro=DISTRO [options]
 
   --build VERSION     Explicit version, latest, or its alias lastest
   --distro DISTRO     Target distribution, independent of the build host
-  --release RELEASE   Target release (Fedora defaults to rawhide)
+  --release RELEASE   Target release: 44 (default), or rawhide
   --jobs N            Positive parallel job limit; defaults to at most four
   --dry-run           Resolve and show the plan without installing or building
   --offline           Require cached release metadata, source and toolchain
@@ -39,7 +39,9 @@ Examples:
 The default build verifies the signed Linux source and pinned Uke patches,
 then builds Image, DTB, modules and Fedora RPM/SRPM packages in a container.
 --test also checks RPM install, upgrade and removal in AArch64 userspace.
-Implemented target: Fedora Rawhide AArch64. Fedora 44 migration is pending.
+Kernel build targets: Fedora 44 (default) and Rawhide, both AArch64.
+The Fedora 44 recipe passed a full kernel build and package checks on
+16 October 2026. Rootfs and image recipes also target Fedora 44.
 Unsupported profiles fail explicitly.
 Host families: Fedora/RHEL, Debian/Ubuntu, openSUSE, Arch, Alpine/postmarketOS.
 Missing prerequisites are installed from official host repositories; build
@@ -157,8 +159,14 @@ supported_target() {
     status=$(jq -r --arg d "$DISTRO" --arg r "$RELEASE" '.targets[$d].releases[$r] // "unknown"' "$RULES")
     [[ $status == implemented ]] || die "Target $DISTRO/$RELEASE is $status; no fallback package will be built"
 }
+fedora_base_image() {
+    jq -er --arg release "$RELEASE" --arg arch "$1" '.fedora_images[$release][$arch]' "$RULES"
+}
+kernel_work_directory() {
+    printf '%s/build/fedora-%s/%s\n' "$KERNEL" "$RELEASE" "$1"
+}
 resolve_version() {
-    local cache=$KERNEL/referances/releases/releases.json
+    local cache=$KERNEL/private/releases/releases.json
     [[ $VERSION != lastest ]] || VERSION=latest
     if [[ $VERSION == latest ]]; then
         if ((OFFLINE)); then [[ -s $cache ]] || die 'Cached release metadata is missing';
@@ -194,7 +202,7 @@ verify_source() {
     grep -F "[GNUPG:] VALIDSIG $fingerprint " "$gpg_home/verification.txt" >/dev/null || die 'Unexpected kernel release signer'
 }
 fetch_source() {
-    local archive=$KERNEL/referances/releases/linux-$VERSION.tar.xz signature=$KERNEL/referances/releases/linux-$VERSION.tar.sign
+    local archive=$KERNEL/private/releases/linux-$VERSION.tar.xz signature=$KERNEL/private/releases/linux-$VERSION.tar.sign
     if [[ ! -s $archive || ! -s $signature ]]; then
         ((OFFLINE == 0)) || die 'Offline source archive or signature is missing'
         curl -fL --retry 3 --connect-timeout 20 -o "$archive.part" "$(jq -er '.source_url' "$PROFILE")"
@@ -247,7 +255,7 @@ cleanup() {
 run_job() {
     local image=$1; shift
     local log=$WORK/build.log lifecycle=0
-    local -a opts=(--security-opt label=disable --cpus "$JOBS" -v "$KERNEL:/work/kernel" -w /work/kernel)
+    local -a opts=(--security-opt label=disable --cpus "$JOBS" --env "UKE_FEDORA_RELEASE=$RELEASE" -v "$KERNEL:/work/kernel" -w /work/kernel)
     if [[ ${1:-} == --internal-lifecycle ]]; then
         lifecycle=1; log=$WORK/package-lifecycle.log
         opts+=(--platform linux/arm64 --network=none)
@@ -280,7 +288,8 @@ run_job() {
 internal_build() {
     VERSION=$1 JOBS=$2
     local toolchain=${3:-unrecorded}
-    local work=/work/kernel/build/fedora-rawhide/$VERSION
+    local work
+    work=$(kernel_work_directory "$VERSION")
     local top=$work/rpmbuild adaptation=$work/adaptation/senemos-adaptation
     local source=/work/kernel
     local manifest=$work/source-profile.json
@@ -319,8 +328,8 @@ internal_build() {
     fi
     printf '%s\n' "$identity" > "$work/input-identity"
     mkdir -p "$top"/{BUILD,BUILDROOT,RPMS,SRPMS,SOURCES,SPECS} "$adaptation/patches" "$adaptation/configs"
-    cp "$source/referances/releases/linux-$VERSION.tar.xz" "$top/SOURCES/"
-    cp "$source/referances/releases/linux-$VERSION.tar.sign" "$source/configs/keys/linux-stable.asc" "$top/SOURCES/"
+    cp "$source/private/releases/linux-$VERSION.tar.xz" "$top/SOURCES/"
+    cp "$source/private/releases/linux-$VERSION.tar.sign" "$source/configs/keys/linux-stable.asc" "$top/SOURCES/"
     cp "$source/tests/gpr-domain-contract.sh" "$source/tests/cpucp-mailbox-contract.sh" "$source/tests/slim-startup-contract.sh" "$source/tests/battery-protocol-contract.sh" "$source/tests/firmware-backlight-contract.sh" "$source/tests/usb-charger-readiness-contract.sh" "$source/tests/qup-interconnect-contract.sh" "$source/tests/adreno-lifecycle-contract.sh" "$source/tests/cpu-epss-contract.sh" "$source/tests/sysfb-damage-contract.sh" "$source/tests/serial-power-budget-contract.sh" "$top/SOURCES/"
     cp "$source/patches/$VERSION/"* "$adaptation/patches/"
     cp "$source/configs/arm64-qcom.config" "$source/configs/uke.config" "$source/configs/fedora.config" "$adaptation/configs/"
@@ -353,7 +362,8 @@ build_identity() {
 internal_package() {
     VERSION=$1
     local toolchain=$2
-    local work=/work/kernel/build/fedora-rawhide/$VERSION
+    local work
+    work=$(kernel_work_directory "$VERSION")
     local top=$work/rpmbuild identity
     local spec=/work/kernel/configs/host/senemos-uke-linux-kernel-mainline.spec
     cmp "$work/source-profile.json" "$work/adaptation/senemos-adaptation/source-lock.json" || die 'Compiled source profile changed'
@@ -389,7 +399,8 @@ record_completed() {
 }
 internal_audit() {
     VERSION=$1
-    local work=/work/kernel/build/fedora-rawhide/$VERSION
+    local work
+    work=$(kernel_work_directory "$VERSION")
     local top=$work/rpmbuild
     local output=$top/kernel-out
     [[ -d $output ]] || die 'Kernel output directory is missing'
@@ -467,7 +478,8 @@ internal_audit() {
     say 'Image, DTB, modules, RPM payload, privacy and ABI checks passed'
 }
 internal_srpm_check() {
-    local version=$1 work=/work/kernel/build/fedora-rawhide/$1
+    local version=$1 work
+    work=$(kernel_work_directory "$version")
     local srpm identity prepared spec path expected
     local top=$work/srpm-closure
     srpm=$(find "$work/rpmbuild/SRPMS" -maxdepth 1 -name '*.src.rpm' -print -quit)
@@ -544,6 +556,49 @@ self_test() {
     ok 'shell syntax and available ShellCheck'
     cmp "$KERNEL/packaging/senemos-uke-linux-kernel-mainline.spec" "$KERNEL/configs/host/senemos-uke-linux-kernel-mainline.spec"
     ok 'host and COPR specs share the same source and package checks'
+    release_fixture() (
+        local DISTRO=fedora RELEASE='' release arch image stable_image='' stable_work=''
+        supported_target
+        [[ $RELEASE == 44 ]] || die 'Fedora default release is not 44'
+        for release in 44 rawhide; do
+            RELEASE=$release
+            supported_target
+            [[ $(kernel_work_directory 7.2.9) == "$KERNEL/build/fedora-$release/7.2.9" ]]
+            for arch in x86_64 aarch64; do
+                image=$(fedora_base_image "$arch")
+                [[ $image =~ ^registry[.]fedoraproject[.]org/fedora@sha256:[a-f0-9]{64}$ ]]
+            done
+            if [[ $release == 44 ]]; then
+                stable_image=$(fedora_base_image x86_64)
+                stable_work=$(kernel_work_directory 7.2.9)
+            else
+                [[ $(fedora_base_image x86_64) != "$stable_image" && $(kernel_work_directory 7.2.9) != "$stable_work" ]]
+            fi
+        done
+    )
+    release_fixture
+    ok 'Fedora 44 default, pinned bases and separate Rawhide work directories'
+    container_release_fixture() (
+        local RELEASE=44 ENGINE=fixture_engine WORK=$temporary/job CID='' PAUSED=0
+        mkdir -p "$WORK"
+        wait_idle() { :; }
+        fixture_engine() {
+            printf '%s\n' "$*" >> "$temporary/container-commands"
+            case $1 in
+                create) printf 'fixture-container\n';;
+                inspect)
+                    if [[ $3 == '{{.State.ExitCode}}' ]]; then printf '0\n'; else printf 'false\n'; fi
+                    ;;
+                start|logs|rm) :;;
+                *) return 1;;
+            esac
+        }
+        run_job fixture-image --internal-lifecycle /work/kernel/build/fedora-44/7.2.9
+        grep -F -- '--env UKE_FEDORA_RELEASE=44' "$temporary/container-commands" >/dev/null
+        grep -F -- 'bash /work/kernel/build.sh --internal-lifecycle /work/kernel/build/fedora-44/7.2.9' "$temporary/container-commands" >/dev/null
+    )
+    container_release_fixture
+    ok 'selected Fedora release reaches the container lifecycle entry'
     fixture_identity() {
         local KERNEL=$temporary/guard-fixture before after
         mkdir -p "$KERNEL/tests"
@@ -601,6 +656,9 @@ self_test() {
     reject bash "$ROOT/build.sh" --jobs 0 --dry-run
     reject bash "$ROOT/build.sh" --distro=debian --build 7.2.9 --dry-run
     reject bash "$ROOT/build.sh" --build 99.99.99 --dry-run
+    reject bash "$ROOT/build.sh" --build 7.2.9 --release 45 --dry-run
+    reject env UKE_FEDORA_RELEASE=../escape bash "$ROOT/build.sh" --internal-audit 7.2.9
+    (unset UKE_FEDORA_RELEASE; reject bash "$ROOT/build.sh" --internal-audit 7.2.9)
     reject bash "$ROOT/build.sh" --unknown
     ok 'invalid options, path traversal and unimplemented targets'
     mkdir -p "$temporary/profile-fixture/manifests"
@@ -649,8 +707,8 @@ self_test() {
     local profile archive profile_version signature
     for profile in "$KERNEL"/manifests/linux-*.json; do
         profile_version=$(jq -er '.version | select(test("^[0-9]+[.][0-9]+[.][0-9]+$"))' "$profile")
-        archive=$KERNEL/referances/releases/linux-$profile_version.tar.xz
-        signature=$KERNEL/referances/releases/linux-$profile_version.tar.sign
+        archive=$KERNEL/private/releases/linux-$profile_version.tar.xz
+        signature=$KERNEL/private/releases/linux-$profile_version.tar.sign
         [[ -s $archive ]] || continue
         printf broken > "$temporary/broken.tar.xz"
         reject bash "$ROOT/build.sh" --internal-verify "$temporary/broken.tar.xz" "$signature" "$profile" "$KERNEL/configs/keys/linux-stable.asc" "$temporary/gpg"
@@ -664,6 +722,12 @@ self_test() {
 }
 
 if (($# == 0)); then help; exit 0; fi
+case ${1:-} in
+    --internal-build|--internal-audit|--internal-package|--internal-lifecycle)
+        RELEASE=${UKE_FEDORA_RELEASE:-}
+        case $RELEASE in 44|rawhide) ;; *) die 'Internal job requires UKE_FEDORA_RELEASE=44 or rawhide';; esac
+        ;;
+esac
 if [[ ${1:-} == --internal-build ]]; then shift; internal_build "$@"; exit; fi
 if [[ ${1:-} == --internal-audit ]]; then shift; internal_audit "$@"; exit; fi
 if [[ ${1:-} == --internal-package ]]; then shift; internal_package "$@"; exit; fi
@@ -683,10 +747,10 @@ if [[ ${1:-} == --prepare-boot-dt ]]; then
     architecture=$(uname -m)
     [[ $architecture == x86_64 || $architecture == aarch64 ]] || die 'Unsupported DT preparation host architecture'
     recipe=$(cat "$KERNEL/configs/host/Containerfile.rawhide" "$RULES" | sha256sum | cut -d ' ' -f1)
-    image=localhost/senemos-uke-build:rawhide-${architecture/x86_64/amd64}-${recipe:0:16}
+    image=localhost/senemos-uke-build:44-${architecture/x86_64/amd64}-${recipe:0:16}
     if ! "$ENGINE" image inspect "$image" >/dev/null 2>&1; then
         wait_idle
-        base=$(jq -er --arg a "$architecture" '.fedora_rawhide_images[$a]' "$RULES")
+        base=$(jq -er --arg a "$architecture" '.fedora_images["44"][$a]' "$RULES")
         "$ENGINE" build --cpu-period=100000 --cpu-quota=100000 --memory=2g \
             --build-arg "BASE_IMAGE=$base" --build-arg "RECIPE_SHA=$recipe" \
             -t "$image" -f "$KERNEL/configs/host/Containerfile.rawhide" "$KERNEL/configs/host"
@@ -734,7 +798,7 @@ if ((DRY_RUN)); then
     command -v jq >/dev/null || die 'Dry-run needs jq; no dependencies will be installed'
 else
     bootstrap
-    mkdir -p "$KERNEL/referances/releases"
+    mkdir -p "$KERNEL/private/releases"
     mkdir -p "$BUILDER/build"
     exec 9> "$BUILDER/build/senemos-build.lock"
     if ! flock -n 9; then
@@ -746,9 +810,9 @@ supported_target
 resolve_version
 architecture=$(uname -m)
 [[ $architecture == x86_64 || $architecture == aarch64 ]] || die "Unsupported host architecture: $architecture"
-BASE_IMAGE=$(jq -er --arg a "$architecture" '.fedora_rawhide_images[$a]' "$RULES")
-WORK=$BUILDER/build/fedora-rawhide/$VERSION
-ARTIFACTS=$BUILDER/artifacts/fedora-rawhide/$VERSION
+BASE_IMAGE=$(fedora_base_image "$architecture")
+WORK=$(kernel_work_directory "$VERSION")
+ARTIFACTS=$BUILDER/artifacts/fedora-$RELEASE/$VERSION
 cpus=$(getconf _NPROCESSORS_ONLN)
 memory_jobs=$(awk '/MemAvailable:/ {n=int($2/2097152); print (n>0?n:1)}' /proc/meminfo)
 resource_jobs=$((cpus < memory_jobs ? cpus : memory_jobs))
@@ -760,7 +824,12 @@ elif ((JOBS > resource_jobs)); then
     JOBS=$resource_jobs
 fi
 say "Target $DISTRO/$RELEASE AArch64; Linux $VERSION; $JOBS jobs; Image + Uke DTB + modules + RPM/SRPM"
-if ((DRY_RUN)); then say "Pinned build image: $BASE_IMAGE"; exit; fi
+if ((DRY_RUN)); then
+    say "Pinned build image: $BASE_IMAGE"
+    say "Work: $WORK"
+    say "Artifacts: $ARTIFACTS"
+    exit
+fi
 wait_idle
 mkdir -p "$WORK" "$ARTIFACTS"
 cp "$PROFILE" "$WORK/source-profile.json"
@@ -770,7 +839,7 @@ available=$(df -Pk "$WORK" | awk 'NR==2 {print $4}')
 check_space "$available" "$minimum"
 fetch_source
 RECIPE_SHA=$(cat "$BUILDER/configs/host/Containerfile.rawhide" "$RULES" | sha256sum | cut -d ' ' -f1)
-IMAGE=localhost/senemos-uke-build:rawhide-${architecture/x86_64/amd64}-${RECIPE_SHA:0:16}
+IMAGE=localhost/senemos-uke-build:$RELEASE-${architecture/x86_64/amd64}-${RECIPE_SHA:0:16}
 if ! "$ENGINE" image inspect "$IMAGE" >/dev/null 2>&1; then
     ((OFFLINE == 0)) || die 'Pinned toolchain image is not cached'
     wait_idle
@@ -782,11 +851,11 @@ run_job "$TOOLCHAIN_ID" --internal-build "$VERSION" "$JOBS" "$TOOLCHAIN_ID"
 package_list=$WORK/package-list.json
 if ((TEST)); then
     wait_idle
-    TEST_IMAGE=$(jq -er '.fedora_rawhide_images.aarch64' "$RULES")
+    TEST_IMAGE=$(fedora_base_image aarch64)
     if ((OFFLINE)); then "$ENGINE" image inspect "$TEST_IMAGE" >/dev/null 2>&1 || die 'Offline AArch64 base image is missing'; fi
     prepare_aarch64
-    TEST_RECIPE=$(cat "$BUILDER/configs/host/Containerfile.lifecycle" "$RULES" | sha256sum | cut -d ' ' -f1)
-    TEST_RUNTIME=localhost/senemos-uke-lifecycle:${TEST_RECIPE:0:16}
+    TEST_RECIPE=$({ cat "$BUILDER/configs/host/Containerfile.lifecycle" "$RULES"; printf '%s\n' "$RELEASE" "$TEST_IMAGE"; } | sha256sum | cut -d ' ' -f1)
+    TEST_RUNTIME=localhost/senemos-uke-lifecycle:$RELEASE-${TEST_RECIPE:0:16}
     if ! "$ENGINE" image inspect "$TEST_RUNTIME" >/dev/null 2>&1; then
         ((OFFLINE == 0)) || die 'Offline AArch64 test runtime is missing'
         "$ENGINE" build --platform linux/arm64 --build-arg "BASE_IMAGE=$TEST_IMAGE" \
@@ -794,12 +863,12 @@ if ((TEST)); then
             -f "$BUILDER/configs/host/Containerfile.lifecycle" "$BUILDER/configs/host" > "$WORK/test-runtime.log" 2>&1
     fi
     TEST_RUNTIME_ID=$("$ENGINE" image inspect "$TEST_RUNTIME" --format '{{.Id}}')
-    run_job "$TEST_RUNTIME_ID" --internal-lifecycle "/work/kernel/build/fedora-rawhide/$VERSION"
+    run_job "$TEST_RUNTIME_ID" --internal-lifecycle "/work/kernel/build/fedora-$RELEASE/$VERSION"
 fi
 # Expose one complete candidate only after all requested gates passed. Failed
 # trials must not leave new RPMs beside an older successful manifest.
 ARTIFACT_DESTINATION=$ARTIFACTS
-ARTIFACT_STAGE=$(mktemp -d "$BUILDER/artifacts/fedora-rawhide/.$VERSION-XXXXXX")
+ARTIFACT_STAGE=$(mktemp -d "$BUILDER/artifacts/fedora-$RELEASE/.$VERSION-XXXXXX")
 ARTIFACTS=$ARTIFACT_STAGE
 trap 'rm -rf -- "$ARTIFACT_STAGE"' EXIT
 cp "$WORK/rpmbuild/RPMS/aarch64/"*.rpm "$WORK/rpmbuild/SRPMS/"*.rpm "$ARTIFACTS/"
@@ -813,12 +882,12 @@ jq -n --slurpfile source "$PROFILE" --slurpfile packages "$package_list" --arg i
     --arg test_image "$TEST_RUNTIME_ID" --arg host "$architecture" \
     --arg abi "$(sha256sum "$WORK/module-abi.txt" | cut -d ' ' -f1)" \
     --argjson modules "$(wc -l < "$WORK/module-abi.txt")" \
-    --arg version "$VERSION" --argjson lifecycle "$TEST" \
-    '{schema_version:1,product:"senemos-uke-linux-kernel-mainline",source:$source[0],packages:$packages[0],toolchain_image:$image,toolchain_recipe_sha256:$recipe,base_image:$base,config_sha256:$config,kernel_release:($version+"-senemos-uke"),target:"fedora-rawhide-aarch64",compile_validation:"passed",payload_validation:"passed",source_rpm_preparation:"passed",module_count:$modules,module_abi_sha256:$abi,package_lifecycle_tested:($lifecycle==1),package_test_image:$test_image,build_host_architecture:$host,hardware_tested:false,boot_tested:false,signature_state:"unsigned-development-RPM"}' > "$ARTIFACTS/build-manifest.json"
+    --arg version "$VERSION" --arg target "fedora-$RELEASE-aarch64" --argjson lifecycle "$TEST" \
+    '{schema_version:1,product:"senemos-uke-linux-kernel-mainline",source:$source[0],packages:$packages[0],toolchain_image:$image,toolchain_recipe_sha256:$recipe,base_image:$base,config_sha256:$config,kernel_release:($version+"-senemos-uke"),target:$target,compile_validation:"passed",payload_validation:"passed",source_rpm_preparation:"passed",module_count:$modules,module_abi_sha256:$abi,package_lifecycle_tested:($lifecycle==1),package_test_image:$test_image,build_host_architecture:$host,hardware_tested:false,boot_tested:false,signature_state:"unsigned-development-RPM"}' > "$ARTIFACTS/build-manifest.json"
 (cd "$ARTIFACTS"; find . -type f ! -name SHA256SUMS ! -name '*.part' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.part; mv SHA256SUMS.part SHA256SUMS)
 if [[ -d $ARTIFACT_DESTINATION ]]; then
     mv "$ARTIFACT_DESTINATION" "$ARTIFACT_DESTINATION.saved-$(date +%s)-$$"
 fi
 mv "$ARTIFACT_STAGE" "$ARTIFACT_DESTINATION"
 trap - EXIT
-say "Verified local candidates: artifacts/fedora-rawhide/$VERSION/"
+say "Verified local candidates: artifacts/fedora-$RELEASE/$VERSION/"

@@ -1,7 +1,6 @@
 /build/
 /private/
 /artifacts/
-/referances/releases/
 /src/upstream/
 .directory
 .env
