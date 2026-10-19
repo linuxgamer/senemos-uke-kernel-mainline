@@ -25,7 +25,7 @@
     },
     {
       "path": "src/boot/boot-status.cpp",
-      "sha256": "c93f67ff842c64e5d3103a03bbde9d0a168ea723119d6b81a26dd609ba646d14"
+      "sha256": "bd6586e5acd7a4b78a436f437d15d59c840318eedf46ddba4f4a478ef1aa4aa2"
     },
     {
       "path": "src/boot/build-payload.sh",
