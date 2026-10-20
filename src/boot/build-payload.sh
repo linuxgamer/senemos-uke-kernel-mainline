@@ -43,15 +43,20 @@ if [[ $usb_profile == typec-v1 ]]; then
 fi
 localversion=-${release#*-}
 export ARCH=arm64 LLVM=1
+compiler_args=()
+if [[ ${UKE_CCACHE:-0} == 1 ]]; then
+    command -v ccache >/dev/null || { echo 'UKE_CCACHE requires ccache' >&2; exit 2; }
+    compiler_args=(CC='ccache clang' HOSTCC='ccache gcc' HOSTCXX='ccache g++')
+fi
 bash "$kernel/scripts/config" --file "$out/.config" --set-str INITRAMFS_SOURCE ''
-make -C "$kernel" O="$out" LOCALVERSION="$localversion" olddefconfig
-[[ $(make -s -C "$kernel" O="$out" LOCALVERSION="$localversion" kernelrelease) == "$release" ]]
+make -C "$kernel" O="$out" LOCALVERSION="$localversion" "${compiler_args[@]}" olddefconfig
+[[ $(make -s -C "$kernel" O="$out" LOCALVERSION="$localversion" "${compiler_args[@]}" kernelrelease) == "$release" ]]
 for flag in QCOM_UKE_ABL_DT GUNYAH_WATCHDOG INITRAMFS_FORCE CMDLINE_FORCE DRM_SIMPLEDRM FRAMEBUFFER_CONSOLE; do
     grep -Fx "CONFIG_${flag}=y" "$out/.config"
 done
 grep -F 'root=PARTLABEL=linux ' "$out/.config"
 grep -Fx 'CONFIG_QCOM_Q6V5_PAS=m' "$out/.config"
-make -C "$kernel" O="$out" LOCALVERSION="$localversion" -j"$jobs" Image modules dtbs
+make -C "$kernel" O="$out" LOCALVERSION="$localversion" "${compiler_args[@]}" -j"$jobs" Image modules dtbs
 make -C "$kernel" O="$out" LOCALVERSION="$localversion" modules_install \
     INSTALL_MOD_PATH="$stage" INSTALL_MOD_STRIP=1 DEPMOD=true
 source_modules=$stage/lib/modules/$release
@@ -81,8 +86,8 @@ bash "$here/../audit/check-target-privacy.sh" "$init"
 find "$init" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
 (cd "$init"; find . -print0 | LC_ALL=C sort -z | cpio --null --quiet --reproducible --owner=0:0 -o -H newc) | gzip -n -9 > "$out/boot-initramfs.cpio.gz"
 bash "$kernel/scripts/config" --file "$out/.config" --set-str INITRAMFS_SOURCE "$out/boot-initramfs.cpio.gz"
-make -C "$kernel" O="$out" LOCALVERSION="$localversion" olddefconfig
-make -C "$kernel" O="$out" LOCALVERSION="$localversion" -j"$jobs" Image
+make -C "$kernel" O="$out" LOCALVERSION="$localversion" "${compiler_args[@]}" olddefconfig
+make -C "$kernel" O="$out" LOCALVERSION="$localversion" "${compiler_args[@]}" -j"$jobs" Image
 clang++ -std=c++20 -O2 -Wall -Wextra -Werror "$here/boot-image.cpp" -o "$out/boot-image"
 "$out/boot-image" create "$out/arch/arm64/boot/Image" "$out/linux.img"
 "$out/boot-image" inspect "$out/linux.img" > "$out/boot-header.json"
