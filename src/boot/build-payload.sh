@@ -16,8 +16,14 @@ init=$out/boot-initramfs stage=$out/boot-modules
 [[ ! -e $init && ! -e $stage ]] || { echo 'Use an empty boot output for source compilation' >&2; exit 1; }
 cp -a "$base" "$init"
 # Compile a native initramfs handoff; normal boots retain upstream switch-root.
-clang++ -std=c++17 -O2 -Wall -Wextra -Werror -ffile-prefix-map="$PWD"=. \
-    "$here/offline-switch-root.cpp" -o "$out/uke-offline-switch-root"
+if [[ ${UKE_CROSS_KERNEL:-0} == 1 ]]; then
+    prebuilt=$(dirname "$base")/uke-offline-switch-root
+    [[ -s $prebuilt ]] || { echo 'Missing AArch64 offline switch-root' >&2; exit 2; }
+    install -m755 "$prebuilt" "$out/uke-offline-switch-root"
+else
+    clang++ -std=c++17 -O2 -Wall -Wextra -Werror -ffile-prefix-map="$PWD"=. \
+        "$here/offline-switch-root.cpp" -o "$out/uke-offline-switch-root"
+fi
 readelf -h "$out/uke-offline-switch-root" | grep -E 'Machine:.*AArch64' >/dev/null
 install -Dm755 "$out/uke-offline-switch-root" "$init/usr/libexec/uke-offline-switch-root"
 mkdir -p "$init/usr/lib/systemd/system/initrd-switch-root.service.d"
@@ -57,7 +63,7 @@ done
 grep -F 'root=PARTLABEL=linux ' "$out/.config"
 grep -Fx 'CONFIG_QCOM_Q6V5_PAS=m' "$out/.config"
 make -C "$kernel" O="$out" LOCALVERSION="$localversion" "${compiler_args[@]}" -j"$jobs" Image modules dtbs
-make -C "$kernel" O="$out" LOCALVERSION="$localversion" modules_install \
+make -C "$kernel" O="$out" LOCALVERSION="$localversion" "${compiler_args[@]}" modules_install \
     INSTALL_MOD_PATH="$stage" INSTALL_MOD_STRIP=1 DEPMOD=true
 source_modules=$stage/lib/modules/$release
 find "$source_modules" -maxdepth 1 -type l \( -name build -o -name source \) -delete
@@ -93,9 +99,19 @@ clang++ -std=c++20 -O2 -Wall -Wextra -Werror "$here/boot-image.cpp" -o "$out/boo
 "$out/boot-image" inspect "$out/linux.img" > "$out/boot-header.json"
 "$out/boot-image" extract "$out/linux.img" "$out/boot-readback-Image"
 cmp "$out/arch/arm64/boot/Image" "$out/boot-readback-Image"
+if [[ ${UKE_CROSS_KERNEL:-0} == 1 ]]; then
+    prebuilt=$(dirname "$base")/boot-image-aarch64
+    [[ -s $prebuilt ]] || { echo 'Missing AArch64 boot-image checker' >&2; exit 2; }
+    install -m755 "$prebuilt" "$out/boot-image"
+    readelf -h "$out/boot-image" | grep -E 'Machine:.*AArch64' >/dev/null
+fi
 (cd "$source_modules"; find kernel -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > "$out/modules.sha256"
 image=$(sha256sum "$out/linux.img" | cut -d ' ' -f1)
 raw=$(sha256sum "$out/arch/arm64/boot/Image" | cut -d ' ' -f1)
 inventory=$(sha256sum "$out/modules.sha256" | cut -d ' ' -f1)
 printf 'format=1\nkernel_release=%s\nlinux_image_sha256=%s\nuserdata_image_sha256=unsupported\nlinux_kernel_sha256=%s\nuserdata_kernel_sha256=unsupported\nmodules_sha256=%s\n' \
     "$release" "$image" "$raw" "$inventory" > "$out/boot-manifest"
+if [[ ${UKE_CROSS_KERNEL:-0} == 1 ]]; then
+    (cd "$kernel"; sha256sum native-profile/SHA256SUMS \
+        senemos-adaptation/source-lock.json boot-recipe/lock.json) > "$out/cross-source.sha256"
+fi

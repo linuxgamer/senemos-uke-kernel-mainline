@@ -137,14 +137,30 @@ test "$(cat %{uke_boot_userspace}/kernel-release)" = '%{krel}'
 (cd %{uke_boot_userspace}; sha256sum -c base-files.sha256)
 jobs=%{?_smp_build_ncpus}%{!?_smp_build_ncpus:4}
 test "$jobs" -le 8 || jobs=8
-bash boot-recipe/src/boot/build-payload.sh "$PWD" %{_uke_out} %{uke_boot_userspace}/base '%{krel}' "$jobs"
+if test "${UKE_PREBUILT_KERNEL:-0}" = 1; then
+    test -s %{_uke_out}/cross-source.sha256
+    sha256sum -c %{_uke_out}/cross-source.sha256
+    for path in .config boot-initramfs.cpio.gz Module.symvers boot-manifest \
+        arch/arm64/boot/Image; do
+        test -s "%{_uke_out}/$path"
+    done
+    readelf -h %{_uke_out}/boot-image | grep -E 'Machine:.*AArch64' >/dev/null
+    readelf -h %{_uke_out}/uke-offline-switch-root | grep -E 'Machine:.*AArch64' >/dev/null
+    expected=$(sed -n 's/^linux_kernel_sha256=//p' %{_uke_out}/boot-manifest)
+    test "$(sha256sum %{_uke_out}/arch/arm64/boot/Image | cut -d ' ' -f1)" = "$expected"
+    test "$(cat %{_uke_out}/include/config/kernel.release)" = '%{krel}'
+else
+    bash boot-recipe/src/boot/build-payload.sh "$PWD" %{_uke_out} %{uke_boot_userspace}/base '%{krel}' "$jobs"
+fi
 for requirement in CONFIG_QCOM_UKE_ABL_DT=y CONFIG_PSI=y CONFIG_DRM_MSM=m \
     CONFIG_DRM_PANEL_XIAOMI_O82=m CONFIG_SM_DISPCC_8250=y \
     CONFIG_DRM_FBDEV_EMULATION=y CONFIG_BACKLIGHT_KTZ8866=m; do
     grep -Fx "$requirement" %{_uke_out}/.config
 done
 grep -Fx '# CONFIG_PSI_DEFAULT_DISABLED is not set' %{_uke_out}/.config
-test "$(make -s O=%{_uke_out} LOCALVERSION=-%{senemos_build_release} kernelrelease)" = '%{krel}'
+if test "${UKE_PREBUILT_KERNEL:-0}" != 1; then
+    test "$(make -s O=%{_uke_out} LOCALVERSION=-%{senemos_build_release} kernelrelease)" = '%{krel}'
+fi
 
 %check
 CXX=clang++ bash native-profile/tests/uke-rpmh-resource-contract.sh native-generated/rpmh-regulator-before-native.c pre-native
