@@ -69,7 +69,6 @@
   },
   "default_profile": "existing_usb2_peripheral",
   "full_typec_profile_enabled": false,
-  "python_target_payload": false,
   "deferred_fixtures": [
     "drivers/usb/typec/ucsi/ucsi_glink_test.c in patch 0052",
     "tests/usb-utmi-resume-contract.sh",

@@ -13,7 +13,7 @@ validate:
 	done < <(jq -r '.patches[], .configs[] | [.path,.sha256] | @tsv' manifests/linux-$(version).json)
 	bash tests/mainline-package-contract.sh
 srpm: validate
-	cache="$(CURDIR)/referances/releases"
+	cache="$(CURDIR)/source-cache/releases"
 	top="$$(realpath -m "$(outdir)/rpmbuild")"
 	mkdir -p "$$cache" "$$top"/{BUILD,BUILDROOT,RPMS,SRPMS,SOURCES,SPECS}
 	for name in linux-$(version).tar.xz linux-$(version).tar.sign; do

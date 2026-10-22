@@ -95,7 +95,7 @@ prepare_common() {
         printf 'unchanged\t%s-%s\n' "$current" "$release"; return;
     fi
     base=$(git rev-parse HEAD)
-    cache=$PWD/referances/releases; mkdir -p "$cache"
+    cache=$PWD/source-cache/releases; mkdir -p "$cache"
     archive=$cache/linux-$next.tar.xz sig=$cache/linux-$next.tar.sign
     curl -fL --connect-timeout 20 --max-time 900 "$url" -o "$archive.part"
     curl -fL --connect-timeout 20 --max-time 90 "$signature" -o "$sig.part"

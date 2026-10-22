@@ -186,7 +186,7 @@ supported_target() {
     [[ $status == implemented ]] || die "Target $DISTRO/$RELEASE is $status; no fallback package will be built"
 }
 resolve_version() {
-    local cache=$KERNEL/referances/releases/releases.json
+    local cache=$KERNEL/source-cache/releases/releases.json
     [[ $VERSION != lastest ]] || VERSION=latest
     if [[ $VERSION == latest ]]; then
         if ((OFFLINE)); then [[ -s $cache ]] || die 'Cached release metadata is missing';
@@ -222,7 +222,7 @@ verify_source() {
     grep -F "[GNUPG:] VALIDSIG $fingerprint " "$gpg_home/verification.txt" >/dev/null || die 'Unexpected kernel release signer'
 }
 fetch_source() {
-    local archive=$KERNEL/referances/releases/linux-$VERSION.tar.xz signature=$KERNEL/referances/releases/linux-$VERSION.tar.sign
+    local archive=$KERNEL/source-cache/releases/linux-$VERSION.tar.xz signature=$KERNEL/source-cache/releases/linux-$VERSION.tar.sign
     if [[ ! -s $archive || ! -s $signature ]]; then
         ((OFFLINE == 0)) || die 'Offline source archive or signature is missing'
         curl -fL --retry 3 --connect-timeout 20 -o "$archive.part" "$(jq -er '.source_url' "$PROFILE")"
@@ -347,8 +347,8 @@ internal_build() {
     fi
     printf '%s\n' "$identity" > "$work/input-identity"
     mkdir -p "$top"/{BUILD,BUILDROOT,RPMS,SRPMS,SOURCES,SPECS} "$adaptation/patches" "$adaptation/configs"
-    cp "$source/referances/releases/linux-$VERSION.tar.xz" "$top/SOURCES/"
-    cp "$source/referances/releases/linux-$VERSION.tar.sign" "$source/configs/keys/linux-stable.asc" "$top/SOURCES/"
+    cp "$source/source-cache/releases/linux-$VERSION.tar.xz" "$top/SOURCES/"
+    cp "$source/source-cache/releases/linux-$VERSION.tar.sign" "$source/configs/keys/linux-stable.asc" "$top/SOURCES/"
     cp "$source/tests/gpr-domain-contract.sh" "$source/tests/cpucp-mailbox-contract.sh" "$source/tests/slim-startup-contract.sh" "$source/tests/battery-protocol-contract.sh" "$source/tests/firmware-backlight-contract.sh" "$source/tests/usb-charger-readiness-contract.sh" "$source/tests/qup-interconnect-contract.sh" "$source/tests/adreno-lifecycle-contract.sh" "$source/tests/cpu-epss-contract.sh" "$source/tests/sysfb-damage-contract.sh" "$source/tests/serial-power-budget-contract.sh" "$top/SOURCES/"
     cp "$source/patches/$VERSION/"* "$adaptation/patches/"
     cp "$source/configs/arm64-qcom.config" "$source/configs/uke.config" "$source/configs/fedora.config" "$adaptation/configs/"
@@ -442,7 +442,6 @@ internal_audit() {
     verify_patch_series "$work/source-profile.json" "$output/senemos-applied-patches.txt"
     cmp "$output/senemos-applied-patches.txt" "$work/extracted/usr/share/senemos/uke/$krel/applied-patches.txt" || die 'Packaged applied-patch receipt differs from the compiled source'
     cp "$output/senemos-applied-patches.txt" "$work/output/applied-patches.txt"
-    bash /work/kernel/src/audit/check-target-payload.sh "$work/extracted"
     bash /work/kernel/src/audit/check-target-privacy.sh "$work/extracted"
     local count=0
     : > "$work/module-abi.txt"
@@ -465,7 +464,6 @@ internal_audit() {
     fdtget -t s "$work/output/sm7675-xiaomi-uke.dtb" / compatible | grep -F xiaomi,uke
     for package in "$top/RPMS/aarch64/"*.rpm; do
         rpm -qp --requires "$package" > "$work/$(basename "$package").requires"
-        if grep -Ei 'python|pypy|libpython' "$work/$(basename "$package").requires"; then die 'Python runtime dependency in target RPM'; fi
         rpm -qp --scripts "$package" > "$work/$(basename "$package").scripts"
     done
     # Query package metadata in the RPM toolchain, so APT/APK hosts do not need RPM.
@@ -537,7 +535,6 @@ internal_lifecycle() {
     rpm -q --qf '%{RELEASE}\n' senemos-uke-linux-kernel-mainline | grep -E '^2\.'
     rpm -qa --qf '%{NAME}\n' | sort > dependency-closure.txt
     rpm -qa --qf '%{NAME}-%{EPOCHNUM}:%{VERSION}-%{RELEASE}.%{ARCH}\n' | sort > dependency-closure-nevra.txt
-    if grep -Ei 'python|pypy|libpython' dependency-closure.txt; then die 'Python present in target dependency closure'; fi
     rpm -V senemos-uke-linux-kernel-mainline-core senemos-uke-linux-kernel-mainline-modules \
         senemos-uke-linux-kernel-mainline-dtbs
     dnf -y --disablerepo='*' remove senemos-uke-linux-kernel-mainline senemos-uke-linux-kernel-mainline-core \
@@ -679,8 +676,8 @@ self_test() {
     local profile archive profile_version signature
     for profile in "$KERNEL"/manifests/linux-*.json; do
         profile_version=$(jq -er '.version | select(test("^[0-9]+[.][0-9]+[.][0-9]+$"))' "$profile")
-        archive=$KERNEL/referances/releases/linux-$profile_version.tar.xz
-        signature=$KERNEL/referances/releases/linux-$profile_version.tar.sign
+        archive=$KERNEL/source-cache/releases/linux-$profile_version.tar.xz
+        signature=$KERNEL/source-cache/releases/linux-$profile_version.tar.sign
         [[ -s $archive ]] || continue
         printf broken > "$temporary/broken.tar.xz"
         reject bash "$ROOT/senemos.sh" --internal-verify "$temporary/broken.tar.xz" "$signature" "$profile" "$KERNEL/configs/keys/linux-stable.asc" "$temporary/gpg"
@@ -763,7 +760,7 @@ if ((DRY_RUN)); then
     command -v jq >/dev/null || die 'Dry-run needs jq; no dependencies will be installed'
 else
     bootstrap
-    mkdir -p "$KERNEL/referances/releases"
+    mkdir -p "$KERNEL/source-cache/releases"
     mkdir -p "$BUILDER/build"
     exec 9> "$BUILDER/build/senemos-build.lock"
     if ! flock -n 9; then

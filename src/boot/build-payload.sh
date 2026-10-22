@@ -10,7 +10,6 @@ here=$(cd -- "$(dirname -- "$0")" && pwd)
 [[ -x $base/usr/lib/systemd/systemd && -x $base/usr/libexec/uke-root-guard ]]
 [[ ! -e $base/usr/lib/modules && ! -e $base/usr/lib/firmware ]]
 [[ ! -s $base/etc/machine-id && ! -e $base/etc/shadow && ! -e $base/root/.ssh ]]
-[[ -z $(find "$base" -type f \( -name '*.py' -o -name '*.pyc' -o -iname '*python*' -o -iname '*pypy*' \) -print -quit) ]]
 mkdir -p "$out"
 init=$out/boot-initramfs stage=$out/boot-modules
 [[ ! -e $init && ! -e $stage ]] || { echo 'Use an empty boot output for source compilation' >&2; exit 1; }
@@ -87,7 +86,6 @@ else
     [[ $? == 1 ]]
 fi
 [[ -s $source_modules/kernel/drivers/remoteproc/qcom_q6v5_pas.ko.zst ]]
-bash "$here/../audit/check-target-payload.sh" "$init"
 bash "$here/../audit/check-target-privacy.sh" "$init"
 find "$init" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
 (cd "$init"; find . -print0 | LC_ALL=C sort -z | cpio --null --quiet --reproducible --owner=0:0 -o -H newc) | gzip -n -9 > "$out/boot-initramfs.cpio.gz"

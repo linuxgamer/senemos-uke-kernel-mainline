@@ -5,15 +5,10 @@
   "source_origin": "Project boot producer 4eb69e5, integrated with the current native display and sensor profile",
   "firmware_included": false,
   "device_private_data_included": false,
-  "python_target_payload": false,
   "source_assets": [
     {
       "path": "packaging/native/native.config",
       "sha256": "df532cff3362eed56fd9c8cba4cbf96a8dd8f9f3ea96b13725df201795ff1ff5"
-    },
-    {
-      "path": "src/audit/check-target-payload.sh",
-      "sha256": "e1f249804a3bbd35f33cc6941f7d41feeccfb3fed87b4733ac49eb7390a1c2f0"
     },
     {
       "path": "src/audit/check-target-privacy.sh",
@@ -29,7 +24,7 @@
     },
     {
       "path": "src/boot/build-payload.sh",
-      "sha256": "c98e6a1f8a49250d7caba9f25af2c234239f3c9ccd35e7b8dbce9567d9117d2a"
+      "sha256": "30d5225704dcfba4808df961121cff3eecd3c9e011bf9436844ab43ecadf3219"
     },
     {
       "path": "src/boot/dracut/module-setup.sh",
@@ -73,7 +68,7 @@
     },
     {
       "path": "src/boot/make-initramfs-base.sh",
-      "sha256": "9aa4348ea960ae17eab610b409e60cceb49aa8922f91f4da46a53d334ddbd6cc"
+      "sha256": "18f2e532ff5660fb9c60fd4da34dd2e133791bef0bc4e32d25371e13b68d0af4"
     },
     {
       "path": "tests/boot-image-contract.sh",

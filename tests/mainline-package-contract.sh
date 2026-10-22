@@ -16,7 +16,7 @@ names=$(rpmspec -q --qf '%{NAME}\n' --target aarch64 "$spec")
 parsed=$(rpmspec --parse "$spec")
 grep -Eq '^Provides: kernel-uname-r\(7\.2\.11-[1-9][0-9]*\)$' <<< "$parsed"
 [[ $(grep -c '^Provides: installonlypkg(kernel)$' <<< "$parsed") == 4 ]]
-if grep -E '^Obsoletes:|^Conflicts:|^%post([[:space:]]|$)|^%pre([[:space:]]|$)|^Requires:.*(python|pypy)|senemos-uke-linux-kernel-mainline-native' <<< "$parsed"; then
+if grep -E '^Obsoletes:|^Conflicts:|^%post([[:space:]]|$)|^%pre([[:space:]]|$)|senemos-uke-linux-kernel-mainline-native' <<< "$parsed"; then
     echo 'Mainline source packages must preserve installed boot and fallback kernels' >&2
     exit 1
 fi

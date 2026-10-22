@@ -78,7 +78,7 @@ stock_dt_main() {
     case $arch in x86_64) arch=amd64;; aarch64) arch=arm64;; esac
     image=localhost/senemos-uke-build:rawhide-$arch-${recipe:0:16}
     "$engine" image inspect "$image" >/dev/null 2>&1 || die 'Run a kernel build once to prepare the pinned host toolchain'
-    dest=$KERNEL/referances/firmware/$profile
+    dest=$KERNEL/source-cache/firmware/$profile
     [[ ! -e $dest ]] || die 'Stock inspection output already exists; preserve it and choose a new profile receipt name'
     mkdir -p "$dest/raw" "$dest/derived"
     cp --reflink=auto "$vendor" "$dest/raw/vendor_boot.img"
