@@ -7,7 +7,7 @@
 Name: senemos-uke-linux-kernel-mainline
 Version: 7.2.11
 %if "%{version}" == "7.2.11"
-%global senemos_build_release 6
+%global senemos_build_release 9
 %else
 %global senemos_build_release 1
 %endif
@@ -196,6 +196,7 @@ CC=clang bash native-profile/tests/adc5-gen3-scalers.sh "$PWD"
 CC=clang CXX=clang++ bash native-profile/tests/hall-contract.sh "$PWD"
 CC=clang bash native-profile/tests/smp2p-restart-contract.sh "$PWD"
 CC=clang bash native-profile/tests/cpucp-mailbox-contract.sh "$PWD"
+CC=clang bash native-profile/tests/scmi-discovery-contract.sh "$PWD"
 CC=clang bash native-profile/tests/empty-oem-nodes-contract.sh "$PWD"
 CC=clang bash native-profile/tests/bluetooth-fdt-contract.sh "$PWD"
 CC=clang bash native-profile/tests/wlan-remove-contract.sh "$PWD"
@@ -287,6 +288,16 @@ fi
 %license /usr/share/licenses/%{name}-boot-%{version}-%{release}/
 
 %changelog
+* Mon Oct 19 2026 Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com> - 7.2.11-9
+- Assert SCMI transfer allocation counts in the Clang package check.
+
+* Mon Oct 19 2026 Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com> - 7.2.11-8
+- Validate the fixed SCMI list header before reading its count, including empty lists.
+
+* Mon Oct 19 2026 Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com> - 7.2.11-7
+- Expose error-qualified cached SCMI protocol discovery without new firmware requests.
+- Reject incomplete lists in diagnostic results and retain existing consumer behavior.
+
 * Sun Oct 18 2026 Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com> - 7.2.11-29
 - Add an explicit root-only, read-only firmware threshold query without control admission.
 - Bound diagnostic GETs and reject active leases, lifecycle changes and partial results.

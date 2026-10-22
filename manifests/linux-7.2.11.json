@@ -328,6 +328,10 @@
     {
       "path": "patches/7.2.11/0080-msm-global-engine-time.patch",
       "sha256": "7662c75130c5b8435ec7ad6745c60cf874d9ca7eecce5723fd16bb27c89f1904"
+    },
+    {
+      "path": "patches/7.2.11/0081-scmi-cached-protocol-discovery.patch",
+      "sha256": "f2970405e9a026a387aee2e407a4fc61a13ca9462a6cb17aaffe2570b551bc22"
     }
   ],
   "dtb": "qcom/sm7675-xiaomi-uke.dtb",

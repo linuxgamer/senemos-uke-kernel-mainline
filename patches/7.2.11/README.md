@@ -55,3 +55,14 @@ execution time for a separate native desktop sensor plugin. Reads do not wake
 hardware or change governor sampling. This prepares monitoring for platform
 Adreno hardware without modifying original KDE applications or proc security.
 Device and desktop presentation acceptance are separate from source/build checks.
+
+**19 October 2026, release 7 source:** patch 0081 adds read-only cached SCMI
+implemented_protocols. Failed, truncated, excessive and incomplete discovery
+remain errors; a valid empty list is distinct. Reads issue no firmware request.
+Internal consumer matching is preserved. This admits no vendor algorithm or
+performance policy. Native compile, package and tablet results remain separate.
+
+Release 8 also validates the four-byte discovery header before reading the
+returned count. A zero-byte response cannot qualify as an empty list. The
+regression fails on release 7 source and passes after the correction; normal
+consumer matching and base initialization behavior remain unchanged.
