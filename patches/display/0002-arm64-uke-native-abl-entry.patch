@@ -1,12 +1,10 @@
 From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
 Subject: [PATCH] arm64: select the isolated Uke native display graph
 
-The normal firmware-framebuffer path remains unchanged. This additional patch
-is applied only by the native candidate preparer after the normal ABL hook.
-Keep the bootloader-selected memory, reservations and panel selector; restore
-the output buffer capacity before applying the source-compiled display overlay.
-Reject an incompatible graph before OF scans it. This is not physical support
-evidence and must not be added to the normal release series.
+The bootloader can select either O82-36 or O82-42 on Xiaomi Pad 7. Keep the
+firmware framebuffer for O82-36; the source-compiled native graph currently
+describes only O82-42. Reject unknown selectors before OF scans an incomplete
+graph. Keep the bootloader-selected memory and reservations in both paths.
 
 --- a/arch/arm64/kernel/uke-abl.c
 +++ b/arch/arm64/kernel/uke-abl.c
@@ -19,28 +17,41 @@ evidence and must not be added to the normal release series.
  
  void *__init uke_abl_prepare_fdt(void *input, int size, phys_addr_t *physical)
  {
-@@ -821,6 +823,15 @@ void *__init uke_abl_prepare_fdt(void *input, int size, phys_addr_t *physical)
+@@ -821,6 +823,28 @@ void *__init uke_abl_prepare_fdt(void *input, int size, phys_addr_t *physical)
  	ret = uke_abl_transform(uke_fdt, sizeof(uke_fdt), input, size,
  			      uke_ufs_overlay, sizeof(uke_ufs_overlay),
  			      uke_usb_overlay, sizeof(uke_usb_overlay));
 +	if (ret > 0) {
-+		ret = fdt_open_into(uke_fdt, uke_fdt, sizeof(uke_fdt));
-+		if (!ret)
-+			ret = uke_abl_native(uke_fdt, uke_native_overlay,
-+					     sizeof(uke_native_overlay),
-+					     UKE_NATIVE_PANEL_SELECTOR);
-+		if (!ret)
-+			ret = 1;
++		static const char fallback[] =
++			"msm_drm.dsi_display0=qcom,mdss_dsi_o82_36_02_0a_dualdsi_dsc_vid:";
++		const char *bootargs;
++		int chosen, len;
++
++		chosen = fdt_path_offset(uke_fdt, "/chosen");
++		bootargs = fdt_getprop(uke_fdt, chosen, "bootargs", &len);
++		if (!bootargs || len <= 0 || bootargs[len - 1] ||
++		    (!strstr(bootargs, UKE_NATIVE_PANEL_SELECTOR) &&
++		     !strstr(bootargs, fallback))) {
++			ret = -FDT_ERR_BADVALUE;
++		} else if (strstr(bootargs, UKE_NATIVE_PANEL_SELECTOR)) {
++			ret = fdt_open_into(uke_fdt, uke_fdt, sizeof(uke_fdt));
++			if (!ret)
++				ret = uke_abl_native(uke_fdt, uke_native_overlay,
++						     sizeof(uke_native_overlay),
++						     UKE_NATIVE_PANEL_SELECTOR);
++			if (!ret)
++				ret = 1;
++		}
 +	}
  	if (ret < 0) {
  		pr_crit("Uke ABL DT adaptation rejected (%d); refusing incomplete board graph\n", ret);
  		while (true)
-@@ -830,7 +841,7 @@ void *__init uke_abl_prepare_fdt(void *input, int size, phys_addr_t *physical)
+@@ -830,7 +854,7 @@ void *__init uke_abl_prepare_fdt(void *input, int size, phys_addr_t *physical)
  	if (!ret)
  		return input;
  	*physical = __pa_symbol(uke_fdt);
 -	pr_info("Uke ABL DT: selected RAM preserved; UFS, selected USB profile and simplefb prepared\n");
-+	pr_info("Uke ABL DT: selected RAM preserved; native display and selected USB profile prepared\n");
++	pr_info("Uke ABL DT: selected RAM preserved; panel-selected display and USB profile prepared\n");
  	return uke_fdt;
  }
  #endif

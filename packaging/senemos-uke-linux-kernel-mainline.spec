@@ -7,7 +7,7 @@
 Name: senemos-uke-linux-kernel-mainline
 Version: 7.2.11
 %if "%{version}" == "7.2.11"
-%global senemos_build_release 9
+%global senemos_build_release 10
 %else
 %global senemos_build_release 1
 %endif
@@ -288,6 +288,9 @@ fi
 %license /usr/share/licenses/%{name}-boot-%{version}-%{release}/
 
 %changelog
+* Fri Oct 23 2026 Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com> - 7.2.11-10
+- Keep the firmware framebuffer on O82-36 panels; select native display only for O82-42.
+
 * Mon Oct 19 2026 Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com> - 7.2.11-9
 - Assert SCMI transfer allocation counts in the Clang package check.
 
