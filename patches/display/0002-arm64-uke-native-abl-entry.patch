@@ -1,14 +1,13 @@
-From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
-Subject: [PATCH] arm64: select the isolated Uke native display graph
+From: Uke Fedora Maintainers <linuxgamer@users.noreply.github.com>
+Subject: [PATCH] arm64: allow opt-in native display on O82-36 Uke panels
 
-The bootloader can select either O82-36 or O82-42 on Xiaomi Pad 7. Keep the
-firmware framebuffer for O82-36; the source-compiled native graph currently
-describes only O82-42. Reject unknown selectors before OF scans an incomplete
-graph. Keep the bootloader-selected memory and reservations in both paths.
+Select the tested O82-42 native graph as before. Keep the firmware
+framebuffer on O82-36 unless the image cmdline explicitly opts into
+the separate 60 Hz candidate. Reject unknown or ambiguous selectors.
 
 --- a/arch/arm64/kernel/uke-abl.c
 +++ b/arch/arm64/kernel/uke-abl.c
-@@ -809,6 +809,8 @@
+@@ -1025,6 +1025,8 @@
   */
  static unsigned char uke_fdt[UKE_FDT_CAPACITY] __ro_after_init __aligned(8);
  #include "uke-abl-overlays.h"
@@ -17,28 +16,34 @@ graph. Keep the bootloader-selected memory and reservations in both paths.
  
  void *__init uke_abl_prepare_fdt(void *input, int size, phys_addr_t *physical)
  {
-@@ -821,6 +823,28 @@ void *__init uke_abl_prepare_fdt(void *input, int size, phys_addr_t *physical)
+@@ -1035,6 +1037,34 @@
  	ret = uke_abl_transform(uke_fdt, sizeof(uke_fdt), input, size,
  			      uke_ufs_overlay, sizeof(uke_ufs_overlay),
  			      uke_usb_overlay, sizeof(uke_usb_overlay));
 +	if (ret > 0) {
-+		static const char fallback[] =
-+			"msm_drm.dsi_display0=qcom,mdss_dsi_o82_36_02_0a_dualdsi_dsc_vid:";
-+		const char *bootargs;
-+		int chosen, len;
++		const char *bootargs, *selector;
++		unsigned char *overlay;
++		size_t overlay_bytes;
++		int chosen, len, panel42, panel36, native36 = 0;
 +
 +		chosen = fdt_path_offset(uke_fdt, "/chosen");
 +		bootargs = fdt_getprop(uke_fdt, chosen, "bootargs", &len);
-+		if (!bootargs || len <= 0 || bootargs[len - 1] ||
-+		    (!strstr(bootargs, UKE_NATIVE_PANEL_SELECTOR) &&
-+		     !strstr(bootargs, fallback))) {
++		panel42 = bootargs && strstr(bootargs, UKE_NATIVE_PANEL_SELECTOR) != NULL;
++		panel36 = bootargs && strstr(bootargs, UKE_EXPERIMENTAL_PANEL_SELECTOR) != NULL;
++#ifdef CONFIG_CMDLINE
++		native36 = strstr(CONFIG_CMDLINE, " uke.native_o82_36=1") != NULL;
++#endif
++		if (!bootargs || len <= 0 || bootargs[len - 1] || panel42 == panel36) {
 +			ret = -FDT_ERR_BADVALUE;
-+		} else if (strstr(bootargs, UKE_NATIVE_PANEL_SELECTOR)) {
++		} else if (panel42 || native36) {
++			selector = panel42 ? UKE_NATIVE_PANEL_SELECTOR :
++				UKE_EXPERIMENTAL_PANEL_SELECTOR;
++			overlay = panel42 ? uke_native_overlay : uke_native_overlay_36;
++			overlay_bytes = panel42 ? sizeof(uke_native_overlay) :
++				sizeof(uke_native_overlay_36);
 +			ret = fdt_open_into(uke_fdt, uke_fdt, sizeof(uke_fdt));
 +			if (!ret)
-+				ret = uke_abl_native(uke_fdt, uke_native_overlay,
-+						     sizeof(uke_native_overlay),
-+						     UKE_NATIVE_PANEL_SELECTOR);
++				ret = uke_abl_native(uke_fdt, overlay, overlay_bytes, selector);
 +			if (!ret)
 +				ret = 1;
 +		}
@@ -46,7 +51,7 @@ graph. Keep the bootloader-selected memory and reservations in both paths.
  	if (ret < 0) {
  		pr_crit("Uke ABL DT adaptation rejected (%d); refusing incomplete board graph\n", ret);
  		while (true)
-@@ -830,7 +854,7 @@ void *__init uke_abl_prepare_fdt(void *input, int size, phys_addr_t *physical)
+@@ -1043,7 +1073,7 @@
  	if (!ret)
  		return input;
  	*physical = __pa_symbol(uke_fdt);

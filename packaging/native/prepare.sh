@@ -22,6 +22,12 @@ cp "$kernel/drivers/regulator/qcom-rpmh-regulator-uke.c" "$output/rpmh-regulator
 bash "$profile/src/boot/prepare-abl-source.sh" "$kernel" "$output"
 bash "$profile/src/display/prepare-source.sh" "$kernel"
 bash "$profile/src/display/prepare-native-abl-source.sh" "$kernel" "$output" 42
+# Keep the tested O82-42 source profile and compile a separate, opt-in O82-36
+# graph. The latter exposes only the initial 60 Hz mode until a tablet test.
+cpp -nostdinc -undef -D__DTS__ -DO82_PANEL_VARIANT=36 -x assembler-with-cpp \
+    "${usb_cpp[@]}" \
+    -I "$kernel/include" "$profile/src/display/sm7675-uke-native-display.dtso" > "$output/display36.dts"
+dtc -q -@ -I dts -O dtb -o "$output/display36.dtbo" "$output/display36.dts"
 # Replace only the generated graph with the explicit exact seven-mode profile.
 cpp -nostdinc -undef -D__DTS__ -DO82_PANEL_VARIANT=42 -x assembler-with-cpp \
     "${usb_cpp[@]}" \
@@ -29,9 +35,14 @@ cpp -nostdinc -undef -D__DTS__ -DO82_PANEL_VARIANT=42 -x assembler-with-cpp \
 dtc -q -@ -I dts -O dtb -o "$output/display.dtbo" "$output/display.dts"
 {
     printf '#define UKE_NATIVE_PANEL_SELECTOR "msm_drm.dsi_display0=qcom,mdss_dsi_o82_42_02_0b_dualdsi_dsc_vid:"\n'
+    printf '#define UKE_EXPERIMENTAL_PANEL_SELECTOR "msm_drm.dsi_display0=qcom,mdss_dsi_o82_36_02_0a_dualdsi_dsc_vid:"\n'
     printf 'static unsigned char uke_native_overlay[] __initdata __aligned(8) = {\n'
     od -An -v -tx1 "$output/display.dtbo" | sed -E 's/[a-f0-9]{2}/0x&,/g'
     printf '};\n'
+    printf 'static unsigned char uke_native_overlay_36[] __initdata __aligned(8) = {\n'
+    od -An -v -tx1 "$output/display36.dtbo" | sed -E 's/[a-f0-9]{2}/0x&,/g'
+    printf '};\n'
 } > "$kernel/arch/arm64/kernel/uke-native-display.h"
 fdtdump "$output/display.dtbo" 2>/dev/null | grep -E '^[[:space:]]+xiaomi,oem-refresh-modes;' >/dev/null
-printf 'Exact seven-mode O82-42 native source prepared; no private boot input\n'
+fdtdump "$output/display36.dtbo" 2>/dev/null | grep -E '^[[:space:]]+xiaomi,initial-60hz-only;' >/dev/null
+printf 'O82-42 native source and opt-in O82-36 60 Hz candidate prepared; no private boot input\n'
