@@ -335,7 +335,7 @@
     },
     {
       "path": "patches/7.2.11/0082-uke-perceptual-normal-brightness.patch",
-      "sha256": "3107babaf6929dfb2fa84634306f5f77657be3039956cc5e0f5c92014cf66277"
+      "sha256": "79e9ea261298f13c2c606e0fca554cf7d54f8dec816f83a528208bd88b168cbe"
     }
   ],
   "dtb": "qcom/sm7675-xiaomi-uke.dtb",

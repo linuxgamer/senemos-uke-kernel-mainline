@@ -104,8 +104,9 @@ int main() {
         assert(!level ? code==0 : code>=444);
     }
     assert(ktz8866_uke_code(MAX_BRIGHTNESS)==1952);
-    assert(ktz8866_uke_code(205)-ktz8866_uke_code(102) <
-           ktz8866_uke_code(2047)-ktz8866_uke_code(1945));
+    const unsigned int low_step=ktz8866_uke_code(205)-ktz8866_uke_code(102);
+    const unsigned int high_step=ktz8866_uke_code(2047)-ktz8866_uke_code(1945);
+    assert(low_step*4>=high_step*3 && low_step*4<=high_step*5);
     assert(ktz8866_uke_level(0)==0 && ktz8866_uke_level(1953)==-ERANGE);
     i2c_client clients[2]; regmap maps[2];
     ktz8866 secondary{&clients[1],&maps[1],nullptr,{}};
