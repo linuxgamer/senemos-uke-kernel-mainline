@@ -25,7 +25,7 @@ cat > "$work/check.cpp" <<'CPP'
 enum drm_mode_status {MODE_OK,MODE_BAD,MODE_CLOCK_RANGE,MODE_ERROR,MODE_H_ILLEGAL};
 struct drm_display_info {};
 struct drm_bridge {int id=0;};
-struct device_node {bool pb=true,tm=false,refresh=true,trial=false;};
+struct device_node {bool pb=true,tm=false,refresh=true,trial=false,all=false;};
 struct device {device_node *of_node;};
 struct platform_device {device dev;};
 struct mipi_dsi_host {};
@@ -58,7 +58,8 @@ static bool of_device_is_compatible(device_node *node,const char *name) {
 }
 static bool of_property_read_bool(device_node *node,const char *name) {
     if(!std::strcmp(name,"xiaomi,oem-refresh-modes"))return node&&node->refresh;
-    assert(!std::strcmp(name,"xiaomi,o82-36-60-120-trial"));return node&&node->trial;
+    if(!std::strcmp(name,"xiaomi,o82-36-60-120-trial"))return node&&node->trial;
+    assert(!std::strcmp(name,"xiaomi,o82-36-all-rates-trial"));return node&&node->all;
 }
 static unsigned int drm_mode_vrefresh(const drm_display_mode *mode) {
     const uint64_t total=static_cast<uint64_t>(mode->htotal)*mode->vtotal;
@@ -117,6 +118,12 @@ int main() {
         const auto status=dsi_mgr_bridge_mode_valid(&bridge,nullptr,&o82_modes[i].mode);
         assert(status==((i==3||i==5) ? MODE_OK:MODE_BAD));
         assert(clock_calls==((i==3||i==5) ? 1U:0U));
+        assert(node_gets==node_puts);
+    }
+    for(int link=0;link<2;link++)for(size_t i=0;i<7;i++) {
+        reset();bridge.id=link;panel_node.tm=panel_node.trial=panel_node.all=true;
+        assert(dsi_mgr_bridge_mode_valid(&bridge,nullptr,&o82_modes[i].mode)==MODE_OK);
+        assert(clock_calls==1&&opp_calls==1&&opp_puts==1&&dsc_calls==1);
         assert(node_gets==node_puts);
     }
     /* Every unrelated board, panel or absent profile retains legacy validation. */

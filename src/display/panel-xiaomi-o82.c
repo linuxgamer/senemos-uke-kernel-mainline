@@ -71,6 +71,7 @@ struct o82_panel {
 	bool initial_120hz_only;
 	bool oem_refresh_modes;
 	bool trial_60_120_only;
+	bool trial_all_rates;
 	atomic64_t touch_state;
 };
 
@@ -302,8 +303,10 @@ static int o82_read_initial_mode(struct o82_panel *ctx, struct device_node *node
 	ctx->initial_120hz_only = of_property_read_bool(node, "xiaomi,initial-120hz-only");
 	ctx->oem_refresh_modes = of_property_read_bool(node, "xiaomi,oem-refresh-modes");
 	ctx->trial_60_120_only = of_property_read_bool(node, "xiaomi,o82-36-60-120-trial");
+	ctx->trial_all_rates = of_property_read_bool(node, "xiaomi,o82-36-all-rates-trial");
 	if ((ctx->initial_60hz_only && ctx->initial_120hz_only) ||
 	    (ctx->oem_refresh_modes && (ctx->initial_60hz_only || ctx->initial_120hz_only)) ||
+	    (ctx->trial_all_rates && !ctx->trial_60_120_only) ||
 	    (ctx->trial_60_120_only &&
 	     (!ctx->oem_refresh_modes ||
 	      !of_device_is_compatible(node, "xiaomi,o82-36-02-0a"))) ||
@@ -338,7 +341,7 @@ static int o82_prepare_locked(struct drm_panel *panel)
 		/* The isolated OEM 120 Hz comparison must not power another mode. */
 		if (ctx->initial_120hz_only && drm_mode_vrefresh(&o82_modes[i].mode) != 120)
 			continue;
-		if (ctx->trial_60_120_only &&
+		if (ctx->trial_60_120_only && !ctx->trial_all_rates &&
 		    drm_mode_vrefresh(&o82_modes[i].mode) != 60 &&
 		    drm_mode_vrefresh(&o82_modes[i].mode) != 120)
 			continue;
@@ -655,7 +658,7 @@ static int o82_get_modes(struct drm_panel *panel, struct drm_connector *connecto
 		struct drm_display_mode *mode;
 		if (ctx->initial_60hz_only && drm_mode_vrefresh(&o82_modes[i].mode) != 60)
 			continue;
-		if (ctx->trial_60_120_only &&
+		if (ctx->trial_60_120_only && !ctx->trial_all_rates &&
 		    drm_mode_vrefresh(&o82_modes[i].mode) != 60 &&
 		    drm_mode_vrefresh(&o82_modes[i].mode) != 120)
 			continue;
@@ -689,9 +692,10 @@ static bool o82_dfps_check_locked(struct o82_panel *ctx,
 		ctx->oem_refresh_modes &&
 		((ctx->profiles == o82_42_02_0b_profiles && !ctx->trial_60_120_only) ||
 		 (ctx->profiles == o82_36_02_0a_profiles && ctx->trial_60_120_only &&
-		  (drm_mode_vrefresh(old) == 60 || drm_mode_vrefresh(old) == 120) &&
-		  (drm_mode_vrefresh(new_mode) == 60 ||
-		   drm_mode_vrefresh(new_mode) == 120))) &&
+		  (ctx->trial_all_rates ||
+		   ((drm_mode_vrefresh(old) == 60 || drm_mode_vrefresh(old) == 120) &&
+		    (drm_mode_vrefresh(new_mode) == 60 ||
+		     drm_mode_vrefresh(new_mode) == 120))))) &&
 		ctx->active == &ctx->profiles[old_group] && ctx->prepared &&
 		!ctx->removing && (atomic64_read(&ctx->touch_state) & 1);
 }

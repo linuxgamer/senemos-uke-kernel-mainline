@@ -26,16 +26,18 @@ diff --git a/drivers/gpu/drm/msm/dsi/dsi_manager.c b/drivers/gpu/drm/msm/dsi/dsi
 index 213d518..1ef814d 100644
 --- a/drivers/gpu/drm/msm/dsi/dsi_manager.c
 +++ b/drivers/gpu/drm/msm/dsi/dsi_manager.c
-@@ -528,15 +528,20 @@ static enum drm_mode_status dsi_mgr_bridge_mode_valid(struct drm_bridge *bridge,
+@@ -528,15 +528,22 @@ static enum drm_mode_status dsi_mgr_bridge_mode_valid(struct drm_bridge *bridge,
  	struct dev_pm_opp *opp;
  	unsigned long byte_clk_rate;
  	struct device_node *panel;
 -	bool oem_modes;
-+	bool oem_modes, o82_36_trial;
++	bool oem_modes, o82_36_trial, o82_36_all_rates;
  
  	panel = of_graph_get_remote_node(pdev->dev.of_node, 1, -1);
 +	o82_36_trial = of_device_is_compatible(panel, "xiaomi,o82-36-02-0a") &&
 +		of_property_read_bool(panel, "xiaomi,o82-36-60-120-trial");
++	o82_36_all_rates = o82_36_trial &&
++		of_property_read_bool(panel, "xiaomi,o82-36-all-rates-trial");
  	oem_modes = of_machine_is_compatible("xiaomi,uke") &&
  		of_machine_is_compatible("qcom,sm7675") &&
 -		of_device_is_compatible(panel, "xiaomi,o82-42-02-0b") &&
@@ -45,7 +47,7 @@ index 213d518..1ef814d 100644
  	of_node_put(panel);
 -	if (oem_modes && !qcom_uke_o82_mode(mode))
 +	if (oem_modes && (!qcom_uke_o82_mode(mode) ||
-+	    (o82_36_trial && drm_mode_vrefresh(mode) != 60 &&
++	    (o82_36_trial && !o82_36_all_rates && drm_mode_vrefresh(mode) != 60 &&
 +	     drm_mode_vrefresh(mode) != 120)))
  		return MODE_BAD;
  

@@ -53,7 +53,7 @@ struct o82_panel {
     struct mipi_dsi_device *dsi[2];
     struct mutex lock;
     const struct o82_profile *profiles,*active;
-    bool oem_refresh_modes,trial_60_120_only,prepared,removing;
+    bool oem_refresh_modes,trial_60_120_only,trial_all_rates,prepared,removing;
     atomic64_t touch_state;
 };
 static struct o82_panel *current;
@@ -146,6 +146,12 @@ int main(void) {
     }
     ctx.active=&ctx.profiles[0];
     assert(!o82_dfps_ops.check(&ctx.panel,&o82_modes[3].mode,&o82_modes[6].mode));
+    ctx.trial_all_rates=true;
+    for(size_t i=0;i<ARRAY_SIZE(o82_modes);i++)for(size_t j=0;j<ARRAY_SIZE(o82_modes);j++) {
+        ctx.active=&ctx.profiles[o82_modes[i].group];
+        assert(o82_dfps_ops.check(&ctx.panel,&o82_modes[i].mode,&o82_modes[j].mode)==(i!=j));
+    }
+    ctx.trial_all_rates=false;
     ctx.trial_60_120_only=false;
     assert(!o82_dfps_ops.check(&ctx.panel,&o82_modes[3].mode,&o82_modes[5].mode));
 }

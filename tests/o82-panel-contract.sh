@@ -63,13 +63,14 @@ awk '/^u8 drm_dsc_initial_scale_value\(/ {p=1} p && /^EXPORT_SYMBOL/ {exit} p' \
 } >> "$work/check.c"
 cat >> "$work/check.c" <<'C'
 struct device_node { const char *compatible; };
-static bool requested_initial60,requested_initial120,requested_oem_modes,requested_trial_rates;
+static bool requested_initial60,requested_initial120,requested_oem_modes,requested_trial_rates,requested_all_rates;
 static bool of_property_read_bool(struct device_node *node,const char *property) {
     assert(node);
     if(!strcmp(property,"xiaomi,initial-60hz-only")) return requested_initial60;
     if(!strcmp(property,"xiaomi,initial-120hz-only")) return requested_initial120;
     if(!strcmp(property,"xiaomi,oem-refresh-modes")) return requested_oem_modes;
-    assert(!strcmp(property,"xiaomi,o82-36-60-120-trial")); return requested_trial_rates;
+    if(!strcmp(property,"xiaomi,o82-36-60-120-trial")) return requested_trial_rates;
+    assert(!strcmp(property,"xiaomi,o82-36-all-rates-trial")); return requested_all_rates;
 }
 struct device { struct device_node *of_node; int kobj; };
 typedef struct {u64 value;} atomic64_t;
@@ -440,14 +441,14 @@ static struct o82_panel context(int variant,int mode) {
     last_error[0]=0;
     failure=transfer_failure=disable_failure=transfer_short=-1;
     cs.adjusted_mode=o82_modes[mode].mode;
-    const struct o82_profile *p=(variant==0 || variant==3) ? o82_36_02_0a_profiles : o82_42_02_0b_profiles;
+    const struct o82_profile *p=(variant==0 || variant==3 || variant==4) ? o82_36_02_0a_profiles : o82_42_02_0b_profiles;
     struct o82_panel ctx={.panel={.funcs=&funcs},.dsi={&dsis[0],&dsis[1]},.supplies={&supplies[0],&supplies[1],&supplies[2]},
         .connector=&connector,.backlight=&backlight,.profiles=p,.active=p,
         .initial_120hz_only=variant==1 && mode==5,.oem_refresh_modes=variant>=2,
-        .trial_60_120_only=variant==3};
+        .trial_60_120_only=variant==3 || variant==4,.trial_all_rates=variant==4};
     mutex_init(&ctx.lock);
     pps_start=2*p[o82_modes[mode].group].on_count;
-    struct device_node node={(variant==0 || variant==3) ? "xiaomi,o82-36-02-0a" : "xiaomi,o82-42-02-0b"};
+    struct device_node node={(variant==0 || variant==3 || variant==4) ? "xiaomi,o82-36-02-0a" : "xiaomi,o82-42-02-0b"};
     struct platform_device platform={.dev={.of_node=&node}};
     struct msm_dsi_host h={&platform};
     ctx.dsc=(struct drm_dsc_config){.dsc_version_major=1,.dsc_version_minor=1,
@@ -478,7 +479,7 @@ int main(void) {
         struct o82_panel ctx=context(variant,3);
         struct device_node node={variant ? "xiaomi,o82-42-02-0b" : "xiaomi,o82-36-02-0a"};
         requested_initial60=flags&1; requested_initial120=flags&2; requested_oem_modes=flags&4;
-        requested_trial_rates=false;
+        requested_trial_rates=requested_all_rates=false;
         const bool invalid=(requested_initial60 && requested_initial120) ||
             (requested_oem_modes && (requested_initial60 || requested_initial120)) ||
             ((requested_initial120 || requested_oem_modes) && !variant);
@@ -498,7 +499,14 @@ int main(void) {
         requested_oem_modes=true;
         node.compatible="xiaomi,o82-42-02-0b";
         assert(o82_probe_initial_mode(&ctx,&node)==-EINVAL);
-        requested_trial_rates=false;requested_oem_modes=false;
+        requested_trial_rates=requested_oem_modes=false;
+        requested_all_rates=true;
+        assert(o82_probe_initial_mode(&ctx,&node)==-EINVAL);
+        node.compatible="xiaomi,o82-36-02-0a";
+        requested_trial_rates=requested_oem_modes=true;
+        assert(o82_probe_initial_mode(&ctx,&node)==0 && ctx.trial_all_rates);
+        requested_trial_rates=requested_oem_modes=false;
+        requested_all_rates=false;
     }
     {
         struct o82_panel ctx=context(0,3);
@@ -554,6 +562,9 @@ int main(void) {
     selection=context(3,3); published=preferred=0;
     assert(o82_get_modes(&selection.panel,selection.connector)==2 && published==2 && preferred==1 && preferred_rate==60);
     assert(drm_mode_vrefresh(&copies[0])==60 && drm_mode_vrefresh(&copies[1])==120);
+    selection=context(4,3); published=preferred=0;
+    assert(o82_get_modes(&selection.panel,selection.connector)==7 && published==7 && preferred==1 && preferred_rate==60);
+    for(unsigned int m=0;m<ARRAY_SIZE(rates);m++) assert(drm_mode_vrefresh(&copies[m])==rates[m]);
     for(int trial_mode=3;trial_mode<=5;trial_mode+=2) {
         struct o82_panel trial=context(3,trial_mode);
         assert(o82_prepare(&trial.panel)==0 && trial.prepared && !on_batch_calls);
@@ -562,6 +573,17 @@ int main(void) {
         first_boundary(&trial.first_frame_work);
         assert(trial.backlight->on && atomic64_read(&trial.touch_state)==3);
         assert(!on_batch_calls && !batch_api_calls && !lp_api_calls && !dimming_transfers);
+        drm_panel_disable(&trial.panel);
+        video_started=false;
+        assert(o82_unprepare(&trial.panel)==0 && !trial.prepared);
+    }
+    for(int trial_mode=0;trial_mode<7;trial_mode++) {
+        struct o82_panel trial=context(4,trial_mode);
+        assert(o82_prepare(&trial.panel)==0 && trial.prepared && !on_batch_calls);
+        video_started=true;
+        drm_panel_enable(&trial.panel);
+        first_boundary(&trial.first_frame_work);
+        assert(trial.backlight->on && atomic64_read(&trial.touch_state)==3);
         drm_panel_disable(&trial.panel);
         video_started=false;
         assert(o82_unprepare(&trial.panel)==0 && !trial.prepared);

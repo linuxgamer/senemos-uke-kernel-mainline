@@ -34,6 +34,12 @@ cpp -nostdinc -undef -D__DTS__ -DO82_PANEL_VARIANT=36 -x assembler-with-cpp \
     "${usb_cpp[@]}" \
     -I "$kernel/include" "$profile/src/display/sm7675-uke-native-display-36-rates.dtso" > "$output/display36-rates.dts"
 dtc -q -@ -I dts -O dtb -o "$output/display36-rates.dtbo" "$output/display36-rates.dts"
+# Keep the tested 60/120 graph available while exposing all seven exact OEM
+# modes only through a second, explicit O82-36 trial selector.
+cpp -nostdinc -undef -D__DTS__ -DO82_PANEL_VARIANT=36 -x assembler-with-cpp \
+    "${usb_cpp[@]}" \
+    -I "$kernel/include" "$profile/src/display/sm7675-uke-native-display-36-all-rates.dtso" > "$output/display36-all-rates.dts"
+dtc -q -@ -I dts -O dtb -o "$output/display36-all-rates.dtbo" "$output/display36-all-rates.dts"
 # Replace only the generated graph with the explicit exact seven-mode profile.
 cpp -nostdinc -undef -D__DTS__ -DO82_PANEL_VARIANT=42 -x assembler-with-cpp \
     "${usb_cpp[@]}" \
@@ -51,8 +57,12 @@ dtc -q -@ -I dts -O dtb -o "$output/display.dtbo" "$output/display.dts"
     printf 'static unsigned char uke_native_overlay_36_rates[] __initdata __aligned(8) = {\n'
     od -An -v -tx1 "$output/display36-rates.dtbo" | sed -E 's/[a-f0-9]{2}/0x&,/g'
     printf '};\n'
+    printf 'static unsigned char uke_native_overlay_36_all_rates[] __initdata __aligned(8) = {\n'
+    od -An -v -tx1 "$output/display36-all-rates.dtbo" | sed -E 's/[a-f0-9]{2}/0x&,/g'
+    printf '};\n'
 } > "$kernel/arch/arm64/kernel/uke-native-display.h"
 fdtdump "$output/display.dtbo" 2>/dev/null | grep -E '^[[:space:]]+xiaomi,oem-refresh-modes;' >/dev/null
 fdtdump "$output/display36.dtbo" 2>/dev/null | grep -E '^[[:space:]]+xiaomi,initial-60hz-only;' >/dev/null
 fdtdump "$output/display36-rates.dtbo" 2>/dev/null | grep -E '^[[:space:]]+xiaomi,o82-36-60-120-trial;' >/dev/null
+fdtdump "$output/display36-all-rates.dtbo" 2>/dev/null | grep -E '^[[:space:]]+xiaomi,o82-36-all-rates-trial;' >/dev/null
 printf 'O82-42 native source and opt-in O82-36 60 Hz candidate prepared; no private boot input\n'

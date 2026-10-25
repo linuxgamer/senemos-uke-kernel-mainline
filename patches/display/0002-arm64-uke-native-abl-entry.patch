@@ -1,9 +1,8 @@
 From: Uke Fedora Maintainers <linuxgamer@users.noreply.github.com>
 Subject: [PATCH] arm64: allow opt-in native display on O82-36 Uke panels
 
-Select the tested O82-42 native graph as before. Keep the firmware
-framebuffer on O82-36 unless the image cmdline explicitly opts into
-the separate 60 Hz candidate. Reject unknown or ambiguous selectors.
+Select the native O82-42 graph and the exact seven-mode O82-36 graph by
+the stock panel selector. Reject unknown or ambiguous selectors.
 
 --- a/arch/arm64/kernel/uke-abl.c
 +++ b/arch/arm64/kernel/uke-abl.c
@@ -30,10 +29,10 @@ the separate 60 Hz candidate. Reject unknown or ambiguous selectors.
 +		bootargs = fdt_getprop(uke_fdt, chosen, "bootargs", &len);
 +		panel42 = bootargs && strstr(bootargs, UKE_NATIVE_PANEL_SELECTOR) != NULL;
 +		panel36 = bootargs && strstr(bootargs, UKE_EXPERIMENTAL_PANEL_SELECTOR) != NULL;
-+#ifdef CONFIG_CMDLINE
-+		native36 = strstr(CONFIG_CMDLINE, " uke.native_o82_36=1") != NULL;
-+		native36rates = strstr(CONFIG_CMDLINE, " uke.native_o82_36_rates=1") != NULL;
-+#endif
++		if (panel36) {
++			native36 = 1;
++			native36rates = 1;
++		}
 +		if (!bootargs || len <= 0 || bootargs[len - 1] || panel42 == panel36 ||
 +		    (native36rates && (!native36 || !panel36))) {
 +			ret = -FDT_ERR_BADVALUE;
@@ -41,9 +40,9 @@ the separate 60 Hz candidate. Reject unknown or ambiguous selectors.
 +			selector = panel42 ? UKE_NATIVE_PANEL_SELECTOR :
 +				UKE_EXPERIMENTAL_PANEL_SELECTOR;
 +			overlay = panel42 ? uke_native_overlay :
-+				native36rates ? uke_native_overlay_36_rates : uke_native_overlay_36;
++				native36rates ? uke_native_overlay_36_all_rates : uke_native_overlay_36;
 +			overlay_bytes = panel42 ? sizeof(uke_native_overlay) :
-+				native36rates ? sizeof(uke_native_overlay_36_rates) :
++				native36rates ? sizeof(uke_native_overlay_36_all_rates) :
 +					sizeof(uke_native_overlay_36);
 +			ret = fdt_open_into(uke_fdt, uke_fdt, sizeof(uke_fdt));
 +			if (!ret)

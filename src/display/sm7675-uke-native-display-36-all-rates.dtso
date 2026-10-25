@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/* Opt-in exact OEM modes for the observed O82-36 panel. */
+#if O82_PANEL_VARIANT != 36
+#error O82-36 all-rate trial requires the observed O82-36 panel
+#endif
+#include "sm7675-uke-native-display-36-rates.dtso"
+
+&uke_panel {
+	xiaomi,o82-36-all-rates-trial;
+};

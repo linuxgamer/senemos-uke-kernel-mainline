@@ -7,7 +7,7 @@
 Name: senemos-uke-linux-kernel-mainline
 Version: 7.2.11
 %if "%{version}" == "7.2.11"
-%global senemos_build_release 31
+%global senemos_build_release 32
 %else
 %global senemos_build_release 1
 %endif
@@ -238,6 +238,7 @@ install -m644 %{_uke_out}/arch/arm64/boot/dts/qcom/sm7675-xiaomi-uke.dtb "$modul
 install -m644 native-generated/display.dtbo "$module_dir/dtb/overlays/uke-o82-oem-modes.dtbo"
 install -m644 native-generated/display36.dtbo "$module_dir/dtb/overlays/uke-o82-36-test.dtbo"
 install -m644 native-generated/display36-rates.dtbo "$module_dir/dtb/overlays/uke-o82-36-rates-test.dtbo"
+install -m644 native-generated/display36-all-rates.dtbo "$module_dir/dtb/overlays/uke-o82-36-all-rates-test.dtbo"
 depmod -b %{buildroot} -m /usr/lib/modules -a %{krel}
 identity=%{buildroot}/usr/share/senemos/uke/%{krel}
 mkdir -p "$identity"
@@ -290,6 +291,9 @@ fi
 %license /usr/share/licenses/%{name}-boot-%{version}-%{release}/
 
 %changelog
+* Sun Oct 25 2026 Uke Fedora Maintainers <linuxgamer@users.noreply.github.com> - 7.2.11-32
+- Add an isolated O82-36 seven-mode trial while preserving the tested 60/120 graph.
+
 * Sun Oct 25 2026 Uke Fedora Maintainers <linuxgamer@users.noreply.github.com> - 7.2.11-31
 - Add a separate O82-36 fixed 60/120 Hz trial with the proven serial startup path.
 
