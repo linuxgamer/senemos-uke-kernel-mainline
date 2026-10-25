@@ -53,7 +53,7 @@ struct o82_panel {
     struct mipi_dsi_device *dsi[2];
     struct mutex lock;
     const struct o82_profile *profiles,*active;
-    bool oem_refresh_modes,prepared,removing;
+    bool oem_refresh_modes,trial_60_120_only,prepared,removing;
     atomic64_t touch_state;
 };
 static struct o82_panel *current;
@@ -131,6 +131,23 @@ int main(void) {
         assert(o82_dfps_ops.apply(&ctx.panel,old,&altered,false)==-EAGAIN);
         assert(!pen_calls && !tp_calls && !ctx.lock.locked);
     }
+    ctx.profiles=o82_36_02_0a_profiles;
+    ctx.trial_60_120_only=true;
+    ctx.oem_refresh_modes=ctx.prepared=true;
+    ctx.removing=false;ctx.touch_state.value=5;
+    for(size_t i=3;i<=5;i+=2)for(size_t j=3;j<=5;j+=2) {
+        const struct drm_display_mode *old=&o82_modes[i].mode,*target=&o82_modes[j].mode;
+        ctx.active=&ctx.profiles[0];target_group=0;pen_calls=tp_calls=0;
+        assert(o82_dfps_ops.check(&ctx.panel,old,target)==(i!=j));
+        if(i==j) continue;
+        assert(o82_dfps_ops.apply(&ctx.panel,old,target,true)==0);
+        assert(o82_dfps_ops.apply(&ctx.panel,old,target,false)==0);
+        assert(tp_calls==1 && !ctx.lock.locked);
+    }
+    ctx.active=&ctx.profiles[0];
+    assert(!o82_dfps_ops.check(&ctx.panel,&o82_modes[3].mode,&o82_modes[6].mode));
+    ctx.trial_60_120_only=false;
+    assert(!o82_dfps_ops.check(&ctx.panel,&o82_modes[3].mode,&o82_modes[5].mode));
 }
 C
 "${CC:-cc}" -std=gnu11 -O2 -Wall -Wextra -Werror -Wno-sign-compare \

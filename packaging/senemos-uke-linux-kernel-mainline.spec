@@ -7,7 +7,7 @@
 Name: senemos-uke-linux-kernel-mainline
 Version: 7.2.11
 %if "%{version}" == "7.2.11"
-%global senemos_build_release 30
+%global senemos_build_release 31
 %else
 %global senemos_build_release 1
 %endif
@@ -237,6 +237,7 @@ mkdir -p "$module_dir/dtb/qcom" "$module_dir/dtb/overlays"
 install -m644 %{_uke_out}/arch/arm64/boot/dts/qcom/sm7675-xiaomi-uke.dtb "$module_dir/dtb/qcom/"
 install -m644 native-generated/display.dtbo "$module_dir/dtb/overlays/uke-o82-oem-modes.dtbo"
 install -m644 native-generated/display36.dtbo "$module_dir/dtb/overlays/uke-o82-36-test.dtbo"
+install -m644 native-generated/display36-rates.dtbo "$module_dir/dtb/overlays/uke-o82-36-rates-test.dtbo"
 depmod -b %{buildroot} -m /usr/lib/modules -a %{krel}
 identity=%{buildroot}/usr/share/senemos/uke/%{krel}
 mkdir -p "$identity"
@@ -289,6 +290,9 @@ fi
 %license /usr/share/licenses/%{name}-boot-%{version}-%{release}/
 
 %changelog
+* Sun Oct 25 2026 Uke Fedora Maintainers <linuxgamer@users.noreply.github.com> - 7.2.11-31
+- Add a separate O82-36 fixed 60/120 Hz trial with the proven serial startup path.
+
 * Sat Oct 24 2026 Uke Fedora Maintainers <linuxgamer@users.noreply.github.com> - 7.2.11-30
 - Add an opt-in 60 Hz O82-36 native display candidate; retain firmware scanout by default.
 

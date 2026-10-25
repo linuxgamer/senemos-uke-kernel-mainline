@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/* Opt-in O82-36 fixed 60/120 Hz trial; 60 Hz remains preferred. */
+#if O82_PANEL_VARIANT != 36
+#error O82-36 refresh trial requires the observed O82-36 panel
+#endif
+#include "sm7675-uke-native-display.dtso"
+
+&uke_panel {
+	/delete-property/ xiaomi,initial-60hz-only;
+	xiaomi,oem-refresh-modes;
+	xiaomi,o82-36-60-120-trial;
+};
+
+/* The 120 Hz mode needs the same reviewed MDP clock ceiling as O82-42. */
+&uke_mdp_opps {
+	opp-600000000 { opp-hz = /bits/ 64 <600000000>; };
+};
+
+#ifdef UKE_AUDIO_SERVICES
+#include "../audio/sm7675-uke-audio-services.dtsi"
+#endif

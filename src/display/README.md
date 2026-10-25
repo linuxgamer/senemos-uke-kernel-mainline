@@ -1,5 +1,14 @@
 # SM7675 native display candidate
 
+25 October 2026: an O82-36 / TM tablet has physically booted the opt-in native
+60 Hz graph with KDE and touch on Linux 7.2.11-30. A separate O82-36 60/120 Hz
+graph is now prepared behind `uke.native_o82_36_rates=1`. It keeps the proven
+171-command O82-36 serial startup sequence, exposes only the exact OEM 60 and
+120 Hz timings, and retains 60 Hz as preferred. The 120 Hz mode and live
+transitions have **not** been tested on this tablet. The original O82-36 60 Hz
+graph and O82-42 profile remain separate. See the builder README for the
+opt-in image command; adaptive VRR is outside this trial.
+
 Updated on 17 October 2026. This directory contains a Linux 7.2.9/7.2.10 source
 candidate for the Xiaomi Pad 7 O82 panel and SM7675 primary display pipeline.
 It is separate from the firmware framebuffer used by the normal boot recipe.

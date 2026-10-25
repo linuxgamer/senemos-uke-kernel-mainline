@@ -74,6 +74,9 @@ done
 patch=$here/../../patches/display/0044-uke-displayport-10bpc-output.patch
 git -C "$kernel" apply --check "$patch"
 git -C "$kernel" apply "$patch"
+patch=$here/../../patches/display/9001-uke-o82-36-limited-refresh-trial.patch
+git -C "$kernel" apply --check "$patch"
+git -C "$kernel" apply "$patch"
 for path in "${paths[@]}"; do
     source=${path##*/}
     [[ $source != uke-o82-mode.h ]] || source=o82-mode.h

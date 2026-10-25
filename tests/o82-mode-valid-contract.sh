@@ -25,7 +25,7 @@ cat > "$work/check.cpp" <<'CPP'
 enum drm_mode_status {MODE_OK,MODE_BAD,MODE_CLOCK_RANGE,MODE_ERROR,MODE_H_ILLEGAL};
 struct drm_display_info {};
 struct drm_bridge {int id=0;};
-struct device_node {bool pb=true,refresh=true;};
+struct device_node {bool pb=true,tm=false,refresh=true,trial=false;};
 struct device {device_node *of_node;};
 struct platform_device {device dev;};
 struct mipi_dsi_host {};
@@ -53,10 +53,16 @@ static bool of_machine_is_compatible(const char *name) {
     assert(!std::strcmp(name,"qcom,sm7675"));return sm7675;
 }
 static bool of_device_is_compatible(device_node *node,const char *name) {
-    assert(!std::strcmp(name,"xiaomi,o82-42-02-0b"));return node&&node->pb;
+    if(!std::strcmp(name,"xiaomi,o82-42-02-0b"))return node&&node->pb&&!node->tm;
+    assert(!std::strcmp(name,"xiaomi,o82-36-02-0a"));return node&&node->pb&&node->tm;
 }
 static bool of_property_read_bool(device_node *node,const char *name) {
-    assert(!std::strcmp(name,"xiaomi,oem-refresh-modes"));return node&&node->refresh;
+    if(!std::strcmp(name,"xiaomi,oem-refresh-modes"))return node&&node->refresh;
+    assert(!std::strcmp(name,"xiaomi,o82-36-60-120-trial"));return node&&node->trial;
+}
+static unsigned int drm_mode_vrefresh(const drm_display_mode *mode) {
+    const uint64_t total=static_cast<uint64_t>(mode->htotal)*mode->vtotal;
+    return (static_cast<uint64_t>(mode->clock)*1000+total/2)/total;
 }
 #define IS_BONDED_DSI() (bonded)
 #define IS_ERR(ptr) (reinterpret_cast<intptr_t>(ptr)<0)
@@ -105,6 +111,13 @@ int main() {
         reset();
         assert(dsi_mgr_bridge_mode_valid(&bridge,nullptr,&bad)==MODE_BAD);
         assert(!clock_calls&&!opp_calls&&!opp_puts&&!dsc_calls&&node_gets==node_puts);
+    }
+    for(int link=0;link<2;link++)for(size_t i=0;i<7;i++) {
+        reset();bridge.id=link;panel_node.tm=panel_node.trial=true;
+        const auto status=dsi_mgr_bridge_mode_valid(&bridge,nullptr,&o82_modes[i].mode);
+        assert(status==((i==3||i==5) ? MODE_OK:MODE_BAD));
+        assert(clock_calls==((i==3||i==5) ? 1U:0U));
+        assert(node_gets==node_puts);
     }
     /* Every unrelated board, panel or absent profile retains legacy validation. */
     for(unsigned int outside=0;outside<5;outside++) {

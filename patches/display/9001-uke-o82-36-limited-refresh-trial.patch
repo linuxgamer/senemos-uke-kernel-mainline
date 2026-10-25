@@ -1,0 +1,64 @@
+From: Uke Fedora Maintainers <linuxgamer@users.noreply.github.com>
+Subject: [PATCH] drm/msm/dsi: admit opt-in O82-36 fixed 60/120 trial
+
+Keep the upstream O82-42 seven-mode path intact. Permit the exact O82-36
+panel to use OEM refresh timing only with an explicit trial DT property.
+Reject other O82-36 rates at the bridge before they reach the panel.
+
+Signed-off-by: Uke Fedora Maintainers <linuxgamer@users.noreply.github.com>
+
+diff --git a/drivers/gpu/drm/msm/dsi/dsi_host.c b/drivers/gpu/drm/msm/dsi/dsi_host.c
+index ed333b8..c8bb7a7 100644
+--- a/drivers/gpu/drm/msm/dsi/dsi_host.c
++++ b/drivers/gpu/drm/msm/dsi/dsi_host.c
+@@ -262,7 +262,9 @@ static bool dsi_uke_o82_refresh_selected(struct msm_dsi_host *msm_host)
+ 	if (!dsi_uke_misr_scope(msm_host))
+ 		return false;
+ 	panel = of_graph_get_remote_node(msm_host->pdev->dev.of_node, 1, -1);
+-	selected = of_device_is_compatible(panel, "xiaomi,o82-42-02-0b") &&
++	selected = (of_device_is_compatible(panel, "xiaomi,o82-42-02-0b") ||
++		(of_device_is_compatible(panel, "xiaomi,o82-36-02-0a") &&
++		 of_property_read_bool(panel, "xiaomi,o82-36-60-120-trial"))) &&
+ 		of_property_read_bool(panel, "xiaomi,oem-refresh-modes");
+ 	of_node_put(panel);
+ 	return selected;
+diff --git a/drivers/gpu/drm/msm/dsi/dsi_manager.c b/drivers/gpu/drm/msm/dsi/dsi_manager.c
+index 213d518..1ef814d 100644
+--- a/drivers/gpu/drm/msm/dsi/dsi_manager.c
++++ b/drivers/gpu/drm/msm/dsi/dsi_manager.c
+@@ -528,15 +528,20 @@ static enum drm_mode_status dsi_mgr_bridge_mode_valid(struct drm_bridge *bridge,
+ 	struct dev_pm_opp *opp;
+ 	unsigned long byte_clk_rate;
+ 	struct device_node *panel;
+-	bool oem_modes;
++	bool oem_modes, o82_36_trial;
+ 
+ 	panel = of_graph_get_remote_node(pdev->dev.of_node, 1, -1);
++	o82_36_trial = of_device_is_compatible(panel, "xiaomi,o82-36-02-0a") &&
++		of_property_read_bool(panel, "xiaomi,o82-36-60-120-trial");
+ 	oem_modes = of_machine_is_compatible("xiaomi,uke") &&
+ 		of_machine_is_compatible("qcom,sm7675") &&
+-		of_device_is_compatible(panel, "xiaomi,o82-42-02-0b") &&
++		(of_device_is_compatible(panel, "xiaomi,o82-42-02-0b") ||
++		 o82_36_trial) &&
+ 		of_property_read_bool(panel, "xiaomi,oem-refresh-modes");
+ 	of_node_put(panel);
+-	if (oem_modes && !qcom_uke_o82_mode(mode))
++	if (oem_modes && (!qcom_uke_o82_mode(mode) ||
++	    (o82_36_trial && drm_mode_vrefresh(mode) != 60 &&
++	     drm_mode_vrefresh(mode) != 120)))
+ 		return MODE_BAD;
+ 
+ 	byte_clk_rate = dsi_byte_clk_get_rate(host, IS_BONDED_DSI(), mode);
+@@ -605,7 +610,10 @@ int qcom_uke_dsi_dfps_register(struct mipi_dsi_device *dsi,
+ 	    !IS_BONDED_DSI() || !IS_SYNC_NEEDED() ||
+ 	    !of_machine_is_compatible("xiaomi,uke") ||
+ 	    !of_machine_is_compatible("qcom,sm7675") ||
+-	    !of_device_is_compatible(dsi->dev.of_node, "xiaomi,o82-42-02-0b") ||
++	    !(of_device_is_compatible(dsi->dev.of_node, "xiaomi,o82-42-02-0b") ||
++	      (of_device_is_compatible(dsi->dev.of_node, "xiaomi,o82-36-02-0a") &&
++	       of_property_read_bool(dsi->dev.of_node,
++				     "xiaomi,o82-36-60-120-trial"))) ||
+ 	    !of_property_read_bool(dsi->dev.of_node, "xiaomi,oem-refresh-modes") ||
+ 	    (ops && (!ops->check || !ops->apply)))
+ 		return -EOPNOTSUPP;

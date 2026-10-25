@@ -49,7 +49,7 @@ using u8=uint8_t;using u32=uint32_t;
 #define DSI_TOTAL_V_TOTAL(v) ((v)<<16)
 #define pr_err(...) ((void)0)
 #define DBG(...) ((void)0)
-struct device_node {bool pb=true,refresh=true,initial=false;};
+struct device_node {bool pb=true,tm=false,refresh=true,initial=false,trial=false;};
 struct device {device_node *of_node;};
 struct platform_device {device dev;};
 struct msm_dsi_cfg {unsigned int io_offset=DSI_6G_REG_SHIFT;};
@@ -87,12 +87,14 @@ static device_node *of_graph_get_remote_node(device_node *node,int port,int endp
 }
 static void of_node_put(device_node *node) {assert(node==remote);++node_puts;}
 static bool of_device_is_compatible(device_node *node,const char *name) {
-    assert(!std::strcmp(name,"xiaomi,o82-42-02-0b"));return node&&node->pb;
+    if(!std::strcmp(name,"xiaomi,o82-42-02-0b"))return node&&node->pb&&!node->tm;
+    assert(!std::strcmp(name,"xiaomi,o82-36-02-0a"));return node&&node->pb&&node->tm;
 }
 static bool of_property_read_bool(device_node *node,const char *name) {
     if(!node)return false;
     if(!std::strcmp(name,"xiaomi,oem-refresh-modes"))return node->refresh;
-    assert(!std::strcmp(name,"xiaomi,initial-120hz-only"));return node->initial;
+    if(!std::strcmp(name,"xiaomi,initial-120hz-only"))return node->initial;
+    assert(!std::strcmp(name,"xiaomi,o82-36-60-120-trial"));return node->trial;
 }
 static unsigned int drm_mode_vrefresh(const drm_display_mode *mode) {
     return (static_cast<uint64_t>(mode->clock)*1000+mode->htotal*mode->vtotal/2)/
@@ -192,6 +194,10 @@ int main() {
         assert(node_gets==node_puts);
     }
     reset();assert(!dsi_uke_o82_refresh_modes(&h,nullptr));
+    reset();panel_node.tm=panel_node.trial=true;mode=o82_modes[3].mode;
+    assert(dsi_uke_o82_refresh_modes(&h,&mode));
+    panel_node.trial=false;
+    assert(!dsi_uke_o82_refresh_modes(&h,&mode));
     h.mode=nullptr;assert(!dsi_uke_o82_powered_profile(&h));
     /* The original initial120 profile remains independent of the new flag. */
     reset();mode=o82_modes[5].mode;panel_node.refresh=false;panel_node.initial=true;
