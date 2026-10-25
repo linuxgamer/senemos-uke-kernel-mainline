@@ -332,6 +332,10 @@
     {
       "path": "patches/7.2.11/0081-scmi-cached-protocol-discovery.patch",
       "sha256": "f2970405e9a026a387aee2e407a4fc61a13ca9462a6cb17aaffe2570b551bc22"
+    },
+    {
+      "path": "patches/7.2.11/0082-uke-perceptual-normal-brightness.patch",
+      "sha256": "3107babaf6929dfb2fa84634306f5f77657be3039956cc5e0f5c92014cf66277"
     }
   ],
   "dtb": "qcom/sm7675-xiaomi-uke.dtb",

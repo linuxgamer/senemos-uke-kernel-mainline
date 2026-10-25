@@ -1,0 +1,47 @@
+From: Uke Fedora Maintainers <linuxgamer@users.noreply.github.com>
+Subject: [PATCH] backlight: spread Uke normal brightness across the user slider
+
+The pinned OEM table is a normal-mode hardware code allowlist, but its
+logical index gives very large current changes near the bottom of a linear
+desktop slider and almost none near the top. Map the user range to a bounded
+quadratic blend, then choose the next OEM normal code. Keep the existing
+visible minimum, maximum, HBM exclusion, paired writes and blanking behavior.
+This is a candidate for physical brightness testing, not optical calibration.
+
+--- a/drivers/video/backlight/ktz8866.c
++++ b/drivers/video/backlight/ktz8866.c
+@@ -148,7 +148,33 @@
+ 
+ static unsigned int ktz8866_uke_code(unsigned int level)
+ {
+-	return uke_normal_bl_remap[level * 1535 / MAX_BRIGHTNESS];
++	const unsigned int minimum_level = DIV_ROUND_UP(MAX_BRIGHTNESS, 100);
++	const unsigned int minimum_code =
++		uke_normal_bl_remap[minimum_level * 1535 / MAX_BRIGHTNESS];
++	const unsigned int maximum_code = uke_normal_bl_remap[1535];
++	const unsigned int span = MAX_BRIGHTNESS - minimum_level;
++	u64 offset, denominator;
++	unsigned int target, low = 0, high = 1535;
++
++	if (!level)
++		return 0;
++	if (level <= minimum_level)
++		return minimum_code;
++	level -= minimum_level;
++	/* A gentle linear/quadratic blend approximates even visible steps. */
++	offset = (u64)(maximum_code - minimum_code) * level *
++		(span + 3 * level);
++	denominator = 4ULL * span * span;
++	target = minimum_code + (offset + denominator / 2) / denominator;
++	while (low < high) {
++		unsigned int mid = low + (high - low) / 2;
++
++		if (uke_normal_bl_remap[mid] < target)
++			low = mid + 1;
++		else
++			high = mid;
++	}
++	return uke_normal_bl_remap[low];
+ }
+ 
+ static int ktz8866_uke_level(unsigned int code)

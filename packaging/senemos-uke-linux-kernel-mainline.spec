@@ -7,7 +7,7 @@
 Name: senemos-uke-linux-kernel-mainline
 Version: 7.2.11
 %if "%{version}" == "7.2.11"
-%global senemos_build_release 32
+%global senemos_build_release 33
 %else
 %global senemos_build_release 1
 %endif
@@ -291,6 +291,9 @@ fi
 %license /usr/share/licenses/%{name}-boot-%{version}-%{release}/
 
 %changelog
+* Sun Oct 25 2026 Uke Fedora Maintainers <linuxgamer@users.noreply.github.com> - 7.2.11-33
+- Spread normal backlight codes across the desktop slider for tablet testing.
+
 * Sun Oct 25 2026 Uke Fedora Maintainers <linuxgamer@users.noreply.github.com> - 7.2.11-32
 - Add an isolated O82-36 seven-mode trial while preserving the tested 60/120 graph.
 
