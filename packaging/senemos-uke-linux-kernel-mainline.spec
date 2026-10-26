@@ -7,7 +7,7 @@
 Name: senemos-uke-linux-kernel-mainline
 Version: 7.2.11
 %if "%{version}" == "7.2.11"
-%global senemos_build_release 35
+%global senemos_build_release 36
 %else
 %global senemos_build_release 1
 %endif
@@ -211,6 +211,7 @@ CC=clang bash native-profile/tests/o82-avr-retime-contract.sh drivers/gpu/drm/ms
 CC=clang bash native-profile/tests/o82-vrr-capability-contract.sh "$PWD"
 CC=clang bash native-profile/tests/dpu-watchdog-lifecycle-contract.sh "$PWD"
 CXX=clang++ bash native-profile/tests/dsi-panel-sequence-contract.sh drivers/gpu/drm/msm/dsi/dsi_manager.c
+CXX=clang++ bash native-profile/tests/dsi-color-depth-contract.sh drivers/gpu/drm/msm/dsi/dsi_manager.c
 CXX=clang++ bash native-profile/tests/dp-connector-state-contract.sh drivers/gpu/drm/msm/dp/dp_drm.c
 CC=clang bash native-profile/tests/o82-mode-contract.sh native-profile/src/display/o82-mode.h native-profile/src/display/o82-data.h
 CXX=clang++ bash native-profile/tests/o82-mode-valid-contract.sh drivers/gpu/drm/msm/dsi/dsi_manager.c native-profile/src/display/o82-mode.h native-profile/src/display/o82-data.h
@@ -292,6 +293,9 @@ fi
 %license /usr/share/licenses/%{name}-boot-%{version}-%{release}/
 
 %changelog
+* Mon Oct 26 2026 Uke Fedora Maintainers <linuxgamer@users.noreply.github.com> - 7.2.11-36
+- Advertise the existing O82 10-bpc link through the DRM connector property.
+
 * Mon Oct 26 2026 Uke Fedora Maintainers <linuxgamer@users.noreply.github.com> - 7.2.11-35
 - Accept exact built-in drivers when staging required early boot dependencies.
 

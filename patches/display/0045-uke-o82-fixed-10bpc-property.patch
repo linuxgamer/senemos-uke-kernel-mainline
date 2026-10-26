@@ -1,0 +1,30 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] drm/msm/dsi: expose the fixed O82 10-bpc link to userspace
+
+The O82 panel reports display_info.bpc=10, but KWin obtains its color
+resolution capability from the max bpc connector property. Advertise only
+the existing OEM RGB101010/DSC 10-bpc contract. No receiver mode or optical
+12-bit/FRC support is established by this property.
+
+Initialize atomic state before the property helper writes it, as required
+by this kernel's bridge connector implementation, and propagate failures.
+
+--- a/drivers/gpu/drm/msm/dsi/dsi_manager.c
++++ b/drivers/gpu/drm/msm/dsi/dsi_manager.c
+@@ -827,6 +827,16 @@ int msm_dsi_manager_connector_init(struct msm_dsi *msm_dsi,
+ 		return PTR_ERR(connector);
+ 	}
+ 	if (dsi_bridge->o82_panel) {
++		if (!connector->state) {
++			connector->funcs->reset(connector);
++			if (!connector->state)
++				return -ENOMEM;
++		}
++		/* O82 has one qualified transport depth, including DSC input. */
++		ret = drm_connector_attach_max_bpc_property(connector, 10, 10);
++		if (ret)
++			return ret;
++
+ 		ret = drm_connector_attach_vrr_capable_property(connector);
+ 		if (ret)
+ 			return ret;
