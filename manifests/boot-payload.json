@@ -24,7 +24,7 @@
     },
     {
       "path": "src/boot/build-payload.sh",
-      "sha256": "30d5225704dcfba4808df961121cff3eecd3c9e011bf9436844ab43ecadf3219"
+      "sha256": "61b8acf0009d1c5fb2149a05ac92bd2bd6039cd36b7e656821890bbaa07a9eba"
     },
     {
       "path": "src/boot/dracut/module-setup.sh",
@@ -97,6 +97,10 @@
     {
       "path": "tests/offline-boot-contract.sh",
       "sha256": "5fbad47d511aff9cad2a04e3e93040a34469250b6e9b584ba31b85281d6d3dad"
+    },
+    {
+      "path": "tests/early-modules-contract.sh",
+      "sha256": "d52454b1a84a82b5d5e6a67aa412663b3c1b8b57307e6ae0c7db0bcf321f7e89"
     }
   ]
 }

@@ -7,7 +7,7 @@
 Name: senemos-uke-linux-kernel-mainline
 Version: 7.2.11
 %if "%{version}" == "7.2.11"
-%global senemos_build_release 34
+%global senemos_build_release 35
 %else
 %global senemos_build_release 1
 %endif
@@ -163,6 +163,7 @@ if test "${UKE_PREBUILT_KERNEL:-0}" != 1; then
 fi
 
 %check
+bash boot-recipe/tests/early-modules-contract.sh
 CXX=clang++ bash native-profile/tests/uke-rpmh-resource-contract.sh native-generated/rpmh-regulator-before-native.c pre-native
 CXX=clang++ bash native-profile/tests/uke-rpmh-resource-contract.sh drivers/regulator/qcom-rpmh-regulator-uke.c native
 CXX=clang++ bash native-profile/tests/ktz-dimming-observation-contract.sh drivers/video/backlight/ktz8866.c
@@ -291,6 +292,9 @@ fi
 %license /usr/share/licenses/%{name}-boot-%{version}-%{release}/
 
 %changelog
+* Mon Oct 26 2026 Uke Fedora Maintainers <linuxgamer@users.noreply.github.com> - 7.2.11-35
+- Accept exact built-in drivers when staging required early boot dependencies.
+
 * Sun Oct 25 2026 Uke Fedora Maintainers <linuxgamer@users.noreply.github.com> - 7.2.11-34
 - Blend the OEM index and code-spaced trial after physical brightness feedback.
 

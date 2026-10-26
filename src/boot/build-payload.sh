@@ -70,8 +70,13 @@ find "$source_modules" -type f -name '*.ko' -exec zstd -q -T1 --rm {} \;
 target=$init/usr/lib/modules/$release
 mkdir -p "$target/kernel"
 while IFS= read -r path; do
-    [[ $path =~ ^[a-zA-Z0-9_/.-]+\.ko\.zst$ && $path != *..* && -s $source_modules/kernel/$path ]]
-    install -Dm644 "$source_modules/kernel/$path" "$target/kernel/$path"
+    [[ $path =~ ^[a-zA-Z0-9_/.-]+\.ko\.zst$ && $path != *..* ]]
+    if [[ -s $source_modules/kernel/$path ]]; then
+        install -Dm644 "$source_modules/kernel/$path" "$target/kernel/$path"
+    elif ! grep -Fxq "kernel/${path%.zst}" "$source_modules/modules.builtin"; then
+        printf 'Required early driver is neither a module nor built in: %s\n' "$path" >&2
+        exit 1
+    fi
 done < "$here/early-modules.list"
 for name in modules.builtin modules.builtin.modinfo modules.order; do
     install -m644 "$source_modules/$name" "$target/$name"

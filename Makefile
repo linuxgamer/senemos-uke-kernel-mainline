@@ -12,6 +12,7 @@ validate:
 		test "$$(sha256sum "$$path" | cut -d ' ' -f1)" = "$$expected"
 	done < <(jq -r '.patches[], .configs[] | [.path,.sha256] | @tsv' manifests/linux-$(version).json)
 	bash tests/mainline-package-contract.sh
+	bash tests/early-modules-contract.sh
 srpm: validate
 	cache="$(CURDIR)/source-cache/releases"
 	top="$$(realpath -m "$(outdir)/rpmbuild")"
