@@ -2,7 +2,7 @@
   "schema_version": 1,
   "date": "2026-10-31",
   "source_date_epoch": 1792058622,
-  "source_origin": "Signed Linux 7.3.1 with the qualified release102 capture graph. Candidate106 adds bounded pre-capture DT gains and kernel-owned versioned desktop audio data. Physical candidate acceptance remains pending; no stock firmware or private calibration is added.",
+  "source_origin": "Signed Linux 7.3.1 with qualified release102 capture. Candidate107 corrects the release106 topology lookup, maps DisplayPort ELD to frontend PCM0 and supplies model-specific speaker names with kernel-core. Startup gains and electrical settings are unchanged; candidate boot and acoustic acceptance remain pending.",
   "firmware_included": false,
   "device_private_data_included": false,
   "python_target_payload": false,
@@ -565,7 +565,7 @@
     },
     {
       "path": "packaging/native/prepare.sh",
-      "sha256": "bb795da29209635a0dc801f29246a949c9885081847be8b00953c8fdbec688ef"
+      "sha256": "8cdef42c010304bd948cf1fa83015c12b8cce637f647bfcf166de6c49efc3db1"
     },
     {
       "path": "packaging/native/audio-profile",
@@ -581,7 +581,7 @@
     },
     {
       "path": "src/audio/uke-audio-card.c",
-      "sha256": "06a269198269e49f02026b803dd0526178edf6e2f9a32d9de980019365c7823b"
+      "sha256": "3641b0d72f09b1e92ff63335fab32baa4e00aca0b283db4ad21a307eca6d2564"
     },
     {
       "path": "src/audio/sm7675-uke-microphone-audio.dtsi",
@@ -725,7 +725,7 @@
     },
     {
       "path": "tests/kernel-audio-policy-contract.sh",
-      "sha256": "a77b775a5264c0a7e1360f5c910dada4b5e5fd7105878103c836f5c4e6a1e54c"
+      "sha256": "8f1c03a1fbe6e9f591adf29a13a6d5f2bd131ae71e74b1035e0e035900da8530"
     },
     {
       "path": "src/audio/desktop/LICENSE",
@@ -737,7 +737,7 @@
     },
     {
       "path": "src/audio/desktop/array-ucm2/DP-ELD.conf",
-      "sha256": "976a3c39d506a1a1164444941ec8289b5e38af87a9460232d7ecfc4d2c0b04c7"
+      "sha256": "ea3f70b17be4f26d82eb7cd4707088afd0930c73fac2eb9e1683278cd9765984"
     },
     {
       "path": "src/audio/desktop/array-ucm2/DP-HiFi.conf",
@@ -773,7 +773,7 @@
     },
     {
       "path": "src/audio/desktop/install-policy.sh",
-      "sha256": "6d57f145d1ffc157bb7f246a95946e5b2e19b0c35a49ad1c1a0f10fbeb8014ad"
+      "sha256": "511c7098b654247376c3ae89a124309e06fb9fa24e14b065906f67fe8f9a97f3"
     },
     {
       "path": "src/audio/desktop/legacy-ucm2/DP-ELD.conf",
@@ -826,6 +826,18 @@
     {
       "path": "src/audio/desktop/wireplumber/80-uke-microphone-array.conf",
       "sha256": "699cf71e340dde4f9a3115b4153bf402ba5b8b00ea4ff90ac225dd0da22bade9"
+    },
+    {
+      "path": "src/audio/uke-dp-eld.h",
+      "sha256": "d7e9ced5d46cb4bfb06dd568466a5746f58a00778d8ce4be26309045e295e940"
+    },
+    {
+      "path": "tests/audio-eld-contract.sh",
+      "sha256": "e4c3089baf755d87dc56dca0ff053bbc714aaba0a6a82814b925cc4dc591f3b0"
+    },
+    {
+      "path": "src/audio/desktop/model-names.conf",
+      "sha256": "fa7a3f0a2cdb405e3286c9733ab3a3535c5ec3846b361a8183b26007ad01c92b"
     }
   ],
   "root_selector_capability": {

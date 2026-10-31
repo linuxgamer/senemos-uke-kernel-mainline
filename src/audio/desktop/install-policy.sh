@@ -28,8 +28,8 @@ wp=$destination/usr/share/wireplumber/wireplumber.conf.d
 for config in "$root/wireplumber/"*.conf; do
  install -Dm644 "$config" "$wp/${config##*/}"
 done
-jq --arg components "mic:uke-4ch-v4 kernel:$release" \
- '."monitor.alsa.rules"[].matches[] += {"alsa.components":$components}' \
+jq --arg components "mic:uke-4ch-v4 kernel:$release" --slurpfile names "$root/model-names.conf" \
+ '."monitor.alsa.rules" += $names[0]."monitor.alsa.rules" | ."monitor.alsa.rules"[].matches[] += {"alsa.components":$components}' \
  "$root/wireplumber/80-uke-microphone-array.conf" > "$wp/95-uke-microphone-array-$release.conf"
 chmod 644 "$wp/95-uke-microphone-array-$release.conf"
 install -Dm644 "$root/microphone-layout.json" "$destination/usr/share/senemos/uke/audio/microphone-layout.json"

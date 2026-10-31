@@ -7,7 +7,7 @@
 Name: senemos-uke-linux-kernel-mainline
 Version: 7.3.1
 %if "%{version}" == "7.3.1"
-%global senemos_build_release 106
+%global senemos_build_release 107
 %else
 %global senemos_build_release 1
 %endif
@@ -198,6 +198,8 @@ bash native-profile/tests/usbss-kconfig-contract.sh "$PWD" "%{_uke_out}/scripts/
 printf 'UKE_BUILD_STAGE boot_bundle elapsed_s=%d\n' "$((SECONDS-uke_build_start))"
 
 %check
+test -L %{buildroot}/usr/lib/firmware/%{krel}/qcom/uke%{krel}/POCO-Pad-X1-tplg.bin
+cmp native-generated/POCO-Pad-X1-tplg.bin %{buildroot}/usr/lib/firmware/%{krel}/qcom/uke%{krel}/POCO-Pad-X1-tplg.bin
 uke_check_start=$SECONDS
 bash native-profile/tests/kernel-hardening-config-contract.sh %{_uke_out}/.config
 bash native-profile/tests/kernel-module-signatures-contract.sh "$PWD" \
@@ -273,6 +275,7 @@ CXX=clang++ bash native-profile/tests/audio-preset-contract.sh
 CXX=clang++ bash native-profile/tests/audio-acdb-contract.sh
 CC=clang bash native-profile/tests/audio-card-contract.sh "$PWD"
 CC=clang bash native-profile/tests/microphone-gain-contract.sh
+CC=clang bash native-profile/tests/audio-eld-contract.sh
 CXX=clang++ bash native-profile/tests/kernel-audio-policy-contract.sh
 CC=clang bash native-profile/tests/audio-fs19xx-contract.sh "$PWD"
 CC=clang bash native-profile/tests/audio-fs19xx-lifecycle-contract.sh "$PWD"
@@ -373,6 +376,12 @@ install -Dm644 native-generated/POCO-Pad-X1-HDMI-tplg.bin \
     %{buildroot}/usr/lib/firmware/%{krel}/qcom/sm7675/POCO-Pad-X1-HDMI-tplg.bin
 install -Dm644 native-generated/POCO-Pad-X1-tplg.bin \
     %{buildroot}/usr/lib/firmware/%{krel}/qcom/sm7675/POCO-Pad-X1-tplg.bin
+# AudioReach derives this lookup from the unnormalized ASoC driver name.
+install -d %{buildroot}/usr/lib/firmware/%{krel}/qcom/uke%{krel}
+ln -s ../sm7675/POCO-Pad-X1-tplg.bin \
+    %{buildroot}/usr/lib/firmware/%{krel}/qcom/uke%{krel}/POCO-Pad-X1-tplg.bin
+cmp native-generated/POCO-Pad-X1-tplg.bin \
+    %{buildroot}/usr/lib/firmware/%{krel}/qcom/uke%{krel}/POCO-Pad-X1-tplg.bin
 test -z "$(find %{buildroot} -type f \( -name '*.py' -o -name '*.pyc' -o -name 'python*' \) -print -quit)"
 bundle=%{buildroot}/usr/lib/senemos/kernel-updates/%{krel}
 mkdir -p "$bundle"
