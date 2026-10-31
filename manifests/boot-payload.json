@@ -2,7 +2,7 @@
   "schema_version": 1,
   "date": "2026-10-31",
   "source_date_epoch": 1792058622,
-  "source_origin": "Signed Linux 7.3.1 with qualified release102 capture. Candidate107 corrects the release106 topology lookup, maps DisplayPort ELD to frontend PCM0 and supplies model-specific speaker names with kernel-core. Startup gains and electrical settings are unchanged; candidate boot and acoustic acceptance remain pending.",
+  "source_origin": "Signed Linux 7.3.1 with qualified release102 capture. Candidate108 corrects the release106 topology lookup, maps DisplayPort ELD to frontend PCM0 and supplies model-specific speaker names with kernel-core. Startup gains and electrical settings are unchanged; candidate boot and acoustic acceptance remain pending.",
   "firmware_included": false,
   "device_private_data_included": false,
   "python_target_payload": false,
@@ -725,7 +725,7 @@
     },
     {
       "path": "tests/kernel-audio-policy-contract.sh",
-      "sha256": "8f1c03a1fbe6e9f591adf29a13a6d5f2bd131ae71e74b1035e0e035900da8530"
+      "sha256": "3ccf88027713512bcd5edeef6af42c9bc6b64c9b492fbe76e06ea1a53811ca82"
     },
     {
       "path": "src/audio/desktop/LICENSE",
@@ -837,7 +837,7 @@
     },
     {
       "path": "src/audio/desktop/model-names.conf",
-      "sha256": "fa7a3f0a2cdb405e3286c9733ab3a3535c5ec3846b361a8183b26007ad01c92b"
+      "sha256": "ddac9df8d42850a0bfc0f7c257d9f903c773db9a4502a4d6da6cd2876d9ba475"
     }
   ],
   "root_selector_capability": {
