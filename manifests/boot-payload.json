@@ -2,7 +2,7 @@
   "schema_version": 1,
   "date": "2026-10-31",
   "source_date_epoch": 1792058622,
-  "source_origin": "Signed Linux 7.3.1 with qualified release102 capture. Candidate108 corrects the release106 topology lookup, maps DisplayPort ELD to frontend PCM0 and supplies model-specific speaker names with kernel-core. Startup gains and electrical settings are unchanged; candidate boot and acoustic acceptance remain pending.",
+  "source_origin": "Signed Linux 7.3.1 with qualified release102 capture. Candidate109 corrects the release106 topology lookup, maps DisplayPort ELD to frontend PCM0 and resolves notifications through the registered control ID. Kernel-core supplies matching model-specific speaker and microphone names. Startup gains and electrical settings are unchanged; candidate boot and acoustic acceptance remain pending.",
   "firmware_included": false,
   "device_private_data_included": false,
   "python_target_payload": false,
@@ -838,6 +838,14 @@
     {
       "path": "src/audio/desktop/model-names.conf",
       "sha256": "ddac9df8d42850a0bfc0f7c257d9f903c773db9a4502a4d6da6cd2876d9ba475"
+    },
+    {
+      "path": "patches/display/0057-uke-displayport-eld-notification.patch",
+      "sha256": "9de41e6e9ed819c411f61b58b4b1c0c4edb274d65c8155c25f0cbfab4bc6add1"
+    },
+    {
+      "path": "tests/dp-eld-notification-contract.sh",
+      "sha256": "253fbb43d19fab14cd4d147c50f2fe26800c73dc6ea1c3c4703d13928c993eef"
     }
   ],
   "root_selector_capability": {

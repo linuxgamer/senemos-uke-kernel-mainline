@@ -5,8 +5,9 @@ Release106 boots but initially has no ALSA card. AudioReach derives its
 topology lookup from the versioned ASoC driver name; kernel-core installed
 the verified topology only under the original `sm7675` directory. Adding
 the matching release-scoped alias and retrying card registration restores
-the two playback PCMs and one four-channel capture PCM. This is registration
-and desktop enumeration evidence, not an acoustic or fresh-boot result.
+the two playback PCMs and one four-channel capture PCM. The operator subsequently
+confirms ordinary speaker and microphone operation after this recovery. This
+does not qualify a fresh candidate boot.
 
 Candidate107 installs the topology alias with kernel-core and checks its
 target against the generated topology. It preserves the topology bytes,
@@ -22,8 +23,11 @@ retains ordinary card registration and a generic DisplayPort description.
 No playback data, monitor firmware or audio gain changes in this mapping.
 
 Versioned desktop rules name the internal output `POCO PAD X1 Speaker` or
-`Xiaomi Pad 7 Speaker` from the card model. They retain the one named
-four-channel microphone. DisplayPort uses the monitor identity supplied by
+`Xiaomi Pad 7 Speaker` from the card model. Candidate108 adds matching
+`POCO PAD X1 Microphone` and `Xiaomi Pad 7 Microphone` names for the single
+four-channel microphone. These labels are verified in the recovered release106
+session. The separate legacy audio package is removed; kernel-core owns the
+retained UCM and desktop data. DisplayPort uses the monitor identity supplied by
 ELD through the distribution's existing audio stack; it is not renamed as
 an internal speaker. A disconnected or unreadable monitor keeps a generic
 DisplayPort label.
@@ -36,6 +40,13 @@ The relevant upstream contracts are `audioreach_tplg_init` in
 Linux7.3.1 source pin. The helper checks missing source, duplicate target,
 rename failure and backend-number changes. All compilation and execution
 of these fixtures is restricted to COPR.
+
+Candidate109 also updates the existing Uke-only HDMI-codec notifier. The machine
+driver's ELD mapping preserves the control numid but changes its PCM device ID.
+The notifier resolves that stable numid under the control read lock and emits
+the current registered ID. Its checks cover FE0 and backend18, absent controls,
+balanced locks and unchanged data. Candidates107 and108 are cancelled before
+binary publication so they do not become the automatic-update delivery.
 
 Remaining acceptance: signed candidate artifacts, fresh boot without the
 temporary release106 recovery alias, input/output operation, monitor name
