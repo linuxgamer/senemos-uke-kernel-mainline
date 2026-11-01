@@ -1,6 +1,6 @@
 Name: uke-o82-color-profile
 Version: 0.1.0
-Release: 1%{?dist}
+Release: 2%{?dist}
 Summary: Generate a private O82 OEM P3 ICC mapping for original KDE
 License: MIT
 URL: https://github.com/MCC45TR/senemos-uke-kernel-mainline
@@ -25,7 +25,7 @@ cp %{SOURCE1} .
 cp %{SOURCE2} .
 
 %build
-clang++ -std=c++20 %{optflags} -UNDEBUG -Wall -Wextra -Werror \
+g++ -std=c++20 %{optflags} -UNDEBUG -Wall -Wextra -Werror \
     o82-color-profile.cpp $(pkg-config --cflags --libs json-c lcms2 openssl) \
     %{build_ldflags} -o uke-o82-color-profile
 
@@ -46,5 +46,8 @@ clang++ -std=c++20 -O1 -g -UNDEBUG -Wall -Wextra -Werror \
 %{_bindir}/uke-o82-color-profile
 
 %changelog
+* Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 0.1.0-2
+- Build the installed binary with Fedora's matching GCC hardening flags.
+
 * Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 0.1.0-1
 - Generate local OEM P3 ICC mappings with pinned inputs and bounded color data.
