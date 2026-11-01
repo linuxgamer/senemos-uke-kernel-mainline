@@ -1,8 +1,8 @@
 # Mainline native source profile
 
-1 November 2026, isolated kernel117 candidate: compose the explicit O82 30 Hz
-AVR floor and zero-brightness first-frame fix over the exact release115 SRPM.
-Retain its startup fixes, matching package family and all 122 adaptation patches.
+1 November 2026, isolated kernel118 candidate: compose the explicit O82 30 Hz
+AVR floor and zero-brightness first-frame fix over the exact installed116 SRPM.
+Retain its power/startup fixes, matching family and all122 adaptation patches.
 The requested floor is no longer silently raised to90 Hz. Electrical limits
 remain unchanged; low-refresh touch, cadence and lifecycle need tablet acceptance.
 

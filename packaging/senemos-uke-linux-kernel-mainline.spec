@@ -7,7 +7,7 @@
 Name: senemos-uke-linux-kernel-mainline
 Version: 7.3.1
 %if "%{version}" == "7.3.1"
-%global senemos_build_release 117
+%global senemos_build_release 118
 %else
 %global senemos_build_release 1
 %endif
@@ -455,9 +455,9 @@ cp -a boot-recipe/src/boot/licenses/. %{buildroot}/usr/share/licenses/%{name}-bo
 /usr/lib/senemos/default-boot.img
 
 %changelog
-* Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-117
-- Preserve the explicit 30 Hz O82 AVR floor and zero-brightness first frame.
-- Retain the exact release115 startup fixes and matching package family.
+* Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-118
+- Preserve the requested 30 Hz O82 floor and zero-brightness first frame.
+- Retain the installed release116 power, startup and matching-family inputs.
 
 * Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-115
 - Encode the standard initial console in one deterministic source-built cpio.
