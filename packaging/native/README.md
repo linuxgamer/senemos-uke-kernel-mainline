@@ -1,10 +1,10 @@
 # Mainline native source profile
 
-1 November 2026, isolated kernel1021 source candidate: retain the exact installed
-1003 SRPM, including the116 power/startup parent and30 Hz AVR floor. Add default-off
-O82 CABC through the original KWin adaptive-backlight enum. Five logical tiers map
-to the four OEM modes; PQ/HLG with active adaptation is refused. Remote full-kernel
-and fault checks and separate tablet acceptance are required. See
+1 November 2026, kernel1022 testing-image candidate: combine the exact COPR1020
+USB/LMH/power source with default-off O82 CABC and the retained30 Hz AVR floor.
+Accepted running1003 remains separate from this uninstalled candidate. Original
+KWin controls five logical tiers mapped to four OEM modes; HDR adaptation is
+refused. Full remote checks and separate tablet acceptance are required. See
 [the source and validation limits](../../docs/O82-ADAPTIVE-BACKLIGHT.md).
 
 1 November 2026, isolated kernel1003 candidate: compose the explicit O82 30 Hz

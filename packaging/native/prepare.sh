@@ -208,3 +208,9 @@ bash "$profile/tests/o82-abm-contract.sh" "$kernel" "$profile/src/display/panel-
 CC=clang SANITIZE=1 bash "$profile/tests/o82-abm-contract.sh" "$kernel" "$profile/src/display/panel-xiaomi-o82.c"
 sha256sum "$profile/patches/display/0070-o82-adaptive-backlight.patch" >> "$output/abl-source-SHA256SUMS"
 printf 'Exact seven-mode O82-42 native source prepared; no private boot input\n'
+# Retain the independently verified USB role/PM correction from release1020.
+cp "$kernel/drivers/usb/dwc3/dwc3-qcom.c" "$output/dwc3-qcom-before-role-pm.c"
+git -C "$kernel" apply --check "$profile/patches/usb/0001-qcom-system-role-pm.patch"
+git -C "$kernel" apply "$profile/patches/usb/0001-qcom-system-role-pm.patch"
+CC=clang bash "$profile/tests/usb-role-pm-contract.sh" \
+    "$kernel/drivers/usb/dwc3/dwc3-qcom.c" "$output/dwc3-qcom-before-role-pm.c"

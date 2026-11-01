@@ -33,7 +33,7 @@
     },
     {
       "path": "packaging/native/prepare.sh",
-      "sha256": "5a0da127fb29d6db791f8b73d5963a9b430be92a8cb9f6e859175708a4cdac13"
+      "sha256": "ccd54f9d70701d105e56c86dbcba2b2d8cdab280f5eacd29bdf60c636fb366fb"
     },
     {
       "path": "patches/boot/0014-uke-ufs-mcq-resources.patch",
@@ -712,7 +712,7 @@
     "requires_three_candidate_patches_preapplied": true,
     "package_selector": "packaging/native/llcc-profile"
   },
-  "kernel_release": "7.3.1-1021",
+  "kernel_release": "7.3.1-1022",
   "boot_argument_handoff": {
     "source_commit": "84b172c09fee0b60e901bfe40a2d7b6244aa726a",
     "integrated_commit": "3d78e6c",
