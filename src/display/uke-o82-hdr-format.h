@@ -115,8 +115,8 @@ static inline void o82_hdr_make_edid(unsigned char edid[O82_HDR_EDID_SIZE])
 	edid[8] = 0x31; edid[9] = 0xd8; /* LNX, not a fabricated OEM/unit identity. */
 	edid[10] = 0x82;
 	edid[17] = 36;
-	/* EDID 1.3 permits the native preferred timing to live in DisplayID. */
-	edid[18] = 1; edid[19] = 3;
+	/* EDID 1.2 permits no base DTD; every native clock exceeds its limit. */
+	edid[18] = 1; edid[19] = 2;
 	edid[20] = 0x80; /* Digital RGB; the connector separately fixes 10 bpc. */
 	edid[21] = 24; edid[22] = 16; edid[23] = 120;
 	for (i = 0; i < 8; i++) {
