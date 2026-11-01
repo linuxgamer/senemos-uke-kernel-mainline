@@ -2,7 +2,7 @@
   "schema_version": 1,
   "date": "2026-11-01",
   "source_date_epoch": 1792058622,
-  "source_origin": "Signed Linux 7.3.1 with the complete release 110 parent and release 114 warning corrections. Candidate 115 encodes the standard initial console with the selected Linux host cpio generator, preserving early-user data and hardlink groups. Hardware settings and release 110 audio/display inputs remain; physical acceptance is pending.",
+  "source_origin": "Signed Linux 7.3.1 release117 candidate over the exact release115 SRPM. Preserve its startup and initramfs corrections and all 122 adaptation patches. Admit the requested O82 30 Hz AVR floor and intentional zero-brightness first frame. Electrical limits and audio inputs remain unchanged; physical acceptance is pending.",
   "firmware_included": false,
   "device_private_data_included": false,
   "python_target_payload": false,
