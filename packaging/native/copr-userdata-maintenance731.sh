@@ -8,6 +8,10 @@ parent_url=https://download.copr.fedorainfracloud.org/results/mcc45tr/uke-linux-
 release=1040
 stage=$(mktemp -d)
 trap 'rm -rf -- "$stage"' EXIT
+for project in uke-linux-test uke-linux-unstable; do
+    curl -fLsS --max-time 40 "https://copr.fedorainfracloud.org/api_3/build/list?ownername=mcc45tr&projectname=$project&packagename=senemos-uke-linux-kernel-mainline&limit=100" -o "$stage/history.json"
+    jq -e --arg version "7.3.1-$release" '.items|type=="array" and all(.[];(.source_package.version//"")!=$version and (.source_package.version//"")!=($version+".fc46"))' "$stage/history.json" >/dev/null
+done
 mkdir -p "$output" "$stage/source" "$stage/profile" "$stage/boot"
 [[ -z $(find "$output" -mindepth 1 -maxdepth 1 -print -quit) ]]
 curl -fLsS --proto '=https' --proto-redir '=https' --max-time 240 "$parent_url" -o "$stage/parent.src.rpm"
