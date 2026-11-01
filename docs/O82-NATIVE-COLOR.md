@@ -59,9 +59,23 @@ source identities, bounded contiguous offsets, checked monotonic curves and
 can use gamma2.2 or PQ. Records with unimplemented active processing contain no
 selectable table payload. Their original picture/HDR data remains private and
 the selector refuses them without changing output pointers. Zero-valued
-SixZone adjustment curves are treated as an identity operation. Native driver
-loading, hardware bank/channel order and all nonzero picture operations still
-require implementation and verification before capability admission.
+SixZone adjustment curves are treated as an identity operation.
+
+`dpu_o82_profiles.c` loads only a fixed PA/PB firmware name from the real root,
+validates the entire bundle before publishing state and retains the firmware
+until its owner releases it. Missing/corrupt data or an unsupported default
+does not publish a partial state. Preset refusal preserves the selected record;
+invalid input selection preserves the caller's table pointers. There is no
+KMS caller or hardware activation from this loader yet. Hardware bank/channel
+order and all nonzero picture operations still need verification and integration.
+
+The remote source-stage object check uses the exact Linux 7.3.1 archive,
+SHA-256 `fa595aad93734f829c963c2a90ef7c3673224fd7fdae7b49406e397cde2de231`.
+It builds only the loader and transport objects against actual AArch64 kernel
+headers, with a small local Kbuild for the direct targets. The source-stage
+archive stays in the owner's reference cache. No Image, module or firmware is
+produced, and the production adaptation queue/linkage remains a separate check.
+It uses the original upstream Bash/Make/C/Perl build tools; no Python is needed.
 
 The register and clock evidence is the GPL-2.0-only Xiaomi
 [REGDMA implementation](https://github.com/MiCode/vendor_opensource_display-drivers/blob/44275c404a677d9d9e5230fedd1af2ef02fc7b9a/msm/sde/sde_hw_reg_dma_v1.c)

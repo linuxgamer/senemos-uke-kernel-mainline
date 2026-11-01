@@ -112,6 +112,9 @@ test-microphones:
 .PHONY: test-o82-regdma
 test-o82-regdma:
 	bash tests/o82-regdma-transport-contract.sh
+.PHONY: test-o82-profiles
+test-o82-profiles:
+	bash tests/o82-profile-loader-contract.sh
 srpm: validate
 	cache="$(CURDIR)/referances/releases"
 	top="$$(realpath -m "$(outdir)/rpmbuild")"

@@ -1,6 +1,6 @@
 Name: uke-o82-color-profile
 Version: 0.3.0
-Release: 1%{?dist}
+Release: 2%{?dist}
 Summary: Generate private O82 OEM color mappings and native preset data
 License: MIT
 URL: https://github.com/MCC45TR/senemos-uke-kernel-mainline
@@ -15,6 +15,10 @@ Source7: dpu_o82_regdma.h
 Source8: o82-regdma-transport-contract.c
 Source9: o82-regdma-transport-contract.sh
 Source10: o82-color-firmware.h
+Source11: dpu_o82_profiles.c
+Source12: dpu_o82_profiles.h
+Source13: o82-profile-loader-contract.c
+Source14: o82-profile-loader-contract.sh
 ExclusiveArch: aarch64
 BuildRequires: clang gcc-c++ compiler-rt pkgconf-pkg-config
 BuildRequires: pkgconfig(json-c) pkgconfig(lcms2) pkgconfig(openssl)
@@ -42,7 +46,9 @@ cp %{SOURCE5} .
 cp %{SOURCE10} .
 mkdir -p src/display tests
 cp %{SOURCE5} %{SOURCE6} %{SOURCE7} src/display/
+cp %{SOURCE3} %{SOURCE10} %{SOURCE11} %{SOURCE12} src/display/
 cp %{SOURCE8} %{SOURCE9} tests/
+cp %{SOURCE13} %{SOURCE14} tests/
 
 %build
 g++ -std=c++20 %{optflags} -UNDEBUG -Wall -Wextra -Werror \
@@ -65,6 +71,7 @@ g++ -std=c++20 -O2 -UNDEBUG -Wall -Wextra -Werror -I. \
     o82-hdr-edid-contract.cpp $(pkg-config --cflags --libs libdisplay-info) -o edid-contract
 ./edid-contract
 bash tests/o82-regdma-transport-contract.sh .
+bash tests/o82-profile-loader-contract.sh .
 
 %files
 %license LICENSE
@@ -72,6 +79,10 @@ bash tests/o82-regdma-transport-contract.sh .
 %{_bindir}/uke-o82-color-profile
 
 %changelog
+* Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 0.3.0-2
+- Load and select validated private root-resident presets in native kernel C.
+- Check refusal, four input combinations and firmware lifetime with synthetic data.
+
 * Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 0.3.0-1
 - Compile distinct native-gamut/BT.2020 and gamma2.2/PQ preset inputs.
 - Preserve active unsupported operations and refuse them instead of aliasing profiles.
