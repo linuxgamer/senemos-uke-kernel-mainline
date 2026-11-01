@@ -7,7 +7,7 @@
 Name: senemos-uke-linux-kernel-mainline
 Version: 7.3.1
 %if "%{version}" == "7.3.1"
-%global senemos_build_release 115
+%global senemos_build_release 116
 %else
 %global senemos_build_release 1
 %endif
@@ -62,6 +62,7 @@ Provides: uke-displayport-audio = 0.1.0-13%{?dist}
 Requires: (wireplumber >= 0.5 if wireplumber)
 Requires: (pipewire-pulseaudio >= 1.6.10-1.uke1 if pipewire-pulseaudio)
 Recommends: alsa-ucm
+Recommends: cryptsetup
 
 %description core
 Image with the matching source-built initramfs, configuration and source record.
@@ -204,6 +205,7 @@ bash native-profile/tests/usbss-kconfig-contract.sh "$PWD" "%{_uke_out}/scripts/
 printf 'UKE_BUILD_STAGE boot_bundle elapsed_s=%d\n' "$((SECONDS-uke_build_start))"
 
 %check
+bash native-profile/tests/storage-crypto-contract.sh %{_uke_out}/.config
 test -L %{buildroot}/usr/lib/firmware/%{krel}/qcom/uke%{krel}/POCO-Pad-X1-tplg.bin
 cmp native-generated/POCO-Pad-X1-tplg.bin %{buildroot}/usr/lib/firmware/%{krel}/qcom/uke%{krel}/POCO-Pad-X1-tplg.bin
 uke_check_start=$SECONDS

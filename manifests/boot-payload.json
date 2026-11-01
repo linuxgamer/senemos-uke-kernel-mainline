@@ -2,14 +2,14 @@
   "schema_version": 1,
   "date": "2026-11-01",
   "source_date_epoch": 1792058622,
-  "source_origin": "Signed Linux 7.3.1 with the complete release 110 parent and release 114 warning corrections. Candidate 115 encodes the standard initial console with the selected Linux host cpio generator, preserving early-user data and hardlink groups. Hardware settings and release 110 audio/display inputs remain; physical acceptance is pending.",
+  "source_origin": "Signed Linux 7.3.1 with the complete release115 parent and optional storage encryption for EXT4, F2FS, XFS and Btrfs. No device conversion or encrypted-I/O/performance acceptance.",
   "firmware_included": false,
   "device_private_data_included": false,
   "python_target_payload": false,
   "source_assets": [
     {
       "path": "packaging/native/native.config",
-      "sha256": "d744290e1d9c19684f274d44ba9f0f093a3ac983adca2271bb54cf3dfccfd2c8"
+      "sha256": "4b9c16d2d971fd3c26e11bda9a10e4f3726d788e78123d72c9eca7e2a0bf943b"
     },
     {
       "path": "patches/boot/0005-uke-root-selector.patch",
@@ -117,7 +117,7 @@
     },
     {
       "path": "src/boot/build-payload.sh",
-      "sha256": "bce2748d6877b8380eaba54916f31b389d2b9f833d2a7cf9dd092eb7685a6d71"
+      "sha256": "c44f31c61f113a21a905b71fe0b145170aed1627e6a005a925f319ffb954765f"
     },
     {
       "path": "src/boot/check-root-capability.sh",
@@ -874,6 +874,10 @@
     {
       "path": "tests/initramfs-cpio-contract.sh",
       "sha256": "6fe97da1c7b654ede8da0126a28ca95214f046e9c0e85ea868f3b9efed839911"
+    },
+    {
+      "path": "tests/storage-crypto-contract.sh",
+      "sha256": "fe9aed87d24578d423ba21e3be6259ce933428c0dd34f4bde63a3bdf22de4ba5"
     }
   ],
   "root_selector_capability": {
