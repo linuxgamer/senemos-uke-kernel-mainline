@@ -176,6 +176,10 @@
       "sha256": "faf3d5648e51c7098909e3d08b07536a022bcabda6f04f72cf0cdb26b82c8e64"
     },
     {
+      "path": "patches/boot/0060-cpufreq-lmh-ready-lifecycle.patch",
+      "sha256": "c4077a97a3bc4ea38d4259c8505d6873d419a91b377ec85a26afe95587aa91c8"
+    },
+    {
       "path": "patches/display/0054-uke-independent-display-crtcs.patch",
       "sha256": "dda3aa0a500b4947d905d7bb16654ae4cea6866240d53ff475dcabe8654da544"
     },
@@ -212,6 +216,10 @@
       "sha256": "e6e0ec427e4321a626761eb22d3149692838796a3ee1bf98987452f0595d7dd0"
     },
     {
+      "path": "patches/display/0069-o82-requested-vrr-floor.patch",
+      "sha256": "1b285cca8d3bdc039cebefddea3ba36540bee7980e0feae86bb149cb5e48a2a7"
+    },
+    {
       "path": "patches/input/0001-smp2p-lid-open-wake.patch",
       "sha256": "e856477b3346c4a58e536c6f828f925ec191466d299c43fc3df8dfd77847cfb0"
     },
@@ -229,7 +237,7 @@
     },
     {
       "path": "src/boot/prepare-abl-source.sh",
-      "sha256": "ac05c576f97e366c5192b6ba3f47b04bf39a9c5ee87f76b6c7af070f8c2e72bc"
+      "sha256": "81366be6bd66dd4bcf41da68074a6a90ebe318c766c444f1ab44fa0bd86a8e30"
     },
     {
       "path": "src/boot/sm7675-uke-ufs.dtso",
@@ -405,7 +413,7 @@
     },
     {
       "path": "tests/cpufreq-lmh-lifecycle-contract.sh",
-      "sha256": "1ce87b238505ced6940bd4883d9d66f095787fd787d04ce0f309ac1eca2ca1df"
+      "sha256": "dc140c2fdf3649be1214898d322ae13ef23fd510dc2d10090ec9df9bbbf46f7d"
     },
     {
       "path": "tests/dp-altmode-retimer-contract.sh",
@@ -510,6 +518,10 @@
     {
       "path": "tests/mdt-metadata-contract.sh",
       "sha256": "f3095cf439af9ef3edfd99bc356c6e1c75f786a3a7174520574f3d4633e91337"
+    },
+    {
+      "path": "tests/memlat-scmi-live-probe.c",
+      "sha256": "8c200da7ef8aca230588f390fa09812ab1ea1baae6c264fb7ce503cac5a039b7"
     },
     {
       "path": "tests/memlat-scmi-probe-contract.sh",

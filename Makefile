@@ -98,6 +98,7 @@ validate: test-touch-protocol test-touch-transport
 	bash tests/kernel-family-contract.sh
 	bash tests/userdata-grow-contract.sh
 	bash tests/early-modules-contract.sh
+	bash -n src/boot/make-initramfs-cpio.sh tests/initramfs-cpio-contract.sh
 	bash tests/platform-profile-contract.sh
 	bash tests/dispcc-dp-votes-contract.sh src/display/uke-dispcc-votes.c
 	bash tests/module-compress-contract.sh

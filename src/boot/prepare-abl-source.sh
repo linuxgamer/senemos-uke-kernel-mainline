@@ -124,6 +124,8 @@ git -C "$kernel" apply "$here/../../patches/boot/0051-cpufreq-preserve-boost-sta
 bash "$here/../../tests/cpufreq-boost-error-contract.sh" "$kernel/drivers/cpufreq/cpufreq.c"
 git -C "$kernel" apply --check "$here/../../patches/boot/0055-cpufreq-lmh-policy-lifecycle.patch"
 git -C "$kernel" apply "$here/../../patches/boot/0055-cpufreq-lmh-policy-lifecycle.patch"
+git -C "$kernel" apply --check "$here/../../patches/boot/0060-cpufreq-lmh-ready-lifecycle.patch"
+git -C "$kernel" apply "$here/../../patches/boot/0060-cpufreq-lmh-ready-lifecycle.patch"
 bash "$here/../../tests/cpufreq-lmh-lifecycle-contract.sh" "$kernel/drivers/cpufreq/qcom-cpufreq-hw.c"
 git -C "$kernel" apply --check "$here/../../patches/boot/0052-scmi-protocol-negotiation-opt-out.patch"
 git -C "$kernel" apply "$here/../../patches/boot/0052-scmi-protocol-negotiation-opt-out.patch"
@@ -239,3 +241,9 @@ for cdsp_patch in 0022-mdt-admit-geometry-and-metadata.patch \
     0027-remoteproc-early-stop.patch 0028-cliffs-proxy-per-rail-ownership.patch; do
     sha256sum "$here/../../patches/boot/$cdsp_patch" >> "$output/abl-source-SHA256SUMS"
 done
+sha256sum "$here/uke-clock-debug.h" "$here/../power/prepare-cpucp-observe.sh" \
+    "$here/../power/uke-cpucp-observe.c" \
+    "$here/../../patches/boot/0051-cpufreq-preserve-boost-state-on-error.patch" \
+    "$here/../../patches/boot/0052-scmi-protocol-negotiation-opt-out.patch" \
+    "$here/../../patches/boot/0055-cpufreq-lmh-policy-lifecycle.patch" \
+    "$here/../../patches/boot/0060-cpufreq-lmh-ready-lifecycle.patch" >> "$output/abl-source-SHA256SUMS"

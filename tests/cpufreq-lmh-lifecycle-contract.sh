@@ -15,6 +15,8 @@ cat > "$work/check.c" <<'C'
 #define HZ_PER_KHZ 1000
 #define BIT(n) (1U << (n))
 #define IRQ_HANDLED 1
+#define IRQF_ONESHOT 1
+#define IRQF_NO_AUTOEN 2
 #define IS_ERR(p) false
 #define PTR_ERR(p) 0
 #define dev_warn(...) ((void)0)
@@ -29,6 +31,7 @@ struct qcom_cpufreq_data;
 struct cpufreq_policy {
  void *related_cpus, *cpus;
  struct qcom_cpufreq_data *driver_data;
+ unsigned int cpu;
 };
 struct qcom_cpufreq_data {
  struct cpufreq_policy *policy;
@@ -50,11 +53,13 @@ static unsigned char registers[0x1000];
 static unsigned long cap, requested, pressure;
 static unsigned int checks, pressure_writes, irq_enables, irq_disables, acks;
 static int depth, queued, affinity_error, affinity_calls;
+static int platform_irq=42, request_error, irq_requests, irq_frees;
 static void *system_highpri_wq;
 #define CHECK(expr) do { ++checks; if (!(expr)) { \
  fprintf(stderr,"LMH lifecycle check %u failed: %s\n",checks,#expr); exit(1); \
 } } while (0)
 static void mutex_lock(struct mutex *lock) { CHECK(!lock->held); lock->held=true; }
+static void mutex_init(struct mutex *lock) { lock->held=false; }
 static void mutex_unlock(struct mutex *lock) { CHECK(lock->held); lock->held=false; }
 static int cpumask_first(void *mask) { (void)mask; return 0; }
 static struct device *get_cpu_device(int cpu) { (void)cpu; return &pdev.dev; }
@@ -74,28 +79,47 @@ static int schedule_delayed_work(struct delayed_work *work, unsigned int delay) 
 static int mod_delayed_work(void *queue, struct delayed_work *work, unsigned int delay) { (void)queue; return schedule_delayed_work(work,delay); }
 static int cancel_delayed_work_sync(struct delayed_work *work) { CHECK(work==&data.throttle_work); queued=0; return 1; }
 static int irq_set_affinity_and_hint(int irq, void *mask) { CHECK(irq==42); ++affinity_calls; return mask ? affinity_error : 0; }
+static int platform_get_irq_optional(struct platform_device *dev, int index) { CHECK(dev==&pdev && index==0); return platform_irq; }
+static void free_irq(int irq, void *cookie) { CHECK(irq==42 && cookie==&data && irq_requests==1); ++irq_frees; }
+static irqreturn_t qcom_lmh_dcvs_handle_irq(int irq, void *data);
+static void qcom_lmh_dcvs_poll(void *work) { (void)work; }
+#define INIT_DEFERRABLE_WORK(work, fn) do { (void)(work); (void)(fn); } while (0)
+static int request_threaded_irq(int irq, void *primary, irqreturn_t (*thread)(int,void *), unsigned int flags, const char *name, void *cookie) {
+ CHECK(irq==42 && !primary && thread==qcom_lmh_dcvs_handle_irq && flags==(IRQF_ONESHOT|IRQF_NO_AUTOEN));
+ CHECK(!strcmp(name,"dcvsh-irq-7") && cookie==&data); ++irq_requests;
+ if(request_error)return request_error;
+ CHECK(depth==0); depth=1; return 0;
+}
 C
 awk '/^#define GT_IRQ_STATUS[[:space:]]/ { print }
- /^static (void|int|irqreturn_t) (qcom_lmh_dcvs_notify|qcom_lmh_dcvs_handle_irq|qcom_cpufreq_hw_cpu_online|qcom_cpufreq_hw_cpu_offline)\(/ { emit=1; count++ }
+ /^static (void|int|irqreturn_t) (qcom_lmh_dcvs_notify|qcom_lmh_dcvs_handle_irq|qcom_cpufreq_hw_lmh_init|qcom_cpufreq_hw_lmh_exit|qcom_cpufreq_ready|qcom_cpufreq_hw_cpu_online|qcom_cpufreq_hw_cpu_offline)\(/ { emit=1; count++ }
  emit { print } emit && /^}/ { emit=0 }
- END { if(count!=4) exit 1 }' "$source_file" >> "$work/check.c"
+ END { if(count!=7) exit 1 }' "$source_file" >> "$work/check.c"
 cat >> "$work/check.c" <<'C'
 static void reset(void) {
  memset(&data,0,sizeof(data));
  data.policy=&policy; data.base=registers; data.throttle_irq=42;
  policy.driver_data=&data; policy.related_cpus=&policy; policy.cpus=&data;
+ policy.cpu=7;
  cap=2000000; requested=2000000; pressure=UINT32_MAX;
  depth=queued=affinity_error=affinity_calls=0;
  pressure_writes=irq_enables=irq_disables=acks=0;
+ platform_irq=42;request_error=irq_requests=irq_frees=0;
 }
 static void poll(void) { CHECK(queued); queued=0; qcom_lmh_dcvs_notify(&data); }
 int main(void) {
  reset();
+ CHECK(qcom_cpufreq_hw_lmh_init(&policy,0)==0 && depth==1 && irq_requests==1);
+ qcom_cpufreq_ready(&policy); if(queued)poll(); CHECK(depth==0 && !queued);
+ irq_enables=0;
  CHECK(qcom_cpufreq_hw_cpu_offline(&policy)==0);
  CHECK(data.cancel_throttle && depth==1 && !queued);
  CHECK(qcom_cpufreq_hw_cpu_online(&policy)==0);
+ /* Release116 queues here; replay its observed worker-before-ready race. */
  if (queued) poll();
+ qcom_cpufreq_ready(&policy); if(queued)poll();
  CHECK(depth==0 && !queued && !data.cancel_throttle && pressure==U32_MAX);
+ qcom_cpufreq_ready(&policy); CHECK(depth==0 && !queued);
  for (int iteration=0; iteration<128; ++iteration) {
   cap=iteration%2 ? 1000000 : 1500000; requested=2000000;
   CHECK(qcom_lmh_dcvs_handle_irq(42,&data)==IRQ_HANDLED);
@@ -113,7 +137,9 @@ int main(void) {
   CHECK(data.cancel_throttle && depth==1 && !queued);
   affinity_error=0;
   CHECK(qcom_cpufreq_hw_cpu_online(&policy)==0);
-  CHECK(!data.cancel_throttle && depth==1 && queued);
+  CHECK(!data.cancel_throttle && depth==1 && !queued);
+  qcom_cpufreq_ready(&policy); qcom_cpufreq_ready(&policy);
+  CHECK(depth==1 && queued);
   poll(); CHECK(depth==1 && queued);
   cap=requested; poll();
   CHECK(depth==0 && !queued && !data.throttle_irq_disabled && pressure==U32_MAX);
@@ -126,12 +152,25 @@ int main(void) {
  /* Completed recovery before offline and repeated offline are also balanced. */
  qcom_cpufreq_hw_cpu_offline(&policy); qcom_cpufreq_hw_cpu_offline(&policy);
  CHECK(depth==1 && !queued);
- qcom_cpufreq_hw_cpu_online(&policy); poll(); CHECK(depth==0);
+ qcom_cpufreq_ready(&policy); CHECK(!queued && depth==1);
+ qcom_cpufreq_hw_cpu_online(&policy); qcom_cpufreq_ready(&policy); poll(); CHECK(depth==0);
+ qcom_cpufreq_hw_lmh_exit(&data); CHECK(irq_frees==1);
  reset(); data.throttle_irq=-6;
+ qcom_cpufreq_ready(&policy);
  CHECK(qcom_cpufreq_hw_cpu_online(&policy)==0);
  CHECK(qcom_cpufreq_hw_cpu_offline(&policy)==0);
  CHECK(!depth && !queued && !affinity_calls && !pressure_writes);
- printf("%u native LMH callback checks passed, including 128 clipping/offline/online/recovery cycles.\n",checks);
+ reset(); platform_irq=-ENXIO;
+ CHECK(qcom_cpufreq_hw_lmh_init(&policy,0)==0 && !irq_requests);
+ qcom_cpufreq_ready(&policy); CHECK(!depth && !queued && !irq_enables);
+ qcom_cpufreq_hw_lmh_exit(&data); CHECK(!irq_frees);
+ reset(); request_error=-EBUSY;
+ CHECK(qcom_cpufreq_hw_lmh_init(&policy,0)==0 && irq_requests==1);
+ qcom_cpufreq_ready(&policy);
+ CHECK(qcom_cpufreq_hw_cpu_online(&policy)==0 && qcom_cpufreq_hw_cpu_offline(&policy)==0);
+ CHECK(!depth && !queued && !irq_enables && !irq_disables);
+ qcom_cpufreq_hw_lmh_exit(&data); CHECK(!irq_frees);
+ printf("%u native LMH checks passed across init/ready/IRQ/poll/offline/online/exit and 128 recovery cycles.\n",checks);
 }
 C
 ${CC:-cc} -std=gnu11 -Wall -Wextra -Werror -Wno-unused-variable -Wno-unused-parameter \
