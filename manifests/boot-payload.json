@@ -29,7 +29,7 @@
     },
     {
       "path": "packaging/native/native.config",
-      "sha256": "180141edde9e786a79994c06228954e8b2c7f0d48d66af5977b72e8cdf4cd0f0"
+      "sha256": "831ede0562eba19ad8713dfbbad39442d0a4aac65332ddfbc68e74402ced1343"
     },
     {
       "path": "packaging/native/prepare.sh",
@@ -401,7 +401,7 @@
     },
     {
       "path": "src/boot/build-payload.sh",
-      "sha256": "f144853a72b44950ae6e6b6bb34dc5c90c3de3a28177e2342c8526d0382b6823"
+      "sha256": "3eeceb5d479b5a1d20ea063f93cfa74e743201230485ab1be5bed7332eed06c6"
     },
     {
       "path": "src/boot/check-root-capability.sh",
@@ -854,6 +854,10 @@
     {
       "path": "tests/speaker-audio-fdt-contract.sh",
       "sha256": "4f9b747b1ad02b2b0bc3f84fcaea1d99339e61ab21f47ad160ad02e0f7be30ec"
+    },
+    {
+      "path": "tests/storage-crypto-contract.sh",
+      "sha256": "fe9aed87d24578d423ba21e3be6259ce933428c0dd34f4bde63a3bdf22de4ba5"
     },
     {
       "path": "tests/sysmon-stop-preparation-contract.sh",

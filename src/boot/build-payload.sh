@@ -57,6 +57,7 @@ bash "$kernel/scripts/config" --file "$out/.config" --set-str INITRAMFS_SOURCE '
 make -C "$kernel" O="$out" LOCALVERSION="$localversion" olddefconfig
 bash "$here/../../tests/kernel-hardening-config-contract.sh" "$out/.config"
 bash "$here/../../tests/uke-build-scope-contract.sh" "$out/.config"
+bash "$here/../../tests/storage-crypto-contract.sh" "$out/.config"
 [[ $(make -s -C "$kernel" O="$out" LOCALVERSION="$localversion" kernelrelease) == "$release" ]]
 for flag in QCOM_UKE_ABL_DT GUNYAH_WATCHDOG INITRAMFS_FORCE CMDLINE_FORCE DRM_SIMPLEDRM FRAMEBUFFER_CONSOLE \
     EXT4_FS F2FS_FS XFS_FS BTRFS_FS QCOM_UKE_PLATFORM_PROFILE ACPI_PLATFORM_PROFILE; do
