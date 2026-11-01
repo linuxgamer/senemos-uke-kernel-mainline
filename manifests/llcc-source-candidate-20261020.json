@@ -29,7 +29,7 @@
     },
     {
       "path": "packaging/native/native.config",
-      "sha256": "d744290e1d9c19684f274d44ba9f0f093a3ac983adca2271bb54cf3dfccfd2c8"
+      "sha256": "4b9c16d2d971fd3c26e11bda9a10e4f3726d788e78123d72c9eca7e2a0bf943b"
     },
     {
       "path": "packaging/native/prepare.sh",
@@ -581,7 +581,7 @@
     },
     {
       "path": "src/boot/build-payload.sh",
-      "sha256": "bce2748d6877b8380eaba54916f31b389d2b9f833d2a7cf9dd092eb7685a6d71"
+      "sha256": "c44f31c61f113a21a905b71fe0b145170aed1627e6a005a925f319ffb954765f"
     },
     {
       "path": "src/boot/make-initramfs-cpio.sh",
