@@ -52,3 +52,21 @@ Remaining acceptance: signed candidate artifacts, fresh boot without the
 temporary release106 recovery alias, input/output operation, monitor name
 and hotplug, mute, reopen and suspend/resume. Build and package checks must
 not be reported as physical audio acceptance.
+
+1 November2026. COPR11238292 produces six signed release109 packages. Native
+admission verifies the matching boot payloads,822 module hashes, unchanged DT
+gains and topology, the release-scoped alias and kernel-owned desktop data.
+DNF automatically stages109 to bootB and retains106 in bootA. Release109 then
+boots with the card and all three PCMs registered without a recovery helper.
+The operator confirms ordinary speaker and microphone operation. The ELD0
+control and the selected PipeWire route both supply the connected monitor name;
+the desktop caption remains a separate presentation issue.
+
+Candidate110 adds exact-model card headings so KDE does not display the generic
+Built-in Audio heading for the combined card. It also uses the kernel ALSA long
+name in microphone and speaker UCM port labels. The card-heading rule runs before
+ACP adds release components, so it matches only the exact platform device and
+model. Node rules keep their release component guard. The recovered109 session
+shows POCO PAD X1 as the card heading and in all three endpoint descriptions.
+No additional audio package, daemon, processing filter or gain change is used.
+Candidate110 package and fresh-boot acceptance remain pending.

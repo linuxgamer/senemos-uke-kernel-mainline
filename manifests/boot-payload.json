@@ -2,7 +2,7 @@
   "schema_version": 1,
   "date": "2026-10-31",
   "source_date_epoch": 1792058622,
-  "source_origin": "Signed Linux 7.3.1 with qualified release102 capture. Candidate109 corrects the release106 topology lookup, maps DisplayPort ELD to frontend PCM0 and resolves notifications through the registered control ID. Kernel-core supplies matching model-specific speaker and microphone names. Startup gains and electrical settings are unchanged; candidate boot and acoustic acceptance remain pending.",
+  "source_origin": "Signed Linux7.3.1 with qualified release102 capture and the release109 audio registration/ELD correction. Candidate110 supplies model-specific ALSA card headings and UCM microphone/speaker labels in kernel-core. Release109 speaker and microphone operation is operator-confirmed; candidate110 fresh-boot acceptance remains pending. Startup gains and electrical settings are unchanged.",
   "firmware_included": false,
   "device_private_data_included": false,
   "python_target_payload": false,
@@ -725,7 +725,7 @@
     },
     {
       "path": "tests/kernel-audio-policy-contract.sh",
-      "sha256": "3ccf88027713512bcd5edeef6af42c9bc6b64c9b492fbe76e06ea1a53811ca82"
+      "sha256": "d3ae15078fd29764ae86fe99e41d27f63c188857c89126c21871113ca1b68748"
     },
     {
       "path": "src/audio/desktop/LICENSE",
@@ -749,7 +749,7 @@
     },
     {
       "path": "src/audio/desktop/array-ucm2/Microphone-HiFi.conf",
-      "sha256": "6040e22dbe95f9dec56e1cb7b61f769e469fac78d8441b1ffffe0bf4168980c0"
+      "sha256": "05c675bfd927d289d955a0ef2c981ec9ad8e375118b1211a987205d97369713f"
     },
     {
       "path": "src/audio/desktop/array-ucm2/POCO-Pad-X1-HDMI.conf",
@@ -765,7 +765,7 @@
     },
     {
       "path": "src/audio/desktop/array-ucm2/Speaker-HiFi.conf",
-      "sha256": "1c4f1f48a8f64688ef8fd2966af93d68f022349d7415a4458d5e57b77549819c"
+      "sha256": "7c49434779fd2c00b1ad25d4459fe2bef80521ece3871ae20a58152b524b9461"
     },
     {
       "path": "src/audio/desktop/array-ucm2/Speaker-PCM.conf",
@@ -773,7 +773,7 @@
     },
     {
       "path": "src/audio/desktop/install-policy.sh",
-      "sha256": "511c7098b654247376c3ae89a124309e06fb9fa24e14b065906f67fe8f9a97f3"
+      "sha256": "3e1574fd3176947973783397ce5a0e6963f5f7cd43987ab2cda77a6f5fad217e"
     },
     {
       "path": "src/audio/desktop/legacy-ucm2/DP-ELD.conf",
@@ -817,7 +817,7 @@
     },
     {
       "path": "src/audio/desktop/tests/audio-policy.cpp",
-      "sha256": "351f23c321ebac82e8d3266768449ed33425b40da7c9dd9ed5dac6f1a62e7a29"
+      "sha256": "aaa6cbfc32f19b80845739d268cd410c5c4e73e9d70967750fd16c52567ae474"
     },
     {
       "path": "src/audio/desktop/wireplumber/75-uke-thp-not-camera.conf",
@@ -837,7 +837,7 @@
     },
     {
       "path": "src/audio/desktop/model-names.conf",
-      "sha256": "ddac9df8d42850a0bfc0f7c257d9f903c773db9a4502a4d6da6cd2876d9ba475"
+      "sha256": "524193c9ac5da31609095f3b48af4999bcb0fbc37a5d8263edc67adfa1aa2e19"
     },
     {
       "path": "patches/display/0057-uke-displayport-eld-notification.patch",
