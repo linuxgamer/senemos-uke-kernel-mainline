@@ -873,7 +873,7 @@
     },
     {
       "path": "tests/initramfs-cpio-contract.sh",
-      "sha256": "d0725c76aa208436279e4fce988f6483410c76591a79b282c80c3d2692eda689"
+      "sha256": "6fe97da1c7b654ede8da0126a28ca95214f046e9c0e85ea868f3b9efed839911"
     }
   ],
   "root_selector_capability": {

@@ -23,6 +23,28 @@ bash "$root/src/boot/make-initramfs-cpio.sh" "$stage" "$generator" "$work/after 
 bash "$root/src/boot/make-initramfs-cpio.sh" "$stage" "$generator" "$work/repeat.gz" "$epoch"
 cmp "$work/after archive.gz" "$work/repeat.gz"
 gzip -dc "$work/after archive.gz" > "$work/after.cpio"
+# GNU cpio extraction changes directory mtimes as children are created.
+check_archive_mtimes() {
+    local archive=$1 offset=0 header namesize size name length
+    length=$(stat -c %s "$archive") || return 1
+    while ((offset+110<=length)); do
+        header=$(dd if="$archive" iflag=skip_bytes,count_bytes skip="$offset" count=110 status=none) || return 1
+        [[ $header =~ ^070701[[:xdigit:]]{104}$ ]] || return 1
+        namesize=$((16#${header:94:8}))
+        size=$((16#${header:54:8}))
+        ((namesize>0 && offset+110+namesize<=length)) || return 1
+        name=$(dd if="$archive" iflag=skip_bytes,count_bytes skip=$((offset+110)) count=$((namesize-1)) status=none) || return 1
+        [[ $name != TRAILER!!! ]] || return 0
+        [[ $((16#${header:46:8})) == "$epoch" ]] || return 1
+        offset=$(( (offset+110+namesize+3)/4*4 + (size+3)/4*4 ))
+    done
+    return 1
+}
+check_archive_mtimes "$work/before.cpio"
+check_archive_mtimes "$work/after.cpio"
+cp "$work/after.cpio" "$work/bad-mtime.cpio"
+printf '00000000' | dd of="$work/bad-mtime.cpio" bs=1 seek=46 conv=notrunc status=none
+if check_archive_mtimes "$work/bad-mtime.cpio"; then exit 1; fi
 cpio -itvn --quiet < "$work/after.cpio" > "$work/metadata"
 awk '$1=="crw-------" && $2==1 && $3==0 && $4==0 && $5=="5," && $6==1 && $NF=="dev/console" {found++}
      $3!=0 || $4!=0 {bad=1}
@@ -32,12 +54,14 @@ mkdir "$work/before" "$work/after"
 (cd "$work/before"; cpio -idm --quiet --no-absolute-filenames --no-preserve-owner < ../before.cpio)
 (cd "$work/after"; cpio -idmf --quiet --no-absolute-filenames --no-preserve-owner 'dev/console' < ../after.cpio)
 for tree in before after; do
-    (cd "$work/$tree"; find . -printf '%P\t%y\t%m\t%T@\t%l\n' | sort) > "$work/$tree.metadata"
+    (cd "$work/$tree"; find . -printf '%P\t%y\t%m\t%l\n' | sort) > "$work/$tree.metadata"
+    (cd "$work/$tree"; find . ! -type d -printf '%P\t%T@\n' | sort) > "$work/$tree.mtimes"
     (cd "$work/$tree"; find . -type f -print0 | sort -z | xargs -0 sha256sum) > "$work/$tree.hashes"
     test "$(stat -c %i "$work/$tree/usr/bin/helper")" = "$(stat -c %i "$work/$tree/usr/bin/helper-alias")"
     test "$(stat -c %i "$work/$tree/etc/empty")" = "$(stat -c %i "$work/$tree/etc/empty-alias")"
 done
 cmp "$work/before.metadata" "$work/after.metadata"
+cmp "$work/before.mtimes" "$work/after.mtimes"
 cmp "$work/before.hashes" "$work/after.hashes"
 reject() {
     if bash "$root/src/boot/make-initramfs-cpio.sh" "$stage" "$generator" "$work/refused.gz" "$epoch" > "$work/refusal.log" 2>&1; then exit 1; fi
