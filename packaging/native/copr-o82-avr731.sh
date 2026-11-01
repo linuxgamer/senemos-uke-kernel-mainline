@@ -32,6 +32,7 @@ profile=$stage/unpacked/native-profile
 boot=$stage/unpacked/boot-recipe
 (cd "$profile"; sha256sum --check --strict --quiet SHA256SUMS)
 grep -Fx d9d48e916070c95d19518dda4aa8bcf11ed3d2b4 "$profile/source-commit"
+cp "$boot/lock.json" "$stage/parent-boot-lock.json"
 cp "$profile/SHA256SUMS" "$stage/parent-profile.sha256"
 cp "$profile/source-composition.json" "$profile/source-composition-parent731116.json"
 overlays=(
@@ -61,6 +62,13 @@ while read -r expected relative; do
         printf '%s  %s\n' "$expected" "$profile/$relative" | sha256sum -c -
     fi
 done < "$stage/parent-profile.sha256"
+cmp <(jq -S 'del(.source_assets[].sha256)' "$stage/parent-boot-lock.json") \
+    <(jq -S 'del(.source_assets[].sha256)' "$boot/lock.json")
+while IFS=$'\t' read -r relative expected; do
+    if ! grep -Fxq "$relative" "$stage/overlays"; then
+        printf '%s  %s\n' "$expected" "$boot/$relative" | sha256sum -c -
+    fi
+done < <(jq -r '.source_assets[]|[.path,.sha256]|@tsv' "$stage/parent-boot-lock.json")
 commit=$(git -C "$owner" rev-parse HEAD)
 printf '%s\n' "$commit" > "$profile/source-commit"
 jq -Rn '[inputs]' < "$stage/overlays" > "$stage/overlays.json"
