@@ -2,7 +2,7 @@
   "schema_version": 1,
   "date": "2026-11-01",
   "source_date_epoch": 1792058622,
-  "source_origin": "Standalone source inventory retained from release115 with O82 source edits. The ABM COPR producer composes release1022 from the exact verified1020 SRPM, retaining its USB/LMH/power inputs,1003 floor correction and116 ancestry. This standalone inventory is not the composed release1022 delivery.",
+  "source_origin": "Standalone source inventory retained from release115 with O82 source edits. The ABM COPR producer composes release1041 from the exact verified1020 SRPM, retaining its USB/LMH/power inputs,1003 floor correction and116 ancestry. This standalone inventory is not the composed release1041 delivery.",
   "firmware_included": false,
   "device_private_data_included": false,
   "python_target_payload": false,
@@ -573,7 +573,7 @@
     },
     {
       "path": "packaging/native/README.md",
-      "sha256": "9f7b54b4134564e3429f49652d11fc2aeeba2dc80d43f1006eb011dbc3504163"
+      "sha256": "c458e91acbc910b0349b1bf320b964b9be719a2c0cc77db10e8ba4c896eb13d5"
     },
     {
       "path": "src/boot/prepare-abl-source.sh",

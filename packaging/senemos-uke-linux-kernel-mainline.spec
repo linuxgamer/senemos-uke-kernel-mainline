@@ -7,7 +7,7 @@
 Name: senemos-uke-linux-kernel-mainline
 Version: 7.3.1
 %if "%{version}" == "7.3.1"
-%global senemos_build_release 1022
+%global senemos_build_release 1041
 %else
 %global senemos_build_release 1
 %endif
@@ -456,7 +456,7 @@ cp -a boot-recipe/src/boot/licenses/. %{buildroot}/usr/share/licenses/%{name}-bo
 /usr/lib/senemos/default-boot.img
 
 %changelog
-* Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-1022
+* Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-1041
 - Combine verified release1020 USB/power inputs with default-off O82 CABC.
 - Check paired panel lifecycle and ABM faults before the complete kernel build.
 

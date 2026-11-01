@@ -1,6 +1,6 @@
 # Mainline native source profile
 
-1 November 2026, kernel1022 testing-image candidate: combine the exact COPR1020
+1 November 2026, kernel1041 testing-image candidate: combine the exact COPR1020
 USB/LMH/power source with default-off O82 CABC and the retained30 Hz AVR floor.
 Accepted running1003 remains separate from this uninstalled candidate. Original
 KWin controls five logical tiers mapped to four OEM modes; HDR adaptation is
