@@ -1,3 +1,18 @@
+diff --git a/drivers/gpu/drm/drm_atomic_helper.c b/drivers/gpu/drm/drm_atomic_helper.c
+index 285aac3..718d096 100644
+--- a/drivers/gpu/drm/drm_atomic_helper.c
++++ b/drivers/gpu/drm/drm_atomic_helper.c
+@@ -743,6 +743,10 @@ drm_atomic_helper_check_modeset(struct drm_device *dev,
+ 			    new_connector_state->color_format)
+ 				new_crtc_state->connectors_changed = true;
+ 
++			if (connector->abm_level_property &&
++			    old_connector_state->abm_level != new_connector_state->abm_level)
++				new_crtc_state->connectors_changed = true;
++
+ 		}
+ 
+ 		if (funcs->atomic_check)
 diff --git a/drivers/gpu/drm/drm_atomic_uapi.c b/drivers/gpu/drm/drm_atomic_uapi.c
 index 68d59e1..ae01b8b 100644
 --- a/drivers/gpu/drm/drm_atomic_uapi.c
@@ -63,7 +78,7 @@ index f0faccc..bdbf4a9 100644
   * DOC: Color format
   *
 diff --git a/drivers/gpu/drm/msm/dsi/dsi_manager.c b/drivers/gpu/drm/msm/dsi/dsi_manager.c
-index 003a475..18faa42 100644
+index 003a475..5d98ae7 100644
 --- a/drivers/gpu/drm/msm/dsi/dsi_manager.c
 +++ b/drivers/gpu/drm/msm/dsi/dsi_manager.c
 @@ -5,7 +5,9 @@
@@ -76,7 +91,7 @@ index 003a475..18faa42 100644
  #include <linux/of_graph.h>
  #include <linux/debugfs.h>
  #include <linux/seq_file.h>
-@@ -604,6 +606,33 @@ static void dsi_mgr_bridge_debugfs_init(struct drm_bridge *bridge,
+@@ -604,6 +606,29 @@ static void dsi_mgr_bridge_debugfs_init(struct drm_bridge *bridge,
  				    &dsi_mgr_output_bits_fops);
  }
  
@@ -85,7 +100,6 @@ index 003a475..18faa42 100644
 +		struct drm_crtc_state *crtc_state,
 +		struct drm_connector_state *conn_state)
 +{
-+	struct drm_connector_state *old;
 +	const struct hdr_output_metadata *hdr;
 +	struct drm_property_blob *metadata = conn_state->hdr_output_metadata;
 +
@@ -101,16 +115,13 @@ index 003a475..18faa42 100644
 +		    hdr->hdmi_metadata_type1.eotf != HDMI_EOTF_TRADITIONAL_GAMMA_SDR)
 +			return -EOPNOTSUPP;
 +	}
-+	old = drm_atomic_get_old_connector_state(conn_state->state, conn_state->connector);
-+	if (!old || old->abm_level != conn_state->abm_level)
-+		crtc_state->mode_changed = true;
 +	return 0;
 +}
 +
  static const struct drm_bridge_funcs dsi_mgr_bridge_funcs = {
  	.debugfs_init = dsi_mgr_bridge_debugfs_init,
  	.atomic_create_state = drm_atomic_helper_bridge_create_state,
-@@ -613,6 +642,7 @@ static const struct drm_bridge_funcs dsi_mgr_bridge_funcs = {
+@@ -613,6 +638,7 @@ static const struct drm_bridge_funcs dsi_mgr_bridge_funcs = {
  	.atomic_pre_enable = dsi_mgr_bridge_pre_enable,
  	.atomic_enable = dsi_mgr_bridge_enable,
  	.atomic_post_disable = dsi_mgr_bridge_post_disable,
@@ -118,7 +129,7 @@ index 003a475..18faa42 100644
  	.mode_set = dsi_mgr_bridge_mode_set,
  	.mode_valid = dsi_mgr_bridge_mode_valid,
  };
-@@ -881,6 +911,9 @@ int msm_dsi_manager_connector_init(struct msm_dsi *msm_dsi,
+@@ -881,6 +907,9 @@ int msm_dsi_manager_connector_init(struct msm_dsi *msm_dsi,
  		ret = drm_connector_attach_vrr_capable_property(connector);
  		if (ret)
  			return ret;

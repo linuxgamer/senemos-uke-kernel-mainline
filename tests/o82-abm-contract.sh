@@ -82,18 +82,24 @@ struct drm_connector_state {
 };
 struct drm_bridge {bool o82_panel;};
 struct drm_bridge_state {int unused;};
-struct drm_crtc_state {bool mode_changed;};
+struct drm_crtc_state {bool mode_changed,connectors_changed;};
 #define to_dsi_bridge(b) (b)
 static struct drm_connector_state old_state;
-static bool missing_old;
-static struct drm_connector_state *drm_atomic_get_old_connector_state(void *state,struct drm_connector *connector)
-{
-    (void)state;(void)connector;return missing_old ? NULL:&old_state;
-}
 C
 extract "$kernel/drivers/gpu/drm/drm_connector.c" '^int drm_connector_attach_abm_property\(' >> "$work/check.c"
 extract "$kernel/drivers/gpu/drm/msm/dsi/dsi_manager.c" '^static int dsi_mgr_bridge_atomic_check\(' >> "$work/check.c"
 cat >> "$work/check.c" <<'C'
+static void invalidate(struct drm_connector *connector,
+        struct drm_connector_state *old_connector_state,
+        struct drm_connector_state *new_connector_state,
+        struct drm_crtc_state *new_crtc_state)
+{
+C
+awk '/if \(connector->abm_level_property &&/ {emit=1;found=1}
+    emit {print} emit && /new_crtc_state->connectors_changed = true;/ {exit}
+    END {if(!found)exit 1}' "$kernel/drivers/gpu/drm/drm_atomic_helper.c" >> "$work/check.c"
+cat >> "$work/check.c" <<'C'
+}
 static int set_level(struct drm_connector_state *state,uint64_t val)
 {
 C
@@ -145,8 +151,11 @@ int main(void)
     struct drm_connector_state state={.connector=&connector};
     for(unsigned before=0;before<=4;++before)for(unsigned after=0;after<=4;++after) {
         old_state.abm_level=before;state.abm_level=after;cs.mode_changed=false;
+        cs.connectors_changed=false;
+        invalidate(&connector,&old_state,&state,&cs);
+        assert(cs.connectors_changed==(before!=after));
         assert(!dsi_mgr_bridge_atomic_check(&bridge,&bs,&cs,&state));
-        assert(cs.mode_changed==(before!=after));
+        assert(!cs.mode_changed);
         assert(!set_level(&state,after) && get_level(&state)==after);
     }
     for(uint64_t invalid=5;;invalid=UINT64_MAX) {
@@ -158,9 +167,11 @@ int main(void)
     assert(dsi_mgr_bridge_atomic_check(&bridge,&bs,&cs,&state)==-EINVAL && !cs.mode_changed);
     bridge.o82_panel=false;
     assert(!dsi_mgr_bridge_atomic_check(&bridge,&bs,&cs,&state) && !cs.mode_changed);
-    bridge.o82_panel=true;missing_old=true;state.abm_level=0;
-    assert(!dsi_mgr_bridge_atomic_check(&bridge,&bs,&cs,&state) && cs.mode_changed);
-    missing_old=false;
+    connector.abm_level_property=NULL;old_state.abm_level=0;state.abm_level=1;
+    cs.connectors_changed=false;
+    invalidate(&connector,&old_state,&state,&cs);
+    assert(!cs.connectors_changed);
+    bridge.o82_panel=true;
     struct hdr_output_metadata hdr={0};
     struct drm_property_blob blob={.length=sizeof(hdr),.data=&hdr};
     state.hdr_output_metadata=&blob;
@@ -186,6 +197,11 @@ flags=(-std=gnu11 -O2 -Wall -Wextra -Werror -Wno-unused-parameter)
 if [[ ${SANITIZE:-0} == 1 ]]; then flags+=(-fsanitize=address,undefined -fno-omit-frame-pointer); fi
 "${CC:-cc}" "${flags[@]}" "$work/check.c" -o "$work/check"
 "$work/check"
+# Invalidation must precede collection of every active plane and connector.
+[[ $(awk '/^int drm_atomic_helper_check_modeset\(/ {helper=1}
+    helper && /if \(connector->abm_level_property &&/ {early=1}
+    helper && /ret = drm_atomic_add_affected_planes/ {print early+0;exit}' \
+    "$kernel/drivers/gpu/drm/drm_atomic_helper.c") == 1 ]]
 # Admission must precede publication and retain the existing dark rollback.
 [[ $(awk '/ret = o82_apply_abm\(/ {abm=1}
     abm && /goto failed_on;/ {rollback=1}

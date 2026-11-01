@@ -25,6 +25,8 @@ full modeset with a brief blank. Panel preparation sends paired LP short-write
 parameter commands `FF10` then `55<mode>` after ON/PPS and before publishing
 prepared state. Either failure follows the existing OFF/power-down rollback;
 first-frame backlight admission remains unchanged. Zero brightness stays zero.
+The shared atomic helper marks connector changes before collecting affected
+planes/bridges; a late bridge callback alone cannot guarantee that collection.
 
 Nonzero adaptation with HDR/PQ/HLG metadata is refused until a jointly qualified
 HDR/CABC pipeline exists. Malformed metadata and tiers outside0..4 are refused
