@@ -198,11 +198,17 @@ if [[ ${SANITIZE:-0} == 1 ]]; then flags+=(-fsanitize=address,undefined -fno-omi
 "${CC:-cc}" "${flags[@]}" "$work/check.c" -o "$work/check"
 "$work/check"
 # Invalidation must precede collection of every active plane and connector.
-[[ $(awk '/^int drm_atomic_helper_check_modeset\(/ {helper=1}
+[[ $(awk '/^(int )?drm_atomic_helper_check_modeset\(/ {helper=1}
     helper && /if \(connector->abm_level_property &&/ {early=1}
     helper && /ret = drm_atomic_add_affected_planes/ {print early+0;exit}' \
-    "$kernel/drivers/gpu/drm/drm_atomic_helper.c") == 1 ]]
+    "$kernel/drivers/gpu/drm/drm_atomic_helper.c") == 1 ]] || {
+    printf 'ABM invalidation must precede affected-plane collection\n' >&2
+    exit 1
+}
 # Admission must precede publication and retain the existing dark rollback.
 [[ $(awk '/ret = o82_apply_abm\(/ {abm=1}
     abm && /goto failed_on;/ {rollback=1}
-    /ctx->prepared = true;/ {print abm && rollback;exit}' "$panel") == 1 ]]
+    /ctx->prepared = true;/ {print abm && rollback;exit}' "$panel") == 1 ]] || {
+    printf 'ABM admission must precede prepared state and retain dark rollback\n' >&2
+    exit 1
+}
