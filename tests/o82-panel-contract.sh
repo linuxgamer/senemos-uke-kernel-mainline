@@ -106,7 +106,6 @@ typedef uint8_t u8; typedef uint16_t u16; typedef uint32_t u32; typedef uint64_t
 #define PTR_ERR(p) ((long)(p))
 #define ERR_PTR(e) ((void *)(intptr_t)(e))
 enum { MIPI_DSI_MSG_USE_LPM=2, MIPI_DSI_FMT_RGB101010=10,
-       MIPI_DSI_DCS_SHORT_WRITE_PARAM=0x15,
        DRM_MODE_TYPE_DRIVER=1, DRM_MODE_TYPE_PREFERRED=2 };
 C
 # Use the selected kernel's public flag definitions.
