@@ -117,7 +117,8 @@ git -C "$kernel" apply "$here/../../patches/boot/0043-uke-pm8010-firmware-popula
 install -m644 "$here/../power/uke-pm8010.h" "$kernel/drivers/mfd/uke-pm8010.h"
 bash "$here/../../tests/pm8010-population-contract.sh" "$kernel"
 for power_patch in 0051-cpufreq-preserve-boost-state-on-error.patch \
-    0052-scmi-protocol-negotiation-opt-out.patch 0055-cpufreq-lmh-policy-lifecycle.patch; do
+    0052-scmi-protocol-negotiation-opt-out.patch 0055-cpufreq-lmh-policy-lifecycle.patch \
+    0060-cpufreq-lmh-ready-lifecycle.patch; do
     git -C "$kernel" apply --check "$here/../../patches/boot/$power_patch"
     git -C "$kernel" apply "$here/../../patches/boot/$power_patch"
 done
@@ -237,4 +238,5 @@ sha256sum "$here/uke-clock-debug.h" "$here/../power/prepare-cpucp-observe.sh" \
     "$here/../power/uke-cpucp-observe.c" \
     "$here/../../patches/boot/0051-cpufreq-preserve-boost-state-on-error.patch" \
     "$here/../../patches/boot/0052-scmi-protocol-negotiation-opt-out.patch" \
-    "$here/../../patches/boot/0055-cpufreq-lmh-policy-lifecycle.patch" >> "$output/abl-source-SHA256SUMS"
+    "$here/../../patches/boot/0055-cpufreq-lmh-policy-lifecycle.patch" \
+    "$here/../../patches/boot/0060-cpufreq-lmh-ready-lifecycle.patch" >> "$output/abl-source-SHA256SUMS"

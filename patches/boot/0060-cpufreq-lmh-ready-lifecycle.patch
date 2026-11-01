@@ -1,0 +1,70 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] cpufreq: qcom-hw: start LMH feedback from policy ready
+
+CPUFreq calls ready after initial policy setup and inactive-policy
+reactivation. Patch 0055 queues polling from online but retains ready's
+direct enable_irq. A real release-116 CPU7 cycle lets the worker and ready
+enable the same IRQ, producing an unbalanced-enable warning. Its original
+four-callback fixture omitted ready; the claimed general reactivation gap
+in 0055's description is superseded by this full caller analysis.
+
+Record the IRQF_NO_AUTOEN reference after a successful IRQ request. Online
+only restores affinity and clears cancellation. Ready starts feedback with
+the single reference held; the existing poller releases it after recovery.
+An IRQ request failure leaves an inactive sentinel, so later callbacks and
+exit cannot operate on an unowned IRQ.
+
+Compared Linux v7.3.1 79a907609d53d5cd645b42c11550d295d43abf99,
+current upstream cbbddb6b08cc9900a87cccaa9b22bbe06aa4f50a,
+MiCode Uke 5712080a4b0c0b1a879e6d145c601c649ddaddfd and OnePlus
+SM7675 fc892483f1d61f245924681eb5abd563564d9cba. Their ready callbacks
+retain direct IRQ enabling. Linux GPL attribution is unchanged. No board
+values, frequencies, voltages, protection thresholds or donor code change.
+
+Validation: the expanded actual-function ASan/UBSan fixture reproduces the
+release-116 duplicate enable and passes after this correction. It covers
+initial activation, ready/poll ordering, IRQ-request failure, teardown and
+128 clipping/offline/online/recovery cycles. Kernel and physical acceptance
+remain separate.
+
+--- a/drivers/cpufreq/qcom-cpufreq-hw.c
++++ b/drivers/cpufreq/qcom-cpufreq-hw.c
+@@ -477,8 +477,11 @@
+ 				   IRQF_ONESHOT | IRQF_NO_AUTOEN, data->irq_name, data);
+ 	if (ret) {
+ 		dev_err(&pdev->dev, "Error registering %s: %d\n", data->irq_name, ret);
++		data->throttle_irq = 0;
+ 		return 0;
+ 	}
++	/* IRQF_NO_AUTOEN holds the initial disable until policy ready. */
++	data->throttle_irq_disabled = true;
+ 
+ 	ret = irq_set_affinity_and_hint(data->throttle_irq, policy->cpus);
+ 	if (ret)
+@@ -506,9 +509,6 @@
+ 
+ 	mutex_lock(&data->throttle_lock);
+ 	data->cancel_throttle = false;
+-	/* Refresh feedback before releasing the one retained IRQ disable. */
+-	if (data->throttle_irq_disabled)
+-		mod_delayed_work(system_highpri_wq, &data->throttle_work, 0);
+ 	mutex_unlock(&data->throttle_lock);
+ 
+ 	return ret;
+@@ -619,8 +619,14 @@
+ {
+ 	struct qcom_cpufreq_data *data = policy->driver_data;
+ 
+-	if (data->throttle_irq >= 0)
+-		enable_irq(data->throttle_irq);
++	if (data->throttle_irq <= 0)
++		return;
++
++	mutex_lock(&data->throttle_lock);
++	/* The poller owns initial activation and policy reactivation. */
++	if (!data->cancel_throttle && data->throttle_irq_disabled)
++		mod_delayed_work(system_highpri_wq, &data->throttle_work, 0);
++	mutex_unlock(&data->throttle_lock);
+ }
+ 
+ static struct cpufreq_driver cpufreq_qcom_hw_driver = {

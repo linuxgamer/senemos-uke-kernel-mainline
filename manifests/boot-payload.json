@@ -2,7 +2,7 @@
   "schema_version": 1,
   "date": "2026-11-01",
   "source_date_epoch": 1792058622,
-  "source_origin": "Signed Linux 7.3.1 and the exact release 115 source composition. Candidate 116 retains its four-channel audio, 122 adaptation patches and startup fixes, and adds reviewed CPUFreq boost error recovery, LMH policy lifecycle, manual GET-only CPUCP observation and guarded retirement of an unused clock measurement client. All three ignore-unused parameters remain. Physical acceptance is pending.",
+  "source_origin": "Signed Linux 7.3.1 and the exact release 116 source composition. Candidate 1004 corrects its physically reproduced LMH double-enable during policy reactivation. Four-channel audio, all 122 adaptation patches, startup fixes, CPUCP observation and all three ignore-unused parameters are retained. Physical correction acceptance is pending.",
   "firmware_included": false,
   "device_private_data_included": false,
   "python_target_payload": false,
@@ -577,7 +577,7 @@
     },
     {
       "path": "src/boot/prepare-abl-source.sh",
-      "sha256": "26a0a3a88eaaa9b1a406b1232007665c4b05fe0fbf4edd74fa50f06b99c81e05"
+      "sha256": "a64cf99c25a776811376b58d139c1869fd8911b0bc94b96fa96016f5c4ea27ea"
     },
     {
       "path": "src/audio/uke-audio-card.c",
@@ -909,7 +909,7 @@
     },
     {
       "path": "tests/cpufreq-lmh-lifecycle-contract.sh",
-      "sha256": "1ce87b238505ced6940bd4883d9d66f095787fd787d04ce0f309ac1eca2ca1df"
+      "sha256": "dc140c2fdf3649be1214898d322ae13ef23fd510dc2d10090ec9df9bbbf46f7d"
     },
     {
       "path": "tests/clock-debug-fdt-contract.sh",
@@ -922,6 +922,10 @@
     {
       "path": "tests/memlat-scmi-live-probe.c",
       "sha256": "8c200da7ef8aca230588f390fa09812ab1ea1baae6c264fb7ce503cac5a039b7"
+    },
+    {
+      "path": "patches/boot/0060-cpufreq-lmh-ready-lifecycle.patch",
+      "sha256": "c4077a97a3bc4ea38d4259c8505d6873d419a91b377ec85a26afe95587aa91c8"
     }
   ],
   "root_selector_capability": {
