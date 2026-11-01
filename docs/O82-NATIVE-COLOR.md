@@ -7,8 +7,16 @@ There is no live caller, new EDID attachment or HDR capability from this source.
 COPR [11240208](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11240208/)
 passes the actual-source GCC and Clang ASan/UBSan MMIO fixtures and the existing
 numerical/C11/EDID checks. The signed utility 0.2.0-9 is built; its binary does
-not contain or execute this kernel transport. A full kernel-object build,
-native owner integration and physical acceptance remain separate.
+not contain or execute this kernel transport. Native owner integration and
+physical acceptance remain separate.
+
+COPR [11240486](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11240486/)
+passes the real Linux 7.3.1 AArch64 loader/transport object compilation and the
+GCC/Clang ASan/UBSan compiler, firmware-loader and transport fixtures. Signed
+utility0.3.0-4 generated separate private PA and PB bundles:59 records each,
+47 compiled and12 explicitly refused for remaining nonzero picture/HDR-library
+operations. This is data generation, not native rendering. Neither firmware nor
+the new helper is installed; the corrected ICC remains in use.
 
 `src/display/dpu_o82_regdma.c` implements the exact DB queue contract: CTL IDs
 1–4, 256-byte-aligned 32-bit IOVA, bounded DWORD count, local PMU clock ownership,

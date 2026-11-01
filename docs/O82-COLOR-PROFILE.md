@@ -74,6 +74,12 @@ before writing an output file. The `0.3.0-2` source preserves each preset's
 IGC dither flag and four-bit strength explicitly. The native engine must apply
 that state with its selected input tables; preparation is not hardware support.
 
+COPR11240486 passes utility0.3.0-4 and actual Linux7.3.1 AArch64 object checks.
+The verified production generator creates both private PA/PB bundles with59
+records,47 compiled transforms and12 explicitly refused nonzero picture/HDR
+operations. Each preserves32 IGC-dither configurations. No firmware is installed,
+no profile is applied and original KDE still uses the corrected temporary ICC.
+
 ## Use
 
 First identify the actual panel compatible, for example
