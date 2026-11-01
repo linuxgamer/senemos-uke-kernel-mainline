@@ -53,7 +53,9 @@ for patch in 0057-llcc-optional-window.patch 0058-fs19xx-current-workqueue.patch
 done
 CC=clang bash "$owner/tests/llcc-sm7675-contract.sh" "$slice"
 CC=clang bash "$owner/tests/audio-fs19xx-lifecycle-contract.sh" "$slice"
-clang -O2 -Wall -Wextra -Werror "$slice/usr/gen_init_cpio.c" -o "$slice/usr/gen_init_cpio"
+# Match the selected Linux Makefile's common host C flags.
+clang -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11 \
+    "$slice/usr/gen_init_cpio.c" -o "$slice/usr/gen_init_cpio"
 bash "$owner/tests/initramfs-cpio-contract.sh" "$slice/usr/gen_init_cpio"
 cp "$profile/SHA256SUMS" "$stage/parent-profile.sha256"
 cp "$profile/source-composition.json" "$profile/source-composition-parent731110.json"
