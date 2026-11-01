@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "date": "2026-10-31",
+  "date": "2026-11-01",
   "source_date_epoch": 1792058622,
-  "source_origin": "Signed Linux 7.3.1 with integrated power diagnostics, LMH lifecycle recovery, multichannel microphone TX lifecycle, bounded pre-capture DT gains and versioned desktop audio policy. Physical candidate acceptance remains pending; no stock firmware or private calibration is added. Optional bounded boot-reset support is included; physical watchdog reset, retry exhaustion and fallback remain unqualified.",
+  "source_origin": "Combined source inventory: retained main watchdog, updater and power safeguards with O82 default-off CABC/native color, audio topology, startup, LMH policy-ready and optional storage encryption changes. No combined kernel build or device acceptance; pinned historical producers remain separate.",
   "firmware_included": false,
   "device_private_data_included": false,
   "python_target_payload": false,
@@ -252,8 +252,20 @@
       "sha256": "4aebef3ba5e0532a1c4e5184972163816f6689404b7b3ce283750a2db7ec5d49"
     },
     {
+      "path": "patches/display/0069-o82-requested-vrr-floor.patch",
+      "sha256": "1b285cca8d3bdc039cebefddea3ba36540bee7980e0feae86bb149cb5e48a2a7"
+    },
+    {
+      "path": "patches/display/0070-o82-adaptive-backlight.patch",
+      "sha256": "18708547a231a9782611c5a7041400ee01cbe682ac2ece5f67f4d20c4aaab937"
+    },
+    {
       "path": "src/audio/POCO-Pad-X1-Microphone-Capture.conf",
       "sha256": "f95b4118a3def618655d877c70d76fb12149ebfc36e634f78825ceb41971a128"
+    },
+    {
+      "path": "src/audio/POCO-Pad-X1.conf",
+      "sha256": "6008c22d4a2f380d30683c38f9ef4c924651771b819a2ca0cfd456f52f43de87"
     },
     {
       "path": "src/audio/desktop/LICENSE",
@@ -512,12 +524,48 @@
       "sha256": "83fc0c69059dd818a2c8c9047ab4192a0514fccdd2d7bf04e7a427bfe8ea5efd"
     },
     {
+      "path": "src/display/dpu_o82_profiles.c",
+      "sha256": "65c963c6b2d63ecd1cbc76a1d7f58a8f5528c5b02fdc14eac67837d964f4b4c8"
+    },
+    {
+      "path": "src/display/dpu_o82_profiles.h",
+      "sha256": "53ef42517cbdad323069927efbef703359e797210aeb34b635f23c4a256ae489"
+    },
+    {
+      "path": "src/display/dpu_o82_regdma.c",
+      "sha256": "baa48492b21e5b21c27656cc342e86a66df9607bb1f4eb251ca63280194f4b72"
+    },
+    {
+      "path": "src/display/dpu_o82_regdma.h",
+      "sha256": "076ae17346d8d8e1e1b67f476183052aa2ecb2d601a5541369da018a22e3b1c3"
+    },
+    {
+      "path": "src/display/o82-color-firmware.h",
+      "sha256": "7cac536f24d45d5cba4a299d4a730a8036c6e20a313b09b333f5a4f804733131"
+    },
+    {
+      "path": "src/display/o82-color-profile.cpp",
+      "sha256": "d1d7a30aa09e6c100e06adf971fe8ef43b0c0d0ca0d4854ce9b5ac25d5b59211"
+    },
+    {
+      "path": "src/display/o82-regdma.h",
+      "sha256": "6c16856cd0041aa091162910aebf4076e721b35ba4bf0205b6b315de01a52077"
+    },
+    {
+      "path": "src/display/panel-xiaomi-o82.c",
+      "sha256": "6bd43e6ca73e7d795902c405bd60c93441bb466f80c6c25cc21afa0bab2e424c"
+    },
+    {
       "path": "src/display/sm7675-uke-native-display-oem-modes.dtso",
       "sha256": "64e7fa9fe66534f04df807c7ef80a24400760b7040a9ad48dfc5920b14681cf3"
     },
     {
       "path": "src/display/uke-abl-native.h",
       "sha256": "a4858b8928b6f4880d9ad4b05cd81b6229e7fd65c85cec599f7f4e9338285a79"
+    },
+    {
+      "path": "src/display/uke-o82-hdr-format.h",
+      "sha256": "537bca8c0c82946754ee334a0bd47187fe341c65e2f9c655188062a5c8ded8e8"
     },
     {
       "path": "src/input/Makefile",
@@ -636,6 +684,10 @@
       "sha256": "5948924e9e6c6351d2155b559745cba8ebe3e5b8c30f66bf27dda1f1701c567d"
     },
     {
+      "path": "tests/copr-source-guards-contract.sh",
+      "sha256": "95c36e274069a1beb773eb2d9425c32396aedde6b3b97bed32c213c5adca8209"
+    },
+    {
       "path": "tests/cpu-bwmon-dt-contract.sh",
       "sha256": "e0e67961bce89cf85bc4cfaec94b753d9b28409a553a73df6fffec9373dedf80"
     },
@@ -658,6 +710,14 @@
     {
       "path": "tests/dpu-video-timing-contract.sh",
       "sha256": "07ec8430e807e924da9875359f7b6bf8e453094493c9457c34e37c322d85a9d4"
+    },
+    {
+      "path": "tests/dsi-color-depth-contract.sh",
+      "sha256": "24c42d3d64d086383b0ab851450416d2aec6144aca1e2d4ced9d1979b323afed"
+    },
+    {
+      "path": "tests/dsi-connector-state-contract.sh",
+      "sha256": "50e04f8ad0aa40dd06288ad4de177ab4346a31b0d550bd3db812af73bec0c256"
     },
     {
       "path": "tests/early-modules-contract.sh",
@@ -713,7 +773,7 @@
     },
     {
       "path": "tests/mainline-package-contract.sh",
-      "sha256": "4c06140b9d248fce45657025ec4054bf7207620be466f97e0a9ce69546e2af9f"
+      "sha256": "2f63c5d7aa9b9547c567ea54f6b6968281258884f37ac91471186f247c5b5062"
     },
     {
       "path": "tests/mdt-memory-admission-contract.sh",
@@ -792,8 +852,40 @@
       "sha256": "93ea93aa78a770f552635d4bf0a1470885a3af2954b067d55634e7ed7926ddd5"
     },
     {
+      "path": "tests/o82-abm-contract.sh",
+      "sha256": "e012f422074174f88e3ee4a32e220eaff7ed3837d076b1667af4c894ef426a6c"
+    },
+    {
       "path": "tests/o82-avr-contract.sh",
       "sha256": "d84a5845ff6c40d4daf9f929738bc47b071a742e66a53620c8788b1cf599c465"
+    },
+    {
+      "path": "tests/o82-hdr-edid-contract.cpp",
+      "sha256": "2204f9b34b592a275617a918bdb9b7d7b4ec8d88f618aba02346123ade803cc9"
+    },
+    {
+      "path": "tests/o82-panel-contract.sh",
+      "sha256": "2e524b0d316d9040fb5e7c68b60be1b3112487d73f1821aaa69694a826e00d1b"
+    },
+    {
+      "path": "tests/o82-profile-loader-contract.c",
+      "sha256": "3fca21eb7de8a41bcf908bdf0114c3eb60e659e6ffa92ef5899c21e4b316fb68"
+    },
+    {
+      "path": "tests/o82-profile-loader-contract.sh",
+      "sha256": "e9519ff2db8acea96c7f41c4973f41d968bca04935211793ae4534010a8cb6f8"
+    },
+    {
+      "path": "tests/o82-regdma-transport-contract.c",
+      "sha256": "c1932a846898898e4e3b84b28e7e7237535fc0d38e02766d415e2be56915a755"
+    },
+    {
+      "path": "tests/o82-regdma-transport-contract.sh",
+      "sha256": "b6c12a978f51e0a249d5d2735eb14d03c1cf058729f530b1d184eb9c66ee7dd0"
+    },
+    {
+      "path": "tests/o82-vrr-floor-contract.sh",
+      "sha256": "069e2243a736829818b50bb663dfcd6231951393419511a192897e908665d8bf"
     },
     {
       "path": "tests/offline-boot-contract.sh",
@@ -858,6 +950,10 @@
     {
       "path": "tests/storage-crypto-contract.sh",
       "sha256": "fe9aed87d24578d423ba21e3be6259ce933428c0dd34f4bde63a3bdf22de4ba5"
+    },
+    {
+      "path": "tests/storage-crypto-negative-contract.sh",
+      "sha256": "e494851d0a62f757cd1251f8bdaf4dd2ce016f7e43b33b1f04f8b055ea0c3d2d"
     },
     {
       "path": "tests/sysmon-stop-preparation-contract.sh",

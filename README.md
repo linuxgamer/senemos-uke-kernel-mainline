@@ -58,7 +58,6 @@ The older `senemos.sh` build entry remains available for legacy and diagnostic w
 | Branch | Purpose |
 | --- | --- |
 | [`main`](https://github.com/MCC45TR/senemos-uke-kernel-mainline/tree/main) | Integrated Linux 7.3 kernel and singleboot packages |
-| [`test`](https://github.com/MCC45TR/senemos-uke-kernel-mainline/tree/test) | Test integration and candidate qualification |
 | [`kvm`](https://github.com/MCC45TR/senemos-uke-kernel-mainline/tree/kvm) | Isolated experimental EL2/KVM development |
 
 Previous branch tips remain under `archive/` tags. Singleboot is a package profile, not a separate branch. Detailed development changes belong in [CHANGELOG.md](CHANGELOG.md).

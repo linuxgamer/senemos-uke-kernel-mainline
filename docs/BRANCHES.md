@@ -1,50 +1,57 @@
 # Development branches
 
-31 October 2026. `main` is the continuation branch, `kvm` retains the isolated
-KVM/EL2 package producer, and `test` retains its test integration history.
-These are the three retained development branches. Source integration does not
-establish package, VM or tablet acceptance.
+1 November 2026. `main` is the source integration branch and `kvm` retains the
+isolated experimental EL2/KVM producer. These are the two retained branches.
+The former `test` tip is already reachable from `main`. Source integration does
+not establish package, VM or tablet acceptance.
 
-The former `KVM` and `TEST` tips are retained exactly by the lowercase branch
-renames. The microphone106 source tip is reachable from main through merged
-PR #46. A merged topic branch can therefore be removed without losing commits.
+## Preserved history
 
-Historical branch heads remain in `archive/branch-prune-20261031/` tags.
-The completed one-time pruning workflow is not an active maintenance mechanism.
-Future cleanup must first verify that each exact tip is reachable from `main`;
-never delete an unmerged tip or rewrite these three branches by force.
+Before cleanup, all 119 remote branch tips were copied to lightweight tags under
+`archive/consolidation-20261101/`, followed by each original branch name. Existing
+archive tags and commit identities remain unchanged. The 102 historical
+`archive/tablet-20261101/` branches are retained as tags rather than merged as
+old source snapshots. They include superseded release compositions and
+experimental variants that must not replace current source automatically.
 
-Main's ordinary package identity, native touch integration and transactional
-updater remain unchanged by the KVM source consolidation. The optional KVM
-entry is not enabled by main's producer; see [KVM source boundaries](../KVM.md).
+The requested `c9335a8fdd20a7ee2a33ce203fb5c0e85a2fddb3` PM8010 record was already
+an ancestor of `main`. The dated evidence remains limited to the recorded trial.
+The exact `fcbdae4b757732f0f0e3162c610f19abae290832` release1006 source pin remains
+reachable and unchanged. The `kvm` branch stays at
+`7a8b75f1471a6c9e2e1b6dccdb24bcb20276780f`; its package identity and isolated
+activation boundary are preserved.
 
-## Consolidation validation
+The current non-archive topic histories are integrated into `main`: O82 native
+color and default-off CABC, audio topology naming and lookup, startup warning
+corrections, LMH policy-ready IRQ ownership, optional storage encryption, USB
+role/PM serialization, and the isolated 1010 and maintenance producer records.
+The older USB topic contributes ancestry while the newer serialized producer
+already on main is retained. Main's watchdog, optional gaming, KVM helpers,
+transactional updater requirements and source inventories remain present.
 
-31 October 2026, Debian 13 x86_64 host fixtures: the integrated source retains
-PR #46 microphone capture, PR #47 opt-in boot watchdog, PR #48 optional gaming,
-KVM source helpers and TEST input inventory. RPM metadata, microphone topology
-and desktop policy, source hashes and host contract checks passed. Sanitizer
-leak detection was disabled because the sandbox does not support its ptrace
-requirements. No kernel compilation, package installation, VM or tablet test
-was performed.
+## Validation and release boundary
 
-The ordinary `make validate`/`make srpm` channel admission still refuses the
-retained Linux 7.3.1 version: the inherited unstable-channel policy requires a
-separately reviewed Linux 7.4-rcN source queue. The source-contract body was
-checked separately without authorizing a build. Do not treat this as release
-admission or publish the retained release106 identity with changed binaries.
-Choose and recheck a fresh release immediately before a separately authorized
-build; no release number is reserved by source consolidation.
+1 November 2026, Debian x86_64 host: the source-contract body of `make validate`
+passes independently of release admission. O82 firmware-loader and register-DMA
+fixtures pass with GCC and Clang ASan/UBSan; leak detection is disabled because
+of the sandbox's ptrace restrictions. Audio ELD and storage prerequisite
+negative controls pass. No upstream kernel compilation, package installation,
+VM boot or tablet test is implied by these host checks.
 
-Historical `packaging/native/copr-*.sh` overlay workers describe their original
-pinned-parent trials, not a supported producer for the combined source. Use
-the original archived commit to reproduce those trials; their overlay lists
-must be revalidated against the complete source lock before reuse. The
-canonical source entry and its channel refusal remain unchanged.
+Ordinary `make validate` and `make srpm` continue to refuse Linux 7.3.1 under
+the inherited Linux 7.4-rcN channel admission. The combined source retains the
+historical release106 metadata; this is not permission to rebuild or publish
+that consumed identity. Allocate and verify a fresh release only as part of a
+separately authorized build. No release is reserved by this consolidation.
 
-The refreshed PR #46 tip declares automatic inactive-slot delivery in package
-metadata. The boot package retains the stronger updater 1.9.0 requirement and
-all final-transaction and boot-reset capability requirements. This source change
-does not install packages, activate a slot or enable a main-push build workflow.
-Existing COPR webhook configuration is separate from GitHub Actions triggers;
-it was not changed or independently qualified by this consolidation.
+Historical `packaging/native/copr-*.sh` recipes describe exact pinned-parent
+trials. Use their archived commits for reproduction. Their fixed release
+numbers, overlay inventories and producer checks do not qualify this combined
+tree. COPR configuration, build requests, devices and installed policy are
+outside this source-only cleanup.
+
+Before future branch deletion, verify the exact tip against a fresh remote
+snapshot, preserve it in an immutable archive tag, and establish either current
+source integration or an explicit historical/experimental archival disposition.
+Use exact-tip deletion leases; leave concurrently changed branches for a new
+audit. Never force-update `main`, `kvm` or existing archive tags.
