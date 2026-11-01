@@ -500,18 +500,18 @@ void self_test() {
     assert(descriptor.command == 0x01403fff);
     assert(o82_regdma_make_descriptor(1, 0xffffff00, 256, &descriptor));
     const auto retained = descriptor;
-    auto refused = [&](unsigned ctl, unsigned long long iova, unsigned long bytes) {
+    auto expect_dma_refusal = [&](unsigned ctl, unsigned long long iova, unsigned long bytes) {
         assert(!o82_regdma_make_descriptor(ctl, iova, bytes, &descriptor));
         assert(descriptor.offset == retained.offset && descriptor.address == retained.address &&
                descriptor.command == retained.command);
     };
-    refused(0, 0x100000, 8); refused(5, 0x100000, 8);
-    refused(~0U, 0x100000, 8); refused(1, 0, 8);
-    refused(1, 0x100001, 8); refused(1, 0x100000000ULL, 8);
-    refused(1, ~0ULL, 8); refused(1, 0xffffff00, 260);
-    refused(1, 0x100000, 0); refused(1, 0x100000, 4);
-    refused(1, 0x100000, 9); refused(1, 0x100000, 65536);
-    refused(1, 0x100000, ~0UL);
+    expect_dma_refusal(0, 0x100000, 8); expect_dma_refusal(5, 0x100000, 8);
+    expect_dma_refusal(~0U, 0x100000, 8); expect_dma_refusal(1, 0, 8);
+    expect_dma_refusal(1, 0x100001, 8); expect_dma_refusal(1, 0x100000000ULL, 8);
+    expect_dma_refusal(1, ~0ULL, 8); expect_dma_refusal(1, 0xffffff00, 260);
+    expect_dma_refusal(1, 0x100000, 0); expect_dma_refusal(1, 0x100000, 4);
+    expect_dma_refusal(1, 0x100000, 9); expect_dma_refusal(1, 0x100000, 65536);
+    expect_dma_refusal(1, 0x100000, ~0UL);
     assert(!o82_regdma_make_descriptor(1, 0x100000, 8, nullptr));
     std::cout << "Decoder, gamut, KWin LUT16 stage contract, dark/gray XYZ/P3 roundtrip, PQ, firmware and Cliffs DMA descriptor bounds passed\n";
 }

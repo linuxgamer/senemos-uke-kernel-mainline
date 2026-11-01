@@ -21,7 +21,7 @@ static inline int o82_regdma_make_descriptor(unsigned int ctl,
 	    iova + bytes - 1 > 0xffffffffULL)
 		return 0;
 
-	/* CTL_0 is1; subtracting1 would address another hardware queue. */
+	/* CTL_0 is 1; subtracting 1 would address another hardware queue. */
 	out->offset = 0x1000U * ctl;
 	out->address = (unsigned int)iova;
 	out->command = (1U << 24) | (1U << 22) | (bytes / 4);
