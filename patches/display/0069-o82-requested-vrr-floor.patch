@@ -29,8 +29,11 @@ Touch delivery and physical cadence require separate device qualification.
  }
  
  static const struct kernel_param_ops o82_vrr_floor_ops = {
-@@ -244,3 +250,3 @@ static const struct kernel_param_ops o82_vrr_floor_ops = {
+@@ -244,6 +250,6 @@ static const struct kernel_param_ops o82_vrr_floor_ops = {
  module_param_cb(o82_vrr_test_min_hz, &o82_vrr_floor_ops, &o82_vrr_test_min_hz, 0400);
  MODULE_PARM_DESC(o82_vrr_test_min_hz,
 -	"Unqualified O82-42 receiver experiment; 0 disables, requests 30-89 use 90 Hz");
 +	"Unqualified O82-42 receiver experiment; 0 disables, 30-143 Hz floor, OEM modes only");
+ 
+ static u32 dither_matrix[DITHER_MATRIX_SZ] = {
+ 	15, 7, 13, 5, 3, 11, 1, 9, 12, 4, 14, 6, 0, 8, 2, 10

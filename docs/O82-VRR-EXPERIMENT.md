@@ -1,12 +1,13 @@
 # O82 video AVR experiment
 
-1 November 2026. Release 111 preserves an explicitly requested 30 Hz floor
+1 November 2026. Release 112 preserves an explicitly requested 30 Hz floor
 instead of silently raising it to 90 Hz. A 144 Hz OEM base therefore admits
 the requested 30-144 Hz software range. Unsupported floors are refused without
 changing the previous value; zero still disables the experiment. Touch delivery,
 flicker and physical refresh cadence remain unqualified below the earlier trial
 floor. A deliberately black first frame now completes the panel/touch restoration
 transaction; read and backlight-enable errors still fail that transaction.
+Release111 stopped before compilation because patch0069 lacked trailing context.
 
 18 October 2026. This source path is an **unqualified receiver experiment**
 for Uke SM7675, the native OEM PB/42 profile, dual DSI and DSC. It defaults to

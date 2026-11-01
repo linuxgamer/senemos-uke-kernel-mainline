@@ -1,9 +1,10 @@
 # Mainline native source profile
 
-1 November 2026, isolated release111 source candidate over qualified release110:
+1 November 2026, isolated release112 source candidate over qualified release110:
 preserve the explicitly requested 30 Hz AVR floor under the 144 Hz OEM base.
 Zero disables the experiment; invalid requests leave the previous value intact.
 An intentional zero-brightness first frame completes panel/touch restoration.
+Release111 stopped on missing trailing patch context before kernel compilation.
 No power, voltage, HBM or amplifier gain limit changes. Package checks, boot,
 physical cadence and low-refresh touch acceptance remain separate gates.
 
