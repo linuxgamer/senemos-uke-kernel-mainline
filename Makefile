@@ -109,6 +109,9 @@ test-microphones:
 	bash tests/wcd939x-reset-consumer-contract.sh "$(kernel_source)"
 	bash tests/wcd939x-io-contract.sh "$(kernel_source)"
 	bash tests/soundwire-resume-clock-contract.sh "$(kernel_source)"
+.PHONY: test-o82-regdma
+test-o82-regdma:
+	bash tests/o82-regdma-transport-contract.sh
 srpm: validate
 	cache="$(CURDIR)/referances/releases"
 	top="$$(realpath -m "$(outdir)/rpmbuild")"

@@ -47,9 +47,13 @@ and factory output gamma. It uses the OEM nominal 420-nit value as a conversion
 bound, not measured luminance or a request for HBM. The versioned data includes
 the exact source identity, length, bounds and CRC. No driver consumes it yet.
 The separately tested HDR descriptor is not attached to the live connector.
-These files do not implement the missing native IGC v4/gamut v4.3 register-DMA
-submission, paired-DSPP atomic state, timeout recovery or buffer lifetime.
-Native HDR10/WCG therefore remains unavailable in KDE.
+A separate native Cliffs DB transport now implements bounded descriptor
+submission, completion/error polling, checked reset and a failed-stop latch.
+Its actual C source is checked against deterministic MMIO in COPR; it has no
+live driver caller. Both clock gates, GEM/VM ownership, paired-DSPP state,
+all preset operations and the four compositor input combinations still need
+integration. Native HDR10/WCG therefore remains unavailable in KDE. See the
+[native transport contract](O82-NATIVE-COLOR.md) for the current boundary.
 
 ## Use
 

@@ -1,6 +1,6 @@
 Name: uke-o82-color-profile
 Version: 0.2.0
-Release: 8%{?dist}
+Release: 9%{?dist}
 Summary: Generate a private O82 OEM P3 ICC mapping for original KDE
 License: MIT
 URL: https://github.com/MCC45TR/senemos-uke-kernel-mainline
@@ -10,6 +10,10 @@ Source2: LICENSE
 Source3: uke-o82-hdr-format.h
 Source4: o82-hdr-edid-contract.cpp
 Source5: o82-regdma.h
+Source6: dpu_o82_regdma.c
+Source7: dpu_o82_regdma.h
+Source8: o82-regdma-transport-contract.c
+Source9: o82-regdma-transport-contract.sh
 ExclusiveArch: aarch64
 BuildRequires: clang gcc-c++ compiler-rt pkgconf-pkg-config
 BuildRequires: pkgconfig(json-c) pkgconfig(lcms2) pkgconfig(openssl)
@@ -30,6 +34,9 @@ cp %{SOURCE2} .
 cp %{SOURCE3} .
 cp %{SOURCE4} .
 cp %{SOURCE5} .
+mkdir -p src/display tests
+cp %{SOURCE5} %{SOURCE6} %{SOURCE7} src/display/
+cp %{SOURCE8} %{SOURCE9} tests/
 
 %build
 g++ -std=c++20 %{optflags} -UNDEBUG -Wall -Wextra -Werror \
@@ -50,6 +57,7 @@ clang++ -std=c++20 -O1 -g -UNDEBUG -Wall -Wextra -Werror \
 g++ -std=c++20 -O2 -UNDEBUG -Wall -Wextra -Werror -I. \
     o82-hdr-edid-contract.cpp $(pkg-config --cflags --libs libdisplay-info) -o edid-contract
 ./edid-contract
+bash tests/o82-regdma-transport-contract.sh .
 
 %files
 %license LICENSE
@@ -57,6 +65,9 @@ g++ -std=c++20 -O2 -UNDEBUG -Wall -Wextra -Werror -I. \
 %{_bindir}/uke-o82-color-profile
 
 %changelog
+* Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 0.2.0-9
+- Check the actual native REGDMA transport with completion and failed-reset faults.
+
 * Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 0.2.0-8
 - Keep the DMA refusal fixture distinct from existing parser-failure state.
 
