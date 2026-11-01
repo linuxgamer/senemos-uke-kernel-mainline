@@ -11,11 +11,11 @@ extern "C" {
 #include <cstdio>
 #include "uke-o82-hdr-format.h"
 
-int main() {
+void check_edid(unsigned primaries, unsigned native_hdr) {
     std::array<unsigned char, O82_HDR_EDID_SIZE + 2> storage{};
     storage.front() = storage.back() = 0xa5;
     auto *bytes = storage.data() + 1;
-    o82_hdr_make_edid(bytes);
+    assert(o82_color_make_edid(bytes, primaries, native_hdr));
     assert(storage.front() == 0xa5 && storage.back() == 0xa5);
     for (unsigned block = 0; block < 3; block++) {
         unsigned sum = 0;
@@ -27,11 +27,16 @@ int main() {
     const auto *edid = di_info_get_edid(info);
     const auto *metadata = di_info_get_hdr_static_metadata(info);
     const auto *color = di_info_get_supported_signal_colorimetry(info);
-    assert(edid && metadata && color && metadata->pq && color->bt2020_rgb);
-    assert(metadata->desired_content_max_luminance > 410 && metadata->desired_content_max_luminance <= 420);
-    assert(metadata->desired_content_min_luminance > 0.30 && metadata->desired_content_min_luminance < 0.35);
-    const auto *primaries = di_edid_get_chromaticity_coords(edid);
-    assert(primaries && std::abs(primaries->red_x - 0.68) < 0.001 && std::abs(primaries->green_y - 0.69) < 0.001);
+    assert(edid && bool(metadata && metadata->pq) == bool(native_hdr));
+    assert(bool(color && color->bt2020_rgb) == bool(native_hdr));
+    if (native_hdr) {
+        assert(metadata->desired_content_max_luminance > 410 && metadata->desired_content_max_luminance <= 420);
+        assert(metadata->desired_content_min_luminance > 0.30 && metadata->desired_content_min_luminance < 0.35);
+    }
+    const auto *xy = di_edid_get_chromaticity_coords(edid);
+    const double red_x = primaries == O82_COLOR_P3 ? 0.68 : 0.64;
+    const double green_y = primaries == O82_COLOR_P3 ? 0.69 : 0.60;
+    assert(xy && std::abs(xy->red_x - red_x) < 0.001 && std::abs(xy->green_y - green_y) < 0.001);
     bool native = false;
     for (auto extension = di_edid_get_extensions(edid); *extension; extension++) {
         const auto *displayid = di_edid_ext_get_displayid(*extension);
@@ -46,5 +51,15 @@ int main() {
     if (failure) std::fprintf(stderr, "%s\n", failure);
     assert(!failure);
     di_info_destroy(info);
-    std::puts("Original KWin EDID inputs: PQ, BT.2020 RGB, P3, nominal OEM luminance and native high-clock DisplayID passed");
+}
+int main() {
+    std::array<unsigned char, O82_HDR_EDID_SIZE> untouched;
+    untouched.fill(0xa5);
+    assert(!o82_color_make_edid(nullptr, O82_COLOR_P3, 1));
+    assert(!o82_color_make_edid(untouched.data(), 2, 1));
+    assert(!o82_color_make_edid(untouched.data(), O82_COLOR_P3, 2));
+    for (auto byte : untouched) assert(byte == 0xa5);
+    for (unsigned primaries : {O82_COLOR_SRGB, O82_COLOR_P3})
+        for (unsigned hdr : {0, 1}) check_edid(primaries, hdr);
+    std::puts("Original KWin EDID inputs: sRGB/P3 modes, gated PQ/BT.2020, nominal luminance and native DisplayID passed without warnings");
 }

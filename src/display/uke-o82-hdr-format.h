@@ -15,6 +15,8 @@
 #define O82_HDR_NOMINAL_PEAK_NITS 420
 #define O82_HDR_NOMINAL_BLACK_10000 3230
 #define O82_HDR_EDID_SIZE 384
+#define O82_COLOR_SRGB 0
+#define O82_COLOR_P3 1
 
 static inline unsigned int o82_hdr_u16(const unsigned char *p)
 {
@@ -96,18 +98,27 @@ static inline int o82_hdr_valid(const unsigned char *data, unsigned long length,
 	return 1;
 }
 
-/* Driver-owned EDID; DisplayID carries the existing >655 MHz 120 Hz timing. */
-static inline void o82_hdr_make_edid(unsigned char edid[O82_HDR_EDID_SIZE])
+/* EDID describes the selected transform; its LUTs remain private driver data. */
+static inline int o82_color_make_edid(unsigned char edid[O82_HDR_EDID_SIZE],
+		unsigned int primaries, unsigned int native_hdr)
 {
 	static const unsigned char signature[8] = {0, 255, 255, 255, 255, 255, 255, 0};
-	static const char name[] = "O82 HDR10\n   ";
-	/* Display-P3 / D65, the logical gamut of the OEM standard_P3 mapping. */
-	static const unsigned short xy[8] = {696, 328, 271, 707, 154, 61, 320, 337};
-	unsigned char *cta = edid + 128, *did = edid + 256, *timing = did + 8;
+	static const char name[] = "O82 Panel\n   ";
+	/* Logical sRGB / Display-P3 inputs, both D65; never factory LUT contents. */
+	static const unsigned short gamuts[2][8] = {
+		{655, 338, 307, 614, 154, 61, 320, 337},
+		{696, 328, 271, 707, 154, 61, 320, 337},
+	};
+	unsigned char *cta, *did, *timing;
 	unsigned int i, sum, clock = 96743 - 1;
 	/* Existing OEM 120 Hz: 3200/3490 by 2136/2310, 967428 kHz. */
 	static const unsigned short dimensions[8] = {3199, 289, 225, 31, 2135, 173, 25, 1};
 
+	if (!edid || primaries > O82_COLOR_P3 || native_hdr > 1)
+		return 0;
+	cta = edid + 128;
+	did = edid + 256;
+	timing = did + 8;
 	for (i = 0; i < O82_HDR_EDID_SIZE; i++)
 		edid[i] = 0;
 	for (i = 0; i < 8; i++)
@@ -120,8 +131,8 @@ static inline void o82_hdr_make_edid(unsigned char edid[O82_HDR_EDID_SIZE])
 	edid[20] = 0x80; /* Digital RGB; the connector separately fixes 10 bpc. */
 	edid[21] = 24; edid[22] = 16; edid[23] = 120;
 	for (i = 0; i < 8; i++) {
-		edid[27 + i] = xy[i] >> 2;
-		edid[25 + i / 4] |= (xy[i] & 3) << (6 - (i % 4) * 2);
+		edid[27 + i] = gamuts[primaries][i] >> 2;
+		edid[25 + i / 4] |= (gamuts[primaries][i] & 3) << (6 - (i % 4) * 2);
 		edid[38 + i * 2] = 1; edid[39 + i * 2] = 1;
 	}
 	edid[57] = 0xfc;
@@ -129,11 +140,13 @@ static inline void o82_hdr_make_edid(unsigned char edid[O82_HDR_EDID_SIZE])
 		edid[59 + i] = name[i];
 	edid[75] = edid[93] = edid[111] = 0x10;
 	edid[126] = 2;
-	cta[0] = 2; cta[1] = 3; cta[2] = 15;
-	cta[4] = 0xe3; cta[5] = 5; cta[6] = 0x80; /* BT.2020 RGB. */
-	cta[8] = 0xe6; cta[9] = 6; cta[10] = 5; cta[11] = 1;
-	/* CTA quantization: nominal max <=420 nits, min derived from OEM black. */
-	cta[12] = 98; cta[13] = 98; cta[14] = 71;
+	cta[0] = 2; cta[1] = 3; cta[2] = native_hdr ? 15 : 4;
+	if (native_hdr) {
+		cta[4] = 0xe3; cta[5] = 5; cta[6] = 0x80; /* BT.2020 RGB. */
+		cta[8] = 0xe6; cta[9] = 6; cta[10] = 5; cta[11] = 1;
+		/* Nominal max <=420 nits, min derived from OEM black; not measured. */
+		cta[12] = 98; cta[13] = 98; cta[14] = 71;
+	}
 	/* Include one zero padding header inside the DisplayID checksum domain. */
 	did[0] = 0x70; did[1] = 0x13; did[2] = 26;
 	did[5] = 3; did[6] = 1; did[7] = 20;
@@ -152,5 +165,6 @@ static inline void o82_hdr_make_edid(unsigned char edid[O82_HDR_EDID_SIZE])
 			sum += edid[block * 128 + i];
 		edid[block * 128 + 127] = (unsigned char)-sum;
 	}
+	return 1;
 }
 #endif
