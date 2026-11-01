@@ -1,8 +1,15 @@
 # Optional PM8010 population on Uke
 
-31 October 2026. On POCO Pad X1 with Fedora Rawhide and Linux7.3.1-3, the
-inherited PM8010 N node at SID0x0d fails its revision read at0x104. The
-firmware PMIC inventory does not advertise model65 (PM8010), the command DB
+31 October 2026, POCO Pad X1, Fedora Rawhide AArch64. Normal DNF installation
+and reboot to Linux 7.3.1-4 in slot B passed. The inherited PM8010 N probe
+is skipped with an explicit firmware-population message, and its earlier
+SPMI transaction warning is absent. The same six working PMIC bindings and
+51 thermal zone registrations remain. Signed package identities, all 821
+module digests, running Image notes/build ID and native GPT/UFS admission
+pass; A/7.3.1-3 remains intact as the accepted rollback image.
+
+On 7.3.1-3, the inherited node at SID 0x0d failed its revision read at 0x104.
+The firmware PMIC inventory does not advertise model 65 (PM8010), the command DB
 has no PM8010 N regulator resources, and the exact OEM camera profile uses
 other suppliers. The other six declared primary-bus PMIC devices bind.
 These observations identify a selected-profile population mismatch; DT names
@@ -24,8 +31,11 @@ references and current upstream. Reference-board PM8010 regulator wiring
 is not copied. The recent upstream PM8010 I2C frontend is a separate bus
 implementation.
 
-Fresh7.3.1-4 retains the verified7.3.1-3 native profile and its exact
-122-patch adaptation. Source/native/package verification and a real boot
-remain separate gates. The actual helper fixtures cover population,
+Release 7.3.1-4 retains the verified 7.3.1-3 native profile and its exact
+122-patch adaptation. The actual native helper fixtures cover population,
 all seven resource alternatives, foreign nodes, deferred firmware and
-malformed boundaries. Physical acceptance is pending.
+malformed boundaries. The kernel WARN taint bit clears; CPU_OUT_OF_SPEC
+and the initial-console warning remain. A later automatic suspend attempt
+still fails with Device or resource busy. This test establishes the probe
+correction for the tested firmware profile, not physical chip population,
+PM8010 thermal accuracy, protection behavior or forced fallback.
