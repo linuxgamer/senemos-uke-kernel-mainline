@@ -1,12 +1,10 @@
 # Mainline native source profile
 
-1 November 2026, isolated release112 source candidate over qualified release110:
-preserve the explicitly requested 30 Hz AVR floor under the 144 Hz OEM base.
-Zero disables the experiment; invalid requests leave the previous value intact.
-An intentional zero-brightness first frame completes panel/touch restoration.
-Release111 stopped on missing trailing patch context before kernel compilation.
-No power, voltage, HBM or amplifier gain limit changes. Package checks, boot,
-physical cadence and low-refresh touch acceptance remain separate gates.
+1 November 2026, isolated kernel116 candidate: compose the explicit O82 30 Hz
+AVR floor and zero-brightness first-frame fix over the exact release115 SRPM.
+Retain its startup fixes, matching package family and all 122 adaptation patches.
+The requested floor is no longer silently raised to90 Hz. Electrical limits
+remain unchanged; low-refresh touch, cadence and lifecycle need tablet acceptance.
 
 31 October 2026, unstable kernel106 candidate: preserve release102's four isolated
 capture channels and deliver one named four-channel input with the kernel.

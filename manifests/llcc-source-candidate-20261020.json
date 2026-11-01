@@ -33,7 +33,7 @@
     },
     {
       "path": "packaging/native/prepare.sh",
-      "sha256": "51155f096a8f6f9c9ef56718c472ecfc2d57104677df6db089494b7aa17e1597"
+      "sha256": "c594936ed83b0a69dd198b92467d6368aa745ed2a7330324a74701001fffc56c"
     },
     {
       "path": "patches/boot/0014-uke-ufs-mcq-resources.patch",
@@ -365,7 +365,7 @@
     },
     {
       "path": "tests/llcc-sm7675-contract.sh",
-      "sha256": "0a8f0edea24702582279d03c21e47912fc1bde43ad5e8f21611355d9aadaf2b7"
+      "sha256": "c95e97fa92b8c716b57a328c43c21bb63ed3a2b02056a4c8c87ce6ce38112758"
     },
     {
       "path": "tests/llcc-sm7675-dt-contract.sh",
@@ -562,6 +562,34 @@
     {
       "path": "tests/pm8010-population-contract.sh",
       "sha256": "d1c85a96b167b6820373da95bebd3a37b8c1eefa10cb2da319a9f958c8b7c511"
+    },
+    {
+      "path": "patches/boot/0057-llcc-optional-window.patch",
+      "sha256": "cb975d74c33ef76b823d39ba897ce3f354b0a2c7e3ad33eec1b67598f8805ecf"
+    },
+    {
+      "path": "patches/boot/0058-fs19xx-current-workqueue.patch",
+      "sha256": "730e4f6ef94e28f908ba8f96c84ae16b996756e6206d29a56336fea6acfc4cd4"
+    },
+    {
+      "path": "tests/audio-fs19xx-lifecycle-contract.sh",
+      "sha256": "0bbdecbf33d551b0041492e96d51ba29fe5235d3fe49bff95036e1319cfe14ef"
+    },
+    {
+      "path": "patches/boot/0059-lpass-sort-reg-defaults.patch",
+      "sha256": "faf3d5648e51c7098909e3d08b07536a022bcabda6f04f72cf0cdb26b82c8e64"
+    },
+    {
+      "path": "src/boot/build-payload.sh",
+      "sha256": "bce2748d6877b8380eaba54916f31b389d2b9f833d2a7cf9dd092eb7685a6d71"
+    },
+    {
+      "path": "src/boot/make-initramfs-cpio.sh",
+      "sha256": "7d6ea987cdc9114512d7300f7a935363fc35737d98f4814748ac73efd558214b"
+    },
+    {
+      "path": "tests/initramfs-cpio-contract.sh",
+      "sha256": "6fe97da1c7b654ede8da0126a28ca95214f046e9c0e85ea868f3b9efed839911"
     }
   ],
   "baseline_files": [
@@ -684,7 +712,7 @@
     "requires_three_candidate_patches_preapplied": true,
     "package_selector": "packaging/native/llcc-profile"
   },
-  "kernel_release": "7.3.1-112",
+  "kernel_release": "7.3.1-115",
   "boot_argument_handoff": {
     "source_commit": "84b172c09fee0b60e901bfe40a2d7b6244aa726a",
     "integrated_commit": "3d78e6c",

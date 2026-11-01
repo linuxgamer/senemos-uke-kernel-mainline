@@ -1,0 +1,20 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] soc: qcom: llcc: check for the optional broadcast-AND window
+
+The optional sixth window is absent on Cliffs7. Check its resource before
+mapping it; retain mapping errors and the existing legacy EINVAL fallback.
+No LLCC windows, bank count, cache policy or activation values change.
+
+--- a/drivers/soc/qcom/llcc-qcom.c
++++ b/drivers/soc/qcom/llcc-qcom.c
+@@ -5782,8 +5782,9 @@ static int qcom_llcc_probe(struct platform_device *pdev)
+ 		goto err;
+ 	}
+ 
+ 	/* Applicable only when drv_data->version >= 4.1 */
+-	if (drv_data->version >= LLCC_VERSION_4_1_0_0) {
++	if (drv_data->version >= LLCC_VERSION_4_1_0_0 &&
++	    platform_get_resource(pdev, IORESOURCE_MEM, i + 1)) {
+ 		drv_data->bcast_and_regmap = qcom_llcc_init_mmio(pdev, i + 1, "llcc_broadcast_and_base");
+ 		if (IS_ERR(drv_data->bcast_and_regmap)) {
+ 			ret = PTR_ERR(drv_data->bcast_and_regmap);

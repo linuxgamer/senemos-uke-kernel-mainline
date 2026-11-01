@@ -41,7 +41,7 @@ cp "$here/../../packaging/native/native.config" "$out/.config"
 usb_profile=$(cat "$kernel/native-generated/usb-profile")
 case $usb_profile in peripheral|typec-v1) ;; *) echo 'Missing USB source-profile receipt' >&2; exit 2;; esac
 if [[ $usb_profile == typec-v1 ]]; then
-    # The full role manager has no early legacy gadget owner or root console.
+    # The full role manager has no early legacy gadget owner or USB root shell.
     for unit_dir in "$init/usr/lib/systemd/system" "$init/etc/systemd/system"; do
         [[ -d $unit_dir ]] || continue
         find "$unit_dir" -type l \( -name uke-cdc-acm.service -o -name uke-cdc-shell.service \) -delete
@@ -104,7 +104,7 @@ fi
 bash "$here/../audit/check-target-payload.sh" "$init"
 bash "$here/../audit/check-target-privacy.sh" "$init"
 find "$init" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
-(cd "$init"; find . -print0 | LC_ALL=C sort -z | cpio --null --quiet --reproducible --owner=0:0 -o -H newc) | gzip -n -9 > "$out/boot-initramfs.cpio.gz"
+bash "$here/make-initramfs-cpio.sh" "$init" "$out/usr/gen_init_cpio" "$out/boot-initramfs.cpio.gz" "$SOURCE_DATE_EPOCH"
 printf 'UKE_BUILD_STAGE initramfs elapsed_s=%d jobs=%s\n' "$((SECONDS-uke_stage_start))" "$jobs"
 uke_stage_start=$SECONDS
 bash "$kernel/scripts/config" --file "$out/.config" --set-str INITRAMFS_SOURCE "$out/boot-initramfs.cpio.gz"
