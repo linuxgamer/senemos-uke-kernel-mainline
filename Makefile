@@ -14,6 +14,7 @@ validate: test-touch-protocol test-touch-transport
 	bash tests/input-capability-inventory.sh
 	bash tests/kvm-source-contract.sh
 	bash tests/el2-profile-contract.sh
+	bash -n tests/usb-role-pm-contract.sh
 	bash tests/copr-source-guards-contract.sh
 	bash -n tests/msm-retirement-contract.sh tests/msm-writeback-contract.sh tests/msm-retirement-proof-contract.sh
 	bash -n tests/o82-avr-contract.sh tests/dpu-video-timing-contract.sh
