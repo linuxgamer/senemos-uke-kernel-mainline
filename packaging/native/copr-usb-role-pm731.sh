@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
-# COPR-only USB candidate retaining the complete qualified release1006 cohort.
+# Testing-only USB candidate retaining the complete qualified release1006 cohort.
 set -Eeuo pipefail
 export LC_ALL=C
 test ! -e /etc/senemos/kernel-update.conf
+[[ ${COPR_PROJECT:-} == uke-linux-test ]]
 [[ $(rpm --eval '%{_host_cpu}') == aarch64 && $(rpm --eval '%{fedora}') == 46 ]]
 owner=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 output=$(realpath -m "${1:?COPR result directory}")
 expected_release=7.3.1-1020
 bash "$owner/packaging/native/refuse-published-release.sh" senemos-uke-linux-kernel-mainline "$expected_release"
-make -C "$owner" validate
 stage=$(mktemp -d)
 trap 'find "$stage" -depth -delete' EXIT
+# Validate the retained source's producer; current main has a separate RC admission.
+git init -q "$stage/parent-source"
+git -C "$stage/parent-source" remote add origin https://github.com/MCC45TR/senemos-uke-kernel-mainline.git
+git -C "$stage/parent-source" fetch --depth=1 origin fcbdae4b757732f0f0e3162c610f19abae290832
+git -C "$stage/parent-source" checkout --detach FETCH_HEAD
+test "$(git -C "$stage/parent-source" rev-parse HEAD)" = fcbdae4b757732f0f0e3162c610f19abae290832
+make -C "$stage/parent-source" validate
 curl --fail --location --silent --show-error --retry 3 --proto '=https' --proto-redir '=https' \
  https://download.copr.fedorainfracloud.org/results/mcc45tr/uke-linux-test:custom:power-20261031/srpm-builds/11240463/senemos-uke-linux-kernel-mainline-7.3.1-1006.src.rpm -o "$stage/base.src.rpm"
 printf '%s  %s\n' 70f151855f727c9d83c3bedc35ff52dd60cb222b2d741818472dced458bcd60c "$stage/base.src.rpm" | sha256sum -c -

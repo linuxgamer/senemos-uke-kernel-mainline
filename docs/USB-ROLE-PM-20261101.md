@@ -15,6 +15,12 @@ dropping those inputs. Whole-setting comparison and a missing-field negative
 case supplement the original file-byte retention checks. A new complete COPR
 build and physical qualification remain required.
 
+This retained stable-source worker is restricted to `uke-linux-test`.
+It validates the exact 1006 producer before auditing its retained archives;
+the current main source has a separate 7.4-rc admission policy. The ordinary
+unstable entry and that policy remain unchanged. Its first 1020 attempt stopped
+before emitting a source RPM because it incorrectly validated current main.
+
 The role notifier can run outside the freezer while system sleep has stopped
 the glue clocks. Runtime-PM success then does not establish that QSCRATCH is
 accessible. The existing Uke adaptation has no system-sleep exclusion around
