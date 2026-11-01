@@ -1,6 +1,6 @@
 Name: uke-o82-color-profile
 Version: 0.2.0
-Release: 2%{?dist}
+Release: 3%{?dist}
 Summary: Generate a private O82 OEM P3 ICC mapping for original KDE
 License: MIT
 URL: https://github.com/MCC45TR/senemos-uke-kernel-mainline
@@ -54,6 +54,9 @@ g++ -std=c++20 -O2 -UNDEBUG -Wall -Wextra -Werror -I. \
 %{_bindir}/uke-o82-color-profile
 
 %changelog
+* Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 0.2.0-3
+- Use the KWin-compatible leading-matrix LUT16 profile and validate serialized stages.
+
 * Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 0.2.0-2
 - Use libdisplay-info's C linkage in the compositor capability fixture.
 

@@ -231,7 +231,7 @@ Icc make_icc(const Profile &factory) {
     auto reference = p3_reference();
     Icc output(cmsCreateProfilePlaceholder(nullptr), cmsCloseProfile);
     require(bool(output), "ICC allocation failed");
-    cmsSetProfileVersion(output.get(), 4.3);
+    cmsSetProfileVersion(output.get(), 2.4);
     cmsSetDeviceClass(output.get(), cmsSigDisplayClass);
     cmsSetColorSpace(output.get(), cmsSigRgbData);
     cmsSetPCS(output.get(), cmsSigXYZData);
@@ -258,7 +258,7 @@ Icc make_icc(const Profile &factory) {
     auto insert = [&](cmsStage *stage) {
         require(stage && cmsPipelineInsertStage(pipeline.get(), cmsAT_END, stage), "pipeline stage failed");
     };
-    insert(cmsStageAllocToneCurves(nullptr, 3, identities));
+    /* KWin folds XYZ normalization into this leading LUT16 matrix. */
     insert(cmsStageAllocMatrix(nullptr, 3, 3, matrix, nullptr));
     insert(cmsStageAllocToneCurves(nullptr, 3, inverses));
     auto clut = cmsStageAllocCLut16bit(nullptr, 65, 3, 3, nullptr);
@@ -322,6 +322,20 @@ void save(cmsHPROFILE profile, const char *path) {
     require(cmsSaveProfileToMem(profile, nullptr, &length) && length <= 8 * 1024 * 1024, "ICC serialization failed");
     std::vector<unsigned char> data(length);
     require(cmsSaveProfileToMem(profile, data.data(), &length), "ICC serialization failed");
+    Icc reopened(cmsOpenProfileFromMem(data.data(), length), cmsCloseProfile);
+    require(bool(reopened), "serialized ICC cannot be reopened");
+    unsigned char type[4]{};
+    require(cmsReadRawTag(reopened.get(), cmsSigBToA1Tag, type, sizeof(type)) == sizeof(type) &&
+            std::memcmp(type, "mft2", sizeof(type)) == 0, "ICC requires the original KWin LUT16 path");
+    auto pipeline = static_cast<const cmsPipeline *>(cmsReadTag(reopened.get(), cmsSigBToA1Tag));
+    require(pipeline && cmsPipelineStageCount(pipeline) == 4, "ICC shader stage count mismatch");
+    const cmsStageSignature expected[]{cmsSigMatrixElemType, cmsSigCurveSetElemType,
+                                       cmsSigCLutElemType, cmsSigCurveSetElemType};
+    auto stage = cmsPipelineGetPtrToFirstStage(pipeline);
+    for (auto signature : expected) {
+        require(stage && cmsStageType(stage) == signature, "ICC shader stage order mismatch");
+        stage = cmsStageNext(stage);
+    }
     save_bytes(data, path);
 }
 double pq_nits(double code) {
@@ -402,7 +416,8 @@ void self_test() {
     for (unsigned blue = 0; blue < 17; ++blue)
         for (unsigned green = 0; green < 17; ++green)
             for (unsigned red = 0; red < 17; ++red) identity.gamut.push_back({red / 16.0, green / 16.0, blue / 16.0});
-    const std::array<Vec, 6> inputs{{{0,0,0}, {1,1,1}, {0.1,0.2,0.3}, {1,0,0}, {0,1,0}, {0,0,1}}};
+    const std::array<Vec, 11> inputs{{{0,0,0}, {1,1,1}, {0.1,0.2,0.3}, {1,0,0}, {0,1,0}, {0,0,1},
+        {0.01,0.01,0.01}, {0.05,0.05,0.05}, {0.18,0.18,0.18}, {0.5,0.5,0.5}, {0.75,0.75,0.75}}};
     for (const Vec input : inputs) {
         const auto output = identity.map(input);
         for (size_t channel = 0; channel < 3; ++channel) assert(std::abs(output[channel] - input[channel]) < 1e-12);
@@ -435,6 +450,15 @@ void self_test() {
     assert(cmsSaveProfileToMem(profile.get(), bytes.data(), &size));
     Icc reopened(cmsOpenProfileFromMem(bytes.data(), size), cmsCloseProfile);
     assert(reopened && cmsGetPCS(reopened.get()) == cmsSigXYZData && cmsIsTag(reopened.get(), cmsSigBToA1Tag));
+    unsigned char type[4]{};
+    assert(cmsReadRawTag(reopened.get(), cmsSigBToA1Tag, type, sizeof(type)) == sizeof(type));
+    assert(std::memcmp(type, "mft2", sizeof(type)) == 0);
+    auto serialized = static_cast<const cmsPipeline *>(cmsReadTag(reopened.get(), cmsSigBToA1Tag));
+    assert(serialized && cmsPipelineStageCount(serialized) == 4);
+    const cmsStageSignature expected[]{cmsSigMatrixElemType, cmsSigCurveSetElemType,
+                                       cmsSigCLutElemType, cmsSigCurveSetElemType};
+    auto stage = cmsPipelineGetPtrToFirstStage(serialized);
+    for (auto signature : expected) { assert(stage && cmsStageType(stage) == signature); stage = cmsStageNext(stage); }
     auto transform = cmsCreateTransform(reference.get(), TYPE_RGB_DBL, reopened.get(), TYPE_RGB_DBL,
                                         INTENT_RELATIVE_COLORIMETRIC, cmsFLAGS_NOOPTIMIZE | cmsFLAGS_NOCACHE);
     assert(transform);
@@ -464,7 +488,7 @@ void self_test() {
         assert(!o82_hdr_valid(firmware.data(), firmware.size(), 0x42));
         firmware[offset] ^= 1;
     }
-    std::cout << "Decoder, gamut axis/interpolation, ICC XYZ/P3 roundtrip and SHA-256 checks passed\n";
+    std::cout << "Decoder, gamut, KWin LUT16 stage contract, dark/gray XYZ/P3 roundtrip, PQ and firmware checks passed\n";
 }
 }
 int main(int argc, char **argv) {
