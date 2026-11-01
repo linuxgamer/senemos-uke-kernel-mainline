@@ -1,6 +1,6 @@
 Name: uke-o82-color-profile
 Version: 0.2.0
-Release: 6%{?dist}
+Release: 7%{?dist}
 Summary: Generate a private O82 OEM P3 ICC mapping for original KDE
 License: MIT
 URL: https://github.com/MCC45TR/senemos-uke-kernel-mainline
@@ -9,6 +9,7 @@ Source1: O82-COLOR-PROFILE.md
 Source2: LICENSE
 Source3: uke-o82-hdr-format.h
 Source4: o82-hdr-edid-contract.cpp
+Source5: o82-regdma.h
 ExclusiveArch: aarch64
 BuildRequires: clang gcc-c++ compiler-rt pkgconf-pkg-config
 BuildRequires: pkgconfig(json-c) pkgconfig(lcms2) pkgconfig(openssl)
@@ -28,6 +29,7 @@ cp %{SOURCE1} .
 cp %{SOURCE2} .
 cp %{SOURCE3} .
 cp %{SOURCE4} .
+cp %{SOURCE5} .
 
 %build
 g++ -std=c++20 %{optflags} -UNDEBUG -Wall -Wextra -Werror \
@@ -54,6 +56,9 @@ g++ -std=c++20 -O2 -UNDEBUG -Wall -Wextra -Werror -I. \
 %{_bindir}/uke-o82-color-profile
 
 %changelog
+* Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 0.2.0-7
+- Verify Cliffs register-DMA descriptor alignment, aperture and length bounds.
+
 * Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 0.2.0-6
 - Check both OEM input gamuts and gate HDR descriptors on a native converter.
 

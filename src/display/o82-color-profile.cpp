@@ -20,6 +20,7 @@
 #include <unistd.h>
 #include <vector>
 #include "uke-o82-hdr-format.h"
+#include "o82-regdma.h"
 
 namespace {
 using Vec = std::array<double, 3>;
@@ -488,7 +489,31 @@ void self_test() {
         assert(!o82_hdr_valid(firmware.data(), firmware.size(), 0x42));
         firmware[offset] ^= 1;
     }
-    std::cout << "Decoder, gamut, KWin LUT16 stage contract, dark/gray XYZ/P3 roundtrip, PQ and firmware checks passed\n";
+    static_assert(sizeof(unsigned int) == 4 && sizeof(unsigned long long) == 8);
+    o82_regdma_descriptor descriptor{};
+    for (unsigned ctl = 1; ctl <= 4; ctl++) {
+        assert(o82_regdma_make_descriptor(ctl, 0x100000, 8, &descriptor));
+        assert(descriptor.offset == ctl * 0x1000 && descriptor.address == 0x100000);
+        assert(descriptor.command == 0x01400002);
+    }
+    assert(o82_regdma_make_descriptor(1, 0xffff0000, 0x3fff * 4, &descriptor));
+    assert(descriptor.command == 0x01403fff);
+    assert(o82_regdma_make_descriptor(1, 0xffffff00, 256, &descriptor));
+    const auto retained = descriptor;
+    auto refused = [&](unsigned ctl, unsigned long long iova, unsigned long bytes) {
+        assert(!o82_regdma_make_descriptor(ctl, iova, bytes, &descriptor));
+        assert(descriptor.offset == retained.offset && descriptor.address == retained.address &&
+               descriptor.command == retained.command);
+    };
+    refused(0, 0x100000, 8); refused(5, 0x100000, 8);
+    refused(~0U, 0x100000, 8); refused(1, 0, 8);
+    refused(1, 0x100001, 8); refused(1, 0x100000000ULL, 8);
+    refused(1, ~0ULL, 8); refused(1, 0xffffff00, 260);
+    refused(1, 0x100000, 0); refused(1, 0x100000, 4);
+    refused(1, 0x100000, 9); refused(1, 0x100000, 65536);
+    refused(1, 0x100000, ~0UL);
+    assert(!o82_regdma_make_descriptor(1, 0x100000, 8, nullptr));
+    std::cout << "Decoder, gamut, KWin LUT16 stage contract, dark/gray XYZ/P3 roundtrip, PQ, firmware and Cliffs DMA descriptor bounds passed\n";
 }
 }
 int main(int argc, char **argv) {
