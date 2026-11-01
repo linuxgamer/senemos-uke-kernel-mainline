@@ -32,9 +32,12 @@ make -s -C "$kernel" O="$scratch/out" ARCH=arm64 olddefconfig
 make -s -C "$kernel" O="$scratch/out" ARCH=arm64 -j4 prepare
 printf '%s  %s\n' 81763fc03ea0ebf254ab7427af2113dc0c7c0d80dceab61232b6e371463d1f90 \
     "$kernel/drivers/gpu/drm/msm/registers/gen_header.py" | sha256sum -c -
-# Existing host-only upstream exception in packaging/native/README.md.
-make -C "$kernel" O="$scratch/out" ARCH=arm64 \
-    drivers/gpu/drm/msm/generated/mdp_common.xml.h
+# Same command as MSM's Kbuild; the top-level Makefile has no direct .h target.
+mkdir -p "$scratch/out/drivers/gpu/drm/msm/generated"
+python3 "$kernel/drivers/gpu/drm/msm/registers/gen_header.py" --no-validate \
+    --rnn "$kernel/drivers/gpu/drm/msm/registers" \
+    --xml "$kernel/drivers/gpu/drm/msm/registers/display/mdp_common.xml" c-defines \
+    > "$scratch/out/drivers/gpu/drm/msm/generated/mdp_common.xml.h"
 make -C "$kernel" O="$scratch/out" ARCH=arm64 KCFLAGS=-Werror -j4 \
     drivers/gpu/drm/msm/disp/dpu1/dpu_o82_profiles.o \
     drivers/gpu/drm/msm/disp/dpu1/dpu_o82_regdma.o
