@@ -1,0 +1,27 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: fs19xx: use the current per-CPU system workqueue
+
+Linux 7.3 names system_percpu_wq as the replacement for system_wq.
+Keep the existing delayed-work callbacks, locking, delay and cancellation.
+No amplifier registers, gain, firmware or calibration settings change.
+
+--- a/sound/soc/codecs/fs19xx.c
++++ b/sound/soc/codecs/fs19xx.c
+@@ -433,7 +433,7 @@
+ 		goto stop;
+ 	if (!(status & FS19XX_STATUS_PLLS)) {
+ 		if (++fs19xx->pll_polls < FS19XX_LOCK_POLL_COUNT) {
+-			mod_delayed_work(system_wq, &fs19xx->unmute_work,
++			mod_delayed_work(system_percpu_wq, &fs19xx->unmute_work,
+ 					 msecs_to_jiffies(FS19XX_LOCK_POLL_MS));
+ 			return;
+ 		}
+@@ -489,7 +489,7 @@
+ 	}
+ 	fs19xx->powered = true;
+ 	fs19xx->pll_polls = 0;
+-	mod_delayed_work(system_wq, &fs19xx->unmute_work,
++	mod_delayed_work(system_percpu_wq, &fs19xx->unmute_work,
+ 			 msecs_to_jiffies(FS19XX_UNMUTE_DELAY_MS));
+ 	return 0;
+ }

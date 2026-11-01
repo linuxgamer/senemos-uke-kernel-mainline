@@ -10,6 +10,10 @@ cp "$kernel/drivers/gpu/drm/msm/msm_fb.c" "$output/msm-framebuffer-before55.c"
 git -C "$kernel" apply --check "$profile/patches/display/0065-msm-framebuffer-pin-state.patch"
 git -C "$kernel" apply "$profile/patches/display/0065-msm-framebuffer-pin-state.patch"
 CC=clang bash "$profile/tests/msm-framebuffer-pin-contract.sh" "$kernel" "$output/msm-framebuffer-before55.c"
+for startup_patch in 0057-llcc-optional-window.patch 0058-fs19xx-current-workqueue.patch; do
+    git -C "$kernel" apply --check "$profile/patches/boot/$startup_patch"
+    git -C "$kernel" apply "$profile/patches/boot/$startup_patch"
+done
 export UKE_LLCC_PROFILE
 UKE_LLCC_PROFILE=$(cat "$profile/llcc-profile")
 case $UKE_LLCC_PROFILE in disabled|native-v1) ;; *) echo 'Unknown LLCC package profile' >&2; exit 2;; esac

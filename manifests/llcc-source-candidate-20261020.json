@@ -33,7 +33,7 @@
     },
     {
       "path": "packaging/native/prepare.sh",
-      "sha256": "8cdef42c010304bd948cf1fa83015c12b8cce637f647bfcf166de6c49efc3db1"
+      "sha256": "a469522ca85e9491c5ab59a80553a61442ae774dd0d4b57600b1aa93f43ab142"
     },
     {
       "path": "patches/boot/0014-uke-ufs-mcq-resources.patch",
@@ -365,7 +365,7 @@
     },
     {
       "path": "tests/llcc-sm7675-contract.sh",
-      "sha256": "0a8f0edea24702582279d03c21e47912fc1bde43ad5e8f21611355d9aadaf2b7"
+      "sha256": "c95e97fa92b8c716b57a328c43c21bb63ed3a2b02056a4c8c87ce6ce38112758"
     },
     {
       "path": "tests/llcc-sm7675-dt-contract.sh",
@@ -562,6 +562,18 @@
     {
       "path": "tests/pm8010-population-contract.sh",
       "sha256": "d1c85a96b167b6820373da95bebd3a37b8c1eefa10cb2da319a9f958c8b7c511"
+    },
+    {
+      "path": "patches/boot/0057-llcc-optional-window.patch",
+      "sha256": "cb975d74c33ef76b823d39ba897ce3f354b0a2c7e3ad33eec1b67598f8805ecf"
+    },
+    {
+      "path": "patches/boot/0058-fs19xx-current-workqueue.patch",
+      "sha256": "730e4f6ef94e28f908ba8f96c84ae16b996756e6206d29a56336fea6acfc4cd4"
+    },
+    {
+      "path": "tests/audio-fs19xx-lifecycle-contract.sh",
+      "sha256": "0bbdecbf33d551b0041492e96d51ba29fe5235d3fe49bff95036e1319cfe14ef"
     }
   ],
   "baseline_files": [
@@ -684,7 +696,7 @@
     "requires_three_candidate_patches_preapplied": true,
     "package_selector": "packaging/native/llcc-profile"
   },
-  "kernel_release": "7.3.1-110",
+  "kernel_release": "7.3.1-113",
   "boot_argument_handoff": {
     "source_commit": "84b172c09fee0b60e901bfe40a2d7b6244aa726a",
     "integrated_commit": "3d78e6c",

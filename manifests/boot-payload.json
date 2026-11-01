@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "date": "2026-10-31",
+  "date": "2026-11-01",
   "source_date_epoch": 1792058622,
-  "source_origin": "Signed Linux7.3.1 with qualified release102 capture and the release109 audio registration/ELD correction. Candidate110 supplies model-specific ALSA card headings and UCM microphone/speaker labels in kernel-core. Release109 speaker and microphone operation is operator-confirmed; candidate110 fresh-boot acceptance remains pending. Startup gains and electrical settings are unchanged.",
+  "source_origin": "Signed Linux7.3.1 with the complete release110 source parent. Candidate113 checks the optional LLCC window before mapping and moves FS19xx delayed work to the current per-CPU queue. Hardware settings and the release110 audio/display inputs are retained; physical acceptance remains pending.",
   "firmware_included": false,
   "device_private_data_included": false,
   "python_target_payload": false,
@@ -565,7 +565,7 @@
     },
     {
       "path": "packaging/native/prepare.sh",
-      "sha256": "8cdef42c010304bd948cf1fa83015c12b8cce637f647bfcf166de6c49efc3db1"
+      "sha256": "a469522ca85e9491c5ab59a80553a61442ae774dd0d4b57600b1aa93f43ab142"
     },
     {
       "path": "packaging/native/audio-profile",
@@ -846,6 +846,22 @@
     {
       "path": "tests/dp-eld-notification-contract.sh",
       "sha256": "253fbb43d19fab14cd4d147c50f2fe26800c73dc6ea1c3c4703d13928c993eef"
+    },
+    {
+      "path": "patches/boot/0057-llcc-optional-window.patch",
+      "sha256": "cb975d74c33ef76b823d39ba897ce3f354b0a2c7e3ad33eec1b67598f8805ecf"
+    },
+    {
+      "path": "patches/boot/0058-fs19xx-current-workqueue.patch",
+      "sha256": "730e4f6ef94e28f908ba8f96c84ae16b996756e6206d29a56336fea6acfc4cd4"
+    },
+    {
+      "path": "tests/llcc-sm7675-contract.sh",
+      "sha256": "c95e97fa92b8c716b57a328c43c21bb63ed3a2b02056a4c8c87ce6ce38112758"
+    },
+    {
+      "path": "tests/audio-fs19xx-lifecycle-contract.sh",
+      "sha256": "0bbdecbf33d551b0041492e96d51ba29fe5235d3fe49bff95036e1319cfe14ef"
     }
   ],
   "root_selector_capability": {

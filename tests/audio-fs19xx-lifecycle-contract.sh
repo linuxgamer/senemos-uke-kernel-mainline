@@ -20,6 +20,8 @@ if [[ -z $kernel ]]; then
         "$root/patches/7.3.0/0118-asoc-fs19xx-speaker-rotation.patch"
     git -C "$kernel" apply --include=sound/soc/codecs/fs19xx.c \
         "$root/patches/7.3.0/0119-asoc-uke-probe-readiness.patch"
+    git -C "$kernel" apply --include=sound/soc/codecs/fs19xx.c \
+        "$root/patches/boot/0058-fs19xx-current-workqueue.patch"
 fi
 source_file=$kernel/sound/soc/codecs/fs19xx.c
 cat > "$work/check.c" <<'C'
@@ -63,7 +65,7 @@ static void drop_lock(struct mutex **m) { mutex_unlock(*m); }
 #define dev_dbg(...) ((void)0)
 #define dev_info(...) ((void)0)
 #define msecs_to_jiffies(x) (x)
-static void *system_wq;
+static void *system_percpu_wq;
 static void msleep(unsigned x) { sleeps+=x; }
 static void usleep_range(unsigned a,unsigned b) { (void)a;(void)b; }
 static void gpiod_set_value_cansleep(struct gpio_desc *g,int v) { g->asserted=v; }
