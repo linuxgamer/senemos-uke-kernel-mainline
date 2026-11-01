@@ -40,6 +40,7 @@ g++ -std=c++20 %{optflags} -UNDEBUG -Wall -Wextra -Werror \
 install -Dpm755 uke-o82-color-profile %{buildroot}%{_bindir}/uke-o82-color-profile
 
 %check
+gcc -std=c11 -Wall -Wextra -Werror -x c -fsyntax-only o82-regdma.h
 ./uke-o82-color-profile --self-test
 clang++ -std=c++20 -O1 -g -UNDEBUG -Wall -Wextra -Werror \
     -fsanitize=address,undefined -fno-omit-frame-pointer \
