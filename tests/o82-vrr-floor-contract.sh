@@ -44,22 +44,28 @@ int main(void) {
  for(unsigned i=0;i<sizeof(requests)/sizeof(requests[0]);++i) {
   char request[32],readback[32];unsigned actual;
   const unsigned requested=requests[i];
-  const unsigned expected=requested>=30&&requested<90?90:requested;
+  const unsigned previous=o82_vrr_test_min_hz;
   snprintf(request,sizeof(request),"%u",requested);
+  if(requested && (requested<30 || requested>=144)) {
+   assert(floor_ops->set(request,&floor_parameter)==-ERANGE);
+   assert(o82_vrr_test_min_hz==previous);
+   continue;
+  }
   assert(!floor_ops->set(request,&floor_parameter));
-  assert(o82_vrr_test_min_hz==expected);
+  assert(o82_vrr_test_min_hz==requested);
   assert(floor_ops->get(readback,&floor_parameter)>0);
-  assert(sscanf(readback,"%u",&actual)==1&&actual==expected);
+  assert(sscanf(readback,"%u",&actual)==1&&actual==requested);
  }
  assert(!floor_ops->set("0x1e",&floor_parameter));
- assert(o82_vrr_test_min_hz==90);
- assert(floor_ops->set("invalid",&floor_parameter)<0&&o82_vrr_test_min_hz==90);
- assert(floor_ops->set("4294967296",&floor_parameter)<0&&o82_vrr_test_min_hz==90);
- assert(floor_ops->set("-1",&floor_parameter)<0&&o82_vrr_test_min_hz==90);
+ assert(o82_vrr_test_min_hz==30);
+ assert(floor_ops->set("invalid",&floor_parameter)<0&&o82_vrr_test_min_hz==30);
+ assert(floor_ops->set("4294967296",&floor_parameter)<0&&o82_vrr_test_min_hz==30);
+ assert(floor_ops->set("-1",&floor_parameter)<0&&o82_vrr_test_min_hz==30);
+ assert(!floor_ops->set("0",&floor_parameter)&&o82_vrr_test_min_hz==0);
  (void)standard_ops;
  return 0;
 }
 C
 "${CC:-cc}" -std=c11 -Wall -Wextra -Werror "$work/check.c" -o "$work/check"
 "$work/check"
-printf 'Actual O82 parameter: opt-in floor normalization, readback, disabled state and parser refusal passed\n'
+printf 'Actual O82 parameter: 30 Hz floor, readback, disabled state and transactional refusal passed\n'

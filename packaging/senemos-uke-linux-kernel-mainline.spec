@@ -7,7 +7,7 @@
 Name: senemos-uke-linux-kernel-mainline
 Version: 7.3.1
 %if "%{version}" == "7.3.1"
-%global senemos_build_release 1004
+%global senemos_build_release 1006
 %else
 %global senemos_build_release 1
 %endif
@@ -455,6 +455,14 @@ cp -a boot-recipe/src/boot/licenses/. %{buildroot}/usr/share/licenses/%{name}-bo
 /usr/lib/senemos/default-boot.img
 
 %changelog
+* Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-1006
+- Retain release1003 display, power, audio and adaptation inputs.
+- Correct LMH IRQ ownership across policy-ready activation and hotplug.
+
+* Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-1003
+- Preserve the requested 30 Hz O82 floor and zero-brightness first frame.
+- Retain the installed release116 power, startup and matching-family inputs.
+
 * Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-115
 - Encode the standard initial console in one deterministic source-built cpio.
 - Preserve early-user files, permissions, symlinks and regular-file hardlinks.

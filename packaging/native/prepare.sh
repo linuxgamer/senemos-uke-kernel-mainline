@@ -195,4 +195,8 @@ if [[ $(cat "$profile/audio-profile") == microphones ]]; then
     bash "$profile/tests/microphone-audio-topology-contract.sh"
     bash "$profile/tests/microphone-audio-card-contract.sh"
 fi
+# Preserve the historical KMS source receipts before this explicit AVR opt-in.
+git -C "$kernel" apply --check "$profile/patches/display/0069-o82-requested-vrr-floor.patch"
+git -C "$kernel" apply "$profile/patches/display/0069-o82-requested-vrr-floor.patch"
+bash "$profile/tests/o82-vrr-floor-contract.sh" "$kernel"
 printf 'Exact seven-mode O82-42 native source prepared; no private boot input\n'

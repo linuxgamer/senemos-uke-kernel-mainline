@@ -2,7 +2,7 @@
   "schema_version": 1,
   "date": "2026-11-01",
   "source_date_epoch": 1792058622,
-  "source_origin": "Signed Linux 7.3.1 and the exact release 116 source composition. Candidate 1004 corrects its physically reproduced LMH double-enable during policy reactivation. Four-channel audio, all 122 adaptation patches, startup fixes, CPUCP observation and all three ignore-unused parameters are retained. Physical correction acceptance is pending.",
+  "source_origin": "Signed Linux 7.3.1 and the exact release1003 source composition. Candidate1006 retains its O82 restoration and requested AVR floor, four-channel audio, startup fixes and all122 adaptation patches, with the reviewed LMH policy-ready correction. Physical acceptance is pending.",
   "firmware_included": false,
   "device_private_data_included": false,
   "python_target_payload": false,
@@ -565,7 +565,7 @@
     },
     {
       "path": "packaging/native/prepare.sh",
-      "sha256": "5e9c763260b05d2d8ff50d3e804356dfc8b7c6081a87c8cf6cb0cbbaa2fe8728"
+      "sha256": "c594936ed83b0a69dd198b92467d6368aa745ed2a7330324a74701001fffc56c"
     },
     {
       "path": "packaging/native/audio-profile",
@@ -573,7 +573,7 @@
     },
     {
       "path": "packaging/native/README.md",
-      "sha256": "07151ff15503ba3bdc33406806564fbaffafe9bfca005316999fb61f28fc539a"
+      "sha256": "0b175805e4f6f64bd690492a5118171fbfd73b21f1408d8fbc2ed843bba9e6bf"
     },
     {
       "path": "src/boot/prepare-abl-source.sh",

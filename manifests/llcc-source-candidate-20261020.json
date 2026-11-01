@@ -33,7 +33,7 @@
     },
     {
       "path": "packaging/native/prepare.sh",
-      "sha256": "5e9c763260b05d2d8ff50d3e804356dfc8b7c6081a87c8cf6cb0cbbaa2fe8728"
+      "sha256": "c594936ed83b0a69dd198b92467d6368aa745ed2a7330324a74701001fffc56c"
     },
     {
       "path": "patches/boot/0014-uke-ufs-mcq-resources.patch",
@@ -205,7 +205,7 @@
     },
     {
       "path": "src/display/panel-xiaomi-o82.c",
-      "sha256": "0cf49d8dd01c499a73085489e59cd638c0f8c413cefefefe1de616c0c6c869e9"
+      "sha256": "d510cda34e359d5ca7355276744f22878ae98f5be914371bc6bc053572dc4dd5"
     },
     {
       "path": "src/display/prepare-source.sh",
@@ -642,6 +642,10 @@
     {
       "path": "patches/boot/0060-cpufreq-lmh-ready-lifecycle.patch",
       "sha256": "c4077a97a3bc4ea38d4259c8505d6873d419a91b377ec85a26afe95587aa91c8"
+    },
+    {
+      "path": "patches/display/0069-o82-requested-vrr-floor.patch",
+      "sha256": "1b285cca8d3bdc039cebefddea3ba36540bee7980e0feae86bb149cb5e48a2a7"
     }
   ],
   "baseline_files": [
@@ -764,7 +768,7 @@
     "requires_three_candidate_patches_preapplied": true,
     "package_selector": "packaging/native/llcc-profile"
   },
-  "kernel_release": "7.3.1-1004",
+  "kernel_release": "7.3.1-1006",
   "boot_argument_handoff": {
     "source_commit": "84b172c09fee0b60e901bfe40a2d7b6244aa726a",
     "integrated_commit": "3d78e6c",
