@@ -10,7 +10,7 @@ producer retains qualified 1006 from COPR 11240463, source
 fcbdae4b757732f0f0e3162c610f19abae290832, SRPM SHA256
 70f151855f727c9d83c3bedc35ff52dd60cb222b2d741818472dced458bcd60c.
 That cohort already retains the installed 1003 display changes and the later
-LMH-ready correction. Candidate 1010 adds the same USB patch and model without
+LMH-ready correction. Candidate 1020 adds the same USB patch and model without
 dropping those inputs. Whole-setting comparison and a missing-field negative
 case supplement the original file-byte retention checks. A new complete COPR
 build and physical qualification remain required.

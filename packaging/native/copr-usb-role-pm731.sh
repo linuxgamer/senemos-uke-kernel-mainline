@@ -6,7 +6,7 @@ test ! -e /etc/senemos/kernel-update.conf
 [[ $(rpm --eval '%{_host_cpu}') == aarch64 && $(rpm --eval '%{fedora}') == 46 ]]
 owner=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 output=$(realpath -m "${1:?COPR result directory}")
-expected_release=7.3.1-1010
+expected_release=7.3.1-1020
 bash "$owner/packaging/native/refuse-published-release.sh" senemos-uke-linux-kernel-mainline "$expected_release"
 make -C "$owner" validate
 stage=$(mktemp -d)
@@ -92,6 +92,6 @@ fi
 tar --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner -cJf \
  "$output/senemos-native-profile-7.3.1.tar.xz" -C "$stage/unpacked" native-profile
 test "$(grep -Fxc '%global senemos_build_release 1006' "$spec")" = 1
-sed -i 's/^%global senemos_build_release 1006$/%global senemos_build_release 1010/' "$spec"
+sed -i 's/^%global senemos_build_release 1006$/%global senemos_build_release 1020/' "$spec"
 sha256sum -c "$stage/retained.sha256"
 test "$(rpmspec --target aarch64 --define 'dist %{nil}' -q --srpm --qf '%{VERSION}-%{RELEASE}' "$spec")" = "$expected_release"
