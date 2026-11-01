@@ -19,6 +19,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
+#include "uke-o82-hdr-format.h"
 
 namespace {
 using Vec = std::array<double, 3>;
@@ -139,11 +140,11 @@ double lookup(const std::vector<double> &table, double value) {
 struct Profile {
     std::array<std::vector<double>, 3> igc, gc;
     std::vector<Vec> gamut;
-    Vec map(Vec rgb) const {
+    Vec gamut_map(Vec rgb) const {
         std::array<unsigned, 3> lower{};
         Vec fraction{}, result{};
         for (size_t channel = 0; channel < 3; ++channel) {
-            const double at = lookup(igc[channel], rgb[channel]) * 16;
+            const double at = std::clamp(rgb[channel], 0.0, 1.0) * 16;
             lower[channel] = std::min(static_cast<unsigned>(at), 15u);
             fraction[channel] = at - lower[channel];
         }
@@ -158,6 +159,11 @@ struct Profile {
             }
             for (size_t channel = 0; channel < 3; ++channel) result[channel] += weight * gamut[index][channel];
         }
+        return result;
+    }
+    Vec map(Vec rgb) const {
+        for (size_t channel = 0; channel < 3; ++channel) rgb[channel] = lookup(igc[channel], rgb[channel]);
+        auto result = gamut_map(rgb);
         for (size_t channel = 0; channel < 3; ++channel) result[channel] = lookup(gc[channel], result[channel]);
         return result;
     }
@@ -297,23 +303,95 @@ std::string sha256(std::string_view data) {
     }
     return result;
 }
-void save(cmsHPROFILE profile, const char *path) {
-    cmsUInt32Number length = 0;
-    require(cmsSaveProfileToMem(profile, nullptr, &length) && length <= 8 * 1024 * 1024, "ICC serialization failed");
-    std::vector<unsigned char> data(length);
-    require(cmsSaveProfileToMem(profile, data.data(), &length), "ICC serialization failed");
+void save_bytes(const std::vector<unsigned char> &data, const char *path) {
     const int fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
     require(fd >= 0, "cannot create new ICC file (existing files are retained)");
     size_t at = 0;
     bool ok = true;
-    while (at < length) {
-        const ssize_t bytes = write(fd, data.data() + at, length - at);
+    while (at < data.size()) {
+        const ssize_t bytes = write(fd, data.data() + at, data.size() - at);
         if (bytes <= 0) { ok = false; break; }
         at += bytes;
     }
     if (fsync(fd)) ok = false;
     if (close(fd)) ok = false;
     if (!ok) { unlink(path); throw std::runtime_error("ICC write failed"); }
+}
+void save(cmsHPROFILE profile, const char *path) {
+    cmsUInt32Number length = 0;
+    require(cmsSaveProfileToMem(profile, nullptr, &length) && length <= 8 * 1024 * 1024, "ICC serialization failed");
+    std::vector<unsigned char> data(length);
+    require(cmsSaveProfileToMem(profile, data.data(), &length), "ICC serialization failed");
+    save_bytes(data, path);
+}
+double pq_nits(double code) {
+    constexpr double m1 = 2610.0 / 16384, m2 = 2523.0 / 32;
+    constexpr double c1 = 3424.0 / 4096, c2 = 2413.0 / 128, c3 = 2392.0 / 128;
+    const double power = std::pow(std::clamp(code, 0.0, 1.0), 1 / m2);
+    return 10000 * std::pow(std::max(power - c1, 0.0) / (c2 - c3 * power), 1 / m1);
+}
+unsigned crc32(std::string_view data) {
+    return o82_hdr_crc32(reinterpret_cast<const unsigned char *>(data.data()), data.size());
+}
+std::vector<unsigned char> native_hdr(const Profile &factory, unsigned panel, std::string_view input_hash) {
+    std::vector<unsigned char> data(O82_HDR_HEADER_SIZE);
+    std::copy_n(O82_HDR_MAGIC, 8, data.begin());
+    auto word = [&](size_t at, unsigned value) {
+        for (unsigned byte = 0; byte < 4; byte++) data.at(at + byte) = value >> (byte * 8);
+    };
+    auto sample = [&](double value, unsigned maximum) {
+        const unsigned quantized = std::lround(std::clamp(value, 0.0, 1.0) * maximum);
+        data.push_back(quantized & 255); data.push_back(quantized >> 8);
+    };
+    require(input_hash.size() == 64 && (panel == 0x36 || panel == 0x42), "invalid native profile identity");
+    word(8, O82_HDR_VERSION); word(12, panel); word(16, O82_HDR_FILE_SIZE);
+    word(24, O82_HDR_NOMINAL_PEAK_NITS); word(28, O82_HDR_NOMINAL_BLACK_10000);
+    for (size_t at = 0; at < 32; at++) {
+        unsigned byte;
+        const auto [end, error] = std::from_chars(input_hash.data() + at * 2, input_hash.data() + at * 2 + 2, byte, 16);
+        require(error == std::errc() && end == input_hash.data() + at * 2 + 2, "invalid native source hash");
+        data[32 + at] = byte;
+    }
+    for (unsigned curve = 0; curve < 2; curve++)
+        for (unsigned at = 0; at < O82_HDR_IGC_ENTRIES; at++) {
+            const double code = at / 256.0;
+            const double linear = curve == 0 ? pq_nits(code) / O82_HDR_NOMINAL_PEAK_NITS : std::pow(code, 2.2);
+            for (unsigned channel = 0; channel < 3; channel++) sample(linear, 4095);
+        }
+    const cmsCIExyY white{0.3127, 0.3290, 1};
+    const cmsCIExyYTRIPLE p3{{0.68, 0.32, 1}, {0.265, 0.69, 1}, {0.15, 0.06, 1}};
+    const cmsCIExyYTRIPLE bt2020{{0.708, 0.292, 1}, {0.170, 0.797, 1}, {0.131, 0.046, 1}};
+    cmsToneCurve *linear = cmsBuildGamma(nullptr, 1);
+    require(linear, "linear curve allocation failed");
+    cmsToneCurve *curves[]{linear, linear, linear};
+    Icc source(cmsCreateRGBProfile(&white, &bt2020, curves), cmsCloseProfile);
+    Icc target(cmsCreateRGBProfile(&white, &p3, curves), cmsCloseProfile);
+    cmsFreeToneCurve(linear);
+    require(source && target, "native gamut profile allocation failed");
+    std::unique_ptr<void, decltype(&cmsDeleteTransform)> transform(
+        cmsCreateTransform(source.get(), TYPE_RGB_DBL, target.get(), TYPE_RGB_DBL,
+                           INTENT_RELATIVE_COLORIMETRIC, cmsFLAGS_NOOPTIMIZE | cmsFLAGS_NOCACHE), cmsDeleteTransform);
+    require(bool(transform), "native gamut conversion allocation failed");
+    for (unsigned blue = 0; blue < 17; blue++)
+        for (unsigned green = 0; green < 17; green++)
+            for (unsigned red = 0; red < 17; red++) {
+                const Vec input{red / 16.0, green / 16.0, blue / 16.0};
+                Vec result{};
+                cmsDoTransform(transform.get(), input.data(), result.data(), 1);
+                for (size_t channel = 0; channel < 3; channel++) {
+                    const double value = std::clamp(result[channel], 0.0, 1.0);
+                    const double encoded = value <= 0.0031308 ? value * 12.92 : 1.055 * std::pow(value, 1 / 2.4) - 0.055;
+                    result[channel] = lookup(factory.igc[channel], encoded);
+                }
+                result = factory.gamut_map(result);
+                for (double value : result) sample(value, 4095);
+            }
+    for (unsigned at = 0; at < O82_HDR_GC_ENTRIES; at++)
+        for (size_t channel = 0; channel < 3; channel++) sample(factory.gc[channel][at], 1023);
+    require(data.size() == O82_HDR_FILE_SIZE, "native profile length mismatch");
+    word(20, crc32(std::string_view(reinterpret_cast<const char *>(data.data() + O82_HDR_HEADER_SIZE), O82_HDR_PAYLOAD_SIZE)));
+    require(o82_hdr_valid(data.data(), data.size(), panel), "native profile validation failed");
+    return data;
 }
 void self_test() {
     Profile identity;
@@ -367,14 +445,34 @@ void self_test() {
     }
     cmsDeleteTransform(transform);
     assert(sha256("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    assert(crc32("123456789") == 0xcbf43926);
+    assert(pq_nits(0) == 0 && std::abs(pq_nits(1) - 10000) < 1e-6);
+    assert(std::abs(pq_nits(0.5080784215) - 100) < 0.0001);
+    assert(std::abs(pq_nits(0.7518270962) - 1000) < 0.001);
+    auto firmware = native_hdr(identity, 0x42, "2b6442ce0e8fef6d1b008cdeca3838450282868d385f6e3056c0a4ce2b8949d8");
+    assert(firmware.size() == O82_HDR_FILE_SIZE);
+    const size_t gamut_start = O82_HDR_HEADER_SIZE + O82_HDR_IGC_ENTRIES * 3 * 2 * 2;
+    assert(firmware[gamut_start] == 0 && firmware[gamut_start + 1] == 0);
+    const size_t white_start = gamut_start + (O82_HDR_GAMUT_ENTRIES - 1) * 3 * 2;
+    for (unsigned channel = 0; channel < 3; channel++)
+        assert((firmware[white_start + channel * 2] | (firmware[white_start + channel * 2 + 1] << 8)) >= 4094);
+    assert(!o82_hdr_valid(nullptr, firmware.size(), 0x42));
+    assert(!o82_hdr_valid(firmware.data(), firmware.size() - 1, 0x42));
+    assert(!o82_hdr_valid(firmware.data(), firmware.size(), 0x36));
+    for (size_t offset : {size_t(8), size_t(20), size_t(24), size_t(32), gamut_start}) {
+        firmware[offset] ^= 1;
+        assert(!o82_hdr_valid(firmware.data(), firmware.size(), 0x42));
+        firmware[offset] ^= 1;
+    }
     std::cout << "Decoder, gamut axis/interpolation, ICC XYZ/P3 roundtrip and SHA-256 checks passed\n";
 }
 }
 int main(int argc, char **argv) {
     try {
         if (argc == 2 && std::string_view(argv[1]) == "--self-test") { self_test(); return 0; }
-        require(argc == 3, "usage: uke-o82-color-profile OEM_QDCM_JSON NEW_PRIVATE_ICC");
-        const auto data = read_file(argv[1]);
+        const bool native = argc == 4 && std::string_view(argv[1]) == "--native-hdr";
+        require(native || argc == 3, "usage: uke-o82-color-profile [--native-hdr] OEM_QDCM_JSON NEW_PRIVATE_OUTPUT");
+        const auto data = read_file(argv[native ? 2 : 1]);
         const auto hash = sha256(data);
         const char *panel = nullptr;
         if (hash == "bd88eb94134e5f62c05eebaa0a9e4b5267968363f72f440018b98a15d1bd9122") panel = "xiaomi_o82_36_02_0a_vid_mode_dualdsi_dsc_panel";
@@ -382,6 +480,11 @@ int main(int argc, char **argv) {
         require(panel, "unreviewed OEM profile hash");
         auto document = parse(data);
         auto factory = load(document.get(), panel);
+        if (native) {
+            save_bytes(native_hdr(factory, std::string_view(panel).find("42_02_0b") != std::string_view::npos ? 0x42 : 0x36, hash), argv[3]);
+            std::cout << "Generated private O82 HDR10/PQ and BT.2020 color data; driver and optical acceptance remain separate\n";
+            return 0;
+        }
         auto profile = make_icc(factory);
         save(profile.get(), argv[2]);
         std::cout << "Generated private " << panel << " P3 ICC mapping; optical calibration and HDR10/EDR acceptance remain unmeasured\n";
