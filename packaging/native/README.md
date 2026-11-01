@@ -1,5 +1,12 @@
 # Mainline native source profile
 
+1 November 2026, isolated release111 source candidate over qualified release110:
+preserve the explicitly requested 30 Hz AVR floor under the 144 Hz OEM base.
+Zero disables the experiment; invalid requests leave the previous value intact.
+An intentional zero-brightness first frame completes panel/touch restoration.
+No power, voltage, HBM or amplifier gain limit changes. Package checks, boot,
+physical cadence and low-refresh touch acceptance remain separate gates.
+
 31 October 2026, unstable kernel106 candidate: preserve release102's four isolated
 capture channels and deliver one named four-channel input with the kernel.
 Bounded ADC/TX defaults move to DT and apply before capture power-up, including

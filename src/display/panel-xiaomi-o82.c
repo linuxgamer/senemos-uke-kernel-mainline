@@ -559,8 +559,9 @@ static void o82_first_frame(struct kthread_work *work)
 	if (ret)
 		goto failed;
 	brightness = backlight_get_brightness(ctx->backlight);
-	if (brightness <= 0) {
-		ret = -ERANGE;
+	/* A deliberately black first frame still completes panel/touch restoration. */
+	if (brightness < 0) {
+		ret = brightness;
 		goto failed;
 	}
 	dev_info(&ctx->dsi[0]->dev,

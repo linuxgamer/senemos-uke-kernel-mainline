@@ -1,0 +1,36 @@
+Subject: [PATCH] drm/msm: preserve the explicitly requested O82 AVR floor
+
+Admit 30-143 Hz requests without silently substituting 90 Hz. Reject an
+unsupported floor before changing the parameter. The default remains zero
+and the exact OEM modes still bound the unqualified receiver experiment.
+Touch delivery and physical cadence require separate device qualification.
+
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c
+@@ -230,10 +230,16 @@ static int o82_set_vrr_floor(const char *value, const struct kernel_param *kp)
+ {
+-	int ret = param_set_uint(value, kp);
++	unsigned int floor;
++	struct kernel_param temporary = *kp;
++	int ret;
+ 
+-	/* Display-driven touch delivery regresses at the lower experiment floors. */
+-	if (!ret && o82_vrr_test_min_hz >= 30 && o82_vrr_test_min_hz < 90)
+-		o82_vrr_test_min_hz = 90;
+-	return ret;
++	temporary.arg = &floor;
++	ret = param_set_uint(value, &temporary);
++	if (ret)
++		return ret;
++	if (floor && (floor < 30 || floor >= 144))
++		return -ERANGE;
++	*(unsigned int *)kp->arg = floor;
++	return 0;
+ }
+ 
+ static const struct kernel_param_ops o82_vrr_floor_ops = {
+@@ -244,3 +250,3 @@ static const struct kernel_param_ops o82_vrr_floor_ops = {
+ module_param_cb(o82_vrr_test_min_hz, &o82_vrr_floor_ops, &o82_vrr_test_min_hz, 0400);
+ MODULE_PARM_DESC(o82_vrr_test_min_hz,
+-	"Unqualified O82-42 receiver experiment; 0 disables, requests 30-89 use 90 Hz");
++	"Unqualified O82-42 receiver experiment; 0 disables, 30-143 Hz floor, OEM modes only");

@@ -791,8 +791,14 @@ int main(void) {
             else positive_brightness=fault==1 ? 0:-1;
             first_boundary(&c.first_frame_work);
             assert(c.panel.enabled && c.first_frame_initialized);
-            assert(strstr(last_error,fault==0 ? "result=-5 blank_result=0":"result=-34 blank_result=0"));
-            assert(normal_transfers==4 && !c.backlight->on && backlight_calls==1);
+            if(fault==1) {
+                assert(!last_error[0] && atomic64_read(&c.touch_state)==3);
+                assert(c.backlight->on && positive_brightness==0);
+            } else {
+                assert(strstr(last_error,fault==0 ? "result=-5 blank_result=0":"result=-1 blank_result=0"));
+                assert(!c.backlight->on && !(atomic64_read(&c.touch_state)&1));
+            }
+            assert(normal_transfers==4 && backlight_calls==1);
             drm_panel_disable(&c.panel); assert(cancelled==1 && !c.first_frame_initialized);
             video_started=false; assert(o82_unprepare(&c.panel)==0);
         }
