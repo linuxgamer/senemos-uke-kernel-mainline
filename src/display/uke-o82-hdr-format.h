@@ -115,8 +115,9 @@ static inline void o82_hdr_make_edid(unsigned char edid[O82_HDR_EDID_SIZE])
 	edid[8] = 0x31; edid[9] = 0xd8; /* LNX, not a fabricated OEM/unit identity. */
 	edid[10] = 0x82;
 	edid[17] = 36;
-	edid[18] = 1; edid[19] = 4;
-	edid[20] = 0xb0; /* Digital RGB, 10 bits, unspecified internal interface. */
+	/* EDID 1.3 permits the native preferred timing to live in DisplayID. */
+	edid[18] = 1; edid[19] = 3;
+	edid[20] = 0x80; /* Digital RGB; the connector separately fixes 10 bpc. */
 	edid[21] = 24; edid[22] = 16; edid[23] = 120;
 	for (i = 0; i < 8; i++) {
 		edid[27 + i] = xy[i] >> 2;
@@ -133,7 +134,8 @@ static inline void o82_hdr_make_edid(unsigned char edid[O82_HDR_EDID_SIZE])
 	cta[8] = 0xe6; cta[9] = 6; cta[10] = 5; cta[11] = 1;
 	/* CTA quantization: nominal max <=420 nits, min derived from OEM black. */
 	cta[12] = 98; cta[13] = 98; cta[14] = 71;
-	did[0] = 0x70; did[1] = 0x13; did[2] = 23;
+	/* Include one zero padding header inside the DisplayID checksum domain. */
+	did[0] = 0x70; did[1] = 0x13; did[2] = 26;
 	did[5] = 3; did[6] = 1; did[7] = 20;
 	timing[0] = clock; timing[1] = clock >> 8; timing[2] = clock >> 16;
 	timing[3] = 0x80;
@@ -142,9 +144,9 @@ static inline void o82_hdr_make_edid(unsigned char edid[O82_HDR_EDID_SIZE])
 		timing[5 + i * 2] = dimensions[i] >> 8;
 	}
 	/* DisplayID's inner checksum excludes the outer EDID extension tag. */
-	for (sum = 0, i = 1; i < 28; i++)
+	for (sum = 0, i = 1; i < 31; i++)
 		sum += did[i];
-	did[28] = (unsigned char)-sum;
+	did[31] = (unsigned char)-sum;
 	for (unsigned int block = 0; block < 3; block++) {
 		for (sum = 0, i = 0; i < 127; i++)
 			sum += edid[block * 128 + i];

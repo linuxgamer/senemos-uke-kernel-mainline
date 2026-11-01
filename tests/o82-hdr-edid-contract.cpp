@@ -42,7 +42,9 @@ int main() {
         }
     }
     assert(native);
-    if (const char *failure = di_info_get_failure_msg(info)) std::fprintf(stderr, "%s\n", failure);
+    const char *failure = di_info_get_failure_msg(info);
+    if (failure) std::fprintf(stderr, "%s\n", failure);
+    assert(!failure);
     di_info_destroy(info);
     std::puts("Original KWin EDID inputs: PQ, BT.2020 RGB, P3, nominal OEM luminance and native high-clock DisplayID passed");
 }
