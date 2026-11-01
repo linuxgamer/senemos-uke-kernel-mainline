@@ -1,8 +1,14 @@
-# O82 OEM P3 mapping and HDR10 content rendering
+# O82 OEM P3 mapping for original KDE
 
-1 November 2026. Source candidate for POCO Pad X1 / Xiaomi Pad 7 O82 panels,
+1 November 2026. OEM P3 mapping for POCO Pad X1 / Xiaomi Pad 7 O82 panels,
 Fedora Rawhide AArch64 and original KWin 6.8.2. Compilation and numerical checks
 run in COPR. Optical color and HDR acceptance require separate measurements.
+
+COPR11239634 built signed `0.1.0-2` with ordinary and ASan/UBSan numerical
+checks. The utility is installed on POCO Pad X1 and generated the private PB
+profile. Original KDE accepted its ICC selection while DSI remained disabled;
+visible shader operation, optical calibration and native HDR remain unverified.
+Existing-output and unreviewed-input refusals passed without modifying the ICC.
 
 `uke-o82-color-profile` creates a private ICC profile from one exact retained
 Global OS3.0.304.0 factory QDCM input. It accepts only the reviewed PA/PB SHA-256
