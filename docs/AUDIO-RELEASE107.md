@@ -70,3 +70,19 @@ model. Node rules keep their release component guard. The recovered109 session
 shows POCO PAD X1 as the card heading and in all three endpoint descriptions.
 No additional audio package, daemon, processing filter or gain change is used.
 Candidate110 package and fresh-boot acceptance remain pending.
+
+1 November2026. COPR11239296 completes release110 for source
+`1ea50711f0acf2e5cb3aa1cb7c349ba065c3db33`. Six signed packages pass native
+payload admission. DNF stages110 in bootA while retaining109 in bootB, and110
+then boots without a recovery helper. The accepted running card exposes one
+four-channel microphone, four internal speaker channels and two DisplayPort
+channels. Card, microphone and speaker model names persist in the kernel-owned
+UCM/WirePlumber data; the installed core verifies clean. ADC8/TX24 is unchanged.
+
+The operator explicitly accepts a generic KDE DisplayPort caption to retain
+kernel-only delivery. Kernel ELD and the selected route still provide the actual
+monitor identity. PipeWire is unchanged and the separate audio RPM is absent.
+A new coordinated four-channel capture on110 remains pending; channel exposure
+and boot health are not reported as a new acoustic test. Ordinary speaker and
+microphone operation was confirmed separately on109. No physical110 hotplug,
+mute/reopen endurance or suspend/resume success is claimed.
