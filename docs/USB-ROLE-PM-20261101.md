@@ -5,6 +5,22 @@ native source from COPR 11239905, SRPM SHA256
 e376800a58f3d1b91e89b5f88b678da950e74157035db7944edbf306cc7f822c.
 This is a source candidate without Uke physical acceptance.
 
+The first isolated candidate 1005 completed COPR 11240238. The current
+producer retains qualified 1006 from COPR 11240463, source
+fcbdae4b757732f0f0e3162c610f19abae290832, SRPM SHA256
+70f151855f727c9d83c3bedc35ff52dd60cb222b2d741818472dced458bcd60c.
+That cohort already retains the installed 1003 display changes and the later
+LMH-ready correction. Candidate 1020 adds the same USB patch and model without
+dropping those inputs. Whole-setting comparison and a missing-field negative
+case supplement the original file-byte retention checks. A new complete COPR
+build and physical qualification remain required.
+
+This retained stable-source worker is restricted to `uke-linux-test`.
+It validates the exact 1006 producer before auditing its retained archives;
+the current main source has a separate 7.4-rc admission policy. The ordinary
+unstable entry and that policy remain unchanged. Its first 1020 attempt stopped
+before emitting a source RPM because it incorrectly validated current main.
+
 The role notifier can run outside the freezer while system sleep has stopped
 the glue clocks. Runtime-PM success then does not establish that QSCRATCH is
 accessible. The existing Uke adaptation has no system-sleep exclusion around
