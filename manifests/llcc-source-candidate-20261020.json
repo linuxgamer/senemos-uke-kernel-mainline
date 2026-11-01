@@ -33,7 +33,7 @@
     },
     {
       "path": "packaging/native/prepare.sh",
-      "sha256": "a469522ca85e9491c5ab59a80553a61442ae774dd0d4b57600b1aa93f43ab142"
+      "sha256": "5e9c763260b05d2d8ff50d3e804356dfc8b7c6081a87c8cf6cb0cbbaa2fe8728"
     },
     {
       "path": "patches/boot/0014-uke-ufs-mcq-resources.patch",
@@ -574,6 +574,10 @@
     {
       "path": "tests/audio-fs19xx-lifecycle-contract.sh",
       "sha256": "0bbdecbf33d551b0041492e96d51ba29fe5235d3fe49bff95036e1319cfe14ef"
+    },
+    {
+      "path": "patches/boot/0059-lpass-sort-reg-defaults.patch",
+      "sha256": "faf3d5648e51c7098909e3d08b07536a022bcabda6f04f72cf0cdb26b82c8e64"
     }
   ],
   "baseline_files": [
@@ -696,7 +700,7 @@
     "requires_three_candidate_patches_preapplied": true,
     "package_selector": "packaging/native/llcc-profile"
   },
-  "kernel_release": "7.3.1-113",
+  "kernel_release": "7.3.1-114",
   "boot_argument_handoff": {
     "source_commit": "84b172c09fee0b60e901bfe40a2d7b6244aa726a",
     "integrated_commit": "3d78e6c",

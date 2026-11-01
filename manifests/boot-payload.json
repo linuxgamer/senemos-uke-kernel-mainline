@@ -2,7 +2,7 @@
   "schema_version": 1,
   "date": "2026-11-01",
   "source_date_epoch": 1792058622,
-  "source_origin": "Signed Linux7.3.1 with the complete release110 source parent. Candidate113 checks the optional LLCC window before mapping and moves FS19xx delayed work to the current per-CPU queue. Hardware settings and the release110 audio/display inputs are retained; physical acceptance remains pending.",
+  "source_origin": "Signed Linux7.3.1 with the complete release110 source parent. Candidate114 retains the release113 LLCC/FS19xx corrections and backports upstream LPASS RX/WSA default-table sorting without changing register values or cache types. Hardware settings and release110 audio/display inputs are retained; physical acceptance remains pending.",
   "firmware_included": false,
   "device_private_data_included": false,
   "python_target_payload": false,
@@ -565,7 +565,7 @@
     },
     {
       "path": "packaging/native/prepare.sh",
-      "sha256": "a469522ca85e9491c5ab59a80553a61442ae774dd0d4b57600b1aa93f43ab142"
+      "sha256": "5e9c763260b05d2d8ff50d3e804356dfc8b7c6081a87c8cf6cb0cbbaa2fe8728"
     },
     {
       "path": "packaging/native/audio-profile",
@@ -862,6 +862,10 @@
     {
       "path": "tests/audio-fs19xx-lifecycle-contract.sh",
       "sha256": "0bbdecbf33d551b0041492e96d51ba29fe5235d3fe49bff95036e1319cfe14ef"
+    },
+    {
+      "path": "patches/boot/0059-lpass-sort-reg-defaults.patch",
+      "sha256": "faf3d5648e51c7098909e3d08b07536a022bcabda6f04f72cf0cdb26b82c8e64"
     }
   ],
   "root_selector_capability": {

@@ -7,7 +7,7 @@
 Name: senemos-uke-linux-kernel-mainline
 Version: 7.3.1
 %if "%{version}" == "7.3.1"
-%global senemos_build_release 113
+%global senemos_build_release 114
 %else
 %global senemos_build_release 1
 %endif
@@ -448,6 +448,10 @@ cp -a boot-recipe/src/boot/licenses/. %{buildroot}/usr/share/licenses/%{name}-bo
 /usr/lib/senemos/default-boot.img
 
 %changelog
+* Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-114
+- Backport upstream sorting of combined LPASS RX/WSA register defaults.
+- Retain all register values, cache types and release113 warning corrections.
+
 * Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-113
 - Check for the optional LLCC window before mapping it.
 - Use the current per-CPU system queue for amplifier delayed work.
