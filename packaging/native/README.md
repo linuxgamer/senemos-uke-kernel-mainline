@@ -1,6 +1,6 @@
 # Mainline native source profile
 
-1 November 2026, isolated kernel1010 source candidate: retain the exact installed
+1 November 2026, isolated kernel1011 source candidate: retain the exact installed
 1003 SRPM, including the116 power/startup parent and30 Hz AVR floor. Add default-off
 O82 CABC through the original KWin adaptive-backlight enum. Five logical tiers map
 to the four OEM modes; PQ/HLG with active adaptation is refused. Remote full-kernel

@@ -202,6 +202,8 @@ bash "$profile/tests/o82-vrr-floor-contract.sh" "$kernel"
 # Optional panel CABC control follows the frozen KMS source receipts above.
 git -C "$kernel" apply --check "$profile/patches/display/0070-o82-adaptive-backlight.patch"
 git -C "$kernel" apply "$profile/patches/display/0070-o82-adaptive-backlight.patch"
+CC=clang bash "$profile/tests/o82-panel-contract.sh" "$profile/src/display/panel-xiaomi-o82.c" \
+    "$profile/src/display/o82-data.h" "$kernel"
 bash "$profile/tests/o82-abm-contract.sh" "$kernel" "$profile/src/display/panel-xiaomi-o82.c"
 CC=clang SANITIZE=1 bash "$profile/tests/o82-abm-contract.sh" "$kernel" "$profile/src/display/panel-xiaomi-o82.c"
 sha256sum "$profile/patches/display/0070-o82-adaptive-backlight.patch" >> "$output/abl-source-SHA256SUMS"
