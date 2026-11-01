@@ -7,6 +7,7 @@ patch_series := 7.3.0
 patch_count := 127
 outdir ?= $(CURDIR)/build/srpm
 validate: test-touch-protocol test-touch-transport
+	bash -n tests/usb-role-pm-contract.sh
 	bash tests/copr-source-guards-contract.sh
 	bash -n tests/msm-retirement-contract.sh tests/msm-writeback-contract.sh tests/msm-retirement-proof-contract.sh
 	bash -n tests/o82-avr-contract.sh tests/dpu-video-timing-contract.sh
