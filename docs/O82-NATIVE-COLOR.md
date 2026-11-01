@@ -4,6 +4,12 @@
 Pad 7. Remote checks use deterministic MMIO and do not access a display engine.
 There is no live caller, new EDID attachment or HDR capability from this source.
 
+COPR [11240208](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11240208/)
+passes the actual-source GCC and Clang ASan/UBSan MMIO fixtures and the existing
+numerical/C11/EDID checks. The signed utility 0.2.0-9 is built; its binary does
+not contain or execute this kernel transport. A full kernel-object build,
+native owner integration and physical acceptance remain separate.
+
 `src/display/dpu_o82_regdma.c` implements the exact DB queue contract: CTL IDs
 1–4, 256-byte-aligned 32-bit IOVA, bounded DWORD count, local PMU clock ownership,
 reset before address publication, ordered descriptor/trigger writes, queue0
