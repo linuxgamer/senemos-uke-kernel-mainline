@@ -23,12 +23,18 @@ done
 # A direct object target needs a local Kbuild; production linkage remains separate.
 cat > "$target/Makefile" <<'EOF'
 ccflags-y += -I$(srctree)/drivers/gpu/drm/msm
+ccflags-y += -I$(objtree)/drivers/gpu/drm/msm/generated
 obj-y += dpu_o82_profiles.o dpu_o82_regdma.o
 EOF
 make -s -C "$kernel" O="$scratch/out" ARCH=arm64 defconfig
-"$kernel/scripts/config" --file "$scratch/out/.config" -d RUST -d DEBUG_INFO_BTF
+"$kernel/scripts/config" --file "$scratch/out/.config" -d RUST -d DEBUG_INFO_BTF -d DRM_MSM_VALIDATE_XML
 make -s -C "$kernel" O="$scratch/out" ARCH=arm64 olddefconfig
 make -s -C "$kernel" O="$scratch/out" ARCH=arm64 -j4 prepare
+printf '%s  %s\n' 81763fc03ea0ebf254ab7427af2113dc0c7c0d80dceab61232b6e371463d1f90 \
+    "$kernel/drivers/gpu/drm/msm/registers/gen_header.py" | sha256sum -c -
+# Existing host-only upstream exception in packaging/native/README.md.
+make -C "$kernel" O="$scratch/out" ARCH=arm64 \
+    drivers/gpu/drm/msm/generated/mdp_common.xml.h
 make -C "$kernel" O="$scratch/out" ARCH=arm64 KCFLAGS=-Werror -j4 \
     drivers/gpu/drm/msm/disp/dpu1/dpu_o82_profiles.o \
     drivers/gpu/drm/msm/disp/dpu1/dpu_o82_regdma.o

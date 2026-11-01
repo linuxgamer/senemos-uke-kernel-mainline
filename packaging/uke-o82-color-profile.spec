@@ -1,6 +1,6 @@
 Name: uke-o82-color-profile
 Version: 0.3.0
-Release: 2%{?dist}
+Release: 3%{?dist}
 Summary: Generate private O82 OEM color mappings and native preset data
 License: MIT
 URL: https://github.com/MCC45TR/senemos-uke-kernel-mainline
@@ -79,6 +79,9 @@ bash tests/o82-profile-loader-contract.sh .
 %{_bindir}/uke-o82-color-profile
 
 %changelog
+* Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 0.3.0-3
+- Include the pinned upstream MSM generated header in the remote kernel-object check.
+
 * Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 0.3.0-2
 - Load and select validated private root-resident presets in native kernel C.
 - Check refusal, four input combinations and firmware lifetime with synthetic data.

@@ -76,7 +76,15 @@ It builds only the loader and transport objects against actual AArch64 kernel
 headers, with a small local Kbuild for the direct targets. The source-stage
 archive stays in the owner's reference cache. No Image, module or firmware is
 produced, and the production adaptation queue/linkage remains a separate check.
-It uses the original upstream Bash/Make/C/Perl build tools; no Python is needed.
+The check needs the same upstream MSM register generator as the production
+kernel. The existing host-only exception in `packaging/native/README.md` pins
+`drivers/gpu/drm/msm/registers/gen_header.py` to SHA-256
+`81763fc03ea0ebf254ab7427af2113dc0c7c0d80dceab61232b6e371463d1f90`.
+It runs unmodified only on the COPR worker to produce `mdp_common.xml.h` from
+the exact upstream XML. Reimplementing it or borrowing headers from another
+kernel would weaken the ABI check. No project Python or Python payload is added
+to the tablet. The first direct-object trial failed on the missing generated
+header before producing an SRPM; the corrected source adds this existing step.
 
 The register and clock evidence is the GPL-2.0-only Xiaomi
 [REGDMA implementation](https://github.com/MiCode/vendor_opensource_display-drivers/blob/44275c404a677d9d9e5230fedd1af2ef02fc7b9a/msm/sde/sde_hw_reg_dma_v1.c)
