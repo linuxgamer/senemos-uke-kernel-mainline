@@ -154,6 +154,28 @@ static int o82_off(struct o82_panel *ctx)
 	return first_error;
 }
 
+static int o82_apply_abm(struct o82_panel *ctx, unsigned int level)
+{
+	/* Exact O82 micommon CABC modes: off/UI/still/movie. Bias-min shares UI. */
+	static const u8 modes[] = { 0, 1, 1, 2, 3 };
+	const u8 page[] = { 0xff, 0x10 };
+	u8 value[] = { 0x55, 0 };
+	struct o82_command command = {
+		.type = MIPI_DSI_DCS_SHORT_WRITE_PARAM,
+		.len = sizeof(page), .data = page,
+	};
+	int ret;
+
+	if (level >= ARRAY_SIZE(modes))
+		return -EINVAL;
+	value[1] = modes[level];
+	ret = o82_send(ctx, &command, true);
+	if (ret)
+		return ret;
+	command.data = value;
+	return o82_send(ctx, &command, true);
+}
+
 static int o82_lp_batch(struct o82_panel *ctx,
 			const struct o82_command *commands, unsigned int count)
 {
@@ -437,6 +459,11 @@ static int o82_prepare_locked(struct drm_panel *panel)
 		o82_off(ctx);
 		o82_power_off(ctx);
 		return ret;
+	}
+	if (ctx->connector->abm_level_property) {
+		ret = o82_apply_abm(ctx, ctx->connector->state->abm_level);
+		if (ret)
+			goto failed_on;
 	}
 	o82_readback(ctx, false);
 	ctx->prepared = true;

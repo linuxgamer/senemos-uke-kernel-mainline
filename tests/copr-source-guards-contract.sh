@@ -6,7 +6,7 @@ recipes=${1:-$owner/packaging/native}
 release_guard=${2:-$owner/packaging/native/refuse-published-release.sh}
 work=$(mktemp -d)
 trap 'find "$work" -depth -delete' EXIT
-for recipe in copr-framebuffer55 copr-reservation56 copr-lifecycle57 copr-retirement58 copr-transaction59 copr-regression60 copr-transaction73 copr-stable731 copr-o82-avr731;do
+for recipe in copr-framebuffer55 copr-reservation56 copr-lifecycle57 copr-retirement58 copr-transaction59 copr-regression60 copr-transaction73 copr-stable731 copr-o82-avr731 copr-o82-abm731;do
  path_check=$(awk '/awk .*bad/ && index($0,"\"$stage/entries\"") {print;found++} END {if(found!=1)exit 1}' "$recipes/$recipe.sh")
  printf 'set -Eeuo pipefail\nstage=${1:?}\n%s\nprintf reached\n' "$path_check" > "$work/entry-check.sh"
  for path in './safe/file' 'safe/../escape' '/absolute' '../escape' './safe/../../escape' './safe/.../file';do

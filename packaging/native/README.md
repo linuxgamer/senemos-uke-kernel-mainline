@@ -1,5 +1,12 @@
 # Mainline native source profile
 
+1 November 2026, isolated kernel1007 source candidate: retain the exact installed
+1003 SRPM, including the116 power/startup parent and30 Hz AVR floor. Add default-off
+O82 CABC through the original KWin adaptive-backlight enum. Five logical tiers map
+to the four OEM modes; PQ/HLG with active adaptation is refused. Remote full-kernel
+and fault checks and separate tablet acceptance are required. See
+[the source and validation limits](../../docs/O82-ADAPTIVE-BACKLIGHT.md).
+
 1 November 2026, isolated kernel1003 candidate: compose the explicit O82 30 Hz
 AVR floor and zero-brightness first-frame fix over the exact installed116 SRPM.
 Retain its power/startup fixes, matching family and all122 adaptation patches.

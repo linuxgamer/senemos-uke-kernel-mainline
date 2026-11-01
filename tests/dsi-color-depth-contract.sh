@@ -53,7 +53,14 @@ int drm_connector_attach_max_bpc_property(drm_connector *c,int min,int max) {
 int drm_connector_attach_vrr_capable_property(drm_connector *) {
     ++vrr_properties;return vrr_error;
 }
+int abm_properties=0,abm_error=0;
+int drm_connector_attach_abm_property(drm_connector *) {++abm_properties;return abm_error;}
 CPP
+if grep -q 'ret = drm_connector_attach_abm_property(connector);' "$manager"; then
+    printf '#define HAS_ABM 1\n' >> "$work/check.cpp"
+else
+    printf '#define HAS_ABM 0\n' >> "$work/check.cpp"
+fi
 awk '/^int msm_dsi_manager_connector_init\(/ {emit=1} emit {print} emit && /^}/ {exit}' "$manager" >> "$work/check.cpp"
 cat >> "$work/check.cpp" <<'CPP'
 int main() {
@@ -81,6 +88,12 @@ int main() {
     add_error=0; attach_error=-EIO;
     assert(msm_dsi_manager_connector_init(&dsi,&encoder)==-EIO);
     assert(properties==3 && vrr_properties==2);
+    if(HAS_ABM) {
+        add_error=attach_error=vrr_error=0;abm_error=-ENOMEM;
+        const int before=abm_properties;
+        assert(msm_dsi_manager_connector_init(&dsi,&encoder)==-ENOMEM);
+        assert(abm_properties==before+1);
+    }
     puts("Actual O82 fixed 10-bpc capability, foreign panel and failure boundaries: passed");
 }
 CPP

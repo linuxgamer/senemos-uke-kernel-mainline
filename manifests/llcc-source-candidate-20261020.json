@@ -33,7 +33,7 @@
     },
     {
       "path": "packaging/native/prepare.sh",
-      "sha256": "c594936ed83b0a69dd198b92467d6368aa745ed2a7330324a74701001fffc56c"
+      "sha256": "cf0e81e7732a08f34b4b2666647e7a522034f1da1ebd58ddc7fdefb2af5493ec"
     },
     {
       "path": "patches/boot/0014-uke-ufs-mcq-resources.patch",
@@ -205,7 +205,7 @@
     },
     {
       "path": "src/display/panel-xiaomi-o82.c",
-      "sha256": "d510cda34e359d5ca7355276744f22878ae98f5be914371bc6bc053572dc4dd5"
+      "sha256": "6bd43e6ca73e7d795902c405bd60c93441bb466f80c6c25cc21afa0bab2e424c"
     },
     {
       "path": "src/display/prepare-source.sh",
@@ -712,7 +712,7 @@
     "requires_three_candidate_patches_preapplied": true,
     "package_selector": "packaging/native/llcc-profile"
   },
-  "kernel_release": "7.3.1-1003",
+  "kernel_release": "7.3.1-1007",
   "boot_argument_handoff": {
     "source_commit": "84b172c09fee0b60e901bfe40a2d7b6244aa726a",
     "integrated_commit": "3d78e6c",

@@ -199,4 +199,10 @@ fi
 git -C "$kernel" apply --check "$profile/patches/display/0069-o82-requested-vrr-floor.patch"
 git -C "$kernel" apply "$profile/patches/display/0069-o82-requested-vrr-floor.patch"
 bash "$profile/tests/o82-vrr-floor-contract.sh" "$kernel"
+# Optional panel CABC control follows the frozen KMS source receipts above.
+git -C "$kernel" apply --check "$profile/patches/display/0070-o82-adaptive-backlight.patch"
+git -C "$kernel" apply "$profile/patches/display/0070-o82-adaptive-backlight.patch"
+bash "$profile/tests/o82-abm-contract.sh" "$kernel" "$profile/src/display/panel-xiaomi-o82.c"
+CC=clang SANITIZE=1 bash "$profile/tests/o82-abm-contract.sh" "$kernel" "$profile/src/display/panel-xiaomi-o82.c"
+sha256sum "$profile/patches/display/0070-o82-adaptive-backlight.patch" >> "$output/abl-source-SHA256SUMS"
 printf 'Exact seven-mode O82-42 native source prepared; no private boot input\n'

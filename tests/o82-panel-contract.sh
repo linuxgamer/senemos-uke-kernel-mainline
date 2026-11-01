@@ -106,6 +106,7 @@ typedef uint8_t u8; typedef uint16_t u16; typedef uint32_t u32; typedef uint64_t
 #define PTR_ERR(p) ((long)(p))
 #define ERR_PTR(e) ((void *)(intptr_t)(e))
 enum { MIPI_DSI_MSG_USE_LPM=2, MIPI_DSI_FMT_RGB101010=10,
+       MIPI_DSI_DCS_SHORT_WRITE_PARAM=0x15,
        DRM_MODE_TYPE_DRIVER=1, DRM_MODE_TYPE_PREFERRED=2 };
 C
 # Use the selected kernel's public flag definitions.
@@ -229,8 +230,9 @@ static void first_boundary(struct drm_vblank_work *work) {
     assert(work->pending); boundary_seen=true;
     work->crtc->count=work->count; work->pending=false; work->base.func(&work->base);
 }
-struct drm_connector_state { struct drm_crtc *crtc; };
+struct drm_connector_state { struct drm_crtc *crtc; unsigned int abm_level; };
 struct drm_connector { struct drm_connector_state *state; void *dev;
+    void *abm_level_property;
     struct { int bpc,width_mm,height_mm; } display_info; };
 static unsigned int published, preferred, preferred_rate, duplication_failure;
 static struct drm_display_mode copies[7];
@@ -490,7 +492,7 @@ static struct o82_panel context(int variant,int mode) {
     static struct regulator supplies[3]={{0},{1},{2}};
     static struct drm_crtc_state cs;
     static struct drm_crtc crtc={.state=&cs};
-    static struct drm_connector_state state={&crtc};
+    static struct drm_connector_state state={.crtc=&crtc};
     static struct drm_connector connector={.state=&state};
     static struct backlight_device backlight;
     memset(balance,0,sizeof(balance)); memset(loads,0,sizeof(loads));
