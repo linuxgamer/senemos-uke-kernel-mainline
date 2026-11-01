@@ -1,0 +1,49 @@
+Subject: [PATCH] firmware: arm_scmi: permit strict protocol version admission
+
+Some legacy vendor protocols assign message 0x10 to an algorithm SET request.
+The core's automatic NEGOTIATE_PROTOCOL_VERSION path must not send that
+message before a read-only client validates the actual protocol version.
+
+Add a descriptor flag for protocols whose initialization performs strict
+version admission without negotiation. Existing descriptors retain their
+default behavior. A flagged protocol still receives version discovery and
+must reject unsupported versions in instance_init; this is not permission to
+accept the core's best-effort fallback as a successful query.
+
+Base: Linux v7.3.1, 79a907609d53d5cd645b42c11550d295d43abf99.
+Original SCMI core license and attribution are retained.
+
+--- a/drivers/firmware/arm_scmi/protocols.h
++++ b/drivers/firmware/arm_scmi/protocols.h
+@@ -352,6 +352,9 @@ typedef int (*scmi_prot_init_ph_fn_t)(const struct scmi_protocol_handle *);
+  * @impl_ver: A firmware implementation version for vendor protocols matching.
+  *	      Ignored if zero or if @id identifies a standard protocol.
+  *
++ * @no_version_negotiation: Skip automatic negotiation; instance_init must
++ *			    strictly validate the actual version before using
++ *			    protocol-specific messages.
+  * Note that vendor protocols matching at load time is performed by attempting
+  * the closest match first against the tuple (vendor, sub_vendor, impl_ver)
+  */
+@@ -368,6 +371,7 @@ struct scmi_protocol {
+ 	char					*vendor_id;
+ 	char					*sub_vendor_id;
+ 	u32					impl_ver;
++	bool					no_version_negotiation;
+ };
+ 
+ #define DEFINE_SCMI_PROTOCOL_REGISTER_UNREGISTER(name, proto)	\
+--- a/drivers/firmware/arm_scmi/driver.c
++++ b/drivers/firmware/arm_scmi/driver.c
+@@ -2184,6 +2184,11 @@ static void scmi_protocol_version_initialize(struct device *dev,
+ 		goto best_effort;
+ 	}
+ 
++	if (pi->proto->no_version_negotiation) {
++		ph->version = pi->version;
++		return;
++	}
++
+ 	/* Need to negotiate at all ? */
+ 	if (pi->version <= pi->proto->supported_version) {
+ 		ph->version = pi->version;

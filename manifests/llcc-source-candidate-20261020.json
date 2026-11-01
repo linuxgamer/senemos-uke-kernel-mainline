@@ -29,7 +29,7 @@
     },
     {
       "path": "packaging/native/native.config",
-      "sha256": "d744290e1d9c19684f274d44ba9f0f093a3ac983adca2271bb54cf3dfccfd2c8"
+      "sha256": "08d6d0b9320dd489231a41c057c22797f85108474a3ec7ddeaff56afc3c5e3d2"
     },
     {
       "path": "packaging/native/prepare.sh",
@@ -165,7 +165,7 @@
     },
     {
       "path": "src/boot/uke-abl.c",
-      "sha256": "962717cc365e9b6731e799f9b001a3fdde37a98c73fa9b0620f91cdbc3bd152c"
+      "sha256": "d2f6ac36261f6374d03e2775564a24a3df3ea6072aadbed208f8c54b7726a3da"
     },
     {
       "path": "src/boot/uke-bwmon.h",
@@ -549,7 +549,7 @@
     },
     {
       "path": "src/boot/prepare-abl-source.sh",
-      "sha256": "7bbeffa18f257d22297608c723a270dc5b968d26f784b686707085ec079428c4"
+      "sha256": "26a0a3a88eaaa9b1a406b1232007665c4b05fe0fbf4edd74fa50f06b99c81e05"
     },
     {
       "path": "src/power/uke-pm8010.h",
@@ -590,6 +590,54 @@
     {
       "path": "tests/initramfs-cpio-contract.sh",
       "sha256": "6fe97da1c7b654ede8da0126a28ca95214f046e9c0e85ea868f3b9efed839911"
+    },
+    {
+      "path": "src/boot/uke-clock-debug.h",
+      "sha256": "4ad3b02863856cd46430daf832c6f3cfdc7b9997b40c3a5c7d80e86ca444340f"
+    },
+    {
+      "path": "src/power/prepare-cpucp-observe.sh",
+      "sha256": "deb2d631f5481574d43288a421ac6a6eb82cf08ffae1426872039b7c194ff42d"
+    },
+    {
+      "path": "src/power/uke-cpucp-observe.c",
+      "sha256": "9421e566eb706788884011d465929bf550387f55000152675b46ad6a2465d907"
+    },
+    {
+      "path": "patches/boot/0051-cpufreq-preserve-boost-state-on-error.patch",
+      "sha256": "346967803f13f56147b2da3e99d21f9588260809d5a07581e5f89713c447399b"
+    },
+    {
+      "path": "patches/boot/0052-scmi-protocol-negotiation-opt-out.patch",
+      "sha256": "ca122e655b1e0248c9205aeb61eaf5c3809ac7a2bef67d1475037506bddce4cc"
+    },
+    {
+      "path": "patches/boot/0055-cpufreq-lmh-policy-lifecycle.patch",
+      "sha256": "f78d5c342e2b8239196974c9b575ffe6e88899854fed7da731d5d4aed269ff0f"
+    },
+    {
+      "path": "tests/scmi-no-negotiation-contract.sh",
+      "sha256": "16ca1437d16685b71ade3914006e40556a3250b681024f6522585255023fc73a"
+    },
+    {
+      "path": "tests/cpufreq-boost-error-contract.sh",
+      "sha256": "5253ffca630e6136242bd9af5941eb14d79cfd31ef410e12124ee81843e72ae2"
+    },
+    {
+      "path": "tests/cpufreq-lmh-lifecycle-contract.sh",
+      "sha256": "1ce87b238505ced6940bd4883d9d66f095787fd787d04ce0f309ac1eca2ca1df"
+    },
+    {
+      "path": "tests/clock-debug-fdt-contract.sh",
+      "sha256": "5948924e9e6c6351d2155b559745cba8ebe3e5b8c30f66bf27dda1f1701c567d"
+    },
+    {
+      "path": "tests/memlat-scmi-probe-contract.sh",
+      "sha256": "335b8e97ae06c996dbbf73f15bbbca56dd05d10c91d118da61d7a8c6588c752f"
+    },
+    {
+      "path": "tests/memlat-scmi-live-probe.c",
+      "sha256": "8c200da7ef8aca230588f390fa09812ab1ea1baae6c264fb7ce503cac5a039b7"
     }
   ],
   "baseline_files": [
@@ -712,7 +760,7 @@
     "requires_three_candidate_patches_preapplied": true,
     "package_selector": "packaging/native/llcc-profile"
   },
-  "kernel_release": "7.3.1-115",
+  "kernel_release": "7.3.1-116",
   "boot_argument_handoff": {
     "source_commit": "84b172c09fee0b60e901bfe40a2d7b6244aa726a",
     "integrated_commit": "3d78e6c",

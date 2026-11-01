@@ -167,6 +167,7 @@ static int UKE_INIT uke_empty_demura_regions(void *fdt)
 
 #include "uke-pmic-adc.h"
 #include "uke-cpu-thermal.h"
+#include "uke-clock-debug.h"
 #include "uke-hall.h"
 
 static int UKE_INIT uke_reboot_cell(const void *fdt)
@@ -1044,6 +1045,9 @@ int UKE_INIT uke_abl_transform(void *output, size_t capacity,
 	if (ret)
 		return ret;
 	ret = uke_cpu_thermal(output);
+	if (ret)
+		return ret;
+	ret = uke_clock_debug_retire(output);
 	if (ret)
 		return ret;
 	ret = uke_pmic_adc(output);

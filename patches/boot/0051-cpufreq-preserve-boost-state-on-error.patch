@@ -1,0 +1,41 @@
+Subject: [PATCH] cpufreq: preserve the previous global boost state on error
+
+The global boost store intentionally retries a request for the current state
+so all policies can be synchronized. If no policy supports boost, or a policy
+callback rejects that retry, restoring !state changes the global flag despite
+the rejected write. Remember its actual previous value under the driver lock.
+
+Observed on Uke with three policies without boost OPPs: a rejected write of
+zero changed the global flag from zero to one. This does not add boost OPPs,
+change policy capabilities or make the per-policy update loop transactional.
+
+Base: Linux v7.3.1, 79a907609d53d5cd645b42c11550d295d43abf99.
+Original cpufreq core license and attribution are retained.
+
+--- a/drivers/cpufreq/cpufreq.c
++++ b/drivers/cpufreq/cpufreq.c
+@@ -2814,6 +2814,7 @@ static int cpufreq_boost_trigger_state(int state)
+ {
+ 	struct cpufreq_policy *policy;
+ 	unsigned long flags;
++	bool previous_state;
+ 	int ret = -EOPNOTSUPP;
+ 
+ 	/*
+@@ -2822,6 +2823,7 @@ static int cpufreq_boost_trigger_state(int state)
+ 	 */
+ 
+ 	write_lock_irqsave(&cpufreq_driver_lock, flags);
++	previous_state = cpufreq_driver->boost_enabled;
+ 	cpufreq_driver->boost_enabled = state;
+ 	write_unlock_irqrestore(&cpufreq_driver_lock, flags);
+ 
+@@ -2843,7 +2845,7 @@ static int cpufreq_boost_trigger_state(int state)
+ 		return 0;
+ 
+ 	write_lock_irqsave(&cpufreq_driver_lock, flags);
+-	cpufreq_driver->boost_enabled = !state;
++	cpufreq_driver->boost_enabled = previous_state;
+ 	write_unlock_irqrestore(&cpufreq_driver_lock, flags);
+ 
+ 	pr_err("%s: Cannot %s BOOST\n",

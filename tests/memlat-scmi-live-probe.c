@@ -34,7 +34,9 @@ static int uke_memlat_get(const struct scmi_protocol_handle *ph, u32 parameter,
 	    !((parameter == UKE_MEMLAT_GET_TIMESTAMP && !tx_len && rx_len == 8) ||
 	      (parameter == UKE_MEMLAT_GET_FREQ && request && tx_len == 12 && rx_len == 4)))
 		return -EINVAL;
-	ret = ph->xops->xfer_get_init(ph, 0x11, sizeof(*header) + tx_len, rx_len, &transfer);
+	/* shmem_fetch_response() clips to capacity; retain an overlength sentinel. */
+	ret = ph->xops->xfer_get_init(ph, 0x11, sizeof(*header) + tx_len,
+				      rx_len + sizeof(__le32), &transfer);
 	if (ret)
 		return ret;
 	header = transfer->tx.buf;

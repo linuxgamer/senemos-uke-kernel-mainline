@@ -116,6 +116,15 @@ git -C "$kernel" apply --check "$here/../../patches/boot/0043-uke-pm8010-firmwar
 git -C "$kernel" apply "$here/../../patches/boot/0043-uke-pm8010-firmware-population.patch"
 install -m644 "$here/../power/uke-pm8010.h" "$kernel/drivers/mfd/uke-pm8010.h"
 bash "$here/../../tests/pm8010-population-contract.sh" "$kernel"
+for power_patch in 0051-cpufreq-preserve-boost-state-on-error.patch \
+    0052-scmi-protocol-negotiation-opt-out.patch 0055-cpufreq-lmh-policy-lifecycle.patch; do
+    git -C "$kernel" apply --check "$here/../../patches/boot/$power_patch"
+    git -C "$kernel" apply "$here/../../patches/boot/$power_patch"
+done
+bash "$here/../../tests/cpufreq-boost-error-contract.sh" "$kernel/drivers/cpufreq/cpufreq.c"
+bash "$here/../../tests/cpufreq-lmh-lifecycle-contract.sh" "$kernel/drivers/cpufreq/qcom-cpufreq-hw.c"
+bash "$here/../../tests/scmi-no-negotiation-contract.sh" "$kernel/drivers/firmware/arm_scmi/driver.c"
+bash "$here/../power/prepare-cpucp-observe.sh" "$kernel"
 for cdsp_patch in 0022-mdt-admit-geometry-and-metadata.patch \
     0023-fastrpc-own-coherent-dma-handle.patch 0024-rproc-retry-transport-stop.patch; do
     git -C "$kernel" apply --check "$here/../../patches/boot/$cdsp_patch"
@@ -142,6 +151,7 @@ install -m644 "$here/uke-root-selector.h" "$kernel/arch/arm64/kernel/uke-root-se
 install -m644 "$here/uke-bluetooth.h" "$kernel/arch/arm64/kernel/uke-bluetooth.h"
 install -m644 "$here/uke-pmic-adc.h" "$kernel/arch/arm64/kernel/uke-pmic-adc.h"
 install -m644 "$here/uke-cpu-thermal.h" "$kernel/arch/arm64/kernel/uke-cpu-thermal.h"
+install -m644 "$here/uke-clock-debug.h" "$kernel/arch/arm64/kernel/uke-clock-debug.h"
 install -m644 "$here/uke-hall.h" "$kernel/arch/arm64/kernel/uke-hall.h"
 install -m644 "$here/uke-lights.h" "$kernel/arch/arm64/kernel/uke-lights.h"
 install -m644 "$here/../usb/wcd939x-uke-typec.c" "$kernel/drivers/usb/typec/mux/wcd939x-uke-typec.c"
@@ -223,3 +233,8 @@ for cdsp_patch in 0022-mdt-admit-geometry-and-metadata.patch \
     0027-remoteproc-early-stop.patch 0028-cliffs-proxy-per-rail-ownership.patch; do
     sha256sum "$here/../../patches/boot/$cdsp_patch" >> "$output/abl-source-SHA256SUMS"
 done
+sha256sum "$here/uke-clock-debug.h" "$here/../power/prepare-cpucp-observe.sh" \
+    "$here/../power/uke-cpucp-observe.c" \
+    "$here/../../patches/boot/0051-cpufreq-preserve-boost-state-on-error.patch" \
+    "$here/../../patches/boot/0052-scmi-protocol-negotiation-opt-out.patch" \
+    "$here/../../patches/boot/0055-cpufreq-lmh-policy-lifecycle.patch" >> "$output/abl-source-SHA256SUMS"
