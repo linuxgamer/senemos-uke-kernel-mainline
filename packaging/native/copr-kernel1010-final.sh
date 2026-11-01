@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # COPR-only fixture correction; preserve the explicitly requested kernel ABI.
 set -Eeuo pipefail
+trap 'status=$?; printf "Source preparation failed at line %s (exit %s)\n" "$LINENO" "$status" >&2; exit "$status"' ERR
 export LC_ALL=C
 test ! -e /etc/senemos/kernel-update.conf
 [[ $(rpm --eval '%{_host_cpu}') == aarch64 && $(rpm --eval '%{fedora}') == 46 ]]
@@ -19,12 +20,14 @@ for project in uke-linux-unstable uke-linux-test uke-linux; do
    --data-urlencode limit=100 --data-urlencode "offset=$offset" \
    https://copr.fedorainfracloud.org/api_3/build/list > "$stage/builds.json"
   jq -e '(.items|type)=="array"' "$stage/builds.json" >/dev/null
-  jq -e 'all(.items[]; if .source_package.name=="senemos-uke-linux-kernel-mainline" then
+  jq -e 'all(.items[]; if .source_package.name=="senemos-uke-linux-kernel-mainline" and
+   (.state=="succeeded" or (.source_package.url|type=="string" and length>0)) then
    (.source_package.version|type)=="string" else true end)' "$stage/builds.json" >/dev/null
   while IFS=$'\t' read -r id state version; do
    [[ $id == 11240670 && $state == failed && $version == 7.3.1-1010 ]]
    seen=$((seen + 1))
-  done < <(jq -r '.items[]|select(.source_package.name=="senemos-uke-linux-kernel-mainline")|
+  done < <(jq -r '.items[]|select(.source_package.name=="senemos-uke-linux-kernel-mainline" and
+   (.state=="succeeded" or (.source_package.url|type=="string" and length>0)))|
    select(.source_package.version|test("^7[.]3[.]1-1010([.]|$)"))|
    [.id,.state,.source_package.version]|@tsv' "$stage/builds.json")
   count=$(jq -er '.items|length' "$stage/builds.json")
