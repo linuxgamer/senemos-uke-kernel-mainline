@@ -56,7 +56,8 @@ the logical gamut and transfer actually implemented by the selected transform.
 The v2 private bundle in `o82-color-firmware.h` provides distinct named records,
 source identities, bounded contiguous offsets, checked monotonic curves and
 12/10-bit table ranges. Its native-gamut and BT.2020 cubes are separate; either
-can use gamma2.2 or PQ. Records with unimplemented active processing contain no
+can use gamma2.2 or PQ. Per-preset IGC dithering is retained with its bounded
+four-bit strength. Records with unimplemented active processing contain no
 selectable table payload. Their original picture/HDR data remains private and
 the selector refuses them without changing output pointers. Zero-valued
 SixZone adjustment curves are treated as an identity operation.

@@ -18,6 +18,8 @@ struct dpu_o82_color_input {
 	const u8 *gamut;
 	const u8 *gc;
 	unsigned int primaries;
+	unsigned int dither_strength;
+	bool dither_enabled;
 };
 
 int dpu_o82_profiles_load(struct dpu_o82_profiles *profiles, struct device *dev,

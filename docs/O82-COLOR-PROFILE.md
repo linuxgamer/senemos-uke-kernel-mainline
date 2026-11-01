@@ -69,6 +69,11 @@ block; the forty combined-active modes use SixZone. Some enabled SixZone curves
 are entirely zero. The compiler preserves that identity case while refusing
 nonzero curves; nominal enable counts alone do not describe their visual effect.
 
+The first real PB bundle attempt with `0.3.0-1` refused enabled IGC dithering
+before writing an output file. The `0.3.0-2` source preserves each preset's
+IGC dither flag and four-bit strength explicitly. The native engine must apply
+that state with its selected input tables; preparation is not hardware support.
+
 ## Use
 
 First identify the actual panel compatible, for example

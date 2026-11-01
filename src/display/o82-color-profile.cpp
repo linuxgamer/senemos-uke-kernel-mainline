@@ -172,8 +172,7 @@ struct Profile {
 };
 Profile load_pipeline(json_object *igc, json_object *gc, json_object *gamut) {
     require(enabled(igc) && enabled(gc), "inactive IGC or output gamma");
-    require(!json_object_get_boolean(field(igc, "ditherEnable")) &&
-            number(field(gc, "bitsRounding")) == 10, "unsupported dither or precision");
+    require(number(field(gc, "bitsRounding")) == 10, "unsupported output precision");
     Profile result;
     const char *channels[] = {"lutR", "lutG", "lutB"};
     for (size_t channel = 0; channel < 3; ++channel) {
@@ -533,6 +532,16 @@ std::vector<unsigned char> native_presets(json_object *document, const char *pan
         auto factory = load_pipeline(igc.get(), gc.get(), gamut.get());
         unsigned flags = O82_COLOR_OP_IGC | O82_COLOR_OP_GC, blocked = 0;
         if (enabled(gamut.get())) flags |= O82_COLOR_OP_GAMUT;
+        const auto dither = field(igc.get(), "ditherEnable");
+        require(json_object_is_type(dither, json_type_boolean) ||
+                (json_object_is_type(dither, json_type_int) &&
+                 (json_object_get_int64(dither) == 0 || json_object_get_int64(dither) == 1)), "invalid IGC dither flag");
+        if (json_object_get_boolean(dither)) {
+            const double strength = number(field(igc.get(), "ditherStrength"));
+            require(strength >= 0 && strength <= 15 && strength == std::floor(strength), "invalid IGC dither strength");
+            flags |= O82_COLOR_OP_DITHER;
+            put_word(data, record + 128, 1); put_word(data, record + 132, strength);
+        }
         for (const char *operation : {"PostBlendPCC", "PostBlendDE", "PostBlendDither", "PostBlendPaDither", "PostBlendGameBlob"}) {
             json_object *unused;
             if (json_object_object_get_ex(mode, operation, &unused)) {
@@ -629,6 +638,7 @@ void preset_self_test(const Profile &identity) {
     add_mode("A_P3");
     assert(!json_object_object_add(field(mode.get(), "Applicability"), "ColorPrimaries", json_object_new_string("sRGB")));
     add_mode("B_sRGB");
+    auto clean_mode = parse(json_object_to_json_string_ext(mode.get(), JSON_C_TO_STRING_PLAIN));
     auto six = field(picture.get(), "SixZone");
     assert(!json_object_object_add(six, "enable", json_object_new_boolean(true)));
     for (const char *channel : {"hueCurve", "satCurve", "valCurve"}) {
@@ -653,6 +663,11 @@ void preset_self_test(const Profile &identity) {
     assert(!json_object_object_add(mode.get(), "PostBlendHdrBlob", encode(hdr.get())));
     assert(!json_object_object_add(mode.get(), "DynamicRange", json_object_new_string("HDR")));
     add_mode("G_HDR");
+    auto dither = decode(clean_mode.get(), "PostBlendIGC");
+    assert(!json_object_object_add(dither.get(), "ditherEnable", json_object_new_boolean(true)));
+    assert(!json_object_object_add(dither.get(), "ditherStrength", json_object_new_int(3)));
+    assert(!json_object_object_add(clean_mode.get(), "PostBlendIGC", encode(dither.get())));
+    assert(!json_object_object_add(modes.get(), "H_Dither", clean_mode.release()));
     assert(!json_object_object_add(document.get(), "test_panel", modes.release()));
     constexpr const char *hash = "2b6442ce0e8fef6d1b008cdeca3838450282868d385f6e3056c0a4ce2b8949d8";
     auto bundle = native_presets(document.get(), "test_panel", 0x42, hash);
@@ -677,13 +692,16 @@ void preset_self_test(const Profile &identity) {
     assert(srgb && srgb_wide && std::memcmp(srgb_wide, wide, O82_COLOR_FW_CUBE_BYTES));
     assert(o82_color_fw_data(bundle.data(), 2, 0, 0, &igc, &gc));
     const auto *retained_igc = igc, *retained_gc = gc;
-    for (unsigned index : {3u, 4u, 5u, 6u, 7u, ~0u}) {
+    for (unsigned index : {3u, 4u, 5u, 6u, 8u, ~0u}) {
         assert(!o82_color_fw_data(bundle.data(), index, 0, 0, &igc, &gc));
         assert(igc == retained_igc && gc == retained_gc);
     }
     assert(!o82_color_fw_data(bundle.data(), 0, 2, 0, &igc, &gc));
     assert(!o82_color_fw_data(bundle.data(), 0, 0, 2, &igc, &gc));
     assert(igc == retained_igc && gc == retained_gc);
+    assert(o82_color_fw_data(bundle.data(), 7, 0, 0, &igc, &gc));
+    assert(o82_hdr_u32(o82_color_fw_record(bundle.data(), 7) + 128) == 1);
+    assert(o82_hdr_u32(o82_color_fw_record(bundle.data(), 7) + 132) == 3);
     const auto snapshot = bundle;
     auto seal = [&] { put_word(bundle, 20, o82_hdr_crc32(bundle.data() + 24, bundle.size() - 24)); };
     auto bad_word = [&](size_t at, unsigned value) {
@@ -695,6 +713,7 @@ void preset_self_test(const Profile &identity) {
     bad_word(O82_COLOR_FW_HEADER + 80, ~0U); bad_word(O82_COLOR_FW_HEADER + 84, 1);
     bad_word(O82_COLOR_FW_HEADER + 88, 0); bad_word(O82_COLOR_FW_HEADER + 92, ~0U);
     bad_word(O82_COLOR_FW_HEADER + 128, 1);
+    bad_word(O82_COLOR_FW_HEADER + 7 * O82_COLOR_FW_RECORD + 132, 16);
     const size_t data_start = o82_hdr_u32(snapshot.data() + O82_COLOR_FW_HEADER + 80);
     bundle = snapshot; bundle[data_start] = 1; seal();
     assert(!o82_color_fw_valid(bundle.data(), bundle.size(), 0x42));

@@ -100,7 +100,8 @@ int main(void)
 	retained = input;
 	assert(dpu_o82_profiles_input(&profiles, 2, 0, &input) == -EINVAL);
     assert(input.igc == retained.igc && input.gamut == retained.gamut &&
-           input.gc == retained.gc && input.primaries == retained.primaries);
+           input.gc == retained.gc && input.primaries == retained.primaries &&
+           input.dither_strength == retained.dither_strength && input.dither_enabled == retained.dither_enabled);
 	assert(dpu_o82_profiles_select(&profiles, "blocked") == -EOPNOTSUPP && profiles.selected == 1);
 	assert(dpu_o82_profiles_select(&profiles, "absent") == -ENOENT && profiles.selected == 1);
 	assert(dpu_o82_profiles_select(&profiles, NULL) == -EINVAL && profiles.selected == 1);
@@ -109,7 +110,8 @@ int main(void)
 	assert(!profiles.fw && releases == 4);
 	assert(dpu_o82_profiles_input(&profiles, 0, 0, &input) == -ENODEV);
     assert(input.igc == retained.igc && input.gamut == retained.gamut &&
-           input.gc == retained.gc && input.primaries == retained.primaries);
+           input.gc == retained.gc && input.primaries == retained.primaries &&
+           input.dither_strength == retained.dither_strength && input.dither_enabled == retained.dither_enabled);
 	dpu_o82_profiles_unload(&profiles); dpu_o82_profiles_unload(NULL);
 	assert(releases == 4);
 	puts("Actual kernel preset loader: missing/corrupt data, default admission, refusal, all four inputs and lifetime passed");

@@ -24,6 +24,7 @@
 #define O82_COLOR_OP_SIXZONE 16U
 #define O82_COLOR_OP_MEMORY 32U
 #define O82_COLOR_OP_HDR 64U
+#define O82_COLOR_OP_DITHER 128U
 
 #define O82_COLOR_BLOCK_HSIC 1U
 #define O82_COLOR_BLOCK_SIXZONE 2U
@@ -134,7 +135,7 @@ static inline int o82_color_fw_valid(const unsigned char *data,
 
 		record = o82_color_fw_record(data, i);
 		if (!o82_color_fw_name(record) || o82_hdr_u32(record + 64) > 1 ||
-		    o82_hdr_u32(record + 68) > 1 || !o82_color_fw_zero(record + 128, 32) ||
+		    o82_hdr_u32(record + 68) > 1 || !o82_color_fw_zero(record + 136, 24) ||
 		    o82_color_fw_zero(record + 96, 32))
 			return 0;
 		if (previous) {
@@ -146,14 +147,17 @@ static inline int o82_color_fw_valid(const unsigned char *data,
 		previous = record;
 		flags = o82_hdr_u32(record + 72);
 		blocked = o82_hdr_u32(record + 76);
-		if ((flags & ~127U) || (blocked & ~15U) ||
+		if ((flags & ~255U) || (blocked & ~15U) ||
 		    (flags & (O82_COLOR_OP_IGC | O82_COLOR_OP_GC)) !=
 		    (O82_COLOR_OP_IGC | O82_COLOR_OP_GC) ||
 		    (!!(flags & O82_COLOR_OP_HSIC) != !!(blocked & O82_COLOR_BLOCK_HSIC)) ||
 		    (!!(flags & O82_COLOR_OP_MEMORY) != !!(blocked & O82_COLOR_BLOCK_MEMORY)) ||
 		    (!!(flags & O82_COLOR_OP_HDR) != !!(blocked & O82_COLOR_BLOCK_HDR)) ||
 		    ((blocked & O82_COLOR_BLOCK_SIXZONE) && !(flags & O82_COLOR_OP_SIXZONE)) ||
-		    (o82_hdr_u32(record + 68) && !(flags & O82_COLOR_OP_HDR)))
+		    (o82_hdr_u32(record + 68) && !(flags & O82_COLOR_OP_HDR)) ||
+		    o82_hdr_u32(record + 128) > 1 || o82_hdr_u32(record + 132) > 15 ||
+		    (!!(flags & O82_COLOR_OP_DITHER) != !!o82_hdr_u32(record + 128)) ||
+		    (!o82_hdr_u32(record + 128) && o82_hdr_u32(record + 132)))
 			return 0;
 		offset = o82_hdr_u32(record + 80);
 		size = o82_hdr_u32(record + 84);

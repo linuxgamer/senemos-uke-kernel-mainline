@@ -82,6 +82,7 @@ bash tests/o82-profile-loader-contract.sh .
 * Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 0.3.0-2
 - Load and select validated private root-resident presets in native kernel C.
 - Check refusal, four input combinations and firmware lifetime with synthetic data.
+- Preserve enabled IGC dithering found in the real OEM preset input.
 
 * Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 0.3.0-1
 - Compile distinct native-gamut/BT.2020 and gamma2.2/PQ preset inputs.

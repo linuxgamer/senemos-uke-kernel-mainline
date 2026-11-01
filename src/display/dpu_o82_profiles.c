@@ -85,6 +85,8 @@ int dpu_o82_profiles_input(const struct dpu_o82_profiles *profiles,
 		return -EINVAL;
 	record = o82_color_fw_record(profiles->fw->data, profiles->selected);
 	candidate.primaries = o82_hdr_u32(record + 64);
+	candidate.dither_enabled = o82_hdr_u32(record + 128);
+	candidate.dither_strength = o82_hdr_u32(record + 132);
 	*input = candidate;
 	return 0;
 }
