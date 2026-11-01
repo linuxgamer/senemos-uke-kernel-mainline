@@ -55,6 +55,20 @@ all preset operations and the four compositor input combinations still need
 integration. Native HDR10/WCG therefore remains unavailable in KDE. See the
 [native transport contract](O82-NATIVE-COLOR.md) for the current boundary.
 
+The `0.3.0` source adds `--native-presets OEM_JSON NEW_PRIVATE_BUNDLE`.
+It inventories every retained preset separately and compiles distinct native
+and BT.2020 input gamuts, each selectable with gamma2.2 or PQ. It preserves
+factory picture/HDR operations in private metadata. Nonzero SixZone, scalar
+HSIC, memory-color and opaque HDR-library operations remain explicitly blocked
+until their complete implementation exists. A blocked preset never aliases a
+different preset's transform. This bundle is not yet consumed by the driver.
+
+The earlier audit grouped SixZone and memory-color under one counter. Separate
+inspection of all eight PB picture variants shows no enabled skin/sky/foliage
+block; the forty combined-active modes use SixZone. Some enabled SixZone curves
+are entirely zero. The compiler preserves that identity case while refusing
+nonzero curves; nominal enable counts alone do not describe their visual effect.
+
 ## Use
 
 First identify the actual panel compatible, for example
@@ -63,6 +77,12 @@ read-only OEM resources. Generate a new output path:
 
 ```bash
 uke-o82-color-profile /path/to/exact-o82-qdcm.json /path/to/new-private-o82.icc
+```
+
+To prepare the native bundle without installing firmware or changing output:
+
+```bash
+uke-o82-color-profile --native-presets /path/to/exact-o82-qdcm.json /path/to/new-private-o82.bin
 ```
 
 After retaining the current KScreen configuration, the original desktop can

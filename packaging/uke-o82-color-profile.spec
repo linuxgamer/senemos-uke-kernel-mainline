@@ -1,7 +1,7 @@
 Name: uke-o82-color-profile
-Version: 0.2.0
-Release: 9%{?dist}
-Summary: Generate a private O82 OEM P3 ICC mapping for original KDE
+Version: 0.3.0
+Release: 1%{?dist}
+Summary: Generate private O82 OEM color mappings and native preset data
 License: MIT
 URL: https://github.com/MCC45TR/senemos-uke-kernel-mainline
 Source0: o82-color-profile.cpp
@@ -14,6 +14,7 @@ Source6: dpu_o82_regdma.c
 Source7: dpu_o82_regdma.h
 Source8: o82-regdma-transport-contract.c
 Source9: o82-regdma-transport-contract.sh
+Source10: o82-color-firmware.h
 ExclusiveArch: aarch64
 BuildRequires: clang gcc-c++ compiler-rt pkgconf-pkg-config
 BuildRequires: pkgconfig(json-c) pkgconfig(lcms2) pkgconfig(openssl)
@@ -26,6 +27,10 @@ KWin performs color conversion in its existing ICC shader path. The generator
 does not access hardware, modify the backlight, install a desktop profile or
 redistribute factory tables. Optical calibration and native HDR10 acceptance
 remain separate from OEM-derived P3 mapping and the compositor's existing EDR.
+The native-preset preparation command retains each preset's identity and
+compiles independent native/BT.2020 and gamma2.2/PQ inputs. Active operations
+without a complete implementation remain preserved and explicitly refused;
+the command does not install firmware or advertise new display capabilities.
 
 %prep
 cp %{SOURCE0} .
@@ -34,6 +39,7 @@ cp %{SOURCE2} .
 cp %{SOURCE3} .
 cp %{SOURCE4} .
 cp %{SOURCE5} .
+cp %{SOURCE10} .
 mkdir -p src/display tests
 cp %{SOURCE5} %{SOURCE6} %{SOURCE7} src/display/
 cp %{SOURCE8} %{SOURCE9} tests/
@@ -48,6 +54,7 @@ install -Dpm755 uke-o82-color-profile %{buildroot}%{_bindir}/uke-o82-color-profi
 
 %check
 gcc -std=c11 -Wall -Wextra -Werror -x c -fsyntax-only o82-regdma.h
+gcc -std=c11 -Wall -Wextra -Werror -x c -fsyntax-only o82-color-firmware.h
 ./uke-o82-color-profile --self-test
 clang++ -std=c++20 -O1 -g -UNDEBUG -Wall -Wextra -Werror \
     -fsanitize=address,undefined -fno-omit-frame-pointer \
@@ -65,6 +72,10 @@ bash tests/o82-regdma-transport-contract.sh .
 %{_bindir}/uke-o82-color-profile
 
 %changelog
+* Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 0.3.0-1
+- Compile distinct native-gamut/BT.2020 and gamma2.2/PQ preset inputs.
+- Preserve active unsupported operations and refuse them instead of aliasing profiles.
+
 * Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 0.2.0-9
 - Check the actual native REGDMA transport with completion and failed-reset faults.
 

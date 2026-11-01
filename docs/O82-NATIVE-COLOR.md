@@ -53,6 +53,16 @@ The current private ICC remains selected until its complete replacement is
 available. A synthetic EDID cannot embed arbitrary factory LUTs; it describes
 the logical gamut and transfer actually implemented by the selected transform.
 
+The v2 private bundle in `o82-color-firmware.h` provides distinct named records,
+source identities, bounded contiguous offsets, checked monotonic curves and
+12/10-bit table ranges. Its native-gamut and BT.2020 cubes are separate; either
+can use gamma2.2 or PQ. Records with unimplemented active processing contain no
+selectable table payload. Their original picture/HDR data remains private and
+the selector refuses them without changing output pointers. Zero-valued
+SixZone adjustment curves are treated as an identity operation. Native driver
+loading, hardware bank/channel order and all nonzero picture operations still
+require implementation and verification before capability admission.
+
 The register and clock evidence is the GPL-2.0-only Xiaomi
 [REGDMA implementation](https://github.com/MiCode/vendor_opensource_display-drivers/blob/44275c404a677d9d9e5230fedd1af2ef02fc7b9a/msm/sde/sde_hw_reg_dma_v1.c)
 at commit `44275c404a677d9d9e5230fedd1af2ef02fc7b9a`.
