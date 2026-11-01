@@ -4,11 +4,15 @@
 Fedora Rawhide AArch64 and original KWin 6.8.2. Compilation and numerical checks
 run in COPR. Optical color and HDR acceptance require separate measurements.
 
-COPR11239634 built signed `0.1.0-2` with ordinary and ASan/UBSan numerical
-checks. The utility is installed on POCO Pad X1 and generated the private PB
-profile. Original KDE accepted its ICC selection while DSI remained disabled;
-visible shader operation, optical calibration and native HDR remain unverified.
-Existing-output and unreviewed-input refusals passed without modifying the ICC.
+The initial `0.1.0-2` passed numerical checks and saved ICC selection, but its
+serialized stage order was rejected when original KWin rendered the output.
+User photographs reported crushed shadows and excessive contrast/saturation.
+COPR11239895 built signed `0.2.0-3` with the corrected LUT16 leading-matrix
+layout, serialized-stage validation, dark/gray roundtrips and ASan/UBSan checks.
+That version is installed and generated a replacement private PB profile.
+A short active-output trial on Linux 7.3.1-115 produced no former ICC shader
+error. The previous disabled-output state and brightness were restored.
+Optical accuracy and comparison with Android remain unverified.
 
 `uke-o82-color-profile` creates a private ICC profile from one exact retained
 Global OS3.0.304.0 factory QDCM input. It accepts only the reviewed PA/PB SHA-256
@@ -36,6 +40,16 @@ The generator writes only a new 0600 output file and refuses to replace an
 existing file. It never reads persist, performs calibration, enables HBM,
 changes LED current or communicates with an amplifier, DSP, panel or GPU.
 Factory input and generated ICC data must remain local and private.
+
+The additional `--native-hdr OEM_JSON NEW_COLOR_DATA` form prepares private,
+bounded PQ and gamma-2.2 input curves, a linear BT.2020-to-OEM-P3 gamut mapping
+and factory output gamma. It uses the OEM nominal 420-nit value as a conversion
+bound, not measured luminance or a request for HBM. The versioned data includes
+the exact source identity, length, bounds and CRC. No driver consumes it yet.
+The separately tested HDR descriptor is not attached to the live connector.
+These files do not implement the missing native IGC v4/gamut v4.3 register-DMA
+submission, paired-DSPP atomic state, timeout recovery or buffer lifetime.
+Native HDR10/WCG therefore remains unavailable in KDE.
 
 ## Use
 
