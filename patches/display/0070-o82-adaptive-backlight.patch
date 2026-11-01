@@ -1,0 +1,173 @@
+diff --git a/drivers/gpu/drm/drm_atomic_helper.c b/drivers/gpu/drm/drm_atomic_helper.c
+index 285aac3..718d096 100644
+--- a/drivers/gpu/drm/drm_atomic_helper.c
++++ b/drivers/gpu/drm/drm_atomic_helper.c
+@@ -743,6 +743,10 @@ drm_atomic_helper_check_modeset(struct drm_device *dev,
+ 			    new_connector_state->color_format)
+ 				new_crtc_state->connectors_changed = true;
+ 
++			if (connector->abm_level_property &&
++			    old_connector_state->abm_level != new_connector_state->abm_level)
++				new_crtc_state->connectors_changed = true;
++
+ 		}
+ 
+ 		if (funcs->atomic_check)
+diff --git a/drivers/gpu/drm/drm_atomic_uapi.c b/drivers/gpu/drm/drm_atomic_uapi.c
+index 68d59e1..ae01b8b 100644
+--- a/drivers/gpu/drm/drm_atomic_uapi.c
++++ b/drivers/gpu/drm/drm_atomic_uapi.c
+@@ -940,6 +940,10 @@ static int drm_atomic_connector_set_property(struct drm_connector *connector,
+ 		state->hdcp_content_type = val;
+ 	} else if (property == connector->colorspace_property) {
+ 		state->colorspace = val;
++	} else if (property == connector->abm_level_property) {
++		if (val > 4)
++			return -EINVAL;
++		state->abm_level = val;
+ 	} else if (property == config->writeback_fb_id_property) {
+ 		struct drm_framebuffer *fb;
+ 		int ret;
+@@ -1027,6 +1031,8 @@ drm_atomic_connector_get_property(struct drm_connector *connector,
+ 		*val = state->content_type;
+ 	} else if (property == connector->colorspace_property) {
+ 		*val = state->colorspace;
++	} else if (property == connector->abm_level_property) {
++		*val = state->abm_level;
+ 	} else if (property == connector->scaling_mode_property) {
+ 		*val = state->scaling_mode;
+ 	} else if (property == config->hdr_output_metadata_property) {
+diff --git a/drivers/gpu/drm/drm_connector.c b/drivers/gpu/drm/drm_connector.c
+index f0faccc..bdbf4a9 100644
+--- a/drivers/gpu/drm/drm_connector.c
++++ b/drivers/gpu/drm/drm_connector.c
+@@ -2962,6 +2962,35 @@ int drm_connector_attach_colorspace_property(struct drm_connector *connector)
+ }
+ EXPORT_SYMBOL(drm_connector_attach_colorspace_property);
+ 
++/**
++ * drm_connector_attach_abm_property - attach atomic backlight adaptation control
++ * @connector: internal connector with a content-adaptive backlight implementation
++ *
++ * The driver applies the requested tier during a full modeset. Zero disables
++ * adaptation; the remaining tiers trade color accuracy for power saving.
++ *
++ * Return: zero on success, negative errno on allocation failure.
++ */
++int drm_connector_attach_abm_property(struct drm_connector *connector)
++{
++	static const struct drm_prop_enum_list levels[] = {
++		{ 0, "off" }, { 1, "min" }, { 2, "bias min" },
++		{ 3, "bias max" }, { 4, "max" },
++	};
++	struct drm_property *property;
++
++	if (connector->abm_level_property)
++		return 0;
++	property = drm_property_create_enum(connector->dev, DRM_MODE_PROP_ATOMIC,
++			"adaptive backlight modulation", levels, ARRAY_SIZE(levels));
++	if (!property)
++		return -ENOMEM;
++	connector->abm_level_property = property;
++	drm_object_attach_property(&connector->base, property, 0);
++	return 0;
++}
++EXPORT_SYMBOL(drm_connector_attach_abm_property);
++
+ /**
+  * DOC: Color format
+  *
+diff --git a/drivers/gpu/drm/msm/dsi/dsi_manager.c b/drivers/gpu/drm/msm/dsi/dsi_manager.c
+index 003a475..5d98ae7 100644
+--- a/drivers/gpu/drm/msm/dsi/dsi_manager.c
++++ b/drivers/gpu/drm/msm/dsi/dsi_manager.c
+@@ -5,7 +5,9 @@
+ 
+ #include "drm/drm_bridge_connector.h"
+ #include <drm/drm_panel.h>
++#include <drm/drm_atomic.h>
+ #include <drm/uke-o82-mode.h>
++#include <linux/hdmi.h>
+ #include <linux/of_graph.h>
+ #include <linux/debugfs.h>
+ #include <linux/seq_file.h>
+@@ -604,6 +606,29 @@ static void dsi_mgr_bridge_debugfs_init(struct drm_bridge *bridge,
+ 				    &dsi_mgr_output_bits_fops);
+ }
+ 
++static int dsi_mgr_bridge_atomic_check(struct drm_bridge *bridge,
++		struct drm_bridge_state *bridge_state,
++		struct drm_crtc_state *crtc_state,
++		struct drm_connector_state *conn_state)
++{
++	const struct hdr_output_metadata *hdr;
++	struct drm_property_blob *metadata = conn_state->hdr_output_metadata;
++
++	if (!to_dsi_bridge(bridge)->o82_panel)
++		return 0;
++	if (conn_state->abm_level > 4)
++		return -EINVAL;
++	if (conn_state->abm_level && metadata) {
++		if (metadata->length != sizeof(*hdr))
++			return -EINVAL;
++		hdr = metadata->data;
++		if (hdr->metadata_type || hdr->hdmi_metadata_type1.metadata_type ||
++		    hdr->hdmi_metadata_type1.eotf != HDMI_EOTF_TRADITIONAL_GAMMA_SDR)
++			return -EOPNOTSUPP;
++	}
++	return 0;
++}
++
+ static const struct drm_bridge_funcs dsi_mgr_bridge_funcs = {
+ 	.debugfs_init = dsi_mgr_bridge_debugfs_init,
+ 	.atomic_create_state = drm_atomic_helper_bridge_create_state,
+@@ -613,6 +638,7 @@ static const struct drm_bridge_funcs dsi_mgr_bridge_funcs = {
+ 	.atomic_pre_enable = dsi_mgr_bridge_pre_enable,
+ 	.atomic_enable = dsi_mgr_bridge_enable,
+ 	.atomic_post_disable = dsi_mgr_bridge_post_disable,
++	.atomic_check = dsi_mgr_bridge_atomic_check,
+ 	.mode_set = dsi_mgr_bridge_mode_set,
+ 	.mode_valid = dsi_mgr_bridge_mode_valid,
+ };
+@@ -881,6 +907,9 @@ int msm_dsi_manager_connector_init(struct msm_dsi *msm_dsi,
+ 		ret = drm_connector_attach_vrr_capable_property(connector);
+ 		if (ret)
+ 			return ret;
++		ret = drm_connector_attach_abm_property(connector);
++		if (ret)
++			return ret;
+ 	}
+ 
+ 	return 0;
+diff --git a/include/drm/drm_connector.h b/include/drm/drm_connector.h
+index 758b879..217fe73 100644
+--- a/include/drm/drm_connector.h
++++ b/include/drm/drm_connector.h
+@@ -1257,6 +1257,9 @@ struct drm_connector_state {
+ 	 */
+ 	enum drm_colorspace colorspace;
+ 
++	/** @abm_level: Content-adaptive backlight tier, zero (off) through four. */
++	unsigned int abm_level;
++
+ 	/**
+ 	 * @color_format: State variable for Connector property to request
+ 	 * color format change on Sink. This is most commonly used to switch
+@@ -2289,6 +2292,9 @@ struct drm_connector {
+ 	 */
+ 	struct drm_property *colorspace_property;
+ 
++	/** @abm_level_property: Optional atomic backlight adaptation control. */
++	struct drm_property *abm_level_property;
++
+ 	/**
+ 	 * @color_format_property: Connector property to set the suitable
+ 	 * color format supported by the sink.
+@@ -2692,6 +2698,7 @@ int drm_connector_attach_vrr_capable_property(
+ void drm_connector_attach_panel_type_property(struct drm_connector *connector);
+ int drm_connector_attach_broadcast_rgb_property(struct drm_connector *connector);
+ int drm_connector_attach_colorspace_property(struct drm_connector *connector);
++int drm_connector_attach_abm_property(struct drm_connector *connector);
+ void drm_connector_attach_hdr_output_metadata_property(struct drm_connector *connector);
+ bool drm_connector_atomic_hdr_metadata_equal(struct drm_connector_state *old_state,
+ 					     struct drm_connector_state *new_state);

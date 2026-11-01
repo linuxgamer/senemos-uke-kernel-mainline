@@ -1,0 +1,129 @@
+# O82 OEM P3 mapping for original KDE
+
+1 November 2026. OEM P3 mapping for POCO Pad X1 / Xiaomi Pad 7 O82 panels,
+Fedora Rawhide AArch64 and original KWin 6.8.2. Compilation and numerical checks
+run in COPR. Optical color and HDR acceptance require separate measurements.
+
+The initial `0.1.0-2` passed numerical checks and saved ICC selection, but its
+serialized stage order was rejected when original KWin rendered the output.
+User photographs reported crushed shadows and excessive contrast/saturation.
+COPR11239895 built signed `0.2.0-3` with the corrected LUT16 leading-matrix
+layout, serialized-stage validation, dark/gray roundtrips and ASan/UBSan checks.
+That version is installed and generated a replacement private PB profile.
+A short active-output trial on Linux 7.3.1-115 produced no former ICC shader
+error. The previous disabled-output state and brightness were restored.
+Optical accuracy and comparison with Android remain unverified.
+
+`uke-o82-color-profile` creates a private ICC profile from one exact retained
+Global OS3.0.304.0 factory QDCM input. It accepts only the reviewed PA/PB SHA-256
+identities and the `standard_P3` selector with SDR/P3/sRGB-transfer metadata.
+It validates active IGC/gamut/GC, rejects unsupported active picture operations
+and verifies gamut axis order against the same file's disabled identity table.
+The input contains 257-point IGC, 17³ gamut and 1024-point output gamma data.
+
+The ICC BToA transform converts standard XYZ D50 into encoded Display-P3 and
+then applies the factory IGC → gamut → GC mapping. Gamut interpolation is
+trilinear; the software mapping remains an approximation until compared with
+the OEM hardware's interpolation and optical output. No nominal luminance is
+presented as a measured display value. The profile description explicitly
+identifies this boundary.
+
+Original KDE already implements ICC 3D-LUT rendering and EDR for an internal
+backlight-controlled display. This permits wide-color content conversion and
+HDR10 content tone mapping in the compositor's existing pipeline without a
+KDE fork, a false panel PQ capability or new hardware color-register writes.
+This does not advertise a native HDR10/PQ DSI mode, provide Dolby Vision, change
+the fixed 10-bpc link or establish optical HDR accuracy. The existing EDR
+brightness estimate also remains uncalibrated for O82.
+
+The generator writes only a new 0600 output file and refuses to replace an
+existing file. It never reads persist, performs calibration, enables HBM,
+changes LED current or communicates with an amplifier, DSP, panel or GPU.
+Factory input and generated ICC data must remain local and private.
+
+The additional `--native-hdr OEM_JSON NEW_COLOR_DATA` form prepares private,
+bounded PQ and gamma-2.2 input curves, a linear BT.2020-to-OEM-P3 gamut mapping
+and factory output gamma. It uses the OEM nominal 420-nit value as a conversion
+bound, not measured luminance or a request for HBM. The versioned data includes
+the exact source identity, length, bounds and CRC. No driver consumes it yet.
+The separately tested HDR descriptor is not attached to the live connector.
+A separate native Cliffs DB transport now implements bounded descriptor
+submission, completion/error polling, checked reset and a failed-stop latch.
+Its actual C source is checked against deterministic MMIO in COPR; it has no
+live driver caller. Both clock gates, GEM/VM ownership, paired-DSPP state,
+all preset operations and the four compositor input combinations still need
+integration. Native HDR10/WCG therefore remains unavailable in KDE. See the
+[native transport contract](O82-NATIVE-COLOR.md) for the current boundary.
+
+The `0.3.0` source adds `--native-presets OEM_JSON NEW_PRIVATE_BUNDLE`.
+It inventories every retained preset separately and compiles distinct native
+and BT.2020 input gamuts, each selectable with gamma2.2 or PQ. It preserves
+factory picture/HDR operations in private metadata. Nonzero SixZone, scalar
+HSIC, memory-color and opaque HDR-library operations remain explicitly blocked
+until their complete implementation exists. A blocked preset never aliases a
+different preset's transform. This bundle is not yet consumed by the driver.
+
+The earlier audit grouped SixZone and memory-color under one counter. Separate
+inspection of all eight PB picture variants shows no enabled skin/sky/foliage
+block; the forty combined-active modes use SixZone. Some enabled SixZone curves
+are entirely zero. The compiler preserves that identity case while refusing
+nonzero curves; nominal enable counts alone do not describe their visual effect.
+
+The first real PB bundle attempt with `0.3.0-1` refused enabled IGC dithering
+before writing an output file. The `0.3.0-2` source preserves each preset's
+IGC dither flag and four-bit strength explicitly. The native engine must apply
+that state with its selected input tables; preparation is not hardware support.
+
+COPR11240486 passes utility0.3.0-4 and actual Linux7.3.1 AArch64 object checks.
+The verified production generator creates both private PA/PB bundles with59
+records,47 compiled transforms and12 explicitly refused nonzero picture/HDR
+operations. Each preserves32 IGC-dither configurations. No firmware is installed,
+no profile is applied and original KDE still uses the corrected temporary ICC.
+
+## Use
+
+First identify the actual panel compatible, for example
+`xiaomi,o82-42-02-0b`, and select its exact corresponding QDCM JSON from the
+read-only OEM resources. Generate a new output path:
+
+```bash
+uke-o82-color-profile /path/to/exact-o82-qdcm.json /path/to/new-private-o82.icc
+```
+
+To prepare the native bundle without installing firmware or changing output:
+
+```bash
+uke-o82-color-profile --native-presets /path/to/exact-o82-qdcm.json /path/to/new-private-o82.bin
+```
+
+After retaining the current KScreen configuration, the original desktop can
+select the generated file using its ICC profile setting or standard interface:
+
+```bash
+kscreen-doctor output.DSI-1.iccprofile./path/to/new-private-o82.icc output.DSI-1.colorProfileSource.ICC
+```
+
+Use the original EDR policy for correctly tagged HDR10 content. The native HDR
+and WCG capability toggles remain separate; this tool does not force them or
+write a fabricated EDID. Record whether the application supplies correct
+color metadata, and keep the external DP output's profile independent.
+
+Validate black/white clipping, gradients, grayscale, sRGB and tagged P3 images,
+HDR highlight roll-off, direct-scanout behavior and recovery after modesets.
+Compare with matched Android settings and instrument-measured luminance and
+chromaticity before calling the profile calibrated or the HDR target complete.
+
+## Sources
+
+Exact O82 QDCM profiles are read from local OEM resources and are not included.
+Their pins and scalar audit are in the central Uke audio/display report dated
+1 November 2026. Input PA SHA-256 is
+`bd88eb94134e5f62c05eebaa0a9e4b5267968363f72f440018b98a15d1bd9122`;
+PB is `2b6442ce0e8fef6d1b008cdeca3838450282868d385f6e3056c0a4ce2b8949d8`.
+
+The original [KWin ICC implementation](https://github.com/KDE/kwin/blob/f130ab33c8e6f3b9d728aade87836086ae9a8ed4/src/opengl/icc_shader.cpp)
+and [profile parser](https://github.com/KDE/kwin/blob/f130ab33c8e6f3b9d728aade87836086ae9a8ed4/src/core/iccprofile.cpp)
+provide the accepted BToA curve/matrix/CLUT contract. Xiaomi display driver
+`44275c404a677d9d9e5230fedd1af2ef02fc7b9a` and display DT
+`4a3e1c391130237c5e8c2b250d1c94f3e25b9b11` identify the separate native
+IGC v4/gamut v4.3/LUTBUS hardware path. No donor implementation is executed.

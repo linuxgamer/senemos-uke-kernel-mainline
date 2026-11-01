@@ -18,6 +18,7 @@ validate: test-touch-protocol test-touch-transport
 	bash tests/copr-source-guards-contract.sh
 	bash -n tests/msm-retirement-contract.sh tests/msm-writeback-contract.sh tests/msm-retirement-proof-contract.sh
 	bash -n tests/o82-avr-contract.sh tests/dpu-video-timing-contract.sh
+	bash -n tests/o82-abm-contract.sh packaging/native/copr-o82-abm731.sh
 	bash -n tests/msm-kms-lifecycle-contract.sh tests/msm-kms-unwind-contract.sh tests/msm-kms-alternate-build.sh
 	bash tests/msm-kms-release-contract.sh
 	bash -n tests/gunyah-boot-watchdog-contract.sh packaging/native/copr-boot-watchdog61.sh
@@ -126,6 +127,12 @@ test-microphones:
 	bash tests/wcd939x-reset-consumer-contract.sh "$(kernel_source)"
 	bash tests/wcd939x-io-contract.sh "$(kernel_source)"
 	bash tests/soundwire-resume-clock-contract.sh "$(kernel_source)"
+.PHONY: test-o82-regdma
+test-o82-regdma:
+	bash tests/o82-regdma-transport-contract.sh
+.PHONY: test-o82-profiles
+test-o82-profiles:
+	bash tests/o82-profile-loader-contract.sh
 srpm: validate
 	cache="$(CURDIR)/referances/releases"
 	top="$$(realpath -m "$(outdir)/rpmbuild")"

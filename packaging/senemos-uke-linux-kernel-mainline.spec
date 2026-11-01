@@ -202,6 +202,8 @@ bash native-profile/tests/usbss-kconfig-contract.sh "$PWD" "%{_uke_out}/scripts/
 printf 'UKE_BUILD_STAGE boot_bundle elapsed_s=%d\n' "$((SECONDS-uke_build_start))"
 
 %check
+test -L %{buildroot}/usr/lib/firmware/%{krel}/qcom/uke%{krel}/POCO-Pad-X1-tplg.bin
+cmp native-generated/POCO-Pad-X1-tplg.bin %{buildroot}/usr/lib/firmware/%{krel}/qcom/uke%{krel}/POCO-Pad-X1-tplg.bin
 uke_check_start=$SECONDS
 bash native-profile/tests/optional-gaming-platform.sh %{_uke_out}/.config \
     %{buildroot}/usr/lib/modules/%{krel} %{krel} %{_uke_out}
@@ -251,6 +253,7 @@ CXX=clang++ bash native-profile/tests/uke-rpmh-resource-contract.sh native-gener
 CXX=clang++ bash native-profile/tests/uke-rpmh-resource-contract.sh drivers/regulator/qcom-rpmh-regulator-uke.c native
 CXX=clang++ bash native-profile/tests/ktz-dimming-observation-contract.sh drivers/video/backlight/ktz8866.c
 bash boot-recipe/tests/boot-image-contract.sh %{_uke_out}/boot-image
+bash boot-recipe/tests/initramfs-cpio-contract.sh %{_uke_out}/usr/gen_init_cpio
 CXX=clang++ bash native-profile/tests/root-selector-contract.sh
 CC=clang bash native-profile/tests/root-selector-note-contract.sh "$PWD" "$PWD/boot-recipe/lock.json"
 bash boot-recipe/tests/target-privacy-contract.sh
@@ -283,6 +286,7 @@ CXX=clang++ bash native-profile/tests/audio-preset-contract.sh
 CXX=clang++ bash native-profile/tests/audio-acdb-contract.sh
 CC=clang bash native-profile/tests/audio-card-contract.sh "$PWD"
 CC=clang bash native-profile/tests/microphone-gain-contract.sh
+CC=clang bash native-profile/tests/audio-eld-contract.sh
 CXX=clang++ bash native-profile/tests/kernel-audio-policy-contract.sh
 CC=clang bash native-profile/tests/audio-fs19xx-contract.sh "$PWD"
 CC=clang bash native-profile/tests/audio-fs19xx-lifecycle-contract.sh "$PWD"
@@ -322,6 +326,7 @@ CC=clang bash native-profile/tests/o82-avr-contract.sh "$PWD"
 CC=clang bash native-profile/tests/o82-avr-retime-contract.sh drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c
 CC=clang bash native-profile/tests/o82-vrr-capability-contract.sh "$PWD"
 CC=clang bash native-profile/tests/o82-vrr-floor-contract.sh "$PWD"
+CC=clang SANITIZE=1 bash native-profile/tests/o82-abm-contract.sh "$PWD" native-profile/src/display/panel-xiaomi-o82.c
 CC=clang bash native-profile/tests/dpu-watchdog-lifecycle-contract.sh "$PWD"
 CXX=clang++ bash native-profile/tests/dsi-panel-sequence-contract.sh drivers/gpu/drm/msm/dsi/dsi_manager.c
 CXX=clang++ bash native-profile/tests/dp-connector-state-contract.sh drivers/gpu/drm/msm/dp/dp_drm.c
@@ -383,6 +388,12 @@ install -Dm644 native-generated/POCO-Pad-X1-HDMI-tplg.bin \
     %{buildroot}/usr/lib/firmware/%{krel}/qcom/sm7675/POCO-Pad-X1-HDMI-tplg.bin
 install -Dm644 native-generated/POCO-Pad-X1-tplg.bin \
     %{buildroot}/usr/lib/firmware/%{krel}/qcom/sm7675/POCO-Pad-X1-tplg.bin
+# AudioReach derives this lookup from the unnormalized ASoC driver name.
+install -d %{buildroot}/usr/lib/firmware/%{krel}/qcom/uke%{krel}
+ln -s ../sm7675/POCO-Pad-X1-tplg.bin \
+    %{buildroot}/usr/lib/firmware/%{krel}/qcom/uke%{krel}/POCO-Pad-X1-tplg.bin
+cmp native-generated/POCO-Pad-X1-tplg.bin \
+    %{buildroot}/usr/lib/firmware/%{krel}/qcom/uke%{krel}/POCO-Pad-X1-tplg.bin
 test -z "$(find %{buildroot} -type f \( -name '*.py' -o -name '*.pyc' -o -name 'python*' \) -print -quit)"
 bundle=%{buildroot}/usr/lib/senemos/kernel-updates/%{krel}
 mkdir -p "$bundle"
@@ -449,6 +460,31 @@ cp -a boot-recipe/src/boot/licenses/. %{buildroot}/usr/share/licenses/%{name}-bo
 /usr/lib/senemos/default-boot.img
 
 %changelog
+* Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-1041
+- Combine verified release1020 USB/power inputs with default-off O82 CABC.
+- Check paired panel lifecycle and ABM faults before the complete kernel build.
+
+* Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-1006
+- Retain release1003 display, power, audio and adaptation inputs.
+- Correct LMH IRQ ownership across policy-ready activation and hotplug.
+
+* Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-1003
+- Preserve the requested 30 Hz O82 floor and zero-brightness first frame.
+- Retain the installed release116 power, startup and matching-family inputs.
+
+* Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-115
+- Encode the standard initial console in one deterministic source-built cpio.
+- Preserve early-user files, permissions, symlinks and regular-file hardlinks.
+- Describe policy-gated automatic slot staging and the absence of automatic reboot.
+
+* Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-114
+- Backport upstream sorting of combined LPASS RX/WSA register defaults.
+- Retain all register values, cache types and release113 warning corrections.
+
+* Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-113
+- Check for the optional LLCC window before mapping it.
+- Use the current per-CPU system queue for amplifier delayed work.
+
 * Sat Oct 31 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-106
 - Make guarded automatic boot staging the singleboot package contract.
 - Require the updater whose default enables verified inactive-slot delivery.

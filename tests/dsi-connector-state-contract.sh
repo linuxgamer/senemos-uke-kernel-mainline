@@ -48,6 +48,7 @@ static int drm_connector_attach_max_bpc_property(drm_connector* c,int min,int ma
     c->state->max_bpc=c->state->max_requested_bpc=max;return 0;
 }
 static int drm_connector_attach_vrr_capable_property(drm_connector*) {++vrr_calls;return vrr_error;}
+[[maybe_unused]] static int drm_connector_attach_abm_property(drm_connector*) {return 0;}
 CPP
 awk '/^int msm_dsi_manager_connector_init\(/ {emit=1} emit{print} emit&&/^}/{exit}' "$kernel/drivers/gpu/drm/msm/dsi/dsi_manager.c" >> "$work/check.cpp"
 cat >> "$work/check.cpp" <<'CPP'

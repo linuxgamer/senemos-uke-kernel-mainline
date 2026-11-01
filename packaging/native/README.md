@@ -1,5 +1,18 @@
 # Mainline native source profile
 
+1 November 2026, kernel1041 testing-image candidate: combine the exact COPR1020
+USB/LMH/power source with default-off O82 CABC and the retained30 Hz AVR floor.
+Accepted running1003 remains separate from this uninstalled candidate. Original
+KWin controls five logical tiers mapped to four OEM modes; HDR adaptation is
+refused. Full remote checks and separate tablet acceptance are required. See
+[the source and validation limits](../../docs/O82-ADAPTIVE-BACKLIGHT.md).
+
+1 November 2026, isolated kernel1003 candidate: compose the explicit O82 30 Hz
+AVR floor and zero-brightness first-frame fix over the exact installed116 SRPM.
+Retain its power/startup fixes, matching family and all122 adaptation patches.
+The requested floor is no longer silently raised to90 Hz. Electrical limits
+remain unchanged; low-refresh touch, cadence and lifecycle need tablet acceptance.
+
 31 October 2026, unstable kernel106 candidate: preserve release102's four isolated
 capture channels and deliver one named four-channel input with the kernel.
 Bounded ADC/TX defaults move to DT and apply before capture power-up, including

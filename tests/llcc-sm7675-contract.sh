@@ -60,11 +60,11 @@ struct llcc_drv_data {
 };
 static struct llcc_drv_data *drv_data;
 static struct resource resources[6];
-static struct regmap maps[5];
+static struct regmap maps[6];
 static void *allocations[16];
 static unsigned int allocation_count, alloc_calls, alloc_fault, map_calls, map_fault;
 static unsigned int read_calls, read_fault, write_calls, write_fault, activated, activation_fault, edac_calls;
-static int missing, extra, cfg_fault;
+static int missing, extra, cfg_fault, map_error;
 static u32 hardware_banks, hardware_version;
 static bool sm7675;
 static struct resource *platform_get_resource(struct platform_device *p, int type, int index) {
@@ -90,8 +90,8 @@ static int qcom_llcc_get_cfg_index(struct platform_device *p, u8 *index, int cou
 }
 static struct regmap *qcom_llcc_init_mmio(struct platform_device *p, u8 index, const char *name) {
     (void)p; (void)name; map_calls++;
-    if (map_calls == map_fault) return ERR_PTR(-ENOMEM);
-    return index < 5 ? &maps[index] : ERR_PTR(-EINVAL);
+    if (map_calls == map_fault) return ERR_PTR(map_error);
+    return index < 5 + extra ? &maps[index] : ERR_PTR(-EINVAL);
 }
 static int regmap_read(struct regmap *map, u32 reg, u32 *value) {
     if (++read_calls == read_fault) return -EREMOTEIO;
@@ -139,10 +139,11 @@ static void reset(void) {
     allocation_count=alloc_calls=alloc_fault=map_calls=map_fault=0;
     read_calls=read_fault=write_calls=write_fault=activated=activation_fault=edac_calls=0;
     missing=-1; extra=cfg_fault=0; hardware_banks=4; hardware_version=0x05000000; sm7675=true;
+    map_error=-ENOMEM;
     drv_data=ERR_PTR(-EPROBE_DEFER);
     memset(maps,0,sizeof(maps));
     for (int i=0;i<6;i++) resources[i]=(struct resource){0x25000000U+i*(uint64_t)SZ_2M,0x251fffffU+i*(uint64_t)SZ_2M};
-    for (int i=0;i<5;i++) maps[i].index=i;
+    for (int i=0;i<6;i++) maps[i].index=i;
 }
 #define CHECK_FIELD(n) assert(sm7675_data[i].n == expected_policy[i].n)
 int main(void) {
@@ -174,7 +175,7 @@ int main(void) {
     for (unsigned int i=1;i<=2;i++) {
         reset(); read_fault=i; assert(qcom_llcc_probe(&p)==-EREMOTEIO && !write_calls);
     }
-    for (unsigned int i=1;i<=6;i++) {
+    for (unsigned int i=1;i<=5;i++) {
         reset(); map_fault=i; assert(qcom_llcc_probe(&p)==-ENOMEM && !write_calls);
     }
     /* Allocations 3..5 are the kernel's temporary bank-name strings. */
@@ -217,6 +218,19 @@ int main(void) {
     for (unsigned int i=0;i<ARRAY_SIZE(policy_registers);i++) assert(maps[4].values[policy_registers[i]/4]&BIT(0));
     reset(); sm7675=false; resources[0].start+=4; hardware_version=0x04010000;
     assert(qcom_llcc_probe(&p)==0); /* Existing platforms do not gain the Cliffs7 checks. */
+    assert(map_calls==5 && !drv_data->bcast_and_regmap);
+    reset(); assert(qcom_llcc_probe(&p)==0 && map_calls==5 && !drv_data->bcast_and_regmap);
+    reset(); sm7675=false; extra=1;
+    assert(qcom_llcc_probe(&p)==0 && map_calls==6 && drv_data->bcast_and_regmap==&maps[5]);
+    const int optional_faults[]={-ENOMEM,-EIO,-EPROBE_DEFER};
+    for(unsigned int i=0;i<ARRAY_SIZE(optional_faults);i++) {
+        reset(); sm7675=false; extra=1; map_fault=6; map_error=optional_faults[i];
+        assert(qcom_llcc_probe(&p)==optional_faults[i] && !write_calls);
+    }
+    reset(); sm7675=false; extra=1; map_fault=6; map_error=-EINVAL;
+    assert(qcom_llcc_probe(&p)==0 && !drv_data->bcast_and_regmap); /* Retain legacy EINVAL fallback. */
+    reset(); sm7675=false; extra=1; hardware_version=0x04000000;
+    assert(qcom_llcc_probe(&p)==0 && map_calls==5 && !drv_data->bcast_and_regmap);
     reset(); puts("Actual LLCC probe/config and A7xx cache fields: 17 OEM slices, resources, banks/version, faults, unrelated SCID preservation and legacy guard scope passed");
 }
 C

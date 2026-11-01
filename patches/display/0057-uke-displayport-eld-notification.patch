@@ -7,8 +7,9 @@ retains the empty monitor metadata until its card is recreated. Notify the
 actual registered PCM control when this cache changes, including hotplug.
 
 Limit the notification to the reviewed SM7675 DP parent. Keep a copy of the
-registered control ID rather than a control pointer or a mixer-name lookup:
-ELD belongs to the PCM interface and uses the backend's device number.
+registered control ID and resolve its stable numid before each notification.
+The machine driver can map the ELD control from a backend to frontend PCM0;
+notifications must use the current registered ID under the control read lock.
 No PCM routing, hardware actuation or other board behavior changes.
 
 --- a/sound/soc/codecs/hdmi-codec.c
@@ -30,13 +31,15 @@ No PCM routing, hardware actuation or other board behavior changes.
  	uint8_t eld[MAX_ELD_BYTES];
  	struct snd_parsed_hdmi_eld eld_parsed;
  	struct snd_pcm_chmap *chmap_info;
-@@ -303,6 +306,21 @@
+@@ -303,6 +306,26 @@
  	DAI_ID_SPDIF,
  };
  
 +static void hdmi_codec_notify_eld(struct hdmi_codec_priv *hcp, const u8 *previous)
 +{
 +	struct snd_soc_component *component = hcp->component;
++	struct snd_card *card;
++	struct snd_kcontrol *kctl;
 +
 +	if (!component || !component->card || !component->card->snd_card ||
 +	    !hcp->eld_ctl_id.numid ||
@@ -44,15 +47,18 @@ No PCM routing, hardware actuation or other board behavior changes.
 +	    !memcmp(previous, hcp->eld, sizeof(hcp->eld)))
 +		return;
 +
-+	/* The first PCM open can replace an empty boot-time ELD without hotplug. */
-+	snd_ctl_notify(component->card->snd_card, SNDRV_CTL_EVENT_MASK_VALUE,
-+		       &hcp->eld_ctl_id);
++	card = component->card->snd_card;
++	down_read(&card->controls_rwsem);
++	kctl = snd_ctl_find_id(card, &hcp->eld_ctl_id);
++	if (kctl)
++		snd_ctl_notify(card, SNDRV_CTL_EVENT_MASK_VALUE, &kctl->id);
++	up_read(&card->controls_rwsem);
 +}
 +
  static int hdmi_eld_ctl_info(struct snd_kcontrol *kcontrol,
  			     struct snd_ctl_elem_info *uinfo)
  {
-@@ -452,6 +470,7 @@
+@@ -452,6 +475,7 @@
  	bool tx = substream->stream == SNDRV_PCM_STREAM_PLAYBACK;
  	bool has_capture = !hcp->hcd.no_i2s_capture;
  	bool has_playback = !hcp->hcd.no_i2s_playback;
@@ -60,7 +66,7 @@ No PCM routing, hardware actuation or other board behavior changes.
  	int ret = 0;
  
  	if (!((has_playback && tx) || (has_capture && !tx)))
-@@ -470,6 +489,7 @@
+@@ -470,6 +494,7 @@
  	}
  
  	if (tx && hcp->hcd.ops->get_eld) {
@@ -68,7 +74,7 @@ No PCM routing, hardware actuation or other board behavior changes.
  		ret = hcp->hcd.ops->get_eld(dai->dev->parent, hcp->hcd.data,
  					    hcp->eld, sizeof(hcp->eld));
  		if (ret)
-@@ -477,6 +497,7 @@
+@@ -477,6 +502,7 @@
  
  		snd_parse_eld(dai->dev, &hcp->eld_parsed,
  			      hcp->eld, sizeof(hcp->eld));
@@ -76,7 +82,7 @@ No PCM routing, hardware actuation or other board behavior changes.
  
  		ret = snd_pcm_hw_constraint_eld(substream->runtime, hcp->eld);
  		if (ret)
-@@ -826,6 +847,8 @@
+@@ -826,6 +852,8 @@
  		ret = snd_ctl_add(rtd->card->snd_card, kctl);
  		if (ret < 0)
  			return ret;
@@ -85,7 +91,7 @@ No PCM routing, hardware actuation or other board behavior changes.
  	}
  
  	return 0;
-@@ -952,8 +975,10 @@
+@@ -952,8 +980,10 @@
  static void plugged_cb(struct device *dev, bool plugged)
  {
  	struct hdmi_codec_priv *hcp = dev_get_drvdata(dev);
@@ -96,7 +102,7 @@ No PCM routing, hardware actuation or other board behavior changes.
  	if (plugged) {
  		if (hcp->hcd.ops->get_eld) {
  			hcp->hcd.ops->get_eld(dev->parent, hcp->hcd.data,
-@@ -970,6 +995,7 @@
+@@ -970,6 +1000,7 @@
  		hdmi_codec_jack_report(hcp, 0);
  		memset(hcp->eld, 0, sizeof(hcp->eld));
  	}
@@ -104,7 +110,7 @@ No PCM routing, hardware actuation or other board behavior changes.
  }
  
  static int hdmi_codec_set_jack(struct snd_soc_component *component,
-@@ -1091,6 +1117,8 @@
+@@ -1091,6 +1122,8 @@
  	struct hdmi_codec_priv *hcp = snd_soc_component_get_drvdata(component);
  	int ret = 0;
  
@@ -113,7 +119,7 @@ No PCM routing, hardware actuation or other board behavior changes.
  	if (hcp->hcd.ops->hook_plugged_cb) {
  		ret = hcp->hcd.ops->hook_plugged_cb(component->dev->parent,
  						    hcp->hcd.data,
-@@ -1108,6 +1136,7 @@
+@@ -1108,6 +1141,7 @@
  	if (hcp->hcd.ops->hook_plugged_cb)
  		hcp->hcd.ops->hook_plugged_cb(component->dev->parent,
  					      hcp->hcd.data, NULL, NULL);

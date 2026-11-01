@@ -36,6 +36,7 @@ static void microphones(snd_config_t *config)
     assert(count == 1);
     const std::string device = "SectionDevice.Mic";
     const auto value = device + ".Value.";
+    text(config, device + ".Comment", "${CardLongName} Microphone");
     integer(config, value + "CaptureChannels", 4);
     integer(config, value + "CaptureRate", 48000);
     text(config, value + "CapturePCM", "hw:${CardId},2");

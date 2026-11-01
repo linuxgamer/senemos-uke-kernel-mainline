@@ -10,6 +10,10 @@ cp "$kernel/drivers/gpu/drm/msm/msm_fb.c" "$output/msm-framebuffer-before55.c"
 git -C "$kernel" apply --check "$profile/patches/display/0065-msm-framebuffer-pin-state.patch"
 git -C "$kernel" apply "$profile/patches/display/0065-msm-framebuffer-pin-state.patch"
 CC=clang bash "$profile/tests/msm-framebuffer-pin-contract.sh" "$kernel" "$output/msm-framebuffer-before55.c"
+for startup_patch in 0057-llcc-optional-window.patch 0058-fs19xx-current-workqueue.patch 0059-lpass-sort-reg-defaults.patch; do
+    git -C "$kernel" apply --check "$profile/patches/boot/$startup_patch"
+    git -C "$kernel" apply "$profile/patches/boot/$startup_patch"
+done
 export UKE_LLCC_PROFILE
 UKE_LLCC_PROFILE=$(cat "$profile/llcc-profile")
 case $UKE_LLCC_PROFILE in disabled|native-v1) ;; *) echo 'Unknown LLCC package profile' >&2; exit 2;; esac
@@ -38,6 +42,7 @@ case $(cat "$profile/audio-profile") in
 esac
 install -m644 "$profile/src/audio/uke-audio-card.c" "$kernel/sound/soc/qcom/uke-audio-card.c"
 install -m644 "$profile/src/audio/uke-microphone-gain.h" "$kernel/sound/soc/qcom/uke-microphone-gain.h"
+install -m644 "$profile/src/audio/uke-dp-eld.h" "$kernel/sound/soc/qcom/uke-dp-eld.h"
 alsatplg -c "$profile/src/audio/POCO-Pad-X1-AudioReach.conf" \
     -o "$output/POCO-Pad-X1-AudioReach-tplg.bin"
 alsatplg -c "$profile/src/audio/POCO-Pad-X1-HDMI.conf" \
@@ -190,4 +195,22 @@ if [[ $(cat "$profile/audio-profile") == microphones ]]; then
     bash "$profile/tests/microphone-audio-topology-contract.sh"
     bash "$profile/tests/microphone-audio-card-contract.sh"
 fi
+# Preserve the historical KMS source receipts before this explicit AVR opt-in.
+git -C "$kernel" apply --check "$profile/patches/display/0069-o82-requested-vrr-floor.patch"
+git -C "$kernel" apply "$profile/patches/display/0069-o82-requested-vrr-floor.patch"
+bash "$profile/tests/o82-vrr-floor-contract.sh" "$kernel"
+# Optional panel CABC control follows the frozen KMS source receipts above.
+git -C "$kernel" apply --check "$profile/patches/display/0070-o82-adaptive-backlight.patch"
+git -C "$kernel" apply "$profile/patches/display/0070-o82-adaptive-backlight.patch"
+CC=clang bash "$profile/tests/o82-panel-contract.sh" "$profile/src/display/panel-xiaomi-o82.c" \
+    "$profile/src/display/o82-data.h" "$kernel"
+bash "$profile/tests/o82-abm-contract.sh" "$kernel" "$profile/src/display/panel-xiaomi-o82.c"
+CC=clang SANITIZE=1 bash "$profile/tests/o82-abm-contract.sh" "$kernel" "$profile/src/display/panel-xiaomi-o82.c"
+sha256sum "$profile/patches/display/0070-o82-adaptive-backlight.patch" >> "$output/abl-source-SHA256SUMS"
 printf 'Exact seven-mode O82-42 native source prepared; no private boot input\n'
+# Retain the independently verified USB role/PM correction from release1020.
+cp "$kernel/drivers/usb/dwc3/dwc3-qcom.c" "$output/dwc3-qcom-before-role-pm.c"
+git -C "$kernel" apply --check "$profile/patches/usb/0001-qcom-system-role-pm.patch"
+git -C "$kernel" apply "$profile/patches/usb/0001-qcom-system-role-pm.patch"
+CC=clang bash "$profile/tests/usb-role-pm-contract.sh" \
+    "$kernel/drivers/usb/dwc3/dwc3-qcom.c" "$output/dwc3-qcom-before-role-pm.c"

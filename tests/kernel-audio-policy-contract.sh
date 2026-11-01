@@ -24,8 +24,15 @@ for release in 7.3.1-103 7.3.1-104; do
  ! grep -Eq "cset .*name='(ADC[1-4]|TX_DEC[0-3]) Volume'" "$conf/Microphone-HiFi.conf"
  ! grep -R -F '@UKE_AUDIO_DRIVER@' "$conf"
  jq -e --arg components "mic:uke-4ch-v4 kernel:$release" \
-  'all(."monitor.alsa.rules"[].matches[];."alsa.components"==$components)' \
+  'all(."monitor.alsa.rules"[].matches[];if has("device.name") then ."device.name"=="alsa_card.platform-sound-uke" and (."api.alsa.card.longname"=="POCO Pad X1" or ."api.alsa.card.longname"=="Xiaomi Pad 7") else ."alsa.components"==$components end)' \
   "$stage/usr/share/wireplumber/wireplumber.conf.d/95-uke-microphone-array-$release.conf"
+ jq -e '[."monitor.alsa.rules"[].actions."update-props"."device.description"//empty] == ["POCO PAD X1","Xiaomi Pad 7"]' \
+  "$stage/usr/share/wireplumber/wireplumber.conf.d/95-uke-microphone-array-$release.conf"
+ jq -e '[."monitor.alsa.rules"[].actions."update-props"."node.description"] | index("POCO PAD X1 Speaker") != null and index("Xiaomi Pad 7 Speaker") != null' \
+  "$stage/usr/share/wireplumber/wireplumber.conf.d/95-uke-microphone-array-$release.conf"
+ jq -e '[."monitor.alsa.rules"[].actions."update-props"."node.description"] | index("POCO PAD X1 Microphone") != null and index("Xiaomi Pad 7 Microphone") != null' \
+  "$stage/usr/share/wireplumber/wireplumber.conf.d/95-uke-microphone-array-$release.conf"
+ grep -Fq "name='ELD',device=0\" \"iface=pcm,name='ELD',device=0" "$conf/DP-ELD.conf"
 done
 first=$work/7.3.1-103/usr/share
 second=$work/7.3.1-104/usr/share

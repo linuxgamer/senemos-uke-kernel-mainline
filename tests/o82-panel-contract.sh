@@ -229,8 +229,9 @@ static void first_boundary(struct drm_vblank_work *work) {
     assert(work->pending); boundary_seen=true;
     work->crtc->count=work->count; work->pending=false; work->base.func(&work->base);
 }
-struct drm_connector_state { struct drm_crtc *crtc; };
+struct drm_connector_state { struct drm_crtc *crtc; unsigned int abm_level; };
 struct drm_connector { struct drm_connector_state *state; void *dev;
+    void *abm_level_property;
     struct { int bpc,width_mm,height_mm; } display_info; };
 static unsigned int published, preferred, preferred_rate, duplication_failure;
 static struct drm_display_mode copies[7];
@@ -490,7 +491,7 @@ static struct o82_panel context(int variant,int mode) {
     static struct regulator supplies[3]={{0},{1},{2}};
     static struct drm_crtc_state cs;
     static struct drm_crtc crtc={.state=&cs};
-    static struct drm_connector_state state={&crtc};
+    static struct drm_connector_state state={.crtc=&crtc};
     static struct drm_connector connector={.state=&state};
     static struct backlight_device backlight;
     memset(balance,0,sizeof(balance)); memset(loads,0,sizeof(loads));
@@ -791,8 +792,14 @@ int main(void) {
             else positive_brightness=fault==1 ? 0:-1;
             first_boundary(&c.first_frame_work);
             assert(c.panel.enabled && c.first_frame_initialized);
-            assert(strstr(last_error,fault==0 ? "result=-5 blank_result=0":"result=-34 blank_result=0"));
-            assert(normal_transfers==4 && !c.backlight->on && backlight_calls==1);
+            if(fault==1) {
+                assert(!last_error[0] && atomic64_read(&c.touch_state)==3);
+                assert(c.backlight->on && positive_brightness==0);
+            } else {
+                assert(strstr(last_error,fault==0 ? "result=-5 blank_result=0":"result=-1 blank_result=0"));
+                assert(!c.backlight->on && !(atomic64_read(&c.touch_state)&1));
+            }
+            assert(normal_transfers==4 && backlight_calls==1);
             drm_panel_disable(&c.panel); assert(cancelled==1 && !c.first_frame_initialized);
             video_started=false; assert(o82_unprepare(&c.panel)==0);
         }

@@ -9,12 +9,14 @@
 #include <linux/string.h>
 #include <dt-bindings/sound/qcom,q6dsp-lpass-ports.h>
 #include <sound/jack.h>
+#include <sound/control.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 #include <generated/utsrelease.h>
 #include "common.h"
 #include "sdw.h"
 #include "uke-microphone-gain.h"
+#include "uke-dp-eld.h"
 
 static int uke_hdmi_late_probe(struct snd_soc_card *card)
 {
@@ -164,6 +166,27 @@ static int uke_speaker_late_probe(struct snd_soc_card *card)
 		       fe_seen == 7 ? 0 : -EINVAL;
 	return frontends == 2 && backends == 2 && seen == 3 &&
 	       fe_seen == 3 ? 0 : -EINVAL;
+}
+
+static int uke_microphone_late_probe(struct snd_soc_card *card)
+{
+	struct snd_soc_pcm_runtime *rtd;
+	int ret = uke_speaker_late_probe(card);
+
+	if (ret)
+		return ret;
+	for_each_card_rtds(card, rtd) {
+		if (!rtd->dai_link->no_pcm ||
+		    snd_soc_rtd_to_cpu(rtd, 0)->id != DISPLAY_PORT_RX_0)
+			continue;
+		if (!rtd->pcm)
+			break;
+		ret = uke_dp_eld_to_frontend(card->snd_card, rtd->pcm->device);
+		if (ret)
+			dev_warn(card->dev, "DP ELD frontend mapping unavailable: %d\n", ret);
+		break;
+	}
+	return 0;
 }
 
 static void uke_capture_clear_stream(struct snd_pcm_substream *substream)
@@ -387,6 +410,7 @@ static int uke_speaker_probe(struct platform_device *pdev)
 		/* Per-release discovery lets parallel kernels retain their own UCM data. */
 		BUILD_BUG_ON(sizeof("uke" UTS_RELEASE) > 16);
 		card->driver_name = "uke" UTS_RELEASE;
+		card->late_probe = uke_microphone_late_probe;
 		card->components = "mic:uke-4ch-v4 kernel:" UTS_RELEASE;
 		{
 			const char *model;
