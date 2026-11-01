@@ -6,7 +6,7 @@ kernel=${1:?Pass prepared kernel} panel=${2:?Pass panel source}
 work=$(mktemp -d)
 trap 'find "$work" -depth -delete' EXIT
 extract() {
-    awk -v signature="$2" '$0 ~ signature {emit=1;found=1} emit {print}
+    awk -v prefix="$2" 'index($0,prefix)==1 {emit=1;found=1} emit {print}
         emit && /^}/ {exit} END {if(!found)exit 1}' "$1"
 }
 cat > "$work/check.c" <<'C'
@@ -30,7 +30,7 @@ typedef uint32_t __u32;
 #define EXPORT_SYMBOL(...)
 struct o82_panel {int unused;};
 C
-extract "$panel" '^struct o82_command \{' >> "$work/check.c"
+extract "$panel" 'struct o82_command {' >> "$work/check.c"
 cat >> "$work/check.c" <<'C'
 static int sends, fail_send;
 static unsigned char payloads[2][2];
@@ -43,9 +43,9 @@ static int o82_send(struct o82_panel *ctx, const struct o82_command *cmd, bool l
     return ++sends==fail_send ? -EIO:0;
 }
 C
-extract "$panel" '^static int o82_apply_abm\(' >> "$work/check.c"
-extract "$kernel/include/uapi/drm/drm_mode.h" '^struct hdr_metadata_infoframe \{' >> "$work/check.c"
-extract "$kernel/include/uapi/drm/drm_mode.h" '^struct hdr_output_metadata \{' >> "$work/check.c"
+extract "$panel" 'static int o82_apply_abm(' >> "$work/check.c"
+extract "$kernel/include/uapi/drm/drm_mode.h" 'struct hdr_metadata_infoframe {' >> "$work/check.c"
+extract "$kernel/include/uapi/drm/drm_mode.h" 'struct hdr_output_metadata {' >> "$work/check.c"
 cat >> "$work/check.c" <<'C'
 struct drm_property {int unused;};
 struct drm_mode_object {int unused;};
@@ -86,8 +86,8 @@ struct drm_crtc_state {bool mode_changed,connectors_changed;};
 #define to_dsi_bridge(b) (b)
 static struct drm_connector_state old_state;
 C
-extract "$kernel/drivers/gpu/drm/drm_connector.c" '^int drm_connector_attach_abm_property\(' >> "$work/check.c"
-extract "$kernel/drivers/gpu/drm/msm/dsi/dsi_manager.c" '^static int dsi_mgr_bridge_atomic_check\(' >> "$work/check.c"
+extract "$kernel/drivers/gpu/drm/drm_connector.c" 'int drm_connector_attach_abm_property(' >> "$work/check.c"
+extract "$kernel/drivers/gpu/drm/msm/dsi/dsi_manager.c" 'static int dsi_mgr_bridge_atomic_check(' >> "$work/check.c"
 cat >> "$work/check.c" <<'C'
 static void invalidate(struct drm_connector *connector,
         struct drm_connector_state *old_connector_state,

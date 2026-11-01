@@ -2,7 +2,7 @@
   "schema_version": 1,
   "date": "2026-11-01",
   "source_date_epoch": 1792058622,
-  "source_origin": "Standalone source inventory retained from release115 with O82 source edits. The ABM COPR producer derives the release1008 profile and boot lock from the exact installed1003 SRPM, retaining its116 power parent and changing only declared O82 overlays. This standalone inventory is not the composed release1008 delivery.",
+  "source_origin": "Standalone source inventory retained from release115 with O82 source edits. The ABM COPR producer derives the release1009 profile and boot lock from the exact installed1003 SRPM, retaining its116 power parent and changing only declared O82 overlays. This standalone inventory is not the composed release1009 delivery.",
   "firmware_included": false,
   "device_private_data_included": false,
   "python_target_payload": false,
@@ -573,7 +573,7 @@
     },
     {
       "path": "packaging/native/README.md",
-      "sha256": "6161f264f53c574face146a8b11a652dc3aa2ec33eef094ea2769ef4c8efe2b7"
+      "sha256": "7ea2439cc5d2714d7cad508d72624ce175ee96ec5d3564de29fa5a6d1add9027"
     },
     {
       "path": "src/boot/prepare-abl-source.sh",
