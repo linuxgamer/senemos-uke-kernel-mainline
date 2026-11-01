@@ -41,6 +41,7 @@ overlays=(
  tests/o82-panel-contract.sh tests/o82-vrr-floor-contract.sh
 )
 : > "$stage/overlays"
+: > "$stage/boot-overlays"
 for relative in "${overlays[@]}"; do
     destination=$relative
     case $relative in packaging/native/*) destination=${relative##*/};; esac
@@ -48,6 +49,7 @@ for relative in "${overlays[@]}"; do
     printf '%s\n' "$destination" >> "$stage/overlays"
     if jq -e --arg path "$relative" '.source_assets[]|select(.path==$path)' "$boot/lock.json" >/dev/null; then
         install -Dm644 "$owner/$relative" "$boot/$relative"
+        printf '%s\n' "$relative" >> "$stage/boot-overlays"
         hash=$(sha256sum "$boot/$relative"); hash=${hash%% *}
         jq --arg path "$relative" --arg hash "$hash" \
             '(.source_assets[]|select(.path==$path).sha256)=$hash' \
@@ -65,7 +67,7 @@ done < "$stage/parent-profile.sha256"
 cmp <(jq -S 'del(.source_assets[].sha256)' "$stage/parent-boot-lock.json") \
     <(jq -S 'del(.source_assets[].sha256)' "$boot/lock.json")
 while IFS=$'\t' read -r relative expected; do
-    if ! grep -Fxq "$relative" "$stage/overlays"; then
+    if ! grep -Fxq "$relative" "$stage/boot-overlays"; then
         printf '%s  %s\n' "$expected" "$boot/$relative" | sha256sum -c -
     fi
 done < <(jq -r '.source_assets[]|[.path,.sha256]|@tsv' "$stage/parent-boot-lock.json")
