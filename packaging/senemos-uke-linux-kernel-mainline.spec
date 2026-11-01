@@ -7,7 +7,7 @@
 Name: senemos-uke-linux-kernel-mainline
 Version: 7.3.1
 %if "%{version}" == "7.3.1"
-%global senemos_build_release 114
+%global senemos_build_release 115
 %else
 %global senemos_build_release 1
 %endif
@@ -49,8 +49,9 @@ Provides: installonlypkg(kernel)
 Source-built kernel with the reviewed O82 native display profile.
 The boot subpackage contains a source-built initramfs and Android v4 container
 with matching modules. It contains no OEM firmware or device-private data.
-Boot writes require the explicitly enabled native updater. Build success does
-not establish physical tablet acceptance.
+The native updater respects administrator policy. Guarded automatic staging
+is enabled by default, without an automatic reboot. Build success does not
+establish physical tablet acceptance.
 
 %package core
 Summary: Uke kernel Image and source identity
@@ -100,9 +101,12 @@ Requires: (uke-power-profile-backend(native-handoff-v1) >= 1 if uke-power-profil
 Provides: installonlypkg(kernel)
 
 %description boot
-Kernel-only Android v4 image for boot_b and PARTLABEL=linux. The native updater
-checks package identities, module digests, physical storage and power, preserves
-the previous image, and verifies write readback. Android A is not an update target.
+Kernel-only Android v4 bundles for the selected Linux or userdata root profile.
+The native updater checks package identities, module digests, physical storage
+and power. On userdata installations with automatic updates enabled, it stages
+the inactive Linux slot and retains the accepted image/modules for rollback.
+The separate linux-root mode targets boot_b and preserves Android A. Normal
+package staging does not request a reboot.
 
 %package singleboot
 Summary: Matched Uke userdata boot profile
@@ -113,8 +117,10 @@ Requires: uke-kernel-update(root-filesystem-v2) >= 1
 
 %description singleboot
 Selects the userdata image from this source family's exact kernel tuple.
-Image, modules, DTBs and both root profiles are built once. Installation
-performs no boot activation, partition write, slot selection or reboot.
+Image, modules, DTBs and both root profiles are built once. When automatic
+updates are enabled, installation uses the guarded native transaction to write
+and select the inactive Linux slot. The accepted running slot and modules are
+retained for rollback. Administrator policy is preserved; no reboot is requested.
 
 %prep
 uke_prep_start=$SECONDS
@@ -243,6 +249,7 @@ CXX=clang++ bash native-profile/tests/uke-rpmh-resource-contract.sh native-gener
 CXX=clang++ bash native-profile/tests/uke-rpmh-resource-contract.sh drivers/regulator/qcom-rpmh-regulator-uke.c native
 CXX=clang++ bash native-profile/tests/ktz-dimming-observation-contract.sh drivers/video/backlight/ktz8866.c
 bash boot-recipe/tests/boot-image-contract.sh %{_uke_out}/boot-image
+bash boot-recipe/tests/initramfs-cpio-contract.sh %{_uke_out}/usr/gen_init_cpio
 CXX=clang++ bash native-profile/tests/root-selector-contract.sh
 CC=clang bash native-profile/tests/root-selector-note-contract.sh "$PWD" "$PWD/boot-recipe/lock.json"
 bash boot-recipe/tests/target-privacy-contract.sh
@@ -448,6 +455,11 @@ cp -a boot-recipe/src/boot/licenses/. %{buildroot}/usr/share/licenses/%{name}-bo
 /usr/lib/senemos/default-boot.img
 
 %changelog
+* Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-115
+- Encode the standard initial console in one deterministic source-built cpio.
+- Preserve early-user files, permissions, symlinks and regular-file hardlinks.
+- Describe policy-gated automatic slot staging and the absence of automatic reboot.
+
 * Sun Nov 01 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-114
 - Backport upstream sorting of combined LPASS RX/WSA register defaults.
 - Retain all register values, cache types and release113 warning corrections.

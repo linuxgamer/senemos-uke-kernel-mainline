@@ -578,6 +578,18 @@
     {
       "path": "patches/boot/0059-lpass-sort-reg-defaults.patch",
       "sha256": "faf3d5648e51c7098909e3d08b07536a022bcabda6f04f72cf0cdb26b82c8e64"
+    },
+    {
+      "path": "src/boot/build-payload.sh",
+      "sha256": "bce2748d6877b8380eaba54916f31b389d2b9f833d2a7cf9dd092eb7685a6d71"
+    },
+    {
+      "path": "src/boot/make-initramfs-cpio.sh",
+      "sha256": "7d6ea987cdc9114512d7300f7a935363fc35737d98f4814748ac73efd558214b"
+    },
+    {
+      "path": "tests/initramfs-cpio-contract.sh",
+      "sha256": "d0725c76aa208436279e4fce988f6483410c76591a79b282c80c3d2692eda689"
     }
   ],
   "baseline_files": [
@@ -700,7 +712,7 @@
     "requires_three_candidate_patches_preapplied": true,
     "package_selector": "packaging/native/llcc-profile"
   },
-  "kernel_release": "7.3.1-114",
+  "kernel_release": "7.3.1-115",
   "boot_argument_handoff": {
     "source_commit": "84b172c09fee0b60e901bfe40a2d7b6244aa726a",
     "integrated_commit": "3d78e6c",

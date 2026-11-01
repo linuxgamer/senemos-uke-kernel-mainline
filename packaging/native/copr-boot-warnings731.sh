@@ -6,7 +6,7 @@ test ! -e /etc/senemos/kernel-update.conf
 [[ $(rpm --eval '%{_host_cpu}') == aarch64 && $(rpm --eval '%{fedora}') == 46 ]]
 owner=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 output=$(realpath -m "${1:?COPR result directory}")
-bash "$owner/packaging/native/refuse-published-release.sh" senemos-uke-linux-kernel-mainline 7.3.1-114
+bash "$owner/packaging/native/refuse-published-release.sh" senemos-uke-linux-kernel-mainline 7.3.1-115
 make -C "$owner" validate
 stage=$(mktemp -d)
 trap 'find "$stage" -depth -delete' EXIT
@@ -32,9 +32,11 @@ boot=$stage/unpacked/boot-recipe
 (cd "$profile"; sha256sum --check --strict --quiet SHA256SUMS)
 grep -Fxq 1ea50711f0acf2e5cb3aa1cb7c349ba065c3db33 "$profile/source-commit"
 printf '%s  %s\n' 8cdef42c010304bd948cf1fa83015c12b8cce637f647bfcf166de6c49efc3db1 "$profile/prepare.sh" | sha256sum -c -
+expected_linux=$(jq -er .source_sha256 "$owner/manifests/linux-7.3.1.json")
+printf '%s  %s\n' "$expected_linux" "$output/linux-7.3.1.tar.xz" | sha256sum -c -
 slice=$stage/source-check
 mkdir -p "$slice"
-for relative in drivers/soc/qcom/llcc-qcom.c include/linux/soc/qcom/llcc-qcom.h drivers/gpu/drm/msm/adreno/a6xx_gpu.c sound/soc/codecs/lpass-rx-macro.c sound/soc/codecs/lpass-wsa-macro.c; do
+for relative in drivers/soc/qcom/llcc-qcom.c include/linux/soc/qcom/llcc-qcom.h drivers/gpu/drm/msm/adreno/a6xx_gpu.c sound/soc/codecs/lpass-rx-macro.c sound/soc/codecs/lpass-wsa-macro.c usr/gen_init_cpio.c; do
     mkdir -p "$slice/$(dirname "$relative")"
     tar -xOf "$output/linux-7.3.1.tar.xz" "linux-7.3.1/$relative" > "$slice/$relative"
 done
@@ -43,18 +45,22 @@ while IFS=$'\t' read -r relative expected; do
     printf '%s  %s\n' "$expected" "$profile/$relative" | sha256sum -c --status
     git -C "$slice" apply --include=drivers/soc/qcom/llcc-qcom.c --include=include/linux/soc/qcom/llcc-qcom.h \
         --include=drivers/gpu/drm/msm/adreno/a6xx_gpu.c --include=sound/soc/codecs/fs19xx.c \
-        --include=sound/soc/codecs/lpass-rx-macro.c --include=sound/soc/codecs/lpass-wsa-macro.c "$profile/$relative"
+        --include=sound/soc/codecs/lpass-rx-macro.c --include=sound/soc/codecs/lpass-wsa-macro.c \
+        --include=usr/gen_init_cpio.c "$profile/$relative"
 done < <(jq -r '.patches[] | [.path,.sha256] | @tsv' "$owner/manifests/native-linux-7.3.1.json")
 for patch in 0057-llcc-optional-window.patch 0058-fs19xx-current-workqueue.patch 0059-lpass-sort-reg-defaults.patch; do
     git -C "$slice" apply "$owner/patches/boot/$patch"
 done
 CC=clang bash "$owner/tests/llcc-sm7675-contract.sh" "$slice"
 CC=clang bash "$owner/tests/audio-fs19xx-lifecycle-contract.sh" "$slice"
+clang -O2 -Wall -Wextra -Werror "$slice/usr/gen_init_cpio.c" -o "$slice/usr/gen_init_cpio"
+bash "$owner/tests/initramfs-cpio-contract.sh" "$slice/usr/gen_init_cpio"
 cp "$profile/SHA256SUMS" "$stage/parent-profile.sha256"
 cp "$profile/source-composition.json" "$profile/source-composition-parent731110.json"
 overlays=(packaging/native/prepare.sh patches/boot/0057-llcc-optional-window.patch
  patches/boot/0058-fs19xx-current-workqueue.patch patches/boot/0059-lpass-sort-reg-defaults.patch tests/llcc-sm7675-contract.sh
- tests/audio-fs19xx-lifecycle-contract.sh)
+ tests/audio-fs19xx-lifecycle-contract.sh src/boot/build-payload.sh src/boot/make-initramfs-cpio.sh
+ tests/initramfs-cpio-contract.sh)
 : > "$stage/overlays"
 for relative in "${overlays[@]}"; do
     destination=$relative
@@ -90,4 +96,4 @@ done
 install -m644 "$boot/lock.json" "$output/boot-payload.json"
 install -m644 "$owner/packaging/$spec" "$output/$spec"
 sha256sum -c "$stage/retained.sha256"
-test "$(rpmspec --target aarch64 --define 'dist %{nil}' -q --srpm --qf '%{VERSION}-%{RELEASE}' "$output/$spec")" = 7.3.1-114
+test "$(rpmspec --target aarch64 --define 'dist %{nil}' -q --srpm --qf '%{VERSION}-%{RELEASE}' "$output/$spec")" = 7.3.1-115

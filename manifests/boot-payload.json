@@ -2,7 +2,7 @@
   "schema_version": 1,
   "date": "2026-11-01",
   "source_date_epoch": 1792058622,
-  "source_origin": "Signed Linux7.3.1 with the complete release110 source parent. Candidate114 retains the release113 LLCC/FS19xx corrections and backports upstream LPASS RX/WSA default-table sorting without changing register values or cache types. Hardware settings and release110 audio/display inputs are retained; physical acceptance remains pending.",
+  "source_origin": "Signed Linux 7.3.1 with the complete release 110 parent and release 114 warning corrections. Candidate 115 encodes the standard initial console with the selected Linux host cpio generator, preserving early-user data and hardlink groups. Hardware settings and release 110 audio/display inputs remain; physical acceptance is pending.",
   "firmware_included": false,
   "device_private_data_included": false,
   "python_target_payload": false,
@@ -117,7 +117,7 @@
     },
     {
       "path": "src/boot/build-payload.sh",
-      "sha256": "e4ee96afa6626dc56998da83ebd273fa9a6ac89ba19b971e06e9e53bbb61f380"
+      "sha256": "bce2748d6877b8380eaba54916f31b389d2b9f833d2a7cf9dd092eb7685a6d71"
     },
     {
       "path": "src/boot/check-root-capability.sh",
@@ -866,6 +866,14 @@
     {
       "path": "patches/boot/0059-lpass-sort-reg-defaults.patch",
       "sha256": "faf3d5648e51c7098909e3d08b07536a022bcabda6f04f72cf0cdb26b82c8e64"
+    },
+    {
+      "path": "src/boot/make-initramfs-cpio.sh",
+      "sha256": "7d6ea987cdc9114512d7300f7a935363fc35737d98f4814748ac73efd558214b"
+    },
+    {
+      "path": "tests/initramfs-cpio-contract.sh",
+      "sha256": "d0725c76aa208436279e4fce988f6483410c76591a79b282c80c3d2692eda689"
     }
   ],
   "root_selector_capability": {
