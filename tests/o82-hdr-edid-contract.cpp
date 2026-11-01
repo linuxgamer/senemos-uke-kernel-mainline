@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Use the same libdisplay-info metadata consumed by original KWin 6.8.2.
+extern "C" {
 #include <libdisplay-info/info.h>
 #include <libdisplay-info/edid.h>
 #include <libdisplay-info/displayid.h>
+}
 #include <array>
 #include <cassert>
 #include <cmath>
