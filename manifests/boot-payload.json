@@ -33,7 +33,7 @@
     },
     {
       "path": "packaging/native/prepare.sh",
-      "sha256": "ccd54f9d70701d105e56c86dbcba2b2d8cdab280f5eacd29bdf60c636fb366fb"
+      "sha256": "86537a35c1ea416685c26b0e17e0d85f4c55f1b161441f5644c04664985bdce0"
     },
     {
       "path": "patches/boot/0005-uke-root-selector.patch",
@@ -553,15 +553,15 @@
     },
     {
       "path": "src/display/panel-xiaomi-o82.c",
-      "sha256": "6bd43e6ca73e7d795902c405bd60c93441bb466f80c6c25cc21afa0bab2e424c"
+      "sha256": "a74433c2fc70b680e08a20ec701b02a3a6fb674e1fb0b9c77acbb6165812fe2d"
     },
     {
       "path": "src/display/sm7675-uke-native-display-oem-modes.dtso",
-      "sha256": "64e7fa9fe66534f04df807c7ef80a24400760b7040a9ad48dfc5920b14681cf3"
+      "sha256": "a9e7e1c226346ecb3c14c4bf3883fb4ca2de7427f0a474710d0e488e2b323005"
     },
     {
       "path": "src/display/uke-abl-native.h",
-      "sha256": "a4858b8928b6f4880d9ad4b05cd81b6229e7fd65c85cec599f7f4e9338285a79"
+      "sha256": "65970f0702b421c0e4409efd7020b8ba758664cc58f21f746af2b3786556dd8c"
     },
     {
       "path": "src/display/uke-o82-hdr-format.h",
@@ -577,7 +577,7 @@
     },
     {
       "path": "src/input/nt36532-uke-matrix.c",
-      "sha256": "50392408bd5b9eb41884ee791ebe9c9dc1186068b6ab73389635fc365760eb57"
+      "sha256": "7af80173cfa13bb2bdf9f7bc57279f3576b5c19996518f92cb9fe7da1431f75b"
     },
     {
       "path": "src/input/nt36532-uke-matrix.h",
@@ -585,15 +585,15 @@
     },
     {
       "path": "src/input/nt36532-uke-protocol.c",
-      "sha256": "cf33bab95023c620fda609ae1493660c3ba57d22aef6cb21929217abad2e5edd"
+      "sha256": "a6b7f99b8a226c54f36dea8c58ab0176bf44012086c6908e005e97ab1703e6e3"
     },
     {
       "path": "src/input/nt36532-uke-protocol.h",
-      "sha256": "04843dd877fa78925cee93e9c9eb08d29930a96c32bda006edaeaed9a465b5f4"
+      "sha256": "8c0aeddb7feaa9191b0e2409e43a05772ec320140ecd7c5ff95400281e982de5"
     },
     {
       "path": "src/input/nt36532-uke-spi.c",
-      "sha256": "ec80a9f5e7c72b04e2bb475d96ad3b37e8920ac1905b4ef6f63574892f446aab"
+      "sha256": "c68ae90d832e9b880fbf28840bedea56648df57afea262eea059e402c18af851"
     },
     {
       "path": "src/input/prepare-source.sh",
@@ -601,7 +601,7 @@
     },
     {
       "path": "src/input/sm7675-uke-thp.dtsi",
-      "sha256": "782109bd2357fb796a8e30ef7699735b6371c3692d0101fbf2d23c2cf0f07625"
+      "sha256": "7d0bc48e73f732d924712949f36e4ff945bf7a55f6a9c37b2e0bbf43a85af7b1"
     },
     {
       "path": "src/performance/prepare-source.sh",
@@ -629,7 +629,7 @@
     },
     {
       "path": "src/power/uke-pm8010.h",
-      "sha256": "70548e41cd0b3d610c3298f3e8b88d3212d8195eaa0916873c861408af445cf4"
+      "sha256": "71c187985b08947607016f071da15f11e312e6438484273b62390a4212cec68f"
     },
     {
       "path": "tests/audio-eld-contract.sh",
@@ -865,7 +865,7 @@
     },
     {
       "path": "tests/o82-panel-contract.sh",
-      "sha256": "2e524b0d316d9040fb5e7c68b60be1b3112487d73f1821aaa69694a826e00d1b"
+      "sha256": "bff7c858cfe63d96480130d378e9b0ee3121e92ae936eeb96bfa6dfbfde92b07"
     },
     {
       "path": "tests/o82-profile-loader-contract.c",
@@ -909,7 +909,7 @@
     },
     {
       "path": "tests/pm8010-population-contract.sh",
-      "sha256": "d1c85a96b167b6820373da95bebd3a37b8c1eefa10cb2da319a9f958c8b7c511"
+      "sha256": "514b6340db247b32c3732bd8106b131527d55ed4e8a63fd07d4815aad73eef20"
     },
     {
       "path": "tests/qup-interconnect-contract.sh",
@@ -965,7 +965,7 @@
     },
     {
       "path": "tests/touch-dt-contract.sh",
-      "sha256": "9f7168db1774676084f33f233d984975b52436a28fabd9b998def938c1b45478"
+      "sha256": "8173cce009fafb9868bd6124df6e3f6e9dcba52523f256ac9a5619a05aa2d5af"
     },
     {
       "path": "tests/touch-matrix.c",
@@ -973,7 +973,7 @@
     },
     {
       "path": "tests/touch-protocol-contract.sh",
-      "sha256": "0ef57c8df5328b3585936bc0bf905de39e1a704ec3ff5230d236c9d4c22a38a1"
+      "sha256": "3e62e261353e52f819168e43a1706dc10fa252d95787657e3003379b994e2d84"
     },
     {
       "path": "tests/touch-publish.c",
@@ -1050,6 +1050,46 @@
     {
       "path": "tests/wpss-proxy-contract.sh",
       "sha256": "08886938fb787dd9a7e30cc0c20ac1c3873eac5ee5e9411e33027ef35a097061"
+    },
+    {
+      "path": "src/display/generate-native-panels.sh",
+      "sha256": "d7cea1079a2ddbbc36a2a220a7fb412351d5283c2c6d3bc3c9d5e1b140378b60"
+    },
+    {
+      "path": "patches/display/0071-o82-panel-variants.patch",
+      "sha256": "40e21c06f71845244d160710ebbf54e22a554bb267834468d827c7b38596c162"
+    },
+    {
+      "path": "tests/o82-selector-contract.sh",
+      "sha256": "e4561e99d11ed9548377c3ac4c7336a15f83fb7aa69c9ad32d14fa45645dd7ff"
+    },
+    {
+      "path": "tests/o82-on-batch-contract.sh",
+      "sha256": "a28f49cdbaeffc98cee5faaf8d29809dd539ef9471a2dbc4a2bc3664ca0c1e57"
+    },
+    {
+      "path": "tests/o82-variants-contract.sh",
+      "sha256": "e494ce2d29e65b099f0f660d3186cdc0ea91ad0ffcc6d51746e80d1246a26cf0"
+    },
+    {
+      "path": "tests/o82-variants-dt-contract.sh",
+      "sha256": "86a1a68e68b05578d43917e9938c325ff5e3b37cc20cfcaf6380457fdb7c47a0"
+    },
+    {
+      "path": "src/display/prepare-native-abl-source.sh",
+      "sha256": "714d3a5586dc073aa898aec4019333a5f066cda860c87ce6a5725d564eac0caa"
+    },
+    {
+      "path": "patches/display/0002-arm64-uke-native-abl-entry.patch",
+      "sha256": "a10d7eaef0bd425d277048324f49394cd4b5b6c6800d6475004cd7a0484db74d"
+    },
+    {
+      "path": "tests/touch-config-map.cpp",
+      "sha256": "78f1afc692bc84ecdbf9cc5a6aa916db8acfa7862aa99ba32e76bb6d7dfab8c7"
+    },
+    {
+      "path": "tests/touch-variant-assets.sh",
+      "sha256": "8d032f535ba86c6161720be53ac74c741144b23a51d0a34a98594e798e1cfd65"
     }
   ],
   "root_selector_capability": {

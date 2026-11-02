@@ -45,6 +45,10 @@ printf '#include_next <linux/errno.h>\n' > "$stage/linux/errno.h"
     "${sanitize[@]}" -o "$stage/check"
 "$stage/check"
 "${CC:-cc}" -std=gnu11 -O2 -g -Wall -Wextra -Werror -Wconversion \
+    -DNVT_TEST_VARIANT=NVT_UKE_TIANMA -I "$stage" "$root/tests/touch-protocol.c" \
+    "$root/src/input/nt36532-uke-protocol.c" "${sanitize[@]}" -o "$stage/check-tianma"
+"$stage/check-tianma"
+"${CC:-cc}" -std=gnu11 -O2 -g -Wall -Wextra -Werror -Wconversion \
     -I "$stage" "$root/tests/touch-gesture.c" "$root/src/input/nt36532-uke-protocol.c" \
     "${sanitize[@]}" -o "$stage/gesture"
 "$stage/gesture"
@@ -79,5 +83,5 @@ if [[ -n ${UKE_TOUCH_NORMAL_IMAGE:-} ]]; then
     "${CC:-cc}" -std=gnu11 -O2 -Wall -Wextra -Werror -I "$stage" \
         "$root/tests/touch-protocol-firmware.c" "$root/src/input/nt36532-uke-protocol.c" \
         "${sanitize[@]}" -lcrypto -o "$stage/firmware"
-    "$stage/firmware" "$UKE_TOUCH_NORMAL_IMAGE"
+    "$stage/firmware" "$UKE_TOUCH_NORMAL_IMAGE" "${UKE_TOUCH_NORMAL_VARIANT:-csot}"
 fi

@@ -19,23 +19,22 @@ evidence and must not be added to the normal release series.
  #include "uke-lights.h"
  
  void *__init uke_abl_prepare_fdt(void *input, int size, phys_addr_t *physical)
-@@ -1080,6 +1082,15 @@
+@@ -1080,6 +1082,14 @@
  	ret = uke_abl_transform(uke_fdt, sizeof(uke_fdt), input, size,
  			      uke_ufs_overlay, sizeof(uke_ufs_overlay),
  			      uke_usb_overlay, sizeof(uke_usb_overlay));
 +	if (ret > 0) {
 +		ret = fdt_open_into(uke_fdt, uke_fdt, sizeof(uke_fdt));
 +		if (!ret)
-+			ret = uke_abl_native(uke_fdt, uke_native_overlay,
-+					     sizeof(uke_native_overlay),
-+					     UKE_NATIVE_PANEL_SELECTOR);
++			ret = uke_abl_native_select(uke_fdt, uke_native_panels,
++						    ARRAY_SIZE(uke_native_panels));
 +		if (!ret)
 +			ret = 1;
 +	}
  	if (ret < 0) {
  		pr_crit("Uke ABL DT adaptation rejected (%d); refusing incomplete board graph\n", ret);
  		while (true)
-@@ -1102,7 +1113,7 @@
+@@ -1102,7 +1112,7 @@
  		pr_warn("Uke lights: OEM graph not admitted; light controls unavailable\n");
  	}
  	*physical = __pa_symbol(uke_fdt);

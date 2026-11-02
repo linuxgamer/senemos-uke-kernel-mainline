@@ -66,26 +66,68 @@ int nvt_uke_watchdog(const u8 *data, size_t size, unsigned int *consecutive)
 	return data[0];
 }
 
+const char *nvt_uke_firmware(enum nvt_uke_variant variant)
+{
+	switch (variant) {
+	case NVT_UKE_CSOT:
+		return "qcom/uke/touch/csot/normal.bin";
+	case NVT_UKE_TIANMA:
+		return "qcom/uke/touch/tm/normal.bin";
+	default:
+		return NULL;
+	}
+}
+
+int nvt_uke_variant_from_name(const char *name)
+{
+	if (name && !strcmp(name, "csot"))
+		return NVT_UKE_CSOT;
+	if (name && !strcmp(name, "tianma"))
+		return NVT_UKE_TIANMA;
+	return -EINVAL;
+}
+
+int nvt_uke_panel_id(enum nvt_uke_variant variant, int direction, int level)
+{
+	if (!nvt_uke_firmware(variant))
+		return -EINVAL;
+	if (direction < 0)
+		return direction;
+	if (level < 0)
+		return level;
+	/* Retain the observed CSOT high input; Tianma polarity is not assumed. */
+	return direction == 1 && (level == 0 || level == 1) &&
+		(variant == NVT_UKE_TIANMA || level == 1) ? 0 : -ENODEV;
+}
+
 int nvt_uke_validate_image(const struct nvt_uke_io *io, const u8 *data, size_t size)
 {
-	static const u8 expected[32] = {
+	static const u8 expected[2][32] = { {
 		0xa4, 0xf9, 0x49, 0xfb, 0x89, 0xc7, 0xea, 0xad,
 		0x9d, 0xa8, 0x5a, 0x58, 0x85, 0xcd, 0x2d, 0xcc,
 		0x1f, 0xff, 0xbf, 0x08, 0xbc, 0x1e, 0x7f, 0xfe,
 		0x9f, 0x0b, 0xb9, 0x7c, 0x17, 0x69, 0xb3, 0x10,
-	};
+	}, {
+		0x12, 0xce, 0x26, 0x93, 0xb9, 0x65, 0xa3, 0x5e,
+		0x34, 0x69, 0x98, 0x4f, 0xd9, 0x5a, 0xfe, 0xbb,
+		0x4c, 0x0a, 0x74, 0x0c, 0xa9, 0x08, 0x15, 0x9b,
+		0x0a, 0x5e, 0x6b, 0xda, 0xd5, 0x96, 0x86, 0x19,
+	} };
 	u8 digest[32];
 	int ret;
 
-	if (!io || !io->sha256 || !data || size != NVT_UKE_IMAGE_SIZE)
+	if (!io || !io->sha256 || !data || size != NVT_UKE_IMAGE_SIZE ||
+	    !nvt_uke_firmware(io->variant))
 		return -EINVAL;
 	if (get_unaligned_le32(data) != 0x200 || get_unaligned_le32(data + 4) ||
 	    get_unaligned_le32(data + 8) != 0x174d7 ||
 	    get_unaligned_le32(data + 12) != 0x22000 ||
 	    get_unaligned_le32(data + 16) != 0x100000 ||
 	    get_unaligned_le32(data + 20) != 0x1409f ||
-	    get_unaligned_le32(data + 24) != 0xe4bdd7f0 ||
-	    get_unaligned_le32(data + 28) != 0x89495247 ||
+	    get_unaligned_le32(data + 24) !=
+		(io->variant == NVT_UKE_CSOT ? 0xe4bdd7f0U : 0x9441f4bbU) ||
+	    get_unaligned_le32(data + 28) !=
+		(io->variant == NVT_UKE_CSOT ? 0x89495247U : 0x9c1002baU) ||
 	    data[0x20] != 3 || data[0x28] || data[0x29] ||
 	    get_unaligned_le32(data + 0xf0) != 0x1140a0 ||
 	    get_unaligned_le32(data + 0xf4) != 0xff || get_unaligned_le32(data + 0xf8) ||
@@ -96,7 +138,7 @@ int nvt_uke_validate_image(const struct nvt_uke_io *io, const u8 *data, size_t s
 	ret = io->sha256(io->context, data, size, digest);
 	if (ret)
 		return ret < 0 ? ret : -EIO;
-	return memcmp(digest, expected, sizeof(expected)) ? -EBADMSG : 0;
+	return memcmp(digest, expected[io->variant], sizeof(digest)) ? -EBADMSG : 0;
 }
 
 static bool nvt_uke_ram(u32 address, size_t size)
@@ -242,7 +284,14 @@ int nvt_uke_boot(const struct nvt_uke_io *io, const u8 *data, size_t size, bool 
 		return ret;
 	io->delay_ms(io->context, 5);
 	for (i = 0; i < sizeof(setup) / sizeof(setup[0]); i++) {
-		ret = nvt_uke_write(io, setup[i].address, setup[i].bytes, setup[i].count, false);
+		const u8 *bytes = setup[i].bytes;
+
+		/* Supplier CRCs come only from the fully hash-admitted OEM image. */
+		if (setup[i].address == 0x1fb500)
+			bytes = data + 24;
+		else if (setup[i].address == 0x1fb504)
+			bytes = data + 28;
+		ret = nvt_uke_write(io, setup[i].address, bytes, setup[i].count, false);
 		if (ret)
 			return ret;
 	}

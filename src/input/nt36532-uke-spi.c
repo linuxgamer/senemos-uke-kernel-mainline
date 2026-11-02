@@ -27,7 +27,6 @@
 #include "nt36532-uke-protocol.h"
 #include "nt36532-uke-matrix.h"
 
-#define NVT_UKE_FIRMWARE "qcom/uke/touch/csot/normal.bin"
 #define NVT_UKE_WIRE_SIZE (NVT_UKE_FRAME_SIZE + 2)
 
 struct nvt_uke_touch {
@@ -645,8 +644,9 @@ static int nvt_probe(struct spi_device *spi)
 	struct nvt_uke_touch *t;
 	u32 size_x, size_y;
 	u32 mm_x, mm_y;
-	const char *label;
-	int ret;
+	const char *label, *supplier;
+	enum nvt_uke_variant variant;
+	int ret, panel_level;
 
 	if (!of_machine_is_compatible("xiaomi,uke") || spi->max_speed_hz != 19200000 ||
 	    spi->mode != SPI_MODE_0 || spi->irq <= 0 ||
@@ -655,11 +655,24 @@ static int nvt_probe(struct spi_device *spi)
 	if (spi_max_transfer_size(spi) < NVT_UKE_WIRE_SIZE ||
 	    spi_max_message_size(spi) < NVT_UKE_WIRE_SIZE)
 		return dev_err_probe(dev, -EMSGSIZE, "Complete touch packet transfer required\n");
+	if (device_property_read_string(dev, "novatek,firmware-variant", &supplier))
+		return dev_err_probe(dev, -EINVAL, "Touch supplier identity required\n");
+	ret = nvt_uke_variant_from_name(supplier);
+	if (ret < 0)
+		return dev_err_probe(dev, ret, "Unsupported touch supplier\n");
+	variant = (enum nvt_uke_variant)ret;
 	panel_id = devm_gpiod_get(dev, "panel-id", GPIOD_ASIS);
 	if (IS_ERR(panel_id))
 		return dev_err_probe(dev, PTR_ERR(panel_id), "Panel ID unavailable\n");
-	if (gpiod_get_direction(panel_id) != 1 || gpiod_get_value_cansleep(panel_id) != 1)
-		return dev_err_probe(dev, -ENODEV, "Expected existing high panel-ID input\n");
+	ret = gpiod_get_direction(panel_id);
+	if (ret < 0)
+		return dev_err_probe(dev, ret, "Panel ID direction unavailable\n");
+	panel_level = gpiod_get_value_cansleep(panel_id);
+	if (panel_level < 0)
+		return dev_err_probe(dev, panel_level, "Panel ID value unavailable\n");
+	ret = nvt_uke_panel_id(variant, ret, panel_level);
+	if (ret)
+		return dev_err_probe(dev, ret, "Invalid panel-ID input for touch supplier\n");
 	if (device_property_read_u32(dev, "touchscreen-size-x", &size_x) ||
 	    device_property_read_u32(dev, "touchscreen-size-y", &size_y) ||
 	    size_x != 32000 || size_y != 21360 ||
@@ -681,17 +694,18 @@ static int nvt_probe(struct spi_device *spi)
 	INIT_DELAYED_WORK(&t->poll_work, nvt_poll_worker);
 	if (device_property_read_u32_array(dev, "novatek,column-map", t->matrix.columns, NVT_UKE_COLUMNS) ||
 	    device_property_read_u32_array(dev, "novatek,row-map", t->matrix.rows, NVT_UKE_ROWS))
-		return dev_err_probe(dev, -EINVAL, "CSOT electrode mapping required\n");
+		return dev_err_probe(dev, -EINVAL, "Supplier electrode mapping required\n");
 	t->io = (struct nvt_uke_io) {
 		.context = t, .read = nvt_read, .write = nvt_write,
 		.check_ready = nvt_ready, .delay_ms = nvt_delay, .sha256 = nvt_sha256,
+		.variant = variant,
 	};
 	t->tx = devm_kmalloc(dev, NVT_UKE_WIRE_SIZE, GFP_KERNEL);
 	t->rx = devm_kmalloc(dev, NVT_UKE_WIRE_SIZE, GFP_KERNEL);
 	t->frame = devm_kmalloc(dev, NVT_UKE_FRAME_SIZE, GFP_KERNEL);
 	if (!t->tx || !t->rx || !t->frame)
 		return -ENOMEM;
-	ret = request_firmware(&t->firmware, NVT_UKE_FIRMWARE, dev);
+	ret = request_firmware(&t->firmware, nvt_uke_firmware(variant), dev);
 	if (ret)
 		return ret;
 	ret = devm_add_action_or_reset(dev, nvt_firmware_cleanup, (void *)t->firmware);
@@ -883,6 +897,7 @@ static struct spi_driver nvt_driver = {
 	.id_table = nvt_spi_ids,
 };
 module_spi_driver(nvt_driver);
-MODULE_FIRMWARE(NVT_UKE_FIRMWARE);
+MODULE_FIRMWARE("qcom/uke/touch/csot/normal.bin");
+MODULE_FIRMWARE("qcom/uke/touch/tm/normal.bin");
 MODULE_DESCRIPTION("Uke NT36532 signed raw THP packet transport");
 MODULE_LICENSE("GPL");

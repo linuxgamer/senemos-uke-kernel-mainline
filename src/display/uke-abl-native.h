@@ -11,6 +11,53 @@
 #include "../boot/uke-bwmon.h"
 #include "../boot/uke-cpu-bwmon.h"
 #endif
+struct uke_native_panel {
+	const char *selector;
+	void *overlay;
+	size_t bytes;
+};
+
+/* ABL may omit the trailing colon. Match one complete parameter, not a substring. */
+static int UKE_INIT uke_native_panel_selected(const void *fdt, const char *selector)
+{
+	static const char key[] = "msm_drm.dsi_display0=";
+	const char *args, *cursor, *selected = NULL;
+	size_t length, selected_length = 0;
+	int chosen, bytes;
+
+	if (!selector || strncmp(selector, key, sizeof(key) - 1))
+		return -FDT_ERR_BADVALUE;
+	length = strlen(selector);
+	if (length && selector[length - 1] == ':')
+		length--;
+	chosen = fdt_path_offset(fdt, "/chosen");
+	args = (const char *)fdt_getprop(fdt, chosen, "bootargs", &bytes);
+	if (!args || bytes <= 0 || args[bytes - 1] ||
+	    strlen(args) != (size_t)bytes - 1)
+		return -FDT_ERR_BADVALUE;
+	for (cursor = args; *cursor;) {
+		const char *start;
+		size_t token;
+
+		while (*cursor == ' ' || *cursor == '\t')
+			cursor++;
+		start = cursor;
+		while (*cursor && *cursor != ' ' && *cursor != '\t')
+			cursor++;
+		token = cursor - start;
+		if (token < sizeof(key) - 1 || strncmp(start, key, sizeof(key) - 1))
+			continue;
+		if (selected)
+			return -FDT_ERR_BADVALUE;
+		selected = start;
+		selected_length = token;
+	}
+	if (!selected)
+		return -FDT_ERR_BADVALUE;
+	return selected_length >= length && !strncmp(selected, selector, length) &&
+		(selected_length == length || selected[length] == ':');
+}
+
 /*
  * Give an unlabeled OEM node a phandle and a symbol so overlays can reference it.
  * Adding the phandle shifts later nodes, so /__symbols__ is resolved afterwards.
@@ -59,8 +106,7 @@ static int UKE_INIT uke_abl_native(void *fdt, void *overlay, size_t bytes,
 	    fdt_node_check_compatible(fdt, 0, "xiaomi,uke"))
 		return -FDT_ERR_BADVALUE;
 	chosen = fdt_path_offset(fdt, "/chosen");
-	text = (const char *)fdt_getprop(fdt, chosen, "bootargs", &size);
-	if (!text || size <= 0 || text[size - 1] || !strstr(text, panel_selector))
+	if (uke_native_panel_selected(fdt, panel_selector) != 1)
 		return -FDT_ERR_BADVALUE;
 	text = (const char *)fdt_getprop(fdt, chosen, "stdout-path", &size);
 	if (!text || size <= 0 || size > (int)sizeof(framebuffer) || text[size - 1] ||
@@ -139,4 +185,24 @@ static int UKE_INIT uke_abl_native(void *fdt, void *overlay, size_t bytes,
 	/* Firmware scanout must not wait for or blank the native panel backlight. */
 	ret = fdt_delprop(fdt, node, "backlight");
 	return ret && ret != -FDT_ERR_NOTFOUND ? ret : fdt_pack(fdt);
+}
+
+/* Select before either overlay or the inherited board graph is modified. */
+static inline int UKE_INIT uke_abl_native_select(void *fdt,
+		const struct uke_native_panel *panels, unsigned int count)
+{
+	unsigned int i;
+	int selected;
+
+	if (!fdt || !panels || !count || fdt_check_header(fdt))
+		return -FDT_ERR_BADVALUE;
+	for (i = 0; i < count; i++) {
+		selected = uke_native_panel_selected(fdt, panels[i].selector);
+		if (selected < 0)
+			return selected;
+		if (selected)
+			return uke_abl_native(fdt, panels[i].overlay, panels[i].bytes,
+					      panels[i].selector);
+	}
+	return -FDT_ERR_BADVALUE;
 }

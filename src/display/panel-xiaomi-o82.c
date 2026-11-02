@@ -206,6 +206,8 @@ static int o82_on_batch(struct o82_panel *ctx)
 {
 	struct mipi_dsi_msg msgs[31] = { };
 	const struct o82_profile *profile = ctx->active;
+	bool pa = ctx->profiles == o82_36_02_0a_profiles;
+	unsigned int commands = pa ? 171 : 108;
 	unsigned int i, count = 0, bytes = 0, chunks = 0, total = 0;
 	int ret;
 
@@ -213,17 +215,18 @@ static int o82_on_batch(struct o82_panel *ctx)
 	    (profile != &ctx->profiles[0] &&
 	     !(ctx->oem_refresh_modes && (profile == &ctx->profiles[1] ||
 					profile == &ctx->profiles[2]))) ||
-	    profile->on_count != 108)
+	    profile->on_count != commands)
 		return -EINVAL;
 	/* Reject changed metadata before the first ON chunk can reach the panel. */
 	for (i = 0; i < profile->on_count; i++) {
 		const struct o82_command *cmd = &profile->on[i];
-		bool terminal = i == 6 || i == 12 || i == 74 || i >= 105;
+		bool terminal = i == 6 || i == 12 || i == 74 ||
+			(pa ? i == 157 || i >= 168 : i >= 105);
 
 		if (cmd->type != MIPI_DSI_DCS_LONG_WRITE || cmd->channel ||
 		    !cmd->data || !cmd->len || cmd->len > 17 ||
 		    cmd->downstream_flags != (terminal ? 0 : BIT(6)) ||
-		    cmd->delay_ms != (i == 106 ? 120 : 0))
+		    cmd->delay_ms != (i == commands - 2 ? 120 : 0))
 			return -EINVAL;
 		count++;
 		bytes += ALIGN(cmd->len + 4, 4);
@@ -235,7 +238,7 @@ static int o82_on_batch(struct o82_panel *ctx)
 			count = bytes = 0;
 		}
 	}
-	if (count || chunks != 8 || total != 884)
+	if (count || chunks != (pa ? 10 : 8) || total != (pa ? 1448 : 884))
 		return -EINVAL;
 	chunks = total = 0;
 	for (i = 0; i < profile->on_count; i++) {
@@ -267,8 +270,8 @@ static int o82_on_batch(struct o82_panel *ctx)
 		}
 	}
 	dev_info(&ctx->dsi[0]->dev,
-		 "Uke O82 LP ON batching complete: commands=108 chunks=%u bytes=%u\n",
-		 chunks, total);
+		 "Uke O82 LP ON batching complete: commands=%u chunks=%u bytes=%u\n",
+		 commands, chunks, total);
 	return 0;
 }
 
@@ -347,8 +350,11 @@ static int o82_read_initial_mode(struct o82_panel *ctx, struct device_node *node
 	ctx->oem_refresh_modes = of_property_read_bool(node, "xiaomi,oem-refresh-modes");
 	if ((ctx->initial_60hz_only && ctx->initial_120hz_only) ||
 	    (ctx->oem_refresh_modes && (ctx->initial_60hz_only || ctx->initial_120hz_only)) ||
-	    ((ctx->initial_120hz_only || ctx->oem_refresh_modes) &&
-	     !of_device_is_compatible(node, "xiaomi,o82-42-02-0b")))
+	    (ctx->initial_120hz_only &&
+	     !of_device_is_compatible(node, "xiaomi,o82-42-02-0b")) ||
+	    (ctx->oem_refresh_modes &&
+	     !of_device_is_compatible(node, "xiaomi,o82-42-02-0b") &&
+	     !of_device_is_compatible(node, "xiaomi,o82-36-02-0a")))
 		return -EINVAL;
 	return 0;
 }
@@ -732,7 +738,9 @@ static bool o82_dfps_check_locked(struct o82_panel *ctx,
 	int old_group = qcom_uke_o82_mode_group(old);
 
 	return qcom_uke_o82_live_change(old, new_mode) &&
-		ctx->oem_refresh_modes && ctx->profiles == o82_42_02_0b_profiles &&
+		ctx->oem_refresh_modes &&
+		(ctx->profiles == o82_42_02_0b_profiles ||
+		 ctx->profiles == o82_36_02_0a_profiles) &&
 		ctx->active == &ctx->profiles[old_group] && ctx->prepared &&
 		!ctx->removing && (atomic64_read(&ctx->touch_state) & 1);
 }

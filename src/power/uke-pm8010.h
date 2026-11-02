@@ -11,6 +11,7 @@ static int uke_pm8010_inventory(const void *data, size_t size)
 {
 	size_t header = offsetof(struct socinfo, pmic_array_offset) + sizeof(__le32);
 	u32 count, offset, format, i;
+	bool present = false;
 
 	if (!data || size < header)
 		return -EINVAL;
@@ -29,9 +30,9 @@ static int uke_pm8010_inventory(const void *data, size_t size)
 		if (!model)
 			return -ENODATA;
 		if (model == 65) /* PM8010, as defined by Qualcomm socinfo. */
-			return 1;
+			present = true;
 	}
-	return 0;
+	return present;
 }
 
 static int uke_pm8010_should_probe(struct spmi_device *sdev)

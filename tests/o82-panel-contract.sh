@@ -75,9 +75,11 @@ cat > "$work/check.c" <<'C'
 static char last_error[512];
 static int on_complete;
 static void info(const char *format,...) {
-    if(!strcmp(format,"Uke O82 LP ON batching complete: commands=108 chunks=%u bytes=%u\n")) {
-        va_list args;va_start(args,format);assert(va_arg(args,unsigned int)==8);
-        assert(va_arg(args,unsigned int)==884);va_end(args);++on_complete;
+    if(!strcmp(format,"Uke O82 LP ON batching complete: commands=%u chunks=%u bytes=%u\n")) {
+        va_list args;va_start(args,format);unsigned int commands=va_arg(args,unsigned int);
+        assert(commands==108 || commands==171);
+        assert(va_arg(args,unsigned int)==(commands==171 ? 10U:8U));
+        assert(va_arg(args,unsigned int)==(commands==171 ? 1448U:884U));va_end(args);++on_complete;
     }
 }
 typedef uint8_t u8; typedef uint16_t u16; typedef uint32_t u32; typedef uint64_t u64; typedef uint16_t __be16; typedef long ssize_t;
@@ -173,7 +175,8 @@ struct drm_panel_follower {const struct follower_ops *funcs;};
 static int backlight_calls,backlight_disable_calls,normal_transfers,hs_transfers,dimming_transfers;
 static int batch_api_calls,batch_api_error;
 static int lp_api_calls,lp_api_error,lp_api_fail_call=-1;
-static int on_batch_calls,on_batch_error=-1,on_batch_counts[8],on_batch_sizes[8],on_batch_total;
+static int on_batch_calls,on_batch_error=-1,on_batch_counts[10],on_batch_sizes[10],on_batch_total;
+static bool pa_on;
 static int backlight_enable_error,backlight_disable_error,positive_brightness=1;
 static bool boundary_seen;
 static bool video_started;
@@ -366,8 +369,10 @@ static int qcom_uke_dsi_lp_batch(struct mipi_dsi_device *dsi,const struct mipi_d
     return 0;
 }
 static int qcom_uke_dsi_on_batch(struct mipi_dsi_device *dsi,const struct mipi_dsi_msg *msgs,unsigned int count) {
-    static const int counts[8]={7,6,31,31,28,3,1,1},sizes[8]={56,48,248,248,244,24,8,8};
-    assert(!video_started&&!boundary_seen&&dsi->id==0&&count<=31&&on_batch_calls<8);
+    static const int pb_counts[8]={7,6,31,31,28,3,1,1},pb_sizes[8]={56,48,248,248,244,24,8,8};
+    static const int pa_counts[10]={7,6,31,31,27,28,28,11,1,1},pa_sizes[10]={56,48,248,248,248,248,228,108,8,8};
+    const int *counts=pa_on ? pa_counts:pb_counts,*sizes=pa_on ? pa_sizes:pb_sizes;
+    assert(!video_started&&!boundary_seen&&dsi->id==0&&count<=31&&on_batch_calls<(pa_on ? 10:8));
     unsigned int bytes=0;
     for(unsigned int i=0;i<count;i++) {
         assert(msgs[i].type==0x39&&msgs[i].channel==0&&msgs[i].flags==MIPI_DSI_MSG_USE_LPM);
@@ -508,13 +513,14 @@ static struct o82_panel context(int variant,int mode) {
     last_error[0]=0;
     failure=transfer_failure=disable_failure=transfer_short=-1;
     cs.adjusted_mode=o82_modes[mode].mode;
-    const struct o82_profile *p=variant ? o82_42_02_0b_profiles : o82_36_02_0a_profiles;
+    pa_on=variant==0 || variant==3;
+    const struct o82_profile *p=pa_on ? o82_36_02_0a_profiles:o82_42_02_0b_profiles;
     struct o82_panel ctx={.panel={.funcs=&funcs},.dsi={&dsis[0],&dsis[1]},.supplies={&supplies[0],&supplies[1],&supplies[2]},
         .connector=&connector,.backlight=&backlight,.profiles=p,.active=p,
-        .initial_120hz_only=variant==1 && mode==5,.oem_refresh_modes=variant==2};
+        .initial_120hz_only=variant==1 && mode==5,.oem_refresh_modes=variant>=2};
     mutex_init(&ctx.lock);
     pps_start=2*p[o82_modes[mode].group].on_count;
-    struct device_node node={variant ? "xiaomi,o82-42-02-0b" : "xiaomi,o82-36-02-0a"};
+    struct device_node node={pa_on ? "xiaomi,o82-36-02-0a":"xiaomi,o82-42-02-0b"};
     struct platform_device platform={.dev={.of_node=&node}};
     struct msm_dsi_host h={&platform};
     ctx.dsc=(struct drm_dsc_config){.dsc_version_major=1,.dsc_version_minor=1,
@@ -565,7 +571,7 @@ int main(void) {
         requested_initial60=flags&1; requested_initial120=flags&2; requested_oem_modes=flags&4;
         const bool invalid=(requested_initial60 && requested_initial120) ||
             (requested_oem_modes && (requested_initial60 || requested_initial120)) ||
-            ((requested_initial120 || requested_oem_modes) && !variant);
+            (requested_initial120 && !variant);
         assert(o82_probe_initial_mode(&ctx,&node)==(invalid ? -EINVAL:0));
         assert(!enables && !transfers && !operation && !ctx.prepared);
         assert(ctx.initial_60hz_only==requested_initial60 && ctx.initial_120hz_only==requested_initial120 &&
@@ -579,7 +585,7 @@ int main(void) {
         assert(!enables && !transfers && !operation && !ctx.prepared);
         requested_oem_modes=false;
     }
-    for(int variant=0;variant<3;variant++) for(int fail=-1;fail<2;fail++) {
+    for(int variant=0;variant<4;variant++) for(int fail=-1;fail<2;fail++) {
         struct o82_panel ctx=context(variant,3); attach_ctx=&ctx;
         dfps_register_calls=dfps_unregister_calls=dfps_register_error=0;
         attach_failure=fail; attached=detached=panel_removed=secondary_removed=0;
@@ -587,7 +593,7 @@ int main(void) {
         assert(attached==(fail==0 ? 1:2));
         assert(detached==(fail==1 ? 1:0));
         assert(panel_removed==(fail>=0) && secondary_removed==(fail>=0));
-        assert(dfps_register_calls==(variant==2 && fail<0) && !dfps_unregister_calls);
+        assert(dfps_register_calls==(variant>=2 && fail<0) && !dfps_unregister_calls);
     }
     {
         struct o82_panel ctx=context(2,3); attach_ctx=&ctx;
@@ -629,7 +635,7 @@ int main(void) {
     }
     selection=context(1,5); selection.connector->state->crtc->state->adjusted_mode.clock++;
     assert(o82_prepare(&selection.panel)==-EINVAL && !enables && !transfers && !operation);
-    for(unsigned int v=0;v<3;v++) for(unsigned int m=0;m<7;m++) {
+    for(unsigned int v=0;v<4;v++) for(unsigned int m=0;m<7;m++) {
         const struct drm_display_mode *mode=&o82_modes[m].mode;
         const uint64_t divisor=(uint64_t)mode->htotal*mode->vtotal;
         assert(((uint64_t)mode->clock*1000+divisor/2)/divisor==rates[m]);
@@ -646,7 +652,7 @@ int main(void) {
         assert(pre_video_reads==(batched ? 0:2));
         const int full=transfers;
         assert(full==2*(int)(c.active->on_count+1));
-        if(batched)assert(on_batch_calls==8&&on_batch_total==884&&on_complete==1);
+        if(batched)assert(on_batch_calls==(v==3 ? 10:8)&&on_batch_total==(v==3 ? 1448:884)&&on_complete==1);
         else assert(!on_batch_calls&&!on_complete);
         assert(lpm_transfers==2*(int)(c.active->on_count+1));
         assert(!hs_transfers && !c.panel.enabled && !backlight_calls);
@@ -774,7 +780,7 @@ int main(void) {
         assert(o82_prepare(&c.panel)==-EINVAL && enables==0);
     }
     struct o82_panel c=context(0,3);
-    for(int variant=0;variant<3;variant++) {
+    for(int variant=0;variant<4;variant++) {
         for(int refusal=0;refusal<3;refusal++) {
             c=context(variant,3); assert(o82_prepare(&c.panel)==0);
             const int before=transfers;
@@ -846,7 +852,7 @@ int main(void) {
             video_started=false;
             if(callback) o82_shutdown(c.dsi[0]); else o82_remove(c.dsi[0]);
             assert(c.removing && !c.prepared && !c.first_frame_initialized && cancelled==1);
-            assert(dfps_unregister_calls==(variant==2));
+            assert(dfps_unregister_calls==(variant>=2));
             assert(!c.backlight->on && !backlight_calls && !normal_transfers);
             assert(detached==(callback ? 0:2) && panel_removed==!callback && secondary_removed==!callback);
             const int after_remove=transfers;

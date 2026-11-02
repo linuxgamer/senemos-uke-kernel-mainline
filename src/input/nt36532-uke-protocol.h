@@ -11,6 +11,11 @@
 #define NVT_UKE_GESTURE_SIZE 65
 #define NVT_UKE_CONTACTS 10
 
+enum nvt_uke_variant {
+	NVT_UKE_CSOT,
+	NVT_UKE_TIANMA,
+};
+
 struct nvt_uke_contacts {
 	u16 active;
 	u16 x[NVT_UKE_CONTACTS], y[NVT_UKE_CONTACTS];
@@ -31,7 +36,12 @@ struct nvt_uke_io {
 	int (*check_ready)(void *context);
 	void (*delay_ms)(void *context, unsigned int milliseconds);
 	int (*sha256)(void *context, const u8 *data, size_t size, u8 digest[32]);
+	enum nvt_uke_variant variant;
 };
+
+const char *nvt_uke_firmware(enum nvt_uke_variant variant);
+int nvt_uke_variant_from_name(const char *name);
+int nvt_uke_panel_id(enum nvt_uke_variant variant, int direction, int level);
 
 int nvt_uke_decode(const u8 *data, size_t size, struct nvt_uke_frame *frame);
 int nvt_uke_watchdog(const u8 *data, size_t size, unsigned int *consecutive);

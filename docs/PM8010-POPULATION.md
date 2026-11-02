@@ -1,5 +1,11 @@
 # Optional PM8010 population on Uke
 
+2 November 2026 source follow-up: populated firmware inventories and all seven
+N-regulator resource alternatives retain ordinary probing. The complete PMIC
+array is now validated before a positive result, so an early PM8010 entry
+cannot hide a malformed later record. Absent, populated, malformed and deferred
+fixtures pass without bus or power access. No new hardware result is claimed.
+
 31 October 2026, POCO Pad X1, Fedora Rawhide AArch64. Normal DNF installation
 and reboot to Linux 7.3.1-4 in slot B passed. The inherited PM8010 N probe
 is skipped with an explicit firmware-population message, and its earlier

@@ -1,0 +1,40 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] drm/msm/dsi: admit both exact Uke O82 suppliers
+
+MiCode display DT 4a3e1c391130237c5e8c2b250d1c94f3e25b9b11
+uses identical timing, DSC, lane-clock, supply and reset contracts for
+O82-36 and O82-42. Keep supplier ON streams separate in the panel driver.
+Extend the explicit OEM refresh and grouped-transfer gates to O82-36.
+All board, link, format, mode, timing and lifetime checks remain active.
+The isolated O82-42 initial120 diagnostic remains supplier-specific.
+Original Linux Foundation/Qualcomm GPL-2.0-only attribution is retained.
+
+--- a/drivers/gpu/drm/msm/dsi/dsi_host.c
++++ b/drivers/gpu/drm/msm/dsi/dsi_host.c
+@@ -265,2 +265,3 @@
+-	selected = of_device_is_compatible(panel, "xiaomi,o82-42-02-0b") &&
++	selected = (of_device_is_compatible(panel, "xiaomi,o82-42-02-0b") ||
++		    of_device_is_compatible(panel, "xiaomi,o82-36-02-0a")) &&
+ 		of_property_read_bool(panel, "xiaomi,oem-refresh-modes");
+--- a/drivers/gpu/drm/msm/dsi/dsi_manager.c
++++ b/drivers/gpu/drm/msm/dsi/dsi_manager.c
+@@ -520,2 +520,3 @@
+-		of_device_is_compatible(panel, "xiaomi,o82-42-02-0b") &&
++		(of_device_is_compatible(panel, "xiaomi,o82-42-02-0b") ||
++		 of_device_is_compatible(panel, "xiaomi,o82-36-02-0a")) &&
+ 		of_property_read_bool(panel, "xiaomi,oem-refresh-modes");
+@@ -582,2 +583,3 @@
+-	    !of_device_is_compatible(dsi->dev.of_node, "xiaomi,o82-42-02-0b") ||
++	    (!of_device_is_compatible(dsi->dev.of_node, "xiaomi,o82-42-02-0b") &&
++	     !of_device_is_compatible(dsi->dev.of_node, "xiaomi,o82-36-02-0a")) ||
+ 	    !of_property_read_bool(dsi->dev.of_node, "xiaomi,oem-refresh-modes") ||
+@@ -798,2 +800,3 @@
+-	    !of_device_is_compatible(dsi->dev.of_node, "xiaomi,o82-42-02-0b") ||
++	    (!of_device_is_compatible(dsi->dev.of_node, "xiaomi,o82-42-02-0b") &&
++	     !of_device_is_compatible(dsi->dev.of_node, "xiaomi,o82-36-02-0a")) ||
+ 	    (!of_property_read_bool(dsi->dev.of_node, "xiaomi,initial-120hz-only") &&
+@@ -818,2 +821,3 @@
+-	    !of_device_is_compatible(dsi->dev.of_node, "xiaomi,o82-42-02-0b") ||
++	    (!of_device_is_compatible(dsi->dev.of_node, "xiaomi,o82-42-02-0b") &&
++	     !of_device_is_compatible(dsi->dev.of_node, "xiaomi,o82-36-02-0a")) ||
+ 	    (!of_property_read_bool(dsi->dev.of_node, "xiaomi,initial-120hz-only") &&

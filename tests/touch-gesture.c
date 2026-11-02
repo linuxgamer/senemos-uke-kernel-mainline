@@ -67,7 +67,7 @@ static int read_data(void *context, u32 address, void *data, size_t size, bool f
 		put_unaligned_le16(values[command] ^ wrong, bytes + 3);
 	return 0;
 }
-static const struct nvt_uke_io io = { values, read_data, write_data, ready, delay, NULL };
+static const struct nvt_uke_io io = { values, read_data, write_data, ready, delay, NULL, NVT_UKE_CSOT };
 static void reset(void)
 {
 	calls = guards = setting_writes = event_count = command = 0;

@@ -133,7 +133,7 @@ bash "$profile/tests/dp-mst-payload-contract.sh" "$kernel/drivers/gpu/drm/msm/dp
 bash "$profile/tests/dp-mst-control-contract.sh" "$kernel/drivers/gpu/drm/msm/dp/dp_ctrl.c"
 bash "$profile/tests/dp-lane-limit-contract.sh" "$kernel"
 bash "$profile/src/input/prepare-source.sh" "$kernel"
-bash "$profile/src/display/prepare-native-abl-source.sh" "$kernel" "$output" 42
+bash "$profile/src/display/prepare-native-abl-source.sh" "$kernel" "$output" auto
 if [[ $(cat "$profile/audio-profile") =~ ^(hdmi-only|speakers|microphones)$ ]]; then
     git -C "$kernel" apply --check "$profile/patches/boot/0009-uke-displayport-dma-scope.patch"
     git -C "$kernel" apply "$profile/patches/boot/0009-uke-displayport-dma-scope.patch"
@@ -166,22 +166,13 @@ SANITIZE=1 bash "$profile/tests/wpss-proxy-contract.sh" "$kernel/drivers/remotep
 bash "$profile/tests/pas-stop-ownership-contract.sh" "$kernel/drivers/remoteproc/qcom_q6v5_pas.c"
 bash "$profile/tests/rproc-early-stop-contract.sh" "$kernel/drivers/remoteproc/remoteproc_core.c"
 bash "$profile/tests/sysmon-stop-preparation-contract.sh" "$kernel/drivers/remoteproc/qcom_sysmon.c"
-# Replace only the generated graph with the explicit exact seven-mode profile.
-cpp -nostdinc -undef -D__DTS__ -DO82_PANEL_VARIANT=42 -x assembler-with-cpp \
-    "${usb_cpp[@]}" \
-    -I "$kernel/include" "$profile/src/display/sm7675-uke-native-display-oem-modes.dtso" > "$output/display.dts"
-cpp -nostdinc -undef -D__DTS__ -x assembler-with-cpp -I "$kernel/include" \
-    "$profile/src/video/sm7675-uke-native-video.dtso" > "$output/video.dts"
-# One overlay application keeps the existing display/USB adaptation transaction.
-sed '/^\/dts-v1\/;/d; /^\/plugin\/;/d' "$output/video.dts" >> "$output/display.dts"
-dtc -q -@ -I dts -O dtb -o "$output/display.dtbo" "$output/display.dts"
-{
-    printf '#define UKE_NATIVE_PANEL_SELECTOR "msm_drm.dsi_display0=qcom,mdss_dsi_o82_42_02_0b_dualdsi_dsc_vid:"\n'
-    printf 'static unsigned char uke_native_overlay[] __initdata __aligned(8) = {\n'
-    od -An -v -tx1 "$output/display.dtbo" | sed -E 's/[a-f0-9]{2}/0x&,/g'
-    printf '};\n'
-} > "$kernel/arch/arm64/kernel/uke-native-display.h"
-fdtdump "$output/display.dtbo" 2>/dev/null | grep -E '^[[:space:]]+xiaomi,oem-refresh-modes;' >/dev/null
+# Each supplier gets the same video/audio/USB graph and its own panel compatible.
+UKE_NATIVE_VIDEO_SOURCE="$profile/src/video/sm7675-uke-native-video.dtso" \
+    bash "$profile/src/display/generate-native-panels.sh" "$kernel" "$output" \
+    "$profile/src/display/sm7675-uke-native-display-oem-modes.dtso" auto "${usb_cpp[@]}"
+for variant in 36 42; do
+    fdtdump "$output/display-$variant.dtbo" 2>/dev/null | grep -E '^[[:space:]]+xiaomi,oem-refresh-modes;' >/dev/null
+done
 if [[ $(cat "$profile/audio-profile") == hdmi-only ]]; then
     bash "$profile/tests/dp-audio-fdt-contract.sh" "$kernel"
     bash "$profile/tests/dp-audio-topology-contract.sh"
@@ -207,7 +198,13 @@ CC=clang bash "$profile/tests/o82-panel-contract.sh" "$profile/src/display/panel
 bash "$profile/tests/o82-abm-contract.sh" "$kernel" "$profile/src/display/panel-xiaomi-o82.c"
 CC=clang SANITIZE=1 bash "$profile/tests/o82-abm-contract.sh" "$kernel" "$profile/src/display/panel-xiaomi-o82.c"
 sha256sum "$profile/patches/display/0070-o82-adaptive-backlight.patch" >> "$output/abl-source-SHA256SUMS"
-printf 'Exact seven-mode O82-42 native source prepared; no private boot input\n'
+# Extend the scoped host/manager policy only after the historical source receipts.
+git -C "$kernel" apply --check "$profile/patches/display/0071-o82-panel-variants.patch"
+git -C "$kernel" apply "$profile/patches/display/0071-o82-panel-variants.patch"
+bash "$profile/tests/o82-variants-contract.sh" "$kernel"
+bash "$profile/tests/o82-variants-dt-contract.sh" "$kernel" "${usb_cpp[@]}"
+sha256sum "$profile/patches/display/0071-o82-panel-variants.patch" >> "$output/abl-source-SHA256SUMS"
+printf 'Exact seven-mode O82-36/O82-42 native source prepared; hardware validation remains variant-specific\n'
 # Retain the independently verified USB role/PM correction from release1020.
 cp "$kernel/drivers/usb/dwc3/dwc3-qcom.c" "$output/dwc3-qcom-before-role-pm.c"
 git -C "$kernel" apply --check "$profile/patches/usb/0001-qcom-system-role-pm.patch"

@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Exact O82-42 OEM timing groups; retain 120 Hz as the preferred mode. */
-#if O82_PANEL_VARIANT != 42
-#error OEM refresh modes require the observed O82-42 panel
-#endif
+/* Both O82 suppliers share these OEM timings; ON packets remain supplier-specific. */
 #include "sm7675-uke-native-display.dtso"
 #include "../input/sm7675-uke-thp.dtsi"
 

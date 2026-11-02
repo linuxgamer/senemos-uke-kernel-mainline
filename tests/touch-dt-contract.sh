@@ -14,7 +14,11 @@ case $(fdtget -t s "$input" "$leaf" compatible) in
     novatek,NVT-ts-spi|novatek,nt36532-uke-thp|novatek,nt36532-uke-touch) ;;
     *) echo 'Unreviewed touch input binding' >&2; exit 1;;
 esac
-[[ $(fdtget -t s "$input" "$panel" compatible) == xiaomi,o82-42-02-0b ]]
+case $(fdtget -t s "$input" "$panel" compatible) in
+    xiaomi,o82-42-02-0b) variant=42; supplier=csot;;
+    xiaomi,o82-36-02-0a) variant=36; supplier=tianma;;
+    *) exit 1;;
+esac
 [[ $(fdtget -t x "$input" "$leaf" novatek,irq-gpio) == "$tlmm_handle 36 2001" ]]
 [[ $(fdtget -t x "$input" "$leaf" novatek,lcd_id-gpio) == "$tlmm_handle 1a 0" ]]
 if fdtget "$input" "$leaf" interrupts-extended >/dev/null 2>&1; then
@@ -26,7 +30,7 @@ cat > "$output/candidate.dts" <<'DTS'
 /plugin/;
 #include "sm7675-uke-thp.dtsi"
 DTS
-cpp -P -nostdinc -undef -D__DTS__ -x assembler-with-cpp -I "$kernel/include" -I "$root/src/input" \
+cpp -P -nostdinc -undef -D__DTS__ -DO82_PANEL_VARIANT="$variant" -x assembler-with-cpp -I "$kernel/include" -I "$root/src/input" \
     "$output/candidate.dts" > "$output/overlay.dts"
 dtc -q -@ -I dts -O dtb -o "$output/overlay.dtbo" "$output/overlay.dts"
 fdtoverlay -i "$input" -o "$output/candidate.dtb" "$output/overlay.dtbo"
@@ -34,6 +38,7 @@ fdtoverlay -i "$input" -o "$output/candidate.dtb" "$output/overlay.dtbo"
 [[ $(fdtget -t x "$output/candidate.dtb" "$leaf" interrupt-parent) == "$tlmm_handle" ]]
 [[ $(fdtget -t x "$output/candidate.dtb" "$leaf" interrupts) == '36 1' ]]
 [[ $(fdtget -t x "$output/candidate.dtb" "$leaf" panel-id-gpios) == "$tlmm_handle 1a 0" ]]
+[[ $(fdtget -t s "$output/candidate.dtb" "$leaf" novatek,firmware-variant) == "$supplier" ]]
 [[ $(fdtget -t x "$output/candidate.dtb" "$leaf" panel) == "$(fdtget -t x "$input" "$panel" phandle)" ]]
 [[ $(fdtget -t s "$output/candidate.dtb" "$leaf" label) == 'Xiaomi Pad 7 Touchscreen' ]]
 [[ $(fdtget -t u "$output/candidate.dtb" "$leaf" touchscreen-size-x) == 32000 ]]
@@ -42,7 +47,7 @@ fdtoverlay -i "$input" -o "$output/candidate.dtb" "$output/overlay.dtbo"
 [[ $(fdtget -t u "$output/candidate.dtb" "$leaf" novatek,row-map | wc -w) == 40 ]]
 fdtget "$output/candidate.dtb" "$leaf" touchscreen-inverted-y
 while IFS= read -r property; do
-    case $property in compatible|interrupt-parent|interrupts|panel-id-gpios|panel|label|touchscreen-*|novatek,column-map|novatek,row-map) continue;; esac
+    case $property in compatible|interrupt-parent|interrupts|panel-id-gpios|panel|label|touchscreen-*|novatek,firmware-variant|novatek,column-map|novatek,row-map) continue;; esac
     cmp <(fdtget -t bx "$input" "$leaf" "$property") <(fdtget -t bx "$output/candidate.dtb" "$leaf" "$property")
 done < <(fdtget -p "$input" "$leaf")
 sha256sum -c "$output/input-before.sha256"

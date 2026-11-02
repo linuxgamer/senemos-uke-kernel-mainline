@@ -1,5 +1,12 @@
 # NT36532 Uke protocol and transport candidate
 
+2 November 2026: source profiles now retain separate CSOT and Tianma normal
+firmware hashes, CRCs and DT electrode maps. A mismatched supplier image is
+rejected before RAM writes; all banks are still read back. See
+[variant selection and test limits](O82-PANEL-VARIANTS.md). The O82-36/Tianma
+association and physical input remain unverified; adjacent-device GPIO polarity
+is not substituted. Earlier CSOT-only records below retain their original scope.
+
 23 October 2026. Host C fixtures and AArch64 Linux 7.2.12/7.3 objects.
 The tablet continues to use the packaged userspace touchscreen implementation.
 

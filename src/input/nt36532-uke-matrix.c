@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-/* Integer matrix processing for the measured Uke CSOT THP format.
+/* Integer matrix processing for Uke THP frames with supplier-selected DT maps.
  * Uses a live startup baseline, local ascent and weighted electrode positions.
  * No userspace contact-core source or device-private reference is embedded.
  */

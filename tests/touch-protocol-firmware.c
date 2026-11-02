@@ -12,16 +12,24 @@ static int sha(void *context, const u8 *data, size_t size, u8 digest[32])
 int main(int argc, char **argv)
 {
 	static u8 data[NVT_UKE_IMAGE_SIZE];
-	const struct nvt_uke_io io = { .sha256 = sha };
+	struct nvt_uke_io io = { .sha256 = sha };
 	FILE *file;
 	size_t offset;
 
-	assert(argc == 2);
+	assert(argc == 2 || argc == 3);
+	if (argc == 3) {
+		int variant = nvt_uke_variant_from_name(argv[2]);
+		assert(variant >= 0);
+		io.variant = (enum nvt_uke_variant)variant;
+	}
 	file = fopen(argv[1], "rb");
 	assert(file && fread(data, 1, sizeof(data), file) == sizeof(data));
 	assert(fgetc(file) == EOF && !ferror(file));
 	fclose(file);
 	assert(!nvt_uke_validate_image(&io, data, sizeof(data)));
+	struct nvt_uke_io other = io;
+	other.variant = io.variant == NVT_UKE_CSOT ? NVT_UKE_TIANMA : NVT_UKE_CSOT;
+	assert(nvt_uke_validate_image(&other, data, sizeof(data)) < 0);
 	for (offset = 0; offset < sizeof(data); offset += 1024) {
 		data[offset] ^= 1;
 		assert(nvt_uke_validate_image(&io, data, sizeof(data)) < 0);

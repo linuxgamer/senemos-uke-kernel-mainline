@@ -2,7 +2,7 @@
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/interrupt-controller/irq.h>
 
-/* Explicit candidate: existing Uke IRQ54, high panel-ID26 and native O82 panel. */
+/* Uke IRQ54 and panel-ID26; supplier firmware and geometry stay paired. */
 / {
 	fragment@240 {
 		target-path = "/soc/qcom,qupv3_0_geni_se@ac0000/spi@a90000/novatek@0";
@@ -13,12 +13,28 @@
 			panel-id-gpios = <&tlmm 26 GPIO_ACTIVE_HIGH>;
 			panel = <&uke_panel>;
 			label = "Xiaomi Pad 7 Touchscreen";
-			/* Shared CSOT config c02d1956: separable electrode maps, tenfold units. */
+			/* OEM configuration maps use tenfold display units. */
 			touchscreen-size-x = <32000>;
 			touchscreen-size-y = <21360>;
 			touchscreen-x-mm = <237>;
 			touchscreen-y-mm = <158>;
 			touchscreen-inverted-y;
+#if O82_PANEL_VARIANT == 36
+			novatek,firmware-variant = "tianma";
+			/* Tianma config 4de42f9c, independently verified separable maps. */
+			novatek,row-map = <270 810 1350 1890 2430 2970 3510 4050
+				4590 5130 5670 6210 6750 7290 7830 8370 8910 9450 9990 10530
+				11070 11610 12150 12690 13230 13770 14310 14850 15370 15890
+				16410 16930 17450 17970 18490 19010 19530 20050 20570 21090>;
+			novatek,column-map = <260 780 1300 1820 2340 2880 3420 3960
+				4500 5040 5580 6120 6660 7200 7740 8280 8820 9360 9900 10440
+				10980 11520 12060 12600 13140 13660 14180 14700 15220 15740
+				16260 16780 17300 17820 18340 18880 19420 19960 20500 21040
+				21580 22120 22660 23200 23740 24280 24820 25360 25900 26440
+				26980 27520 28060 28600 29140 29660 30180 30700 31220 31740>;
+#elif !defined(O82_PANEL_VARIANT) || O82_PANEL_VARIANT == 42
+			novatek,firmware-variant = "csot";
+			/* CSOT config c02d1956. */
 			novatek,row-map = <270 810 1350 1890 2430 2970 3510 4050
 				4580 5110 5640 6170 6700 7230 7760 8290 8820 9350 9880 10410
 				10940 11470 12000 12530 13060 13590 14120 14650 15180 15710
@@ -29,6 +45,9 @@
 				16260 16790 17320 17850 18380 18910 19440 19970 20500 21030
 				21560 22090 22620 23150 23680 24210 24740 25270 25800 26330
 				26870 27410 27950 28490 29030 29570 30110 30650 31190 31730>;
+#else
+#error Select an exact O82 touch supplier
+#endif
 			wakeup-source;
 		};
 	};

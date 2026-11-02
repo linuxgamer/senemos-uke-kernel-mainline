@@ -87,6 +87,8 @@ int main(void) {
     current=&ctx;
     assert(!o82_dfps_ops.check(NULL,NULL,NULL));
     assert(o82_dfps_ops.apply(NULL,NULL,NULL,false)==-EINVAL);
+    for(unsigned int supplier=0;supplier<2;supplier++) {
+    ctx.profiles=supplier ? o82_36_02_0a_profiles:o82_42_02_0b_profiles;
     for(size_t i=0;i<ARRAY_SIZE(o82_modes);i++)for(size_t j=0;j<ARRAY_SIZE(o82_modes);j++) {
         const struct drm_display_mode *old=&o82_modes[i].mode,*target=&o82_modes[j].mode;
         const struct o82_profile *original=&ctx.profiles[o82_modes[i].group];
@@ -110,6 +112,7 @@ int main(void) {
             assert(o82_dfps_ops.apply(&ctx.panel,old,target,true)==-ETIMEDOUT && ctx.active==original);
         }
     }
+    }
     const struct drm_display_mode *old=&o82_modes[5].mode,*target=&o82_modes[6].mode;
     for(unsigned int bad=0;bad<8;bad++) {
         struct drm_display_mode altered=*target;
@@ -122,7 +125,7 @@ int main(void) {
         case 2:ctx.removing=true;break;
         case 3:ctx.touch_state.value=4;break;
         case 4:ctx.active=&ctx.profiles[1];break;
-        case 5:ctx.profiles=o82_36_02_0a_profiles;break;
+        case 5:ctx.profiles=NULL;break;
         case 6:altered.clock++;break;
         case 7:old=NULL;break;
         }
@@ -136,4 +139,4 @@ C
 "${CC:-cc}" -std=gnu11 -O2 -Wall -Wextra -Werror -Wno-sign-compare \
     -fsanitize=undefined -fsanitize-undefined-trap-on-error -I"$work" "$work/check.c" -o "$work/check"
 "$work/check"
-printf 'Actual O82 DFPS callbacks: 42 transitions, exact OEM pen/TP batches, scope/readiness rejection and failure-state preservation passed\n'
+printf 'Actual O82 DFPS callbacks: 42 transitions per supplier, exact OEM pen/TP batches, scope/readiness rejection and failure-state preservation passed\n'

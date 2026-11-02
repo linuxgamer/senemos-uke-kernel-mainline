@@ -20,6 +20,9 @@ validate: test-touch-protocol test-touch-transport
 	bash -n tests/msm-retirement-contract.sh tests/msm-writeback-contract.sh tests/msm-retirement-proof-contract.sh
 	bash -n tests/o82-avr-contract.sh tests/dpu-video-timing-contract.sh
 	bash -n tests/o82-abm-contract.sh packaging/native/copr-o82-abm731.sh
+	bash tests/o82-selector-contract.sh
+	bash tests/o82-on-batch-contract.sh
+	bash -n tests/o82-variants-contract.sh tests/o82-variants-dt-contract.sh src/display/generate-native-panels.sh
 	bash -n tests/msm-kms-lifecycle-contract.sh tests/msm-kms-unwind-contract.sh tests/msm-kms-alternate-build.sh
 	bash tests/msm-kms-release-contract.sh
 	bash -n tests/gunyah-boot-watchdog-contract.sh packaging/native/copr-boot-watchdog61.sh

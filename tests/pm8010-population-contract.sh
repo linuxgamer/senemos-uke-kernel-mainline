@@ -102,6 +102,9 @@ int main(void) {
     reset();smem_error=-EPROBE_DEFER;assert(uke_pm8010_should_probe(&dev)==-EPROBE_DEFER && !queries);
     reset();db_error=-EPROBE_DEFER;assert(uke_pm8010_should_probe(&dev)==-EPROBE_DEFER && !queries);
     reset();table_size--;assert(uke_pm8010_should_probe(&dev)==-EINVAL && !queries && !messages);
+    /* A positive entry cannot hide an incomplete later inventory entry. */
+    reset();set32(sizeof(struct socinfo),65);set32(sizeof(struct socinfo)+6*8,0);
+    assert(uke_pm8010_should_probe(&dev)==-ENODATA && !queries && !messages);
     reset();table_size=offsetof(struct socinfo,pmic_array_offset)+3;assert(uke_pm8010_should_probe(&dev)==-EINVAL);
     const u32 invalid_counts[]={0,65,UINT32_MAX};
     for(unsigned i=0;i<3;++i){reset();set32(offsetof(struct socinfo,num_pmics),invalid_counts[i]);assert(uke_pm8010_should_probe(&dev)==-EINVAL);}

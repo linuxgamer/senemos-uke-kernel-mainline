@@ -25,7 +25,7 @@ cat > "$work/check.cpp" <<'CPP'
 enum drm_mode_status {MODE_OK,MODE_BAD,MODE_CLOCK_RANGE,MODE_ERROR,MODE_H_ILLEGAL};
 struct drm_display_info {};
 struct drm_bridge {int id=0;};
-struct device_node {bool pb=true,refresh=true;};
+struct device_node {bool pb=true,refresh=true,pa=false;};
 struct device {device_node *of_node;};
 struct platform_device {device dev;};
 struct mipi_dsi_host {};
@@ -53,6 +53,7 @@ static bool of_machine_is_compatible(const char *name) {
     assert(!std::strcmp(name,"qcom,sm7675"));return sm7675;
 }
 static bool of_device_is_compatible(device_node *node,const char *name) {
+    if(!std::strcmp(name,"xiaomi,o82-36-02-0a"))return node&&node->pa;
     assert(!std::strcmp(name,"xiaomi,o82-42-02-0b"));return node&&node->pb;
 }
 static bool of_property_read_bool(device_node *node,const char *name) {
@@ -90,6 +91,7 @@ int main() {
         assert(node_gets==node_puts);
         node_gets=node_puts=clock_calls=opp_calls=opp_puts=dsc_calls=0;
         uke=sm7675=bonded=true;panel_node={};remote=&panel_node;
+        panel_node.pb=O82_PANEL_VARIANT==42;panel_node.pa=O82_PANEL_VARIANT==36;
         opp_error=0;opp_count=1;dsc_result=MODE_OK;
     };
     for(int link=0;link<2;link++)for(const auto &entry:o82_modes) {
@@ -112,7 +114,7 @@ int main() {
         switch(outside) {
         case 0:uke=false;break;
         case 1:sm7675=false;break;
-        case 2:panel_node.pb=false;break;
+        case 2:panel_node.pb=panel_node.pa=false;break;
         case 3:panel_node.refresh=false;break;
         case 4:remote=nullptr;break;
         }
@@ -134,7 +136,7 @@ int main() {
 }
 CPP
 } >> "$work/check.cpp"
-"${CXX:-g++}" -std=c++20 -O2 -Wall -Wextra -Werror -Wno-unused-parameter \
+"${CXX:-g++}" -DO82_PANEL_VARIANT="${O82_PANEL_VARIANT:-42}" -std=c++20 -O2 -Wall -Wextra -Werror -Wno-unused-parameter \
     -fsanitize=undefined -fsanitize-undefined-trap-on-error -I"$work" "$work/check.cpp" -o "$work/check"
 "$work/check"
 printf 'Actual O82 bridge mode_valid: seven modes/both links, pre-clock malformed-mode refusal, legacy and OPP/DSC behavior passed\n'

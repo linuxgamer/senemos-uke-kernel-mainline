@@ -1,5 +1,9 @@
 # SM7675 native display candidate
 
+2 November 2026: [O82 supplier selection](../../docs/O82-PANEL-VARIANTS.md)
+embeds separate O82-36/O82-42 DT overlays and preserves each supplier's ON
+commands. Targeted source fixtures pass; O82-36 hardware validation is pending.
+
 The O82 panel registration is retained until reboot. Ordinary module removal
 and manual sysfs bind/unbind are disabled because live removal on kernel
 `7.2.12-22` produced late GEM and repeated KMS teardown faults. Shutdown and
