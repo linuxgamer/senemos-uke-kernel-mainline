@@ -2,12 +2,16 @@
 /* Included after the actual production definitions/callbacks. No real providers. */
 static struct {
 	int init_error,send_error,protobuf_error;
-	unsigned int live,cancelled,released,sent,pushed;
+	unsigned int live,cancelled,released,sent,pushed,decoded;
 	bool no_ack,foreign,changed_client,stale_on_wait;
 	unsigned int last_command;
 	struct ssc_controller *controller;
 	s64 pushed_value[3];
 } fixture;
+
+int upstream_qmi_decode_message(const void *,size_t,const struct qmi_elem_info *,void *);
+int qmi_decode_message(const void *data,size_t size,const struct qmi_elem_info *ei,void *out)
+{ fixture.decoded++;return upstream_qmi_decode_message(data,size,ei,out); }
 
 static int qmi_txn_init(struct qmi_handle *qmi, struct qmi_txn *txn, const void *ei, void *dest)
 {
@@ -15,6 +19,7 @@ static int qmi_txn_init(struct qmi_handle *qmi, struct qmi_txn *txn, const void 
 	assert(qmi->live);
 	if (fixture.init_error) return fixture.init_error;
 	*txn = (struct qmi_txn){ .qmi=qmi,.id=17 };
+	qmi->txns.txn=txn;
 	fixture.live++;
 	return 0;
 }
@@ -38,7 +43,8 @@ static int qmi_send_request(struct qmi_handle *qmi, struct sockaddr_qrtr *peer,
 		if (fixture.foreign) sender.sq_node++;
 		if (fixture.changed_client) response.client++;
 		if (fixture.protobuf_error) { response.error_valid=1;response.error=fixture.protobuf_error; }
-		ssc_response(qmi,&sender,txn,&response);
+		size=64;wire=qmi_encode_message(QMI_RESPONSE,0x20,&size,txn->id,ssc_response_ei,&response);
+		assert(!IS_ERR(wire));ssc_message(qmi,&sender,wire,size);free(wire);
 	}
 	return 0;
 }
@@ -46,12 +52,14 @@ static int qmi_txn_wait(struct qmi_txn *txn, unsigned long timeout)
 {
 	assert(timeout == SSC_TIMEOUT && fixture.live);
 	fixture.live--;
+	assert(!txn->lock.locked && !txn->qmi->txn_lock.locked);
+	txn->qmi->txns.txn=NULL;
 	if (fixture.stale_on_wait) ssc_invalidate_locked(fixture.controller);
 	return txn->completion.done ? txn->result : -ETIMEDOUT;
 }
 static void qmi_txn_cancel(struct qmi_txn *txn)
 {
-	(void)txn; assert(fixture.live);fixture.live--;fixture.cancelled++;
+	assert(fixture.live);fixture.live--;fixture.cancelled++;txn->qmi->txns.txn=NULL;
 }
 static void qmi_handle_release(struct qmi_handle *qmi)
 {
@@ -91,6 +99,7 @@ static void ownership(void)
 	assert(fixture.last_command==513 && !fixture.live && !c.pending);
 	assert(!ssc_stop(s) && !s->stream_active && fixture.last_command==10 && fixture.sent==2);
 	ssc_close_client(&c);assert(fixture.released==1 && !c.client_open);
+	for(i=0;i<SSC_SENSOR_COUNT;i++)assert(!c.sensor[i].ready && !c.sensor[i].ticks && !c.sensor[i].sample[0]);
 	for(fault=0;fault<6;fault++) {
 		setup(&c);s=&c.sensor[0];s->buffered=true;
 		if(fault==0)fixture.init_error=-ENOMEM;
@@ -123,19 +132,41 @@ static void qmi_wire(void)
 	struct ssc_qmi_response source={.result_valid=1,.client_valid=1,.client=0x123456789ULL,.error_valid=1},decoded={};
 	struct ssc_qmi_report *in=calloc(1,sizeof(*in)),*out=calloc(1,sizeof(*out));
 	size_t size=64;
+	u16 transaction;
+	size_t cut;
 	u8 *wire=qmi_encode_message(QMI_RESPONSE,0x20,&size,17,ssc_response_ei,&source);
-	assert(!IS_ERR(wire) && !qmi_decode_message(wire,size,ssc_response_ei,&decoded));
+	assert(!IS_ERR(wire) && !uke_ssc_qmi_validate((struct uke_ssc_view){wire,size},true,&transaction));
+	assert(transaction==17 && qmi_decode_message(wire,size,ssc_response_ei,&decoded)>=0);
 	assert(decoded.result_valid && decoded.client_valid && decoded.client==source.client && decoded.error_valid);
 	free(wire);
 	assert(in && out);in->client_valid=in->payload_valid=1;in->client=source.client;
 	in->length=3;memcpy(in->payload,"abc",3);size=SSC_QMI_REPORT_MAX;
 	wire=qmi_encode_message(QMI_INDICATION,0x21,&size,0,ssc_report_ei,in);
-	assert(!IS_ERR(wire) && size==26 && !qmi_decode_message(wire,size,ssc_report_ei,out));
+	assert(!IS_ERR(wire) && size==26 && !uke_ssc_qmi_validate((struct uke_ssc_view){wire,size},false,&transaction));
+	assert(qmi_decode_message(wire,size,ssc_report_ei,out)>=0);
 	assert(out->client_valid && out->payload_valid && out->length==3 && !memcmp(out->payload,"abc",3));
-	assert(qmi_decode_message(wire,size-1,ssc_report_ei,out)<0);
+	for(cut=0;cut<size;cut++) {
+		transaction=0xbeef;
+		assert(uke_ssc_qmi_validate((struct uke_ssc_view){wire,cut},false,&transaction)<0 && transaction==0xbeef);
+	}
+	{
+		u8 *duplicate=malloc(size+11);
+		assert(duplicate);memcpy(duplicate,wire,size);memcpy(duplicate+size,wire+7,11);
+		duplicate[5]=size+11-7;duplicate[6]=0;
+		assert(uke_ssc_qmi_validate((struct uke_ssc_view){duplicate,size+11},false,&transaction)<0);
+		free(duplicate);
+	}
+	assert(uke_ssc_qmi_validate((struct uke_ssc_view){wire,size-1},false,&transaction)<0);
 	/* Body: client TLV11 bytes, payload TLV header3 bytes, little-endian length. */
 	wire[21]=0xff;wire[22]=0xff;
-	assert(qmi_decode_message(wire,size,ssc_report_ei,out)<0);
+	assert(uke_ssc_qmi_validate((struct uke_ssc_view){wire,size},false,&transaction)<0);
+	{
+		struct ssc_controller c;
+		unsigned int decoded_count;
+		setup(&c);decoded_count=fixture.decoded;
+		ssc_message(&c.client,&c.peer,wire,size);
+		assert(fixture.decoded==decoded_count && !fixture.pushed);
+	}
 	free(wire);free(in);free(out);
 }
 struct fixture_bytes { u8 data[512];size_t size; };

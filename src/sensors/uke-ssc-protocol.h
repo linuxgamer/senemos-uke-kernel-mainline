@@ -66,6 +66,7 @@ int uke_ssc_decode_attributes(struct uke_ssc_view wire, const char *datatype,
 			      const char *api, struct uke_ssc_attributes *out);
 int uke_ssc_decode_proximity(struct uke_ssc_view wire, bool sar,
 			     struct uke_ssc_proximity *out);
+int uke_ssc_qmi_validate(struct uke_ssc_view wire, bool response, u16 *transaction);
 /* Encodes protobuf only; QMI framing and transaction/client ownership are separate. */
 int uke_ssc_encode_request(enum uke_ssc_command command, struct uke_ssc_suid suid,
 			   const char *datatype, u32 rate_bits,

@@ -51,7 +51,7 @@ cp "$root/tests/ssc-native-host.h" "$stage/include/ssc-native-host.h"
         "$root/src/sensors/uke-ssc-iio.c"
     printf '%s\n' 'static void ssc_close_client(struct ssc_controller *c);'
     for name in ssc_uid_equal ssc_current ssc_schedule_locked ssc_invalidate_locked \
-        ssc_response ssc_request ssc_rate ssc_sample_values ssc_report \
+        ssc_response ssc_request ssc_rate ssc_sample_values ssc_report ssc_message \
         ssc_start ssc_stop ssc_close_client; do
         awk -v name="$name" '
           $0 ~ "^static .* " name "\\(" && $0 !~ /;/ {emit=1;found=1}
@@ -68,7 +68,7 @@ for compiler in gcc clang; do
     common=(-std=gnu11 -O1 -g -Wall -Werror -Wno-unused-parameter
         -fsanitize=address,undefined -fno-omit-frame-pointer
         -I"$stage/include" -I"$root/src/sensors")
-    "$compiler" "${common[@]}" -fno-sanitize=alignment -c \
+    "$compiler" "${common[@]}" -fno-sanitize=alignment -Dqmi_decode_message=upstream_qmi_decode_message -c \
         "$kernel/drivers/soc/qcom/qmi_encdec.c" -o "$stage/qmi.o"
     "$compiler" "${common[@]}" "$stage/check.c" \
         "$root/src/sensors/uke-ssc-protocol.c" "$stage/qmi.o" -o "$stage/check"

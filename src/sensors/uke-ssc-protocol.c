@@ -434,6 +434,48 @@ int uke_ssc_decode_attributes(struct uke_ssc_view wire, const char *datatype,
 
 struct ssc_writer { u8 data[UKE_SSC_REQUEST_MAX]; size_t size; };
 
+int uke_ssc_qmi_validate(struct uke_ssc_view wire, bool response, u16 *transaction)
+{
+	u8 seen[32] = {};
+	size_t at = 7, size;
+	unsigned long a = (unsigned long)wire.data, b = (unsigned long)transaction;
+	unsigned int type;
+
+	if (!wire.data || !transaction || wire.size < 7 || wire.size > UKE_SSC_MESSAGE_MAX + 23 ||
+	    (a < b ? b - a < wire.size : a - b < sizeof(*transaction)))
+		return -EINVAL;
+	if (wire.data[0] != (response ? 2 : 4) ||
+	    ssc_le(wire.data + 3, 2) != (response ? 0x20 : 0x21) ||
+	    ssc_le(wire.data + 5, 2) != wire.size - 7)
+		return -EBADMSG;
+	while (at < wire.size) {
+		if (wire.size - at < 3)
+			return -EBADMSG;
+		type = wire.data[at];
+		size = ssc_le(wire.data + at + 1, 2);
+		at += 3;
+		if (size > wire.size - at || (seen[type / 8] & (1U << (type % 8))))
+			return -EBADMSG;
+		seen[type / 8] |= 1U << (type % 8);
+		if (response) {
+			if ((type == 2 && size != 4) || (type == 0x10 && size != 8) ||
+			    (type == 0x11 && size != 4) || (type < 0x10 && type != 2))
+				return -EBADMSG;
+		} else {
+			if ((type == 1 && size != 8) || (type < 0x10 && type != 1 && type != 2))
+				return -EBADMSG;
+			if (type == 2 && (size < 2 || ssc_le(wire.data + at, 2) != size - 2))
+				return -EBADMSG;
+		}
+		at += size;
+	}
+	if (!(seen[0] & (1U << 2)) ||
+	    !(seen[response ? 2 : 0] & (response ? 1U : 1U << 1)))
+		return -EBADMSG;
+	*transaction = ssc_le(wire.data + 1, 2);
+	return 0;
+}
+
 int uke_ssc_decode_proximity(struct uke_ssc_view wire, bool sar,
 			     struct uke_ssc_proximity *out)
 {

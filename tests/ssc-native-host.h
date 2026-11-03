@@ -42,8 +42,10 @@
 struct completion { unsigned int done; };
 struct mutex { bool locked; };
 typedef int spinlock_t;
-struct qmi_handle { bool live; };
-struct qmi_txn { struct qmi_handle *qmi; u16 id; int result; struct completion completion; };
+struct qmi_txn;
+struct qmi_idr { struct qmi_txn *txn; };
+struct qmi_handle { bool live; struct mutex txn_lock; struct qmi_idr txns; };
+struct qmi_txn { struct qmi_handle *qmi; u16 id; int result; struct completion completion; struct mutex lock; };
 struct sockaddr_qrtr { unsigned short sq_family; u32 sq_node,sq_port; };
 struct workqueue_struct { unsigned int queued; };
 struct work_struct { int unused; };
@@ -55,6 +57,10 @@ enum iio_chan_type { IIO_ACCEL,IIO_ANGL_VEL,IIO_MAGN,IIO_LIGHT,IIO_PROXIMITY };
 #define lockdep_assert_held(lock) assert((lock)->locked)
 #define spin_lock_irqsave(lock,flags) do { (void)(lock); (flags)=0; } while(0)
 #define spin_unlock_irqrestore(lock,flags) do { (void)(lock); (void)(flags); } while(0)
+static inline void mutex_lock(struct mutex *m) { assert(!m->locked);m->locked=true; }
+static inline void mutex_unlock(struct mutex *m) { assert(m->locked);m->locked=false; }
+static inline struct qmi_txn *idr_find(struct qmi_idr *idr,unsigned int id)
+{ return idr->txn && idr->txn->id==id ? idr->txn : NULL; }
 static inline void complete(struct completion *c) { c->done++; }
 static inline void complete_all(struct completion *c) { c->done=100; }
 static inline void reinit_completion(struct completion *c) { c->done=0; }

@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Uke firmware-owned SSC sensors. No AP bus probing or calibration writes. */
+/* Uke firmware-owned SSC sensors. No AP bus probing or calibration writes.
+ * QMI transaction dispatch follows Linux 7.3.1 qmi_interface.c:
+ * Copyright (c) 2017, Linaro Ltd.
+ */
 #include <linux/completion.h>
 #include <linux/device.h>
 #include <linux/iio/buffer.h>
@@ -471,14 +474,50 @@ out:
 	kfree(events);
 }
 
-static const struct qmi_msg_handler ssc_handlers[] = {
-	{ .type = QMI_RESPONSE, .msg_id = SSC_QMI_REQUEST, .ei = ssc_response_ei,
-	  .decoded_size = sizeof(struct ssc_qmi_response), .fn = ssc_response },
-	{ .type = QMI_INDICATION, .msg_id = SSC_QMI_REPORT, .ei = ssc_report_ei,
-	  .decoded_size = sizeof(struct ssc_qmi_report), .fn = ssc_report },
-	{},
+static void ssc_message(struct qmi_handle *qmi, struct sockaddr_qrtr *peer,
+			const void *data, size_t count)
+{
+	struct uke_ssc_view wire = { data, count };
+	struct ssc_qmi_response response = {};
+	struct ssc_qmi_report *report;
+	struct qmi_txn *txn;
+	u16 transaction;
+	bool is_response;
+	int ret;
+
+	if (count < 7)
+		return;
+	is_response = wire.data[0] == QMI_RESPONSE;
+	if (uke_ssc_qmi_validate(wire, is_response, &transaction))
+		return;
+	if (is_response) {
+		/* Same lifetime/lock order as qmi_handle_message; never retain txn. */
+		mutex_lock(&qmi->txn_lock);
+		txn = idr_find(&qmi->txns, transaction);
+		if (!txn) {
+			mutex_unlock(&qmi->txn_lock);
+			return;
+		}
+		mutex_lock(&txn->lock);
+		mutex_unlock(&qmi->txn_lock);
+		ret = qmi_decode_message(data, count, ssc_response_ei, &response);
+		if (ret >= 0 && (size_t)ret == count - 7)
+			ssc_response(qmi, peer, txn, &response);
+		mutex_unlock(&txn->lock);
+	} else {
+		report = kzalloc(sizeof(*report), GFP_KERNEL);
+		if (!report)
+			return;
+		ret = qmi_decode_message(data, count, ssc_report_ei, report);
+		if (ret >= 0 && (size_t)ret == count - 7)
+			ssc_report(qmi, peer, NULL, report);
+		kfree(report);
+	}
+}
+
+static const struct qmi_ops ssc_client_ops = {
+	.net_reset = ssc_client_reset, .msg_handler = ssc_message,
 };
-static const struct qmi_ops ssc_client_ops = { .net_reset = ssc_client_reset };
 static const struct qmi_ops ssc_lookup_ops = { .new_server = ssc_new_server, .del_server = ssc_del_server };
 
 static void ssc_close_client(struct ssc_controller *c);
@@ -645,12 +684,23 @@ static void ssc_close_client(struct ssc_controller *c)
 {
 	unsigned long flags;
 	bool open;
+	unsigned int i;
 
 	lockdep_assert_held(&c->control);
 	spin_lock_irqsave(&c->state, flags);
 	open = c->client_open;
 	c->client_open = c->client_known = false;
 	c->pending = false;
+	for (i = 0; i < SSC_SENSOR_COUNT; i++) {
+		struct ssc_sensor *s = &c->sensor[i];
+
+		s->ready = s->stream_active = false;
+		s->error = -ENOTCONN;
+		s->ticks = 0;
+		memset(s->sample, 0, sizeof(s->sample));
+		complete_all(&s->metadata_done);
+		complete_all(&s->sample_done);
+	}
 	spin_unlock_irqrestore(&c->state, flags);
 	if (open)
 		qmi_handle_release(&c->client);
@@ -680,7 +730,7 @@ static void ssc_reconcile(struct work_struct *work)
 	if (!allowed)
 		goto out;
 	if (recreate) {
-		ret = qmi_handle_init(&c->client, SSC_QMI_REPORT_MAX, &ssc_client_ops, ssc_handlers);
+		ret = qmi_handle_init(&c->client, SSC_QMI_REPORT_MAX, &ssc_client_ops, NULL);
 		if (ret)
 			goto out;
 		spin_lock_irqsave(&c->state, flags);
