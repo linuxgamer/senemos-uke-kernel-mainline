@@ -3,6 +3,7 @@
 #include "uke-hardware.h"
 #include "uke-bwmon.h"
 #include "uke-cpu-bwmon.h"
+#include "uke-memlat.h"
 #else
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
@@ -10,6 +11,7 @@
 #include "../boot/uke-hardware.h"
 #include "../boot/uke-bwmon.h"
 #include "../boot/uke-cpu-bwmon.h"
+#include "../boot/uke-memlat.h"
 #endif
 struct uke_native_panel {
 	const char *selector;
@@ -176,6 +178,9 @@ static int UKE_INIT uke_abl_native(void *fdt, void *overlay, size_t bytes,
 	if (ret)
 		return ret;
 	ret = uke_cpu_bwmon_apply(fdt);
+	if (ret)
+		return ret;
+	ret = uke_memlat_apply(fdt);
 	if (ret)
 		return ret;
 	node = fdt_path_offset(fdt, framebuffer);

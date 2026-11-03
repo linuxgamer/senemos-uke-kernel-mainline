@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/soc/qcom/xiaomi,uke-memlat.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Xiaomi Uke native LLCC and L3 memory-latency policy
+
+maintainers:
+  - MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+
+description: |
+  Native consumer of the exact inherited Uke LLCC/L3 sampling maps. These
+  monitors use per-CPU ARM PMU events and vote through independent ICC paths.
+  The native fixup retains the OEM DDR/DDRQOS descriptions without creating
+  policy consumers for them. CPUCP ownership and firmware limits are unchanged.
+
+properties:
+  compatible:
+    const: xiaomi,uke-memlat
+  interconnects:
+    maxItems: 2
+  interconnect-names:
+    items:
+      - const: llcc
+      - const: l3
+  llcc:
+    $ref: '#/$defs/group'
+  l3:
+    $ref: '#/$defs/group'
+  ddr:
+    type: object
+    description: Retained OEM description; not consumed by this driver.
+  ddrqos:
+    type: object
+    description: Retained OEM description; not consumed by this driver.
+
+$defs:
+  group:
+    type: object
+    properties:
+      compatible:
+        const: qcom,memlat-grp
+      qcom,miss-ev:
+        $ref: /schemas/types.yaml#/definitions/uint32
+        enum: [0x17, 0x37]
+      qcom,target-dev:
+        $ref: /schemas/types.yaml#/definitions/phandle
+        description: Retained OEM DCVS hardware identity.
+      qcom,sampling-path:
+        $ref: /schemas/types.yaml#/definitions/phandle
+        description: Retained OEM path identity; votes use the native root ICC path.
+    patternProperties:
+      '^(silver|gold|prime|gold-compute|prime-compute)$':
+        type: object
+        properties:
+          compatible:
+            const: qcom,memlat-mon
+          qcom,cpulist:
+            $ref: /schemas/types.yaml#/definitions/phandle-array
+          qcom,cpufreq-memfreq-tbl:
+            $ref: /schemas/types.yaml#/definitions/uint32-array
+            minItems: 2
+            maxItems: 24
+            description: Ordered pairs of CPU and memory frequency in kHz.
+          qcom,sampling-enabled:
+            type: boolean
+          qcom,compute-mon:
+            type: boolean
+        required: [compatible, 'qcom,cpulist', 'qcom,cpufreq-memfreq-tbl', 'qcom,sampling-enabled']
+        additionalProperties: false
+    required: [compatible, 'qcom,miss-ev', 'qcom,target-dev', 'qcom,sampling-path']
+    additionalProperties: false
+
+required: [compatible, interconnects, interconnect-names, llcc, l3]
+additionalProperties: false

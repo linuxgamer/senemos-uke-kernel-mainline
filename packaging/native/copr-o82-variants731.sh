@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# COPR only: add supplier variants to the retained release1011 source recipe.
+# COPR only: retain release1011 with supplier variants and native LLCC/L3 MEMLAT.
 set -Eeuo pipefail
 export LC_ALL=C
 test ! -e /etc/senemos/kernel-update.conf
 [[ $(rpm --eval '%{_host_cpu}') == aarch64 && $(rpm --eval '%{fedora}') == 46 ]]
 owner=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 output=$(realpath -m "${1:?COPR result directory}")
-bash "$owner/packaging/native/refuse-published-release.sh" senemos-uke-linux-kernel-mainline 7.3.1-1102
+bash "$owner/packaging/native/refuse-published-release.sh" senemos-uke-linux-kernel-mainline 7.3.1-1103
 stage=$(mktemp -d)
 trap 'find "$stage" -depth -delete' EXIT
 parent_hash=84915ef98a26df47bc8f223e3751b160e40eba3c447f433fbe13b2097d6a7146
@@ -33,17 +33,33 @@ boot=$stage/unpacked/boot-recipe
 (cd "$profile"; sha256sum --check --strict --quiet SHA256SUMS)
 cp "$profile/SHA256SUMS" "$stage/parent-profile.sha256"
 cp "$boot/lock.json" "$stage/parent-boot-lock.json"
-cp "$profile/source-composition.json" "$profile/source-composition-before1102.json"
+cp "$profile/source-composition.json" "$profile/source-composition-before1103.json"
 printf '%s  %s\n' cf0e81e7732a08f34b4b2666647e7a522034f1da1ebd58ddc7fdefb2af5493ec "$profile/prepare.sh" | sha256sum -c -
 git -C "$profile" apply --check "$owner/packaging/native/o82-variants1011-prepare.patch"
 git -C "$profile" apply "$owner/packaging/native/o82-variants1011-prepare.patch"
 printf '%s  %s\n' 1c8b30589256c211c46752e106ddec1568a63d91dca71624e5342a00ba927ccf "$profile/prepare.sh" | sha256sum -c -
-printf 'prepare.sh\n' > "$stage/overlays"
+git -C "$profile" apply --check "$owner/packaging/native/o82-variants1011-memlat.patch"
+git -C "$profile" apply "$owner/packaging/native/o82-variants1011-memlat.patch"
+! grep -q '^CONFIG_QCOM_UKE_MEMLAT=' "$profile/native.config"
+printf '\nCONFIG_QCOM_UKE_MEMLAT=m\n' >> "$profile/native.config"
+printf '\nCONFIG_QCOM_UKE_MEMLAT=m\n' >> "$boot/packaging/native/native.config"
+printf 'prepare.sh\nnative.config\n' > "$stage/overlays"
 cat "$owner/packaging/native/o82-variants1011-overlays.txt" >> "$stage/overlays"
 : > "$stage/boot-overlays"
+printf 'packaging/native/native.config\n' >> "$stage/boot-overlays"
+hash=$(sha256sum "$boot/packaging/native/native.config"); hash=${hash%% *}
+jq --arg hash "$hash" '(.source_assets[]|select(.path=="packaging/native/native.config").sha256)=$hash' \
+    "$boot/lock.json" > "$boot/lock.json.new"
+mv "$boot/lock.json.new" "$boot/lock.json"
 while read -r relative; do
-    [[ $relative =~ ^(src|patches|tests)/[a-zA-Z0-9_./-]+$ && $relative != *..* ]]
+    [[ $relative =~ ^(src|patches|tests)/[a-zA-Z0-9_,./-]+$ && $relative != *..* ]]
     install -Dm644 "$owner/$relative" "$profile/$relative"
+    if [[ $relative == src/boot/uke-memlat.h ]]; then
+        hash=$(sha256sum "$owner/$relative"); hash=${hash%% *}
+        jq --arg path "$relative" --arg hash "$hash" '.source_assets += [{path:$path,sha256:$hash}]' \
+            "$boot/lock.json" > "$boot/lock.json.new"
+        mv "$boot/lock.json.new" "$boot/lock.json"
+    fi
     if jq -e --arg path "$relative" '.source_assets[]|select(.path==$path)' "$boot/lock.json" >/dev/null; then
         install -Dm644 "$owner/$relative" "$boot/$relative"
         printf '%s\n' "$relative" >> "$stage/boot-overlays"
@@ -62,7 +78,7 @@ while read -r expected relative; do
     fi
 done < "$stage/parent-profile.sha256"
 cmp <(jq -S 'del(.source_assets[].sha256)' "$stage/parent-boot-lock.json") \
-    <(jq -S 'del(.source_assets[].sha256)' "$boot/lock.json")
+    <(jq -S '.source_assets |= map(select(.path!="src/boot/uke-memlat.h")) | del(.source_assets[].sha256)' "$boot/lock.json")
 while IFS=$'\t' read -r relative expected; do
     if ! grep -Fxq "$relative" "$stage/boot-overlays"; then
         printf '%s  %s\n' "$expected" "$boot/$relative" | sha256sum -c --quiet -
@@ -73,13 +89,14 @@ epoch=$(git -C "$owner" show -s --format=%ct HEAD)
 printf '%s\n' "$commit" > "$profile/source-commit"
 jq -Rn '[inputs]' < "$stage/overlays" > "$stage/overlays.json"
 jq --arg commit "$commit" --arg parent_hash "$parent_hash" --slurpfile overlays "$stage/overlays.json" \
- 'del(.kernel_driver_source_unchanged) + {source_mode:"retained1011-with-o82-touch-pmic-variants",
+ 'del(.kernel_driver_source_unchanged) + {source_mode:"retained1011-with-suppliers-and-native-llcc-l3-memlat",
  source_commit:$commit,parent_copr_build:11246385,parent_srpm_sha256:$parent_hash,
- parent_composition:"source-composition-before1102.json",kernel_release:"7.3.1-1102",rpm_revision:"1102",
+ parent_composition:"source-composition-before1103.json",kernel_release:"7.3.1-1103",rpm_revision:"1103",
  overlays:$overlays[0],panel_variants:["o82_36_02_0a","o82_42_02_0b"],
  touch_variants:["tianma","csot"],pm8010_complete_inventory_check:true,
- native_nfc_ir_access_abi:1,firmware_payload_included:false,physical_acceptance:false}' \
- "$profile/source-composition-before1102.json" > "$profile/source-composition.json"
+ native_nfc_ir_access_abi:1,native_memlat_groups:["llcc","l3"],memlat_sample_ms:8,
+ cpucp_policy_changed:false,ddr_bwmon_retained:true,firmware_payload_included:false,physical_acceptance:false}' \
+ "$profile/source-composition-before1103.json" > "$profile/source-composition.json"
 (cd "$profile"; find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 (cd "$boot"; jq -r '.source_assets[]|.sha256+"  "+.path' lock.json | sha256sum -c --quiet -)
 for tree in native-profile boot-recipe; do
@@ -92,26 +109,28 @@ done
 install -m644 "$boot/lock.json" "$output/boot-payload.json"
 [[ $(grep -Fxc '%global senemos_build_release 1011' "$spec") == 1 ]]
 awk '
- /^%global senemos_build_release 1011$/ {$0="%global senemos_build_release 1102"}
+ /^%global senemos_build_release 1011$/ {$0="%global senemos_build_release 1103"}
  /^Provides: uke-kernel\(platform-profile-qos-v1\) = 1$/ {
-  print;print "Provides: uke-kernel(nfc-ir-v1) = 1";next
+  print;print "Provides: uke-kernel(nfc-ir-v1) = 1";print "Provides: uke-kernel(memlat-v1) = 1";next
  }
  /^%package boot$/ {
   print;print "Requires: uke-nfc-ir >= 1.0.0-1";next
  }
  /^%check$/ {
-  print;print "bash native-profile/tests/nfc-ir-package-contract.sh %{_uke_out}";next
+  print;print "bash native-profile/tests/nfc-ir-package-contract.sh %{_uke_out}"
+  print "bash native-profile/tests/memlat-package-contract.sh %{_uke_out}";next
  }
  /^%changelog$/ {
-  print;print "* Tue Nov 03 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-1102"
+  print;print "* Tue Nov 03 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-1103"
   print "- Select either O82 native panel and its NT36532 supplier at early boot."
   print "- Validate the complete PMIC inventory before admitting PM8010."
   print "- Check both DSI suppliers and retain foreign-panel refusal coverage."
   print "- Require native NFC and infrared access with verified provider aliases."
+  print "- Sample OEM LLCC/L3 latency maps through native perf and ICC providers."
   print "";next
  }
  {print}
 ' "$spec" > "$stage/next.spec"
 mv "$stage/next.spec" "$spec"
 sha256sum -c "$stage/retained.sha256"
-[[ $(rpmspec --target aarch64 --define 'dist %{nil}' -q --srpm --qf '%{VERSION}-%{RELEASE}' "$spec") == 7.3.1-1102 ]]
+[[ $(rpmspec --target aarch64 --define 'dist %{nil}' -q --srpm --qf '%{VERSION}-%{RELEASE}' "$spec") == 7.3.1-1103 ]]

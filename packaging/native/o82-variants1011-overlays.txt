@@ -12,6 +12,14 @@ src/input/nt36532-uke-protocol.h
 src/input/nt36532-uke-spi.c
 src/input/sm7675-uke-thp.dtsi
 src/power/uke-pm8010.h
+src/boot/uke-memlat.h
+src/power/prepare-memlat.sh
+src/power/uke-memlat.c
+src/power/uke-memlat-policy.h
+src/power/xiaomi,uke-memlat.yaml
+tests/memlat-policy-contract.sh
+tests/memlat-dt-contract.sh
+tests/memlat-package-contract.sh
 tests/dsi-read-transaction-contract.sh
 tests/nfc-ir-package-contract.sh
 tests/o82-dfps-panel-contract.sh

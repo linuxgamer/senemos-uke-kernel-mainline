@@ -29,11 +29,11 @@
     },
     {
       "path": "packaging/native/native.config",
-      "sha256": "831ede0562eba19ad8713dfbbad39442d0a4aac65332ddfbc68e74402ced1343"
+      "sha256": "c58cc732f9e6f5514c50fdeb1ade6e2d230df34c01ed986cbb16640787d67cab"
     },
     {
       "path": "packaging/native/prepare.sh",
-      "sha256": "86537a35c1ea416685c26b0e17e0d85f4c55f1b161441f5644c04664985bdce0"
+      "sha256": "dc78f6a4ea81e4d0bc52c5d702519f24f8f558defc672b43fbdcbd834338fd5a"
     },
     {
       "path": "patches/boot/0005-uke-root-selector.patch",
@@ -561,7 +561,7 @@
     },
     {
       "path": "src/display/uke-abl-native.h",
-      "sha256": "65970f0702b421c0e4409efd7020b8ba758664cc58f21f746af2b3786556dd8c"
+      "sha256": "98ef66222134bd061b185ccc4b38a5c271621057f13049ba49a2e017cdbf08f5"
     },
     {
       "path": "src/display/uke-o82-hdr-format.h",
@@ -1090,6 +1090,10 @@
     {
       "path": "tests/touch-variant-assets.sh",
       "sha256": "8d032f535ba86c6161720be53ac74c741144b23a51d0a34a98594e798e1cfd65"
+    },
+    {
+      "path": "src/boot/uke-memlat.h",
+      "sha256": "d2c68e5d3e4f5ea810804c4c83648c6ca683e9ea3e57bd03b52c1abde3eb4909"
     }
   ],
   "root_selector_capability": {
