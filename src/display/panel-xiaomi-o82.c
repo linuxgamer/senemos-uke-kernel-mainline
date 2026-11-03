@@ -719,8 +719,11 @@ static int o82_get_modes(struct drm_panel *panel, struct drm_connector *connecto
 			return -ENOMEM;
 		drm_mode_set_name(mode);
 		mode->type = DRM_MODE_TYPE_DRIVER;
+		/* Start Tianma at the working reference's 60 Hz without hiding modes. */
 		if (drm_mode_vrefresh(mode) ==
-		    (ctx->initial_120hz_only || ctx->oem_refresh_modes ? 120 : 60))
+		    (ctx->initial_120hz_only ||
+		     (ctx->oem_refresh_modes &&
+		      ctx->profiles == o82_42_02_0b_profiles) ? 120 : 60))
 			mode->type |= DRM_MODE_TYPE_PREFERRED;
 		drm_mode_probed_add(connector, mode);
 		count++;

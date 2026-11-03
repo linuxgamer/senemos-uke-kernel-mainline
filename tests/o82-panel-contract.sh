@@ -625,6 +625,9 @@ int main(void) {
     selection=context(2,5); published=preferred=0;
     assert(o82_get_modes(&selection.panel,selection.connector)==7 && published==7 && preferred==1 && preferred_rate==120);
     for(unsigned int m=0;m<ARRAY_SIZE(rates);m++) assert(drm_mode_vrefresh(&copies[m])==rates[m]);
+    selection=context(3,5); published=preferred=0;
+    assert(o82_get_modes(&selection.panel,selection.connector)==7 && published==7 && preferred==1 && preferred_rate==60);
+    for(unsigned int m=0;m<ARRAY_SIZE(rates);m++) assert(drm_mode_vrefresh(&copies[m])==rates[m]);
     duplication_failure=1; published=0;
     assert(o82_get_modes(&selection.panel,selection.connector)==-ENOMEM && !published);
     duplication_failure=0;
