@@ -9,6 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <linux/types.h>
+#define U8_MAX UINT8_MAX
+#define ETOOSMALL 525 /* Pinned Linux include/linux/errno.h; host-only shim. */
 #define __packed __attribute__((packed))
 #define __cpu_to_le16(x) (x)
 #define __cpu_to_le32(x) (x)

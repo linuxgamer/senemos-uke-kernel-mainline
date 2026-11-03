@@ -584,6 +584,10 @@ static int ssc_read_raw(struct iio_dev *iio, const struct iio_chan_spec *channel
 	stop_ret = ssc_stop(s);
 	if (!ret)
 		ret = stop_ret;
+	spin_lock_irqsave(&c->state, flags);
+	if (!ret && (!ssc_current(c) || !s->ready))
+		ret = -ENOTCONN;
+	spin_unlock_irqrestore(&c->state, flags);
 	mutex_unlock(&c->control);
 	iio_device_release_direct(iio);
 	if (ret)
