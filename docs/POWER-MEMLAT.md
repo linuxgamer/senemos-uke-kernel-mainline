@@ -82,3 +82,9 @@ Actual-function fixtures require an old-source failure, multiple synthetic
 capacities, duplicate/non-L3 row isolation, repeated-request call bounds,
 transport and release failures, suspend/resume and complete cleanup. Native
 kernel/RPM qualification and physical effectiveness remain pending.
+
+The retained-source composition computes `native_config_sha256` from the actual
+`native-profile/native.config` input and names that scope explicitly. It also
+records the exact retained parent. The separately packaged effective kernel
+configuration can be normalized by Kconfig and has its own artifact identity;
+the input digest must not be used as an unqualified effective-config digest.
