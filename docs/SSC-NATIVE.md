@@ -107,8 +107,8 @@ The protocol is the pinned Qualcomm
 and the output unit follows the exact
 [Linux IIO ABI](https://github.com/torvalds/linux/blob/79a907609d53d5cd645b42c11550d295d43abf99/Documentation/ABI/testing/sysfs-bus-iio).
 
-`packaging/native/copr-hardware1600.sh` prepares the combined successor from
-release 1500, retaining its SSC integration, Binder, MEMLAT and supplier/touch
+`packaging/native/copr-hardware1710.sh` prepares the combined successor from
+release 1600, retaining its secure RTC, SSC integration, Binder, MEMLAT and supplier/touch
 changes. It adds the checked temperature source and NFC/IR updates qualified
 in separate build 11251492. Full combined kernel/package and physical results
 are required separately.

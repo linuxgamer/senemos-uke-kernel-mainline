@@ -493,11 +493,11 @@
     },
     {
       "path": "src/boot/prepare-abl-source.sh",
-      "sha256": "81366be6bd66dd4bcf41da68074a6a90ebe318c766c444f1ab44fa0bd86a8e30"
+      "sha256": "c9052898a129051aa15f20188b4ea8d75346e2fb9d61ee53e091498a481c72b2"
     },
     {
       "path": "src/boot/uke-abl.c",
-      "sha256": "d2f6ac36261f6374d03e2775564a24a3df3ea6072aadbed208f8c54b7726a3da"
+      "sha256": "7087568ac3f1e202989808007cbfef5490d774be98555b9e9c24cee73dce4877"
     },
     {
       "path": "src/boot/uke-bwmon.h",
@@ -1190,6 +1190,30 @@
     {
       "path": "tests/ir-spi-contract.sh",
       "sha256": "7121c9cae9ea33055dad3fc1106138ed34c618b0c54a0ccaf8156b503b798de7"
+    },
+    {
+      "path": "src/boot/uke-rtc.h",
+      "sha256": "cc11546f2fecd6041223e48a190f0dbb21b80ae85817b1f0c9925a7b74ccc205"
+    },
+    {
+      "path": "src/rtc/prepare-secure-rtc.sh",
+      "sha256": "495a011aa12964c35e591bcf6c847207cdfcbfa45db843dd7463e5dda0656b59"
+    },
+    {
+      "path": "src/rtc/uke-rtc-policy.h",
+      "sha256": "55ae25d1b7c8e561a546f5ff774c98b437d3e118052204236165a0a2faabaa72"
+    },
+    {
+      "path": "patches/rtc/0001-uke-secure-rtc-offset.patch",
+      "sha256": "068650ba408471f1bb8821cb77a5f2d834300579f8176ce509c200346ef7f8d4"
+    },
+    {
+      "path": "tests/rtc-fdt-contract.sh",
+      "sha256": "a111a0457fbf309164c1f225bda4070f2fa1efb30dd27ba94617f2979dbd62f2"
+    },
+    {
+      "path": "tests/rtc-secure-contract.sh",
+      "sha256": "37d1b8da680df23af7ab5c94e6e4a5bd5b4dac4498f254155abda53eb5e1300a"
     }
   ],
   "root_selector_capability": {
