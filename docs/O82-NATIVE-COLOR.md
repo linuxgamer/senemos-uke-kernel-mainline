@@ -24,7 +24,9 @@ The new synthetic-table checks interpret every emitted table element, endpoint,
 padding value and GC pair with distinct RGB channels. They cover all valid
 paired DSPP masks and reject invalid widths, masks, capacity, metadata and
 overlapping storage without changing output. Compilation and sanitizer checks
-run only in COPR; their result remains pending for this source extension.
+run only in COPR. [Build11250967](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11250967/)
+passed both GCC and Clang/sanitizer stream checks and compiled the loader,
+REGDMA transport and LUT bus encoder against exact Linux7.3.1 AArch64 headers.
 Native atomic ownership, private firmware lifetime, MDP/REGDMA power and clock
 ownership, failed-reset quarantine, connector metadata and live integration
 remain required before exposing HDR or additional color properties.
