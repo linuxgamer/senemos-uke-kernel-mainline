@@ -72,7 +72,7 @@ jq --arg commit "$commit" --arg parent "$parent" '. + {
  source_commit:$commit,source_mode:"retained1301-uke-secure-rtc",kernel_release:"7.3.1-1401",rpm_revision:"1401",
  overlays:["src/boot/uke-abl.c","src/boot/prepare-abl-source.sh","src/boot/uke-rtc.h",
   "src/rtc/uke-rtc-policy.h","src/rtc/prepare-secure-rtc.sh","patches/rtc/0001-uke-secure-rtc-offset.patch",
-  "tests/rtc-secure-contract.sh","tests/rtc-fdt-contract.sh"],
+  "tests/rtc-secure-contract.sh","tests/rtc-fdt-contract.sh","docs/RTC-SECURE-OFFSET.md"],
  parent_copr_build:11251200,parent_srpm_sha256:$parent,parent_composition:"source-composition-before1401.json",
  rtc_backend:"qseecom-uefisecapp-RTCInfo",rtc_qseecom_version:"0x1402000",rtc_pmic_counter_writes:false,
  rtc_sdam_writes:false,rtc_initial_calendar_invalid:true,rtc_offset_write_readback:true,physical_acceptance:false}' \
