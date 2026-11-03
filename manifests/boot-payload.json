@@ -1094,6 +1094,66 @@
     {
       "path": "src/boot/uke-memlat.h",
       "sha256": "d2c68e5d3e4f5ea810804c4c83648c6ca683e9ea3e57bd03b52c1abde3eb4909"
+    },
+    {
+      "path": "src/boot/uke-hardware.h",
+      "sha256": "508f6a26d23ae90284f7af191f7aa267a0e63d7041715de6cfc76a3204f243c3"
+    },
+    {
+      "path": "src/boot/bindings/firmware/xiaomi,uke-ssc-sensors.yaml",
+      "sha256": "a606b21db996d3a07f2c034b874b3bd38d5da13b2ceea58ef271deb3c1862a6d"
+    },
+    {
+      "path": "src/sensors/Kconfig",
+      "sha256": "1935fbaa243887dfddcc839bc910cd611f73bb2535851d58cb661bb7d3de72ec"
+    },
+    {
+      "path": "src/sensors/Makefile",
+      "sha256": "c0025f1e5c7dbd60899d90a5404c05411ee4c8eb9c394426d94ece98e15c2b5f"
+    },
+    {
+      "path": "src/sensors/prepare-source.sh",
+      "sha256": "64e4f764f3395014db7b153418c7b764c7401a70963080455bd2f30c0ec462b5"
+    },
+    {
+      "path": "src/sensors/uke-ssc-iio.c",
+      "sha256": "cc353df254e25da4bcd454d553c20e901ba539d86b9270d9443381f030e5112e"
+    },
+    {
+      "path": "src/sensors/uke-ssc-protocol.c",
+      "sha256": "1fb62e572cd9eab80abfd6b2b831857bfd300f101bf873a3f1e551ff33535c57"
+    },
+    {
+      "path": "src/sensors/uke-ssc-protocol.h",
+      "sha256": "0e8ee0718335c5977d588ea32adaef450675fdcbd413f5715885e4cfb7bc2198"
+    },
+    {
+      "path": "tests/hardware-dt.cpp",
+      "sha256": "e90cea9fb417866b7b4790ff0baa21d591e71b9ecb1dea1270b682885f5f184c"
+    },
+    {
+      "path": "tests/hardware-dt.sh",
+      "sha256": "62e23381e89f249819ce83f022c78c146878a8374be68ed9d1306e59fed99a59"
+    },
+    {
+      "path": "tests/ssc-protocol-contract.c",
+      "sha256": "89a2990e24094656f22003ae7d8a6267c68a4be77e2a72fbd8d9360ffe2e8859"
+    },
+    {
+      "path": "tests/ssc-protocol-contract.sh",
+      "sha256": "dc866789c44ef080f01d362f3df950d83f0b42e56120e4adb2ad4947680d35fa"
+    },
+    {
+      "path": "tests/ssc-native-contract.c",
+      "sha256": "bcc09dd4f02bb3193498c61e73076c610e26c26000d0ccfd4cfe13da24212417"
+    },
+    {
+      "path": "tests/ssc-native-contract.sh",
+      "sha256": "5c84089a2a58b6344c7d0d6c745a3f7882eb1371317de19ddacf935010d8b596"
+    },
+    {
+      "path": "tests/ssc-native-host.h",
+      "sha256": "5bb91c3cb5e4ba3127f428a7d16a828fd7e28c7cdf8fddd11b61f3daafcd6f5d"
     }
   ],
   "root_selector_capability": {

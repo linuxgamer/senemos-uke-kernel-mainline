@@ -7,8 +7,19 @@ test ! -e /etc/senemos/kernel-update.conf
 [[ $(rpm --eval '%{_host_cpu}') == aarch64 && $(rpm --eval '%{fedora}') == 46 ]]
 owner=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 output=$(realpath -m "${1:?COPR result directory}")
+# Keep the dependent candidate queued remotely until its retained parent passes.
+for attempt in {1..60}; do
+    parent_state=$(curl -fsSL --max-time 45 https://copr.fedorainfracloud.org/api_3/build/11251375 | jq -er .state)
+    case $parent_state in
+        succeeded) break;;
+        running|pending|starting|importing|waiting)
+            printf 'Waiting for retained parent build 11251375: %s\n' "$parent_state"
+            sleep 30;;
+        *) printf 'Retained parent build did not pass: %s\n' "$parent_state" >&2; exit 1;;
+    esac
+done
+[[ $parent_state == succeeded ]]
 bash "$owner/packaging/native/refuse-published-release.sh" senemos-uke-linux-kernel-mainline 7.3.1-1400
-[[ $(curl -fsSL https://copr.fedorainfracloud.org/api_3/build/11251375 | jq -er .state) == succeeded ]]
 stage=$(mktemp -d)
 trap 'find "$stage" -depth -delete' EXIT
 curl -fLsS --retry 2 --proto '=https' --proto-redir '=https' \
