@@ -1,0 +1,1227 @@
+From: Uke Linux maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] power: supply: qcom_battmgr: gate Uke thresholds and FCC by reviewed leases
+
+Add default-off Uke-only standard threshold and constant-current interfaces.
+Require typed, bounded per-boot admission, current measurements, serialized
+requests and exact firmware setting readback. Keep voltage, USB input budget
+and negotiation outside this backend. A firmware ACK is not physical success.
+
+OEM ABI comparison: MiCode uke-v-oss 5712080a4b0c and OnePlus fc892483f1d6;
+shared implementation: Peridot 2ed9eadbecae and Linux4056b3c9d3c9.
+Prepared against project f429992feb63. No build, test or hardware acceptance.
+
+--- a/drivers/power/supply/Kconfig
++++ b/drivers/power/supply/Kconfig
+@@ -217,6 +217,29 @@
+ 	  which is used on modern Qualcomm platforms to provide battery and
+ 	  power supply information.
+ 
++config BATTERY_QCOM_BATTMGR_UKE_THRESHOLDS
++	bool "Reviewed Uke autonomous charge-threshold transport"
++	depends on BATTERY_QCOM_BATTMGR && EXPERT
++	default n
++	help
++	  Build the restricted Uke threshold backend. This is not a firmware
++	  qualification. Every operation also requires a privileged, per-source,
++	  expiring admission lease and matching firmware readback. Leave disabled
++	  until the exact active firmware, reply envelope, threshold semantics,
++	  measurement units and autonomous protection evidence are reviewed.
++	  No PD, current, voltage, factory or gauge control is enabled here.
++
++config BATTERY_QCOM_BATTMGR_UKE_CURRENT
++	bool "Reviewed Uke constant-charge-current transport"
++	depends on BATTERY_QCOM_BATTMGR_UKE_THRESHOLDS
++	default n
++	help
++	  Build the separately admitted positive constant-current backend for
++	  exact Uke OEM wire property 12. Per-boot evidence must establish its
++	  units, readback, effective behavior and firmware-owned CV/protections.
++	  This does not enable the ambiguous thermal-level property 10, voltage
++	  writes, raw properties, PD negotiation or negative/reset sentinels.
++
+ config BATTERY_OLPC
+ 	tristate "One Laptop Per Child battery"
+ 	depends on OLPC_EC
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -5,6 +5,9 @@
+  * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+  */
+ #include <linux/auxiliary_bus.h>
++#include <linux/capability.h>
++#include <linux/cred.h>
++#include <linux/kstrtox.h>
+ #include <linux/devm-helpers.h>
+ #include <linux/module.h>
+ #include <linux/mutex.h>
+@@ -20,6 +23,8 @@
+ #include <linux/units.h>
+ #include <linux/ktime.h>
+ #include <linux/pm.h>
++#include <linux/pid.h>
++#include <linux/sched.h>
+ #include <linux/spinlock.h>
+ 
+ #define BATTMGR_CHEMISTRY_LEN	4
+@@ -334,6 +339,11 @@
+ 	struct qcom_battmgr_message response;
+ };
+ 
++struct qcom_battmgr_uke_current_band {
++	s32 min_temperature, max_temperature;
++	u32 current_max_ua, voltage_max_uv;
++};
++
+ struct qcom_battmgr {
+ 	struct device *dev;
+ 	struct pmic_glink_client *client;
+@@ -352,6 +362,27 @@
+ 
+ 	bool service_up;
+ 	struct qcom_battmgr_uke_transaction transaction;
++	/* Protected by lock; transaction epochs are checked under its spinlock. */
++	struct {
++		struct pid *owner;
++		u64 expires_ns, instance_ns, verified_ns, verified_until_ns;
++		u64 reviewed_ns, invalidation_ns;
++		u32 firmware_generation, source_generation, ack_bytes, usb_type;
++		u32 verified_generation, verified_firmware, verified_source;
++		u32 readback_generation;
++		u32 voltage_min_uv, voltage_max_uv, current_abs_max_ua;
++		u32 fallback_start;
++		int temperature_min, temperature_max, last_error;
++		bool may_enable, standard_clients, enabled, verified;
++		char evidence[65];
++		bool current_admitted, current_verified;
++		u32 current_min_ua, current_max_ua, source_budget_ua, current_ua;
++		u32 current_read_generation, current_generation, current_firmware, current_source;
++		u64 current_verified_ns, current_until_ns, measurement_ns;
++		u32 measurement_generation, measured_voltage, band_count;
++		s32 measured_temperature, measured_current;
++		struct qcom_battmgr_uke_current_band bands[8];
++	} control;
+ 
+ 	struct qcom_battmgr_info info;
+ 	struct qcom_battmgr_status status;
+@@ -371,6 +402,25 @@
+ static void qcom_battmgr_sm8350_callback(struct qcom_battmgr *battmgr,
+ 				       const struct qcom_battmgr_message *resp, size_t len);
+ 
++static bool qcom_battmgr_uke_control_live(struct qcom_battmgr *battmgr, bool owner)
++{
++	struct qcom_battmgr_uke_transaction *tx = &battmgr->transaction;
++
++	return IS_ENABLED(CONFIG_BATTERY_QCOM_BATTMGR_UKE_THRESHOLDS) &&
++		battmgr->variant == QCOM_BATTMGR_UKE && battmgr->control.owner &&
++		(!owner || task_tgid(current) == battmgr->control.owner ||
++		 (battmgr->control.standard_clients && uid_eq(current_euid(), GLOBAL_ROOT_UID))) &&
++		ktime_get_boottime_ns() < battmgr->control.expires_ns &&
++		battmgr->control.reviewed_ns > battmgr->control.invalidation_ns &&
++		battmgr->control.instance_ns == tx->instance_ns &&
++		battmgr->control.firmware_generation == tx->firmware_generation &&
++		battmgr->control.source_generation == tx->source_generation &&
++		battmgr->service_up && !tx->desynced && !tx->suspended && !tx->removing;
++}
++
++static int qcom_battmgr_uke_standard_threshold(struct qcom_battmgr *battmgr,
++					      int value, bool start);
++
+ static u32 qcom_battmgr_uke_generation(struct qcom_battmgr *battmgr)
+ {
+ 	unsigned long flags;
+@@ -405,26 +455,72 @@
+ 		ret = 0;
+ 	if (ret)
+ 		goto out_unlock;
++	if (opcode == BATTMGR_CHG_CTRL_LIMIT_EN || opcode == BATTMGR_BAT_PROPERTY_SET) {
++		if (!IS_ENABLED(CONFIG_BATTERY_QCOM_BATTMGR_UKE_THRESHOLDS)) {
++			ret = -EOPNOTSUPP;
++			goto out_unlock;
++		}
++		if (opcode == BATTMGR_BAT_PROPERTY_SET && len != sizeof(*request)) {
++			ret = -EINVAL;
++			goto out_unlock;
++		}
++		if (!qcom_battmgr_uke_control_live(battmgr, true)) {
++			ret = -EACCES;
++			goto out_unlock;
++		}
++		/* A preceding guard must cover this exact lifecycle generation. */
++		if (!battmgr->control.measurement_ns ||
++		    battmgr->control.measurement_generation != tx->generation ||
++		    ktime_get_boottime_ns() - battmgr->control.measurement_ns > 5ULL * NSEC_PER_SEC) {
++			ret = -ESTALE;
++			goto out_unlock;
++		}
++		if (opcode == BATTMGR_BAT_PROPERTY_SET &&
++		    !((battmgr->control.may_enable &&
++		       le32_to_cpu(request->property) == BATT_CHG_CTRL_EN + 1 &&
++		       le32_to_cpu(request->value) <= 1) ||
++		      (IS_ENABLED(CONFIG_BATTERY_QCOM_BATTMGR_UKE_CURRENT) &&
++		       battmgr->control.current_admitted && le32_to_cpu(request->property) == 12 &&
++		       le32_to_cpu(request->value) >= battmgr->control.current_min_ua &&
++		       le32_to_cpu(request->value) <= battmgr->control.current_max_ua))) {
++			ret = -EOPNOTSUPP;
++			goto out_unlock;
++		}
++	}
++	if (opcode == BATTMGR_BAT_PROPERTY_GET && len == sizeof(*request) &&
++	    le32_to_cpu(request->property) == 12 &&
++	    (!IS_ENABLED(CONFIG_BATTERY_QCOM_BATTMGR_UKE_CURRENT) ||
++	     !battmgr->control.current_admitted || !qcom_battmgr_uke_control_live(battmgr, true))) {
++		ret = -EACCES;
++		goto out_unlock;
++	}
+ 
+ 	if (opcode == BATTMGR_REQUEST_NOTIFICATION &&
+ 	    len != sizeof(struct qcom_battmgr_enable_request)) {
+ 		ret = -EINVAL;
+ 		goto out_unlock;
+ 	}
+-	if (opcode != BATTMGR_REQUEST_NOTIFICATION &&
++	if (opcode != BATTMGR_REQUEST_NOTIFICATION && opcode != BATTMGR_CHG_CTRL_LIMIT_EN &&
+ 	    (len != sizeof(*request) ||
+ 	     (opcode != BATTMGR_BAT_PROPERTY_GET && opcode != BATTMGR_USB_PROPERTY_GET &&
+-	      opcode != BATTMGR_USB_PROPERTY_SET && opcode != BATTMGR_WLS_PROPERTY_GET))) {
++	      opcode != BATTMGR_USB_PROPERTY_SET && opcode != BATTMGR_WLS_PROPERTY_GET &&
++	      opcode != BATTMGR_BAT_PROPERTY_SET))) {
+ 		ret = -EOPNOTSUPP;
+ 		goto out_unlock;
+ 	}
++	if (opcode == BATTMGR_CHG_CTRL_LIMIT_EN &&
++	    len != sizeof(struct qcom_battmgr_charge_ctrl_request)) {
++		ret = -EINVAL;
++		goto out_unlock;
++	}
+ 
+ 	reinit_completion(&battmgr->ack);
+ 	battmgr->error = 0;
+ 	tx->raw_result = 0;
+ 	tx->response_len = 0;
+ 	tx->opcode = opcode;
+-	tx->property = opcode == BATTMGR_REQUEST_NOTIFICATION ? 0 :
++	tx->property = opcode == BATTMGR_REQUEST_NOTIFICATION ||
++		       opcode == BATTMGR_CHG_CTRL_LIMIT_EN ? 0 :
+ 		       le32_to_cpu(request->property);
+ 	generation = tx->generation;
+ 	tx->deadline = jiffies + HZ;
+@@ -445,14 +541,23 @@
+ 	} else if (battmgr->error) {
+ 		ret = battmgr->error;
+ 	} else if (!battmgr->service_up || tx->generation != generation) {
+-		ret = opcode == BATTMGR_USB_PROPERTY_SET ? -ESTALE : -EAGAIN;
++		ret = opcode == BATTMGR_USB_PROPERTY_SET || opcode == BATTMGR_BAT_PROPERTY_SET ||
++		      opcode == BATTMGR_CHG_CTRL_LIMIT_EN ? -ESTALE : -EAGAIN;
+ 	} else if (!tx->response_len) {
+ 		ret = -EPROTO;
+ 		tx->desynced = true;
+ 	} else {
+ 		/* Receive copied the matching response; only this caller commits it. */
+ 		/* Enable payload semantics are unknown; only its envelope was observed. */
+-		if (opcode != BATTMGR_REQUEST_NOTIFICATION)
++		if (opcode == BATTMGR_BAT_PROPERTY_GET && tx->property == 12) {
++			u32 current_ua = le32_to_cpu(tx->response.intval.value);
++
++			if (!current_ua || current_ua > INT_MAX)
++				battmgr->error = -ENODATA;
++			else
++				battmgr->control.current_ua = current_ua;
++		} else if (opcode != BATTMGR_REQUEST_NOTIFICATION && opcode != BATTMGR_CHG_CTRL_LIMIT_EN &&
++		    opcode != BATTMGR_BAT_PROPERTY_SET)
+ 			qcom_battmgr_sm8350_callback(battmgr, &tx->response, tx->response_len);
+ 		ret = battmgr->error;
+ 	}
+@@ -861,6 +966,9 @@
+ 	u32 target_soc, delta_soc;
+ 	int ret;
+ 
++	if (battmgr->variant == QCOM_BATTMGR_UKE)
++		return qcom_battmgr_uke_standard_threshold(battmgr, start_soc, true);
++
+ 	start_soc = clamp(start_soc, CHARGE_CTRL_START_THR_MIN, CHARGE_CTRL_START_THR_MAX);
+ 
+ 	/*
+@@ -886,7 +994,7 @@
+ 		battmgr->info.charge_ctrl_end = target_soc;
+ 	}
+ 
+-	return 0;
++	return ret;
+ }
+ 
+ static int qcom_battmgr_set_charge_end_threshold(struct qcom_battmgr *battmgr, int end_soc)
+@@ -894,6 +1002,9 @@
+ 	u32 delta_soc = CHARGE_CTRL_DELTA_SOC;
+ 	int ret;
+ 
++	if (battmgr->variant == QCOM_BATTMGR_UKE)
++		return qcom_battmgr_uke_standard_threshold(battmgr, end_soc, false);
++
+ 	end_soc = clamp(end_soc, CHARGE_CTRL_END_THR_MIN, CHARGE_CTRL_END_THR_MAX);
+ 
+ 	if (battmgr->info.charge_ctrl_start && end_soc > battmgr->info.charge_ctrl_start)
+@@ -907,7 +1018,7 @@
+ 		battmgr->info.charge_ctrl_end = end_soc;
+ 	}
+ 
+-	return 0;
++	return ret;
+ }
+ 
+ static int qcom_battmgr_charge_control_thresholds_init(struct qcom_battmgr *battmgr)
+@@ -974,6 +1085,8 @@
+ 	return 0;
+ }
+ 
++#include "qcom_battmgr_uke_control.h"
++
+ static const enum power_supply_property sc8280xp_bat_props[] = {
+ 	POWER_SUPPLY_PROP_STATUS,
+ 	POWER_SUPPLY_PROP_PRESENT,
+@@ -1113,6 +1226,30 @@
+ 	.property_is_writeable = qcom_battmgr_bat_is_writeable,
+ };
+ 
++static const enum power_supply_property uke_control_bat_props[] = {
++	POWER_SUPPLY_PROP_STATUS, POWER_SUPPLY_PROP_HEALTH, POWER_SUPPLY_PROP_PRESENT,
++	POWER_SUPPLY_PROP_CHARGE_TYPE, POWER_SUPPLY_PROP_CAPACITY, POWER_SUPPLY_PROP_VOLTAGE_OCV,
++	POWER_SUPPLY_PROP_VOLTAGE_NOW, POWER_SUPPLY_PROP_VOLTAGE_MAX, POWER_SUPPLY_PROP_CURRENT_NOW,
++	POWER_SUPPLY_PROP_TEMP, POWER_SUPPLY_PROP_TECHNOLOGY, POWER_SUPPLY_PROP_CHARGE_COUNTER,
++	POWER_SUPPLY_PROP_CYCLE_COUNT, POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN, POWER_SUPPLY_PROP_CHARGE_FULL,
++	POWER_SUPPLY_PROP_MODEL_NAME, POWER_SUPPLY_PROP_TIME_TO_FULL_AVG, POWER_SUPPLY_PROP_TIME_TO_EMPTY_AVG,
++	POWER_SUPPLY_PROP_INTERNAL_RESISTANCE, POWER_SUPPLY_PROP_STATE_OF_HEALTH, POWER_SUPPLY_PROP_POWER_NOW,
++	POWER_SUPPLY_PROP_CHARGE_CONTROL_START_THRESHOLD, POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD,
++#if IS_ENABLED(CONFIG_BATTERY_QCOM_BATTMGR_UKE_CURRENT)
++	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT,
++#endif
++};
++
++static const struct power_supply_desc uke_control_bat_psy_desc = {
++	.name = "qcom-battmgr-bat",
++	.type = POWER_SUPPLY_TYPE_BATTERY,
++	.properties = uke_control_bat_props,
++	.num_properties = ARRAY_SIZE(uke_control_bat_props),
++	.get_property = qcom_battmgr_uke_control_get_property,
++	.set_property = qcom_battmgr_uke_control_set_property,
++	.property_is_writeable = qcom_battmgr_uke_control_is_writeable,
++};
++
+ static int qcom_battmgr_ac_get_property(struct power_supply *psy,
+ 					enum power_supply_property psp,
+ 					union power_supply_propval *val)
+@@ -1615,7 +1752,11 @@
+ {
+ 	switch (property) {
+ 	case BATT_PRESENT:
++	case BATT_CHG_CTRL_EN:
+ 		return value <= 1 ? 0 : -ENODATA;
++	case BATT_CHG_CTRL_START_THR:
++	case BATT_CHG_CTRL_END_THR:
++		return value <= 100 ? 0 : -ENODATA;
+ 	case BATT_CAPACITY:
+ 		return value <= 10000 ? 0 : -ENODATA;
+ 	case BATT_SOH:
+@@ -1792,6 +1933,9 @@
+ 		case BATT_CHG_CTRL_START_THR:
+ 			battmgr->info.charge_ctrl_start = le32_to_cpu(resp->intval.value);
+ 			break;
++		case BATT_CHG_CTRL_EN:
++			battmgr->control.enabled = le32_to_cpu(resp->intval.value);
++			break;
+ 		case BATT_CHG_CTRL_END_THR:
+ 			battmgr->info.charge_ctrl_end = le32_to_cpu(resp->intval.value);
+ 			break;
+@@ -1942,6 +2086,20 @@
+ 	    tx->suspended || !battmgr->service_up || opcode != tx->opcode ||
+ 	    time_after_eq(jiffies, tx->deadline))
+ 		goto out;
++	if (opcode == BATTMGR_CHG_CTRL_LIMIT_EN) {
++		/* The reviewed exact envelope is opaque. Success requires later GETs. */
++		if (len != battmgr->control.ack_bytes || len < sizeof(resp->hdr) ||
++		    len > sizeof(*resp)) {
++			battmgr->error = -EPROTO;
++			tx->desynced = true;
++		} else {
++			memcpy(&tx->response, resp, len);
++			tx->response_len = len;
++			tx->receipt_ns = ktime_get_boottime_ns();
++		}
++		complete(&battmgr->ack);
++		goto out;
++	}
+ 	if (opcode == BATTMGR_REQUEST_NOTIFICATION) {
+ 		/* Serialize its reply without interpreting an undocumented payload. */
+ 		if (len > sizeof(*resp)) {
+@@ -2042,6 +2200,7 @@
+ 
+ 		spin_lock_irqsave(&tx->lock, flags);
+ 		if (battmgr->service_up != up) {
++			battmgr->control.invalidation_ns = ktime_get_boottime_ns();
+ 			tx->generation++;
+ 			tx->firmware_generation++;
+ 			tx->source_generation++;
+@@ -2085,6 +2244,12 @@
+ 
+ static struct attribute *qcom_battmgr_uke_attrs[] = {
+ 	&dev_attr_uke_battmgr_state.attr,
++	&dev_attr_uke_charge_state.attr,
++	&dev_attr_uke_charge_lease.attr,
++	&dev_attr_uke_charge_thresholds.attr,
++	&dev_attr_uke_charge_refresh.attr,
++	&dev_attr_uke_charge_current_profile.attr,
++	&dev_attr_uke_charge_current_ua.attr,
+ 	NULL,
+ };
+ static const struct attribute_group qcom_battmgr_uke_group = {
+@@ -2109,6 +2274,8 @@
+ 	spin_unlock_irqrestore(&tx->lock, flags);
+ 	cancel_work_sync(&battmgr->enable_work);
+ 	mutex_lock(&battmgr->lock);
++	put_pid(battmgr->control.owner);
++	battmgr->control.owner = NULL;
+ 	mutex_unlock(&battmgr->lock);
+ }
+ 
+@@ -2122,6 +2289,7 @@
+ 		return 0;
+ 	spin_lock_irqsave(&tx->lock, flags);
+ 	tx->suspended = true;
++	battmgr->control.invalidation_ns = ktime_get_boottime_ns();
+ 	tx->generation++;
+ 	if (tx->pending) {
+ 		battmgr->error = -EHOSTDOWN;
+@@ -2240,7 +2408,10 @@
+ 			return dev_err_probe(dev, PTR_ERR(battmgr->wls_psy),
+ 					     "failed to register wireless charing power supply\n");
+ 	} else {
+-		if (battmgr->variant == QCOM_BATTMGR_SM8550)
++		if (battmgr->variant == QCOM_BATTMGR_UKE &&
++		    IS_ENABLED(CONFIG_BATTERY_QCOM_BATTMGR_UKE_THRESHOLDS))
++			psy_desc = &uke_control_bat_psy_desc;
++		else if (battmgr->variant == QCOM_BATTMGR_SM8550)
+ 			psy_desc = &sm8550_bat_psy_desc;
+ 		else
+ 			psy_desc = &sm8350_bat_psy_desc;
+--- /dev/null
++++ b/drivers/power/supply/qcom_battmgr_uke_control.h
+@@ -0,0 +1,713 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/* Included after the common property helpers. No raw firmware ABI is exported. */
++#ifndef QCOM_BATTMGR_UKE_CONTROL_H
++#define QCOM_BATTMGR_UKE_CONTROL_H
++
++#define UKE_CHARGE_LEASE_MAX_NS (30ULL * NSEC_PER_SEC)
++
++static bool qcom_battmgr_uke_current_live(struct qcom_battmgr *battmgr)
++{
++	struct qcom_battmgr_uke_transaction *tx = &battmgr->transaction;
++
++	return IS_ENABLED(CONFIG_BATTERY_QCOM_BATTMGR_UKE_CURRENT) &&
++		battmgr->control.current_admitted && battmgr->control.current_verified &&
++		battmgr->service_up && !tx->desynced && !tx->suspended && !tx->removing &&
++		ktime_get_boottime_ns() < battmgr->control.current_until_ns &&
++		battmgr->control.current_generation == tx->generation &&
++		battmgr->control.current_firmware == tx->firmware_generation &&
++		battmgr->control.current_source == tx->source_generation;
++}
++
++static bool qcom_battmgr_uke_measurement_live(struct qcom_battmgr *battmgr)
++{
++	u64 now = ktime_get_boottime_ns();
++
++	return battmgr->control.measurement_ns && now >= battmgr->control.measurement_ns &&
++		now - battmgr->control.measurement_ns <= 5ULL * NSEC_PER_SEC &&
++		battmgr->control.measurement_generation == battmgr->transaction.generation &&
++		qcom_battmgr_uke_control_live(battmgr, false);
++}
++
++static bool qcom_battmgr_uke_readback_live(struct qcom_battmgr *battmgr)
++{
++	struct qcom_battmgr_uke_transaction *tx = &battmgr->transaction;
++
++	return battmgr->control.verified && battmgr->service_up &&
++		!tx->desynced && !tx->suspended && !tx->removing &&
++		ktime_get_boottime_ns() < battmgr->control.verified_until_ns &&
++		battmgr->control.verified_generation == tx->generation &&
++		battmgr->control.verified_firmware == tx->firmware_generation &&
++		battmgr->control.verified_source == tx->source_generation;
++}
++
++static int qcom_battmgr_uke_control_check(struct qcom_battmgr *battmgr)
++{
++	unsigned long flags;
++	bool valid;
++
++	lockdep_assert_held(&battmgr->lock);
++	spin_lock_irqsave(&battmgr->transaction.lock, flags);
++	valid = qcom_battmgr_uke_control_live(battmgr, true);
++	spin_unlock_irqrestore(&battmgr->transaction.lock, flags);
++	return valid ? 0 : -EACCES;
++}
++
++static int qcom_battmgr_uke_control_guard(struct qcom_battmgr *battmgr)
++{
++	const unsigned int props[] = {
++		BATT_HEALTH, BATT_PRESENT, BATT_TEMP, BATT_VOLT_NOW, BATT_CURR_NOW,
++	};
++	s64 current;
++	u64 began = ktime_get_boottime_ns();
++	u32 generation = qcom_battmgr_uke_generation(battmgr);
++	unsigned long flags;
++	unsigned int i;
++	int ret;
++
++	battmgr->control.measurement_ns = 0;
++	ret = qcom_battmgr_uke_control_check(battmgr);
++	if (ret)
++		return ret;
++	for (i = 0; i < ARRAY_SIZE(props); i++) {
++		ret = qcom_battmgr_request_property(battmgr, BATTMGR_BAT_PROPERTY_GET,
++						  props[i], 0);
++		if (ret)
++			return ret;
++	}
++	ret = qcom_battmgr_request_property(battmgr, BATTMGR_USB_PROPERTY_GET, USB_ONLINE, 0);
++	if (ret)
++		return ret;
++	ret = qcom_battmgr_request_property(battmgr, BATTMGR_USB_PROPERTY_GET, USB_TYPE, 0);
++	if (ret)
++		return ret;
++	current = battmgr->status.current_now;
++	if (current < 0)
++		current = -current;
++	if (generation != qcom_battmgr_uke_generation(battmgr))
++		return -ESTALE;
++	if (battmgr->status.health != POWER_SUPPLY_HEALTH_GOOD || !battmgr->info.present ||
++	    !battmgr->usb.online || battmgr->usb.usb_type != battmgr->control.usb_type ||
++	    (s32)battmgr->status.temperature < battmgr->control.temperature_min ||
++	    (s32)battmgr->status.temperature >= battmgr->control.temperature_max ||
++	    battmgr->status.voltage_now < battmgr->control.voltage_min_uv ||
++	    battmgr->status.voltage_now > battmgr->control.voltage_max_uv ||
++	    current > battmgr->control.current_abs_max_ua)
++		return -ERANGE;
++	ret = qcom_battmgr_uke_control_check(battmgr);
++	if (ret)
++		return ret;
++	spin_lock_irqsave(&battmgr->transaction.lock, flags);
++	if (generation != battmgr->transaction.generation ||
++	    ktime_get_boottime_ns() - began > 5ULL * NSEC_PER_SEC) {
++		ret = -ESTALE;
++	} else {
++		battmgr->control.measured_temperature = (s32)battmgr->status.temperature;
++		battmgr->control.measured_voltage = battmgr->status.voltage_now;
++		battmgr->control.measured_current = battmgr->status.current_now;
++		battmgr->control.measurement_generation = generation;
++		battmgr->control.measurement_ns = began;
++	}
++	spin_unlock_irqrestore(&battmgr->transaction.lock, flags);
++	return ret;
++}
++
++static int qcom_battmgr_uke_current_read(struct qcom_battmgr *battmgr)
++{
++	struct qcom_battmgr_property_request request = {
++		.hdr.owner = cpu_to_le32(PMIC_GLINK_OWNER_BATTMGR),
++		.hdr.type = cpu_to_le32(PMIC_GLINK_REQ_RESP),
++		.hdr.opcode = cpu_to_le32(BATTMGR_BAT_PROPERTY_GET),
++		.property = cpu_to_le32(12),
++	};
++	u32 generation = qcom_battmgr_uke_generation(battmgr);
++	int ret = qcom_battmgr_uke_control_check(battmgr);
++
++	if (ret)
++		return ret;
++	if (!IS_ENABLED(CONFIG_BATTERY_QCOM_BATTMGR_UKE_CURRENT) || !battmgr->control.current_admitted)
++		return -EOPNOTSUPP;
++	ret = qcom_battmgr_request(battmgr, &request, sizeof(request));
++	if (ret)
++		return ret;
++	if (generation != qcom_battmgr_uke_generation(battmgr))
++		return -ESTALE;
++	battmgr->control.current_read_generation = generation;
++	return qcom_battmgr_uke_control_check(battmgr);
++}
++
++static void qcom_battmgr_uke_current_record(struct qcom_battmgr *battmgr)
++{
++	struct qcom_battmgr_uke_transaction *tx = &battmgr->transaction;
++	unsigned long flags;
++
++	spin_lock_irqsave(&tx->lock, flags);
++	battmgr->control.current_generation = tx->generation;
++	battmgr->control.current_firmware = tx->firmware_generation;
++	battmgr->control.current_source = tx->source_generation;
++	battmgr->control.current_verified_ns = ktime_get_boottime_ns();
++	battmgr->control.current_until_ns = battmgr->control.expires_ns;
++	battmgr->control.current_verified = qcom_battmgr_uke_control_live(battmgr, true) &&
++		battmgr->control.current_admitted && tx->generation == battmgr->control.current_read_generation;
++	spin_unlock_irqrestore(&tx->lock, flags);
++}
++
++static int qcom_battmgr_uke_current_apply(struct qcom_battmgr *battmgr, u32 value)
++{
++	struct qcom_battmgr_property_request request = {
++		.hdr.owner = cpu_to_le32(PMIC_GLINK_OWNER_BATTMGR),
++		.hdr.type = cpu_to_le32(PMIC_GLINK_REQ_RESP),
++		.hdr.opcode = cpu_to_le32(BATTMGR_BAT_PROPERTY_SET),
++		.property = cpu_to_le32(12),
++		.value = cpu_to_le32(value),
++	};
++	u32 ceiling = 0;
++	unsigned int i;
++	int ret;
++
++	lockdep_assert_held(&battmgr->lock);
++	battmgr->control.current_verified = false;
++	if (!IS_ENABLED(CONFIG_BATTERY_QCOM_BATTMGR_UKE_CURRENT) || !battmgr->control.current_admitted)
++		return -EOPNOTSUPP;
++	ret = qcom_battmgr_uke_control_guard(battmgr);
++	if (ret)
++		return ret;
++	for (i = 0; i < battmgr->control.band_count; i++) {
++		const struct qcom_battmgr_uke_current_band *b = &battmgr->control.bands[i];
++
++		if (battmgr->control.measured_temperature >= b->min_temperature &&
++		    battmgr->control.measured_temperature < b->max_temperature) {
++			if (battmgr->control.measured_voltage > b->voltage_max_uv)
++				return -ERANGE;
++			ceiling = min3(b->current_max_ua, battmgr->control.current_max_ua,
++				       battmgr->control.source_budget_ua);
++			break;
++		}
++	}
++	if (!ceiling || value < battmgr->control.current_min_ua || value > ceiling)
++		return -ERANGE;
++	ret = qcom_battmgr_uke_current_read(battmgr);
++	if (ret)
++		return ret;
++	if (battmgr->control.current_ua != value) {
++		/* An increase is forbidden while the measured battery is discharging. */
++		if (value > battmgr->control.current_ua && battmgr->control.measured_current < 0)
++			return -EAGAIN;
++		ret = qcom_battmgr_request(battmgr, &request, sizeof(request));
++		if (ret)
++			return ret;
++		ret = qcom_battmgr_uke_current_read(battmgr);
++		if (ret)
++			return ret;
++		if (battmgr->control.current_ua != value)
++			return -EREMOTEIO;
++	}
++	qcom_battmgr_uke_current_record(battmgr);
++	return battmgr->control.current_verified ? 0 : -ESTALE;
++}
++
++static int qcom_battmgr_uke_threshold_read(struct qcom_battmgr *battmgr)
++{
++	const unsigned int props[] = {
++		BATT_CHG_CTRL_EN, BATT_CHG_CTRL_START_THR, BATT_CHG_CTRL_END_THR,
++	};
++	u32 generation = qcom_battmgr_uke_generation(battmgr);
++	unsigned int i;
++	int ret;
++
++	for (i = 0; i < ARRAY_SIZE(props); i++) {
++		ret = qcom_battmgr_request_property(battmgr, BATTMGR_BAT_PROPERTY_GET,
++						  props[i], 0);
++		if (ret)
++			return ret;
++	}
++	if (generation != qcom_battmgr_uke_generation(battmgr))
++		return -ESTALE;
++	if (battmgr->info.charge_ctrl_start > battmgr->info.charge_ctrl_end ||
++	    battmgr->info.charge_ctrl_end > 100)
++		return -ENODATA;
++	battmgr->control.readback_generation = generation;
++	return qcom_battmgr_uke_control_check(battmgr);
++}
++
++static void qcom_battmgr_uke_threshold_record(struct qcom_battmgr *battmgr)
++{
++	struct qcom_battmgr_uke_transaction *tx = &battmgr->transaction;
++	unsigned long flags;
++
++	spin_lock_irqsave(&tx->lock, flags);
++	battmgr->control.verified_generation = tx->generation;
++	battmgr->control.verified_firmware = tx->firmware_generation;
++	battmgr->control.verified_source = tx->source_generation;
++	battmgr->control.verified_ns = ktime_get_boottime_ns();
++	battmgr->control.verified_until_ns = battmgr->control.expires_ns;
++	battmgr->control.verified = qcom_battmgr_uke_control_live(battmgr, true) &&
++		tx->generation == battmgr->control.readback_generation;
++	spin_unlock_irqrestore(&tx->lock, flags);
++}
++
++static int qcom_battmgr_uke_threshold_pair(struct qcom_battmgr *battmgr,
++					 unsigned int start, unsigned int end)
++{
++	struct qcom_battmgr_property_request enable = {
++		.hdr.owner = cpu_to_le32(PMIC_GLINK_OWNER_BATTMGR),
++		.hdr.type = cpu_to_le32(PMIC_GLINK_REQ_RESP),
++		.hdr.opcode = cpu_to_le32(BATTMGR_BAT_PROPERTY_SET),
++		.property = cpu_to_le32(BATT_CHG_CTRL_EN + 1),
++		.value = cpu_to_le32(1),
++	};
++	int ret;
++
++	lockdep_assert_held(&battmgr->lock);
++	battmgr->control.verified = false;
++	if (start >= end || end > 100)
++		return -EINVAL;
++	ret = qcom_battmgr_uke_control_guard(battmgr);
++	if (ret)
++		return ret;
++	ret = qcom_battmgr_uke_threshold_read(battmgr);
++	if (ret)
++		return ret;
++	/* The standard 0/100 pair disables the reviewed threshold feature.
++	 * Do not emulate unlimited charging with an enabled zero-start hysteresis.
++	 */
++	if (!start && end == 100) {
++		if (battmgr->control.enabled) {
++			if (!battmgr->control.may_enable)
++				return -EOPNOTSUPP;
++			enable.value = cpu_to_le32(0);
++			ret = qcom_battmgr_request(battmgr, &enable, sizeof(enable));
++			if (ret)
++				return ret;
++			ret = qcom_battmgr_uke_threshold_read(battmgr);
++			if (ret)
++				return ret;
++			if (battmgr->control.enabled)
++				return -EREMOTEIO;
++		}
++		qcom_battmgr_uke_threshold_record(battmgr);
++		return battmgr->control.verified ? 0 : -ESTALE;
++	}
++	/* Idempotence is proven by fresh GETs, never by an AP cache. */
++	if (battmgr->control.enabled && battmgr->info.charge_ctrl_start == start &&
++	    battmgr->info.charge_ctrl_end == end) {
++		qcom_battmgr_uke_threshold_record(battmgr);
++		return battmgr->control.verified ? 0 : -ESTALE;
++	}
++	if (!battmgr->control.enabled) {
++		if (!battmgr->control.may_enable)
++			return -EOPNOTSUPP;
++		ret = qcom_battmgr_request(battmgr, &enable, sizeof(enable));
++		if (ret)
++			return ret;
++		ret = qcom_battmgr_uke_threshold_read(battmgr);
++		if (ret)
++			return ret;
++		if (!battmgr->control.enabled)
++			return -EREMOTEIO;
++	}
++	ret = qcom_battmgr_uke_control_guard(battmgr);
++	if (ret)
++		return ret;
++	ret = qcom_battmgr_set_charge_control(battmgr, end, end - start);
++	if (ret)
++		return ret;
++	/* An opaque 0x48 ACK is not success: all three settings must read back. */
++	ret = qcom_battmgr_uke_threshold_read(battmgr);
++	if (ret)
++		return ret;
++	if (!battmgr->control.enabled || battmgr->info.charge_ctrl_start != start ||
++	    battmgr->info.charge_ctrl_end != end)
++		return -EREMOTEIO;
++	qcom_battmgr_uke_threshold_record(battmgr);
++	return battmgr->control.verified ? 0 : -ESTALE;
++}
++
++static int qcom_battmgr_uke_standard_threshold(struct qcom_battmgr *battmgr,
++					      int value, bool start)
++{
++	unsigned int first, last;
++	int ret;
++
++	if (value < 0 || value > 100)
++		return -EINVAL;
++	mutex_lock(&battmgr->lock);
++	ret = qcom_battmgr_uke_control_check(battmgr);
++	if (!ret)
++		ret = qcom_battmgr_uke_threshold_read(battmgr);
++	if (!ret) {
++		first = start ? value : battmgr->control.enabled ?
++			battmgr->info.charge_ctrl_start : battmgr->control.fallback_start;
++		last = start ? (battmgr->control.enabled ? battmgr->info.charge_ctrl_end : 100) : value;
++		if (!start && value == 100 && !battmgr->control.enabled)
++			first = 0;
++		ret = qcom_battmgr_uke_threshold_pair(battmgr, first, last);
++	}
++	battmgr->control.last_error = ret;
++	if (ret)
++		battmgr->control.verified = false;
++	mutex_unlock(&battmgr->lock);
++	if (!ret)
++		power_supply_changed(battmgr->bat_psy);
++	return ret;
++}
++
++static int qcom_battmgr_uke_control_get_property(struct power_supply *psy,
++					       enum power_supply_property prop,
++					       union power_supply_propval *value)
++{
++	struct qcom_battmgr *battmgr = power_supply_get_drvdata(psy);
++	unsigned long flags;
++	int ret = 0;
++
++	if (prop == POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT) {
++		mutex_lock(&battmgr->lock);
++		spin_lock_irqsave(&battmgr->transaction.lock, flags);
++		if (!battmgr->control.standard_clients || !qcom_battmgr_uke_current_live(battmgr) ||
++		    !qcom_battmgr_uke_control_live(battmgr, false))
++			ret = -ENODATA;
++		else
++			value->intval = battmgr->control.current_ua;
++		spin_unlock_irqrestore(&battmgr->transaction.lock, flags);
++		mutex_unlock(&battmgr->lock);
++		return ret;
++	}
++	if (prop != POWER_SUPPLY_PROP_CHARGE_CONTROL_START_THRESHOLD &&
++	    prop != POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD)
++		return qcom_battmgr_bat_get_property(psy, prop, value);
++	mutex_lock(&battmgr->lock);
++	spin_lock_irqsave(&battmgr->transaction.lock, flags);
++	if (!qcom_battmgr_uke_readback_live(battmgr) || !battmgr->control.standard_clients ||
++	    !qcom_battmgr_uke_control_live(battmgr, false))
++		ret = -ENODATA;
++	else
++		value->intval = prop == POWER_SUPPLY_PROP_CHARGE_CONTROL_START_THRESHOLD ?
++			(battmgr->control.enabled ? battmgr->info.charge_ctrl_start : 0) :
++			(battmgr->control.enabled ? battmgr->info.charge_ctrl_end : 100);
++	spin_unlock_irqrestore(&battmgr->transaction.lock, flags);
++	mutex_unlock(&battmgr->lock);
++	return ret;
++}
++
++static int qcom_battmgr_uke_control_set_property(struct power_supply *psy,
++					       enum power_supply_property prop,
++					       const union power_supply_propval *value)
++{
++	struct qcom_battmgr *battmgr = power_supply_get_drvdata(psy);
++	int ret;
++
++	if (prop != POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT)
++		return qcom_battmgr_bat_set_property(psy, prop, value);
++	if (value->intval <= 0)
++		return -EINVAL;
++	mutex_lock(&battmgr->lock);
++	ret = qcom_battmgr_uke_current_apply(battmgr, value->intval);
++	battmgr->control.last_error = ret;
++	mutex_unlock(&battmgr->lock);
++	if (!ret)
++		power_supply_changed(battmgr->bat_psy);
++	return ret;
++}
++
++static int qcom_battmgr_uke_control_is_writeable(struct power_supply *psy,
++					       enum power_supply_property prop)
++{
++	if (prop == POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT)
++		return IS_ENABLED(CONFIG_BATTERY_QCOM_BATTMGR_UKE_CURRENT);
++	return qcom_battmgr_bat_is_writeable(psy, prop);
++}
++
++static ssize_t uke_charge_state_show(struct device *dev, struct device_attribute *attr, char *buf)
++{
++	struct qcom_battmgr *battmgr = dev_get_drvdata(dev);
++	struct qcom_battmgr_uke_transaction *tx = &battmgr->transaction;
++	unsigned long flags;
++	ssize_t len;
++
++	mutex_lock(&battmgr->lock);
++	spin_lock_irqsave(&tx->lock, flags);
++	len = sysfs_emit(buf, "1 %u %u %u %u %u %llu %llu %u %u %u %u %llu %d %u %s "
++		"%u %u %u %u %llu %d %u %d %llu %u %llu\n",
++		IS_ENABLED(CONFIG_BATTERY_QCOM_BATTMGR_UKE_THRESHOLDS),
++		qcom_battmgr_uke_control_live(battmgr, false), tx->generation,
++		tx->firmware_generation, tx->source_generation, tx->instance_ns,
++		battmgr->control.expires_ns, battmgr->control.enabled,
++		battmgr->info.charge_ctrl_start, battmgr->info.charge_ctrl_end,
++		qcom_battmgr_uke_readback_live(battmgr), battmgr->control.verified_ns,
++		battmgr->control.last_error, battmgr->control.standard_clients,
++		battmgr->control.evidence[0] ? battmgr->control.evidence : "none",
++		IS_ENABLED(CONFIG_BATTERY_QCOM_BATTMGR_UKE_CURRENT), battmgr->control.current_admitted,
++		battmgr->control.current_ua, qcom_battmgr_uke_current_live(battmgr),
++		battmgr->control.current_verified_ns, battmgr->control.measured_temperature,
++		battmgr->control.measured_voltage, battmgr->control.measured_current,
++		battmgr->control.measurement_ns, qcom_battmgr_uke_measurement_live(battmgr),
++		battmgr->control.invalidation_ns);
++	spin_unlock_irqrestore(&tx->lock, flags);
++	mutex_unlock(&battmgr->lock);
++	return len;
++}
++static DEVICE_ATTR_RO(uke_charge_state);
++
++static int qcom_battmgr_uke_control_split(const char *buf, size_t count,
++					 char *data, size_t size, char **words, size_t capacity)
++{
++	char *cursor, *part;
++	size_t n = 0;
++
++	if (!count || count >= size || memchr(buf, 0, count))
++		return -EINVAL;
++	memcpy(data, buf, count);
++	data[count] = 0;
++	cursor = data;
++	while ((part = strsep(&cursor, " \t\r\n"))) {
++		if (!*part)
++			continue;
++		if (n == capacity)
++			return -EINVAL;
++		words[n++] = part;
++	}
++	return n;
++}
++
++static int qcom_battmgr_uke_control_words(const char *buf, size_t count,
++					 char *data, size_t size, char **words, size_t needed)
++{
++	int n = qcom_battmgr_uke_control_split(buf, count, data, size, words, needed);
++
++	return n == needed ? 0 : -EINVAL;
++}
++
++static ssize_t uke_charge_lease_store(struct device *dev, struct device_attribute *attr,
++				      const char *buf, size_t count)
++{
++	struct qcom_battmgr *battmgr = dev_get_drvdata(dev);
++	struct qcom_battmgr_uke_transaction *tx = &battmgr->transaction;
++	unsigned long flags;
++	unsigned long long instance, expires, reviewed;
++	u32 generation, firmware, source, ack, usb, enable, standard, vmin, vmax, imax, resume;
++	char data[512], *word[18];
++	int tmin, tmax, ret = 0;
++	u64 now;
++
++	if (!capable(CAP_SYS_ADMIN))
++		return -EPERM;
++	mutex_lock(&battmgr->lock);
++	now = ktime_get_boottime_ns();
++	if (sysfs_streq(buf, "revoke")) {
++		if (battmgr->control.owner && task_tgid(current) != battmgr->control.owner)
++			ret = -EBUSY;
++		else {
++			put_pid(battmgr->control.owner);
++			battmgr->control.owner = NULL;
++			battmgr->control.expires_ns = 0;
++		}
++		goto out;
++	}
++	if (qcom_battmgr_uke_control_words(buf, count, data, sizeof(data), word, ARRAY_SIZE(word)) ||
++	    strcmp(word[0], "1") || kstrtoull(word[1], 10, &instance) ||
++	    kstrtou32(word[2], 10, &generation) || kstrtou32(word[3], 10, &firmware) ||
++	    kstrtou32(word[4], 10, &source) || kstrtoull(word[5], 10, &expires) ||
++	    kstrtou32(word[6], 10, &ack) || kstrtou32(word[7], 10, &usb) ||
++	    kstrtou32(word[8], 10, &enable) || kstrtou32(word[9], 10, &standard) ||
++	    kstrtoint(word[10], 10, &tmin) || kstrtoint(word[11], 10, &tmax) ||
++	    kstrtou32(word[12], 10, &vmin) || kstrtou32(word[13], 10, &vmax) ||
++	    kstrtou32(word[14], 10, &imax) || kstrtou32(word[15], 10, &resume) || resume >= 80 ||
++	    strlen(word[16]) != 64 || strspn(word[16], "0123456789abcdef") != 64 ||
++	    kstrtoull(word[17], 10, &reviewed) || !reviewed || reviewed > now ||
++	    expires <= now || expires - now > UKE_CHARGE_LEASE_MAX_NS ||
++	    ack < sizeof(struct pmic_glink_hdr) || ack > sizeof(struct qcom_battmgr_message) ||
++	    usb == POWER_SUPPLY_USB_TYPE_UNKNOWN || usb > POWER_SUPPLY_USB_TYPE_APPLE_BRICK_ID ||
++	    enable > 1 || standard > 1 || tmin >= tmax || !vmin || vmin >= vmax ||
++	    vmax > INT_MAX || !imax || imax > INT_MAX) {
++		ret = -EINVAL;
++		goto out;
++	}
++	spin_lock_irqsave(&tx->lock, flags);
++	if (!IS_ENABLED(CONFIG_BATTERY_QCOM_BATTMGR_UKE_THRESHOLDS) ||
++	    battmgr->variant != QCOM_BATTMGR_UKE)
++		ret = -EOPNOTSUPP;
++	else if (reviewed <= battmgr->control.invalidation_ns ||
++		 instance != tx->instance_ns || generation != tx->generation ||
++		 firmware != tx->firmware_generation || source != tx->source_generation ||
++		 !battmgr->service_up || tx->desynced || tx->suspended || tx->removing)
++		ret = -ESTALE;
++	else if (battmgr->control.owner && task_tgid(current) != battmgr->control.owner &&
++		 now < battmgr->control.expires_ns)
++		ret = -EBUSY;
++	if (!ret) {
++		if (task_tgid(current) != battmgr->control.owner ||
++		    strcmp(battmgr->control.evidence, word[16]) ||
++		    battmgr->control.instance_ns != instance ||
++		    battmgr->control.firmware_generation != firmware ||
++		    battmgr->control.source_generation != source) {
++			battmgr->control.current_admitted = false;
++			battmgr->control.current_verified = false;
++			battmgr->control.verified = false;
++		}
++		put_pid(battmgr->control.owner);
++		battmgr->control.owner = get_task_pid(current, PIDTYPE_TGID);
++		battmgr->control.instance_ns = instance;
++		battmgr->control.firmware_generation = firmware;
++		battmgr->control.source_generation = source;
++		battmgr->control.expires_ns = expires;
++		battmgr->control.reviewed_ns = reviewed;
++		battmgr->control.ack_bytes = ack;
++		battmgr->control.usb_type = usb;
++		battmgr->control.may_enable = enable;
++		battmgr->control.standard_clients = standard;
++		battmgr->control.temperature_min = tmin;
++		battmgr->control.temperature_max = tmax;
++		battmgr->control.voltage_min_uv = vmin;
++		battmgr->control.voltage_max_uv = vmax;
++		battmgr->control.current_abs_max_ua = imax;
++		battmgr->control.fallback_start = resume;
++		strscpy(battmgr->control.evidence, word[16], sizeof(battmgr->control.evidence));
++	}
++	spin_unlock_irqrestore(&tx->lock, flags);
++out:
++	mutex_unlock(&battmgr->lock);
++	return ret ? ret : count;
++}
++static DEVICE_ATTR_WO(uke_charge_lease);
++
++static ssize_t uke_charge_thresholds_store(struct device *dev, struct device_attribute *attr,
++					   const char *buf, size_t count)
++{
++	struct qcom_battmgr *battmgr = dev_get_drvdata(dev);
++	u32 start, end;
++	char data[64], *word[2];
++	int ret;
++
++	if (!capable(CAP_SYS_ADMIN))
++		return -EPERM;
++	if (qcom_battmgr_uke_control_words(buf, count, data, sizeof(data), word, ARRAY_SIZE(word)) ||
++	    kstrtou32(word[0], 10, &start) || kstrtou32(word[1], 10, &end))
++		return -EINVAL;
++	mutex_lock(&battmgr->lock);
++	ret = qcom_battmgr_uke_threshold_pair(battmgr, start, end);
++	battmgr->control.last_error = ret;
++	if (ret)
++		battmgr->control.verified = false;
++	mutex_unlock(&battmgr->lock);
++	if (!ret)
++		power_supply_changed(battmgr->bat_psy);
++	return ret ? ret : count;
++}
++static DEVICE_ATTR_WO(uke_charge_thresholds);
++
++static ssize_t uke_charge_refresh_store(struct device *dev, struct device_attribute *attr,
++					const char *buf, size_t count)
++{
++	struct qcom_battmgr *battmgr = dev_get_drvdata(dev);
++	int ret;
++
++	if (!capable(CAP_SYS_ADMIN))
++		return -EPERM;
++	if (!sysfs_streq(buf, "1"))
++		return -EINVAL;
++	mutex_lock(&battmgr->lock);
++	battmgr->control.verified = false;
++	battmgr->control.current_verified = false;
++	ret = qcom_battmgr_uke_control_guard(battmgr);
++	if (!ret)
++		ret = qcom_battmgr_uke_threshold_read(battmgr);
++	if (!ret && battmgr->control.current_admitted) {
++		ret = qcom_battmgr_uke_current_read(battmgr);
++		if (!ret)
++			qcom_battmgr_uke_current_record(battmgr);
++	}
++	if (!ret)
++		qcom_battmgr_uke_threshold_record(battmgr);
++	if (!ret && !battmgr->control.verified)
++		ret = -ESTALE;
++	battmgr->control.last_error = ret;
++	mutex_unlock(&battmgr->lock);
++	return ret ? ret : count;
++}
++static DEVICE_ATTR_WO(uke_charge_refresh);
++
++static ssize_t uke_charge_current_profile_store(struct device *dev, struct device_attribute *attr,
++					       const char *buf, size_t count)
++{
++	struct qcom_battmgr *battmgr = dev_get_drvdata(dev);
++	struct qcom_battmgr_uke_current_band bands[8];
++	u32 minimum, maximum, budget, n;
++	char data[1024], *word[38];
++	unsigned int i;
++	int words, ret;
++
++	if (!capable(CAP_SYS_ADMIN))
++		return -EPERM;
++	if (!IS_ENABLED(CONFIG_BATTERY_QCOM_BATTMGR_UKE_CURRENT))
++		return -EOPNOTSUPP;
++	words = qcom_battmgr_uke_control_split(buf, count, data, sizeof(data), word, ARRAY_SIZE(word));
++	if (words < 10 || strcmp(word[0], "1") || strlen(word[1]) != 64 ||
++	    strspn(word[1], "0123456789abcdef") != 64 ||
++	    kstrtou32(word[2], 10, &minimum) || kstrtou32(word[3], 10, &maximum) ||
++	    kstrtou32(word[4], 10, &budget) || kstrtou32(word[5], 10, &n) ||
++	    !n || n > ARRAY_SIZE(bands) || words != 6 + 4 * n ||
++	    !minimum || minimum > maximum || maximum > INT_MAX ||
++	    budget < minimum || budget > maximum)
++		return -EINVAL;
++	for (i = 0; i < n; i++) {
++		struct qcom_battmgr_uke_current_band *b = &bands[i];
++
++		if (kstrtos32(word[6 + 4 * i], 10, &b->min_temperature) ||
++		    kstrtos32(word[7 + 4 * i], 10, &b->max_temperature) ||
++		    kstrtou32(word[8 + 4 * i], 10, &b->current_max_ua) ||
++		    kstrtou32(word[9 + 4 * i], 10, &b->voltage_max_uv) ||
++		    b->min_temperature >= b->max_temperature ||
++		    (i && b->min_temperature < bands[i - 1].max_temperature) ||
++		    b->current_max_ua > maximum ||
++		    (b->current_max_ua && b->current_max_ua < minimum))
++			return -EINVAL;
++	}
++	mutex_lock(&battmgr->lock);
++	ret = qcom_battmgr_uke_control_check(battmgr);
++	if (!ret && task_tgid(current) != battmgr->control.owner)
++		ret = -EBUSY;
++	if (!ret && (strcmp(word[1], battmgr->control.evidence) ||
++		     maximum > battmgr->control.current_abs_max_ua))
++		ret = -EINVAL;
++	for (i = 0; !ret && i < n; i++) {
++		if (bands[i].min_temperature < battmgr->control.temperature_min ||
++		    bands[i].max_temperature > battmgr->control.temperature_max ||
++		    bands[i].voltage_max_uv <= battmgr->control.voltage_min_uv ||
++		    bands[i].voltage_max_uv > battmgr->control.voltage_max_uv)
++			ret = -EINVAL;
++	}
++	if (!ret) {
++		memcpy(battmgr->control.bands, bands, n * sizeof(bands[0]));
++		battmgr->control.band_count = n;
++		battmgr->control.current_min_ua = minimum;
++		battmgr->control.current_max_ua = maximum;
++		battmgr->control.source_budget_ua = budget;
++		battmgr->control.current_verified = false;
++		battmgr->control.current_admitted = true;
++	}
++	mutex_unlock(&battmgr->lock);
++	return ret ? ret : count;
++}
++static DEVICE_ATTR_WO(uke_charge_current_profile);
++
++static ssize_t uke_charge_current_ua_store(struct device *dev, struct device_attribute *attr,
++					  const char *buf, size_t count)
++{
++	struct qcom_battmgr *battmgr = dev_get_drvdata(dev);
++	u32 value;
++	int ret;
++
++	if (!capable(CAP_SYS_ADMIN))
++		return -EPERM;
++	if (kstrtou32(buf, 10, &value) || !value || value > INT_MAX)
++		return -EINVAL;
++	mutex_lock(&battmgr->lock);
++	ret = qcom_battmgr_uke_current_apply(battmgr, value);
++	battmgr->control.last_error = ret;
++	mutex_unlock(&battmgr->lock);
++	if (!ret)
++		power_supply_changed(battmgr->bat_psy);
++	return ret ? ret : count;
++}
++static DEVICE_ATTR_WO(uke_charge_current_ua);
++
++#endif
+--- /dev/null
++++ b/Documentation/ABI/testing/sysfs-driver-qcom-battmgr-uke-control
+@@ -0,0 +1,104 @@
++What:           /sys/bus/auxiliary/devices/*/uke_charge_state
++Date:           October 2026
++Contact:        Uke Linux maintainers
++Description:
++                Experimental source candidate for xiaomi,uke only. No firmware
++                I/O. Space-separated version-1 decimal fields (27 tokens):
++                version threshold_compiled lease_live transaction_generation
++                firmware_generation source_generation driver_instance_ns
++                lease_expires_ns feature_enabled raw_start raw_end
++                threshold_readback_valid threshold_readback_ns last_errno
++                standard_clients profile_sha256 current_compiled
++                current_admitted reported_fcc_ua current_readback_valid
++                current_readback_ns battery_temperature_deciC battery_voltage_uv
++                battery_current_ua measurement_begin_ns measurement_valid
++                lifecycle_invalidation_ns
++
++                SHA256 is 64 lowercase hexadecimal characters, or 'none'.
++                Times use CLOCK_BOOTTIME. Generations are local epochs, not
++                remote transaction IDs or authenticated firmware identities.
++                Current is battery-side, Linux positive while charging.
++                Readback validity proves a fresh setting report only, never
++                effective current, electrical cutoff, safety or persistence.
++                Measurement age is from the beginning of the complete guard.
++                Standard power_supply properties are cached only, return
++                -ENODATA without a valid admitted standard-client lease, and
++                require the dedicated kernel options (both default n).
++
++What:           /sys/bus/auxiliary/devices/*/uke_charge_lease
++Date:           October 2026
++Contact:        Uke Linux maintainers
++Description:
++                CAP_SYS_ADMIN, write only, no firmware I/O. Exact grammar:
++                1 instance generation firmware source expires ack_bytes usb_type
++                  may_change_feature standard_clients min_deciC max_deciC
++                  min_battery_uv max_battery_uv abs_battery_current_ua
++                  cap_resume_percent profile_sha256 reviewed_boottime_ns
++
++                The 18 tokens are on one line. Values must match current driver
++                epochs. Lease <=30 seconds; owner is a referenced TGID (not its
++                reusable numeric PID). Other owners cannot renew a live lease.
++                Only explicitly admitted root standard clients can borrow it.
++                Reviewed time must follow the most recent suspend/PDR
++                invalidation; old evidence cannot auto-resume after suspend.
++                Source changes require matching fresh per-boot attestation.
++                Guards and ACK length require exact reviewed firmware evidence.
++                No shipped profile supplies qualified limits or identities.
++                Write 'revoke' by the owner to remove software permission.
++                Revocation, process failure and expiry do NOT undo a setting,
++                restore OEM defaults or physically stop charging.
++
++What:           /sys/bus/auxiliary/devices/*/uke_charge_thresholds
++Date:           October 2026
++Contact:        Uke Linux maintainers
++Description:
++                CAP_SYS_ADMIN plus live qualified lease; write START END with
++                0<=START<END<=100. Fresh health/presence/V/I/T and online USB
++                type must satisfy the reviewed profile. Reads firmware feature
++                enable/start/end (wire25/26/27). If explicitly admitted, feature
++                enable uses wire25 SET. Opcode0x48 carries end and end-start.
++                Exact ACK envelope and subsequent exact GETs are mandatory.
++                Any transport/generation/readback error propagates. No replay.
++                Pair0/100 disables the threshold feature through wire25; it
++                does not enable a zero-start hysteresis or assert cutoff.
++                The two standard charge_control_*_threshold attributes use
++                the same guarded implementation but remain separate writes.
++                A failure of the second standard write may leave the first
++                applied. No transactional rollback or persistence is promised.
++
++What:           /sys/bus/auxiliary/devices/*/uke_charge_refresh
++Date:           October 2026
++Contact:        Uke Linux maintainers
++Description:
++                CAP_SYS_ADMIN plus live lease. Write1 for guarded firmware
++                GETs and cached readback renewal; no firmware SET. It reads FCC
++                wire12 only after explicit current-envelope admission. Errors
++                invalidate reported freshness and propagate without retry.
++
++What:           /sys/bus/auxiliary/devices/*/uke_charge_current_profile
++Date:           October 2026
++Contact:        Uke Linux maintainers
++Description:
++                CAP_SYS_ADMIN and exact lease-owner TGID only; no firmware I/O.
++                Requires CONFIG_BATTERY_QCOM_BATTMGR_UKE_CURRENT. Grammar:
++                1 profile_sha256 min_ua max_ua source_budget_battery_ua band_count
++                  [min_deciC max_deciC max_ua max_battery_uv]...
++                One line, 1..8 ascending nonoverlapping half-open bands inside
++                the lease limits. All positive FCC limits use microamperes;
++                max_ua=0 for a band inhibits software changes, not charging.
++                Source budget is a qualified BATTERY-SIDE budget after losses
++                and system load, never a copied USB input-current limit.
++
++What:           /sys/bus/auxiliary/devices/*/uke_charge_current_ua
++Date:           October 2026
++Contact:        Uke Linux maintainers
++Description:
++                CAP_SYS_ADMIN plus live current admission. Positive uA only.
++                Fresh guard, matching thermal band, battery voltage, source
++                budget and pack limits apply before wire12 SET; exact wire12
++                GET readback follows. An increase while discharging is denied.
++                Standard constant_charge_current uses this implementation.
++                No wire10 thermal-level setter, negative/UINT_MAX reset, voltage,
++                Xiaomi raw property, USB current, PD/QC/PPS/EPR negotiation or
++                factory/calibration API is exposed. Firmware owns CV and all
++                autonomous protections. This driver is not a real-time cutoff.

@@ -223,7 +223,7 @@
     },
     {
       "path": "patches/7.2.11/0054-uke-usb-budget-generation.patch",
-      "sha256": "aa02f97c0449f924c2acd372f59298a239371895ad82a8c4e941831db6bc1657"
+      "sha256": "6809439941745e1fa7a55f8304565e83094d8beebe5e1a7917847db5c2cb5b2b"
     },
     {
       "path": "patches/7.2.11/0055-usb-ucsi-glink-packet-lifecycle.patch",
@@ -334,8 +334,72 @@
       "sha256": "f2970405e9a026a387aee2e407a4fc61a13ca9462a6cb17aaffe2570b551bc22"
     },
     {
-      "path": "patches/7.2.11/0082-uke-perceptual-normal-brightness.patch",
-      "sha256": "79e9ea261298f13c2c606e0fca554cf7d54f8dec816f83a528208bd88b168cbe"
+      "path": "patches/7.2.11/0082-uke-moisture-and-thermal-protection.patch",
+      "sha256": "c6ed51e70662003a478f43f79a95c7f4e5d13978184136c1e16c2ce7e1c1f473"
+    },
+    {
+      "path": "patches/7.2.11/0083-usb-ucsi-cached-transport-state.patch",
+      "sha256": "3edeed88d61aea35060b2e378d1ae695e75e042399190ede0e7d5da825ac4383"
+    },
+    {
+      "path": "patches/7.2.11/0084-audioreach-basic-error-responses.patch",
+      "sha256": "52d03049b4962d36c33b38d1d3b8982d7dc97688241d1adcf7893e2ac18aa7f0"
+    },
+    {
+      "path": "patches/7.2.11/0085-q6apm-preserve-unmap-result-and-buffer-type.patch",
+      "sha256": "d16c1823ea21bc4b0f78c11d6594c4aad7b7c9953ae3bfcc1432bcaa6adca520"
+    },
+    {
+      "path": "patches/7.2.11/0086-q6prm-correlate-resource-transactions.patch",
+      "sha256": "3a18ca0bbbe26bacf5867e3112696a6a411b0cb39e47a867fecd65170d6bb339"
+    },
+    {
+      "path": "patches/7.2.11/0087-q6apm-bound-graph-events-and-buffer-tokens.patch",
+      "sha256": "503c06d7b2442ae9405630124d7074e435fd095ca39f63d1a85f882a77816ada"
+    },
+    {
+      "path": "patches/7.2.11/0088-gpr-drain-dynamic-port-callbacks-before-free.patch",
+      "sha256": "4c5e2a1416c0f2c7e84a0cece46c1be7049b2c375443e71174c28755c63d1e0a"
+    },
+    {
+      "path": "patches/7.2.11/0089-apr-detach-rx-batch-under-queue-lock.patch",
+      "sha256": "6e191a09de60391f9e8d924a2ab0fceecb3f450d412fcb1ca690eeaad95aa891"
+    },
+    {
+      "path": "patches/7.2.11/0090-q6apm-use-sleepable-compressed-stream-lock.patch",
+      "sha256": "c903bd888bcba2d29ee36f19dfb697dc7085012adf48daa249b74e2585d08dd5"
+    },
+    {
+      "path": "patches/7.2.11/0091-q6apm-bound-and-serialize-buffer-submissions.patch",
+      "sha256": "0b11401e75101b3bac81117ae8fcce41dc3a8c6384d54e3ba0bface787b21bea"
+    },
+    {
+      "path": "patches/7.2.11/0092-q6apm-validate-dma-completion-results.patch",
+      "sha256": "dd7b0a7ce6c2d769990e97801192e175e0805f90915613075519b781b32f3ed4"
+    },
+    {
+      "path": "patches/7.2.11/0093-q6apm-qualify-graph-publication-and-references.patch",
+      "sha256": "56a64a38fd961be8601c9f3dbc5260ca4b638b50c0b82bcf26a8ca41d5fe03d1"
+    },
+    {
+      "path": "patches/7.2.11/0094-gpr-quiesce-native-audio-services-before-teardown.patch",
+      "sha256": "897991df8cb126124f8928689b23b08bbf453598211adfb6a60573d8aeede07b"
+    },
+    {
+      "path": "patches/7.2.11/0095-bindings-sm7675-llcc.patch",
+      "sha256": "ef8c4eb4c8b042cea2beeffceb42aa2eff945b5fa85ad075f58f4a94d88725f0"
+    },
+    {
+      "path": "patches/7.2.11/0096-sm7675-llcc-policy-and-resource-guards.patch",
+      "sha256": "fcd5d5c4251f9b2e8e22a6dceb90662f5f991333745ea40730921ef97d951b6e"
+    },
+    {
+      "path": "patches/7.2.11/0097-adreno-order-native-llcc-supplier.patch",
+      "sha256": "3c04845b4c143bcab0dbd87d9f48fd4cd54abb15818cceae93529fa69bcf8303"
+    },
+    {
+      "path": "patches/7.2.11/0098-uke-confirm-usb-sdp-adapter.patch",
+      "sha256": "b6562d35915caf0bfd7f3c9304597d12e8caaa7e79012992aac4936d3f6a6650"
     }
   ],
   "dtb": "qcom/sm7675-xiaomi-uke.dtb",

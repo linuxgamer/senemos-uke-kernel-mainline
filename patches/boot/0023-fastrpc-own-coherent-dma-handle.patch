@@ -1,0 +1,121 @@
+From: Uke Linux contributors <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] misc: fastrpc: own coherent DMA handles beyond creator close
+
+Port the reviewed project correction from a0c6b85 to the signed Linux 7.3
+source. Retain Linux GPL attribution and the exact native APIs. The old
+7.2.12 result did not establish inclusion in this patch queue.
+
+Compared with Uke OEM 5712080a4b0c0b1a879e6d145c601c649ddaddfd, OnePlus
+fc892483f1d61f245924681eb5abd563564d9cba and Palawan
+0d9f7fdf720ae9f4ecfbee4fadaf1e3b5c442e95. Source/host checks do not
+qualify CDSP firmware startup, DMA quiescence or physical compute.
+
+--- a/drivers/misc/fastrpc.c
++++ b/drivers/misc/fastrpc.c
+@@ -220,11 +220,11 @@
+ };
+ 
+ struct fastrpc_buf {
+-	struct fastrpc_user *fl;
+ 	struct dma_buf *dmabuf;
+ 	struct device *dev;
+ 	void *virt;
+ 	dma_addr_t dma_addr;
++	dma_addr_t dma_handle;
+ 	u64 size;
+ 	/* Lock for dma buf attachments */
+ 	struct mutex lock;
+@@ -357,14 +357,6 @@
+ 	struct kref refcount;
+ };
+ 
+-/* Extract SMMU PA from consolidated IOVA */
+-static inline dma_addr_t fastrpc_ipa_to_dma_addr(struct fastrpc_channel_ctx *cctx, dma_addr_t iova)
+-{
+-	if (!cctx->soc_data->sid_pos)
+-		return 0;
+-	return iova & GENMASK_ULL(cctx->soc_data->sid_pos - 1, 0);
+-}
+-
+ /*
+  * Prepare the consolidated iova to send to DSP by prepending the SID
+  * to smmu PA at the appropriate position
+@@ -469,11 +461,13 @@
+ 		return;
+ 
+ 	dma_free_coherent(buf->dev, buf->size, buf->virt,
+-			  fastrpc_ipa_to_dma_addr(buf->fl->cctx, buf->dma_addr));
++			  buf->dma_handle);
++	mutex_destroy(&buf->lock);
++	put_device(buf->dev);
+ 	kfree(buf);
+ }
+ 
+-static int __fastrpc_buf_alloc(struct fastrpc_user *fl, struct device *dev,
++static int __fastrpc_buf_alloc(struct device *dev,
+ 			     u64 size, struct fastrpc_buf **obuf)
+ {
+ 	struct fastrpc_buf *buf;
+@@ -486,21 +480,23 @@
+ 	INIT_LIST_HEAD(&buf->node);
+ 	mutex_init(&buf->lock);
+ 
+-	buf->fl = fl;
+ 	buf->virt = NULL;
+ 	buf->dma_addr = 0;
+ 	buf->size = size;
+-	buf->dev = dev;
++	buf->dev = get_device(dev);
+ 	buf->raddr = 0;
+ 
+-	buf->virt = dma_alloc_coherent(dev, buf->size, &buf->dma_addr,
++	buf->virt = dma_alloc_coherent(dev, buf->size, &buf->dma_handle,
+ 				       GFP_KERNEL);
+ 	if (!buf->virt) {
+ 		mutex_destroy(&buf->lock);
++		put_device(buf->dev);
+ 		kfree(buf);
+ 		return -ENOMEM;
+ 	}
+ 
++	/* DMA API users may outlive the creating FastRPC file. */
++	buf->dma_addr = buf->dma_handle;
+ 	*obuf = buf;
+ 
+ 	return 0;
+@@ -512,7 +508,7 @@
+ 	int ret;
+ 	struct fastrpc_buf *buf;
+ 
+-	ret = __fastrpc_buf_alloc(fl, dev, size, obuf);
++	ret = __fastrpc_buf_alloc(dev, size, obuf);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -529,7 +525,7 @@
+ {
+ 	struct device *rdev = &fl->cctx->rpdev->dev;
+ 
+-	return  __fastrpc_buf_alloc(fl, rdev, size, obuf);
++	return __fastrpc_buf_alloc(rdev, size, obuf);
+ }
+ 
+ static void fastrpc_channel_ctx_free(struct kref *ref)
+@@ -810,7 +806,7 @@
+ 		return -ENOMEM;
+ 
+ 	ret = dma_get_sgtable(buffer->dev, &a->sgt, buffer->virt,
+-			      fastrpc_ipa_to_dma_addr(buffer->fl->cctx, buffer->dma_addr),
++			      buffer->dma_handle,
+ 			      buffer->size);
+ 	if (ret < 0) {
+ 		dev_err(buffer->dev, "failed to get scatterlist from DMA API\n");
+@@ -860,7 +856,7 @@
+ 	dma_resv_assert_held(dmabuf->resv);
+ 
+ 	return dma_mmap_coherent(buf->dev, vma, buf->virt,
+-				 fastrpc_ipa_to_dma_addr(buf->fl->cctx, buf->dma_addr), size);
++				 buf->dma_handle, size);
+ }
+ 
+ static const struct dma_buf_ops fastrpc_dma_buf_ops = {

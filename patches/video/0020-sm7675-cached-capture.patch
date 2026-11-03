@@ -1,0 +1,31 @@
+Subject: [PATCH] media: iris: cache SM7675 decoder CAPTURE MMAP buffers
+
+Use the existing vb2 DMA-contiguous streaming allocation and cache-maintenance
+path for native decoder MMAP output. Shared exported client surfaces retain
+their own allocation policy. Imported DMA-BUFs, compressed input, encoders and
+other platforms keep their existing behavior. No cache synchronization is
+skipped.
+
+The generic allocator choice follows the cacheable CAPTURE experiment in
+CFM880/nabu-iris 6323e3184ec6156e44f1fe894cbcc221341cb38a, iris_vb2.c.
+SM8150/HFI Gen1 and SM7675/HFI Gen2 are different platforms: no IOVA hole,
+firmware packet, register, frequency or board value is ported. Uke uses
+upstream vb2's existing DMA_FROM_DEVICE direction and paired prepare/finish.
+The standalone queue-setup fixture covers import, encoder and legacy limits;
+physical cache integrity and sustained Chrome throughput remain separate gates.
+
+Link: https://github.com/CFM880/nabu-iris/blob/6323e3184ec6156e44f1fe894cbcc221341cb38a/kernel-overlay/drivers/media/platform/qcom/iris/iris_vb2.c
+
+--- a/drivers/media/platform/qcom/iris/iris_vb2.c
++++ b/drivers/media/platform/qcom/iris/iris_vb2.c
+@@ -117,6 +117,10 @@
+ 
+ 	core = inst->core;
+ 	f = V4L2_TYPE_IS_OUTPUT(q->type) ? inst->fmt_src : inst->fmt_dst;
++	/* Use vb2's streaming DMA cache maintenance for CPU-readable output. */
++	if (core->iris_platform_data == &sm7675_data && inst->domain == DECODER &&
++	    V4L2_TYPE_IS_CAPTURE(q->type))
++		q->non_coherent_mem = q->memory == VB2_MEMORY_MMAP;
+ 
+ 	if (*num_planes) {
+ 		if (*num_planes != f->fmt.pix_mp.num_planes ||

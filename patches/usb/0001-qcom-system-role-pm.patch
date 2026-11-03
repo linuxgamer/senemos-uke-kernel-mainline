@@ -1,0 +1,131 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] usb: dwc3: qcom: serialize system sleep and defer role MMIO
+
+Adapt Vladyslav Tymoshchuk's 22 October 2026 v2 proposal for the shared
+Qualcomm DWC3 glue. A UCSI role caller need not be frozen during system
+sleep; runtime-PM success alone does not restore system-suspended clocks.
+Hold one mutex across the complete system sleep callbacks and defer the
+last VBUS override until glue and core resume have completed. Preserve
+resume errors and the existing Uke full-profile next-role policy.
+
+Source: https://lkml.iu.edu/hypermail/linux/kernel/2610.2/17332.html
+Base: Linux 7.3.1 plus the exact release-116 retained native adaptation
+License: GPL-2.0-only
+
+The reported SM8750 reset is reference-device evidence. This correction
+has no physical Uke acceptance and does not prove the cause of the live
+whole-host removal observed on release 116.
+
+--- a/drivers/usb/dwc3/dwc3-qcom.c
++++ b/drivers/usb/dwc3/dwc3-qcom.c
+@@ -10,6 +10,7 @@
+ #include <linux/irq.h>
+ #include <linux/of_clk.h>
+ #include <linux/module.h>
++#include <linux/mutex.h>
+ #include <linux/kernel.h>
+ #include <linux/interconnect.h>
+ #include <linux/platform_device.h>
+@@ -90,6 +91,9 @@
+ 	struct icc_path		*icc_path_apps;
+ 
+ 	enum usb_role		current_role;
++	struct mutex role_lock;
++	bool vbus_override_pending;
++	bool vbus_override;
+ };
+ 
+ #define to_dwc3_qcom(d) container_of((d), struct dwc3_qcom, dwc)
+@@ -577,29 +581,35 @@
+ static void dwc3_qcom_set_role_notifier(struct dwc3 *dwc, enum usb_role next_role)
+ {
+ 	struct dwc3_qcom *qcom = to_dwc3_qcom(dwc);
++	bool enable;
++
++	guard(mutex)(&qcom->role_lock);
+ 
+ 	if (qcom->current_role == next_role)
+ 		return;
+ 
++	enable = qcom->uke_typec ? next_role == USB_ROLE_DEVICE :
++		qcom->current_role != USB_ROLE_DEVICE;
++
++	/* UCSI can change roles before system resume restores the glue clocks. */
++	if (qcom->pm_suspended) {
++		qcom->vbus_override_pending = true;
++		qcom->vbus_override = enable;
++		qcom->current_role = next_role;
++		return;
++	}
++
+ 	if (pm_runtime_resume_and_get(qcom->dev)) {
+ 		dev_dbg(qcom->dev, "Failed to resume device\n");
+ 		return;
+ 	}
+ 
+-	if (qcom->uke_typec)
+-		dwc3_qcom_vbus_override_enable(qcom, next_role == USB_ROLE_DEVICE);
+-	else if (qcom->current_role == USB_ROLE_DEVICE)
+-		dwc3_qcom_vbus_override_enable(qcom, false);
+-	else if (qcom->current_role != USB_ROLE_DEVICE)
+-		dwc3_qcom_vbus_override_enable(qcom, true);
++	qcom->vbus_override_pending = false;
++	dwc3_qcom_vbus_override_enable(qcom, enable);
+ 
+ 	pm_runtime_mark_last_busy(qcom->dev);
+ 	pm_runtime_put_sync(qcom->dev);
+ 
+-	/*
+-	 * Current role changes via usb_role_switch_set_role callback protected
+-	 * internally by mutex lock.
+-	 */
+ 	qcom->current_role = next_role;
+ }
+ 
+@@ -685,6 +695,10 @@
+ 		return -ENOMEM;
+ 
+ 	qcom->dev = &pdev->dev;
++	ret = devm_mutex_init(dev, &qcom->role_lock);
++	if (ret)
++		return ret;
++
+ 	qcom->uke_typec = of_device_is_compatible(dev->of_node, "qcom,sm7675-dwc3-typec");
+ 	qcom->uke = qcom->uke_typec || of_device_is_compatible(dev->of_node, "qcom,sm7675-dwc3");
+ 	if (qcom->uke_typec && (usb_get_dr_mode(dev) != USB_DR_MODE_OTG ||
+@@ -827,6 +841,8 @@
+ 	bool wakeup = device_may_wakeup(dev);
+ 	int ret;
+ 
++	guard(mutex)(&qcom->role_lock);
++
+ 	ret = dwc3_pm_suspend(&qcom->dwc);
+ 	if (ret)
+ 		return ret;
+@@ -847,6 +863,8 @@
+ 	bool wakeup = device_may_wakeup(dev);
+ 	int ret;
+ 
++	guard(mutex)(&qcom->role_lock);
++
+ 	ret = dwc3_qcom_resume(qcom, wakeup);
+ 	if (ret)
+ 		return ret;
+@@ -854,10 +872,14 @@
+ 	qcom->pm_suspended = false;
+ 
+ 	ret = dwc3_pm_resume(&qcom->dwc);
+-	if (ret)
+-		return ret;
+ 
+-	return 0;
++	/* Core resume can restore an older gadget VBUS override. */
++	if (qcom->vbus_override_pending) {
++		dwc3_qcom_vbus_override_enable(qcom, qcom->vbus_override);
++		qcom->vbus_override_pending = false;
++	}
++
++	return ret;
+ }
+ 
+ static void dwc3_qcom_complete(struct device *dev)

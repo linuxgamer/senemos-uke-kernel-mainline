@@ -109,7 +109,7 @@ static struct device_node *of_graph_get_remote_node(struct device_node *node,int
 static bool of_device_is_compatible(struct device_node *node,const char *name) {
     assert(node==&panel_node);
     assert(!strcmp(name,"xiaomi,o82-36-02-0a") || !strcmp(name,"xiaomi,o82-42-02-0b"));
-    return panel_o82&&(!strcmp(name,"xiaomi,o82-36-02-0a")||panel_pb);
+    return panel_o82&&!strcmp(name,panel_pb ? "xiaomi,o82-42-02-0b":"xiaomi,o82-36-02-0a");
 }
 static bool of_property_read_bool(struct device_node *node,const char *name) {
     assert(node==&panel_node);
@@ -537,7 +537,7 @@ int main(void) {
         case 6:schedule_ctrl2[1]=1;break;
         case 7:initial_busy_host=0;break;
         case 8:initial120=false;break;
-        case 9:panel_pb=false;break;
+        case 9:panel_o82=false;break;
         case 10:cfg.minor=1;break;
         case 11:hosts[1].cphy_mode=true;break;
         case 12:hosts[0].vm=NULL;break;
@@ -660,7 +660,7 @@ int main(void) {
             case 7:hosts[1].mode_flags=0;break;
             case 8:hosts[0].format=0;break;
             case 9:hosts[1].mode=NULL;break;
-            case 10:panel_pb=false;break;
+            case 10:panel_o82=false;break;
             case 11:initial120=false;break;
             case 12:panel_dsi.host=&hosts[1].base;break;
             }
@@ -1002,7 +1002,7 @@ int main(void) {
     dsi_err_worker(&hosts[0].err_work);
     assert(outer_locks==1 && !hosts[0].cmd_mutex && error_irq_enables==1 && !writes_count);
 
-    /* Exact OEM totals and TP-FPS bytes must reach both staged links in all modes. */
+    /* Exact OEM totals and TP-FPS bytes must reach both staged links for each supplier. */
     static const struct {int clock,htotal,vtotal,group;u32 total;} timing[]={
         {967428,3490,2310,0,0x0905023b}, {967428,3490,4620,0,0x120b023b},
         {1097712,3300,2310,1,0x090501dc}, {804988,3872,2310,2,0x090502fa},
@@ -1010,6 +1010,7 @@ int main(void) {
         {804988,3872,6930,2,0x1b1102fa},
     };
     struct drm_dsc_config dsc={10,8<<4,800,24};
+    for(unsigned int supplier=0;supplier<2;supplier++) {
     for(unsigned int t=0;t<ARRAY_SIZE(timing);t++) {
         struct drm_display_mode modes[2];
         modes[0]=(struct drm_display_mode){.hdisplay=3200,.vdisplay=2136,
@@ -1023,7 +1024,7 @@ int main(void) {
             selected[3][1]=timing[t].group==1 ? 0:0x80;
         }
         for(int trial=0;trial<5;trial++) {
-            admit_scheduled();initial120=false;refresh_modes=true;hosts[1].cmd_mutex=0;
+            admit_scheduled();panel_pb=supplier;initial120=false;refresh_modes=true;hosts[1].cmd_mutex=0;
             for(int id=0;id<2;id++) {
                 hosts[id].mode=&modes[id];hosts[id].dsc=&dsc;
                 video_total[id]=timing[t].total;
@@ -1073,7 +1074,7 @@ int main(void) {
             u8 selected[4][2];memcpy(selected,tp_payloads,sizeof(selected));
             if(timing[to].group) {selected[2][1]=0;selected[3][1]=timing[to].group==1 ? 0:0x80;}
             for(unsigned int fault=0;fault<5;fault++) {
-                admit_scheduled();initial120=false;refresh_modes=true;hosts[1].cmd_mutex=0;
+                admit_scheduled();panel_pb=supplier;initial120=false;refresh_modes=true;hosts[1].cmd_mutex=0;
                 for(int id=0;id<2;id++) {
                     hosts[id].mode=&old;hosts[id].dsc=&dsc;
                     hosts[id].uke_dfps_mode=&next;hosts[id].uke_dfps_staged=true;
@@ -1097,7 +1098,7 @@ int main(void) {
             static const u8 clear_payload[3][2]={{0xff,0x10},{0xfb,0x01},{0xb2,0x80}};
             struct mipi_dsi_msg clear[3];
             for(unsigned int fault=0;fault<5;fault++) {
-                admit_scheduled();initial120=false;refresh_modes=true;hosts[1].cmd_mutex=0;
+                admit_scheduled();panel_pb=supplier;initial120=false;refresh_modes=true;hosts[1].cmd_mutex=0;
                 for(int id=0;id<2;id++) {
                     hosts[id].mode=&old;hosts[id].dsc=&dsc;
                     hosts[id].uke_dfps_mode=&next;video_total[id]=timing[from].total;
@@ -1116,6 +1117,7 @@ int main(void) {
                 assert(!hosts[0].cmd_mutex&&!hosts[1].cmd_mutex&&!hosts[0].dev_mutex&&!hosts[1].dev_mutex);
             }
         }
+    }
 }
 C
 } >> "$work/check.c"

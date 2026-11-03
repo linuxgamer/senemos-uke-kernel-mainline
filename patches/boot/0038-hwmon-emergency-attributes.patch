@@ -1,0 +1,247 @@
+From 8184f107c1fe860a93ece55d6d5f7cc25af276b9 Mon Sep 17 00:00:00 2001
+From: Guenter Roeck <linux@roeck-us.net>
+Date: Thu, 13 Aug 2026 14:14:33 -0700
+Subject: [PATCH] hwmon: (core) Add support for currX_emergency and
+ inX_[l]emergency attributes
+
+Some hardware monitoring chips support three alarm levels for current and
+voltage high limits, and three alarm levels for voltage low limits.
+Add support for currX_emergency, inX_emergency, and inX_lemergency
+attributes together with the appropriate alarm attributes to support such
+chips.
+
+Cc: Manaf Meethalavalappu Pallikunhi <manaf.pallikunhi@oss.qualcomm.com>
+Tested-by: Manaf Meethalavalappu Pallikunhi <manaf.pallikunhi@oss.qualcomm.com>
+Signed-off-by: Guenter Roeck <linux@roeck-us.net>
+Link: https://patch.msgid.link/20260813211433.879638-1-linux@roeck-us.net
+Signed-off-by: Guenter Roeck <linux@roeck-us.net>
+---
+ Documentation/ABI/testing/sysfs-class-hwmon | 36 +++++++++++++++++++++
+ Documentation/hwmon/sysfs-interface.rst     | 12 +++++++
+ drivers/hwmon/hwmon.c                       |  6 ++++
+ include/linux/hwmon.h                       | 12 +++++++
+ 4 files changed, 66 insertions(+)
+
+diff --git a/Documentation/ABI/testing/sysfs-class-hwmon b/Documentation/ABI/testing/sysfs-class-hwmon
+index b185bdfc7..34df6d7bd 100644
+--- a/Documentation/ABI/testing/sysfs-class-hwmon
++++ b/Documentation/ABI/testing/sysfs-class-hwmon
+@@ -61,6 +61,18 @@ Description:
+ 		take drastic action such as power down or reset. At the very
+ 		least, it should report a fault.
+ 
++What:		/sys/class/hwmon/hwmonX/inY_lemergency
++Description:
++		Voltage emergency min value.
++
++		Unit: millivolt
++
++		RW
++
++		If voltage drops to or below this limit, the system is
++		expected to take drastic action such as immediate power
++		down or reset. At the very least, it should report a fault.
++
+ What:		/sys/class/hwmon/hwmonX/inY_max
+ Description:
+ 		Voltage max value.
+@@ -81,6 +93,18 @@ Description:
+ 		take drastic action such as power down or reset. At the very
+ 		least, it should report a fault.
+ 
++What:		/sys/class/hwmon/hwmonX/inY_emergency
++Description:
++		Voltage emergency max value.
++
++		Unit: millivolt
++
++		RW
++
++		If voltage reaches or exceeds this limit, the system is expected
++		to take drastic action such as immediate power down or reset.
++		At the very least, it should report a fault.
++
+ What:		/sys/class/hwmon/hwmonX/inY_input
+ Description:
+ 		Voltage input value.
+@@ -647,6 +671,18 @@ Description:
+ 
+ 		RW
+ 
++What:		/sys/class/hwmon/hwmonX/currY_emergency
++Description:
++		Current emergency high value.
++
++		Unit: milliampere
++
++		RW
++
++		If a current reaches or exceeds this limit, the system is
++		expected to take drastic action such as immediate power down
++		or reset. At the very least, it should report a fault.
++
+ What:		/sys/class/hwmon/hwmonX/currY_input
+ Description:
+ 		Current input value
+diff --git a/Documentation/hwmon/sysfs-interface.rst b/Documentation/hwmon/sysfs-interface.rst
+index 94e1bbce1..f7ab5d5c4 100644
+--- a/Documentation/hwmon/sysfs-interface.rst
++++ b/Documentation/hwmon/sysfs-interface.rst
+@@ -121,12 +121,18 @@ Voltages
+ `in[0-*]_lcrit`
+ 		Voltage critical min value.
+ 
++`in[0-*]_lemergency`
++		Voltage emergency min value.
++
+ `in[0-*]_max`
+ 		Voltage max value.
+ 
+ `in[0-*]_crit`
+ 		Voltage critical max value.
+ 
++`in[0-*]_emergency`
++		Voltage emergency max value.
++
+ `in[0-*]_input`
+ 		Voltage input value.
+ 
+@@ -332,6 +338,9 @@ Currents
+ `curr[1-*]_crit`
+ 		Current critical high value.
+ 
++`curr[1-*]_emergency`
++		Current emergency high value.
++
+ `curr[1-*]_input`
+ 		Current input value.
+ 
+@@ -527,12 +536,15 @@ implementation.
+ +-------------------------------+-----------------------+
+ | **`in[0-*]_min_alarm`,	| Limit alarm		|
+ | `in[0-*]_max_alarm`,		|			|
++| `in[0-*]_lemergency_alarm`,	|			|
+ | `in[0-*]_lcrit_alarm`,	|   - 0: no alarm	|
+ | `in[0-*]_crit_alarm`,		|   - 1: alarm		|
++| `in[0-*]_emergency_alarm`,	|			|
+ | `curr[1-*]_min_alarm`,	|			|
+ | `curr[1-*]_max_alarm`,	| RO			|
+ | `curr[1-*]_lcrit_alarm`,	|			|
+ | `curr[1-*]_crit_alarm`,	|			|
++| `curr[1-*]_emergency_alarm`,	|			|
+ | `power[1-*]_cap_alarm`,	|			|
+ | `power[1-*]_max_alarm`,	|			|
+ | `power[1-*]_crit_alarm`,	|			|
+diff --git a/drivers/hwmon/hwmon.c b/drivers/hwmon/hwmon.c
+index 10d2df3ef..3f32b0e83 100644
+--- a/drivers/hwmon/hwmon.c
++++ b/drivers/hwmon/hwmon.c
+@@ -625,6 +625,8 @@ static const char * const hwmon_in_attr_templates[] = {
+ 	[hwmon_in_max] = "in%d_max",
+ 	[hwmon_in_lcrit] = "in%d_lcrit",
+ 	[hwmon_in_crit] = "in%d_crit",
++	[hwmon_in_lemergency] = "in%d_lemergency",
++	[hwmon_in_emergency] = "in%d_emergency",
+ 	[hwmon_in_average] = "in%d_average",
+ 	[hwmon_in_lowest] = "in%d_lowest",
+ 	[hwmon_in_highest] = "in%d_highest",
+@@ -635,6 +637,8 @@ static const char * const hwmon_in_attr_templates[] = {
+ 	[hwmon_in_max_alarm] = "in%d_max_alarm",
+ 	[hwmon_in_lcrit_alarm] = "in%d_lcrit_alarm",
+ 	[hwmon_in_crit_alarm] = "in%d_crit_alarm",
++	[hwmon_in_lemergency_alarm] = "in%d_lemergency_alarm",
++	[hwmon_in_emergency_alarm] = "in%d_emergency_alarm",
+ 	[hwmon_in_rated_min] = "in%d_rated_min",
+ 	[hwmon_in_rated_max] = "in%d_rated_max",
+ 	[hwmon_in_beep] = "in%d_beep",
+@@ -648,6 +652,7 @@ static const char * const hwmon_curr_attr_templates[] = {
+ 	[hwmon_curr_max] = "curr%d_max",
+ 	[hwmon_curr_lcrit] = "curr%d_lcrit",
+ 	[hwmon_curr_crit] = "curr%d_crit",
++	[hwmon_curr_emergency] = "curr%d_emergency",
+ 	[hwmon_curr_average] = "curr%d_average",
+ 	[hwmon_curr_lowest] = "curr%d_lowest",
+ 	[hwmon_curr_highest] = "curr%d_highest",
+@@ -658,6 +663,7 @@ static const char * const hwmon_curr_attr_templates[] = {
+ 	[hwmon_curr_max_alarm] = "curr%d_max_alarm",
+ 	[hwmon_curr_lcrit_alarm] = "curr%d_lcrit_alarm",
+ 	[hwmon_curr_crit_alarm] = "curr%d_crit_alarm",
++	[hwmon_curr_emergency_alarm] = "curr%d_emergency_alarm",
+ 	[hwmon_curr_rated_min] = "curr%d_rated_min",
+ 	[hwmon_curr_rated_max] = "curr%d_rated_max",
+ 	[hwmon_curr_beep] = "curr%d_beep",
+diff --git a/include/linux/hwmon.h b/include/linux/hwmon.h
+index dd713e193..a3a7d27f3 100644
+--- a/include/linux/hwmon.h
++++ b/include/linux/hwmon.h
+@@ -134,6 +134,8 @@ enum hwmon_in_attributes {
+ 	hwmon_in_max,
+ 	hwmon_in_lcrit,
+ 	hwmon_in_crit,
++	hwmon_in_lemergency,
++	hwmon_in_emergency,
+ 	hwmon_in_average,
+ 	hwmon_in_lowest,
+ 	hwmon_in_highest,
+@@ -144,6 +146,8 @@ enum hwmon_in_attributes {
+ 	hwmon_in_max_alarm,
+ 	hwmon_in_lcrit_alarm,
+ 	hwmon_in_crit_alarm,
++	hwmon_in_lemergency_alarm,
++	hwmon_in_emergency_alarm,
+ 	hwmon_in_rated_min,
+ 	hwmon_in_rated_max,
+ 	hwmon_in_beep,
+@@ -156,6 +160,8 @@ enum hwmon_in_attributes {
+ #define HWMON_I_MAX		BIT(hwmon_in_max)
+ #define HWMON_I_LCRIT		BIT(hwmon_in_lcrit)
+ #define HWMON_I_CRIT		BIT(hwmon_in_crit)
++#define HWMON_I_LEMERGENCY	BIT(hwmon_in_lemergency)
++#define HWMON_I_EMERGENCY	BIT(hwmon_in_emergency)
+ #define HWMON_I_AVERAGE		BIT(hwmon_in_average)
+ #define HWMON_I_LOWEST		BIT(hwmon_in_lowest)
+ #define HWMON_I_HIGHEST		BIT(hwmon_in_highest)
+@@ -166,6 +172,8 @@ enum hwmon_in_attributes {
+ #define HWMON_I_MAX_ALARM	BIT(hwmon_in_max_alarm)
+ #define HWMON_I_LCRIT_ALARM	BIT(hwmon_in_lcrit_alarm)
+ #define HWMON_I_CRIT_ALARM	BIT(hwmon_in_crit_alarm)
++#define HWMON_I_LEMERGENCY_ALARM BIT(hwmon_in_lemergency_alarm)
++#define HWMON_I_EMERGENCY_ALARM	BIT(hwmon_in_emergency_alarm)
+ #define HWMON_I_RATED_MIN	BIT(hwmon_in_rated_min)
+ #define HWMON_I_RATED_MAX	BIT(hwmon_in_rated_max)
+ #define HWMON_I_BEEP		BIT(hwmon_in_beep)
+@@ -178,6 +186,7 @@ enum hwmon_curr_attributes {
+ 	hwmon_curr_max,
+ 	hwmon_curr_lcrit,
+ 	hwmon_curr_crit,
++	hwmon_curr_emergency,
+ 	hwmon_curr_average,
+ 	hwmon_curr_lowest,
+ 	hwmon_curr_highest,
+@@ -188,6 +197,7 @@ enum hwmon_curr_attributes {
+ 	hwmon_curr_max_alarm,
+ 	hwmon_curr_lcrit_alarm,
+ 	hwmon_curr_crit_alarm,
++	hwmon_curr_emergency_alarm,
+ 	hwmon_curr_rated_min,
+ 	hwmon_curr_rated_max,
+ 	hwmon_curr_beep,
+@@ -199,6 +209,7 @@ enum hwmon_curr_attributes {
+ #define HWMON_C_MAX		BIT(hwmon_curr_max)
+ #define HWMON_C_LCRIT		BIT(hwmon_curr_lcrit)
+ #define HWMON_C_CRIT		BIT(hwmon_curr_crit)
++#define HWMON_C_EMERGENCY	BIT(hwmon_curr_emergency)
+ #define HWMON_C_AVERAGE		BIT(hwmon_curr_average)
+ #define HWMON_C_LOWEST		BIT(hwmon_curr_lowest)
+ #define HWMON_C_HIGHEST		BIT(hwmon_curr_highest)
+@@ -209,6 +220,7 @@ enum hwmon_curr_attributes {
+ #define HWMON_C_MAX_ALARM	BIT(hwmon_curr_max_alarm)
+ #define HWMON_C_LCRIT_ALARM	BIT(hwmon_curr_lcrit_alarm)
+ #define HWMON_C_CRIT_ALARM	BIT(hwmon_curr_crit_alarm)
++#define HWMON_C_EMERGENCY_ALARM	BIT(hwmon_curr_emergency_alarm)
+ #define HWMON_C_RATED_MIN	BIT(hwmon_curr_rated_min)
+ #define HWMON_C_RATED_MAX	BIT(hwmon_curr_rated_max)
+ #define HWMON_C_BEEP		BIT(hwmon_curr_beep)
+-- 
+2.56.0
+

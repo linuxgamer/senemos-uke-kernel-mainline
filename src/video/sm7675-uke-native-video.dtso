@@ -1,0 +1,92 @@
+// SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
+/dts-v1/;
+/plugin/;
+#include <dt-bindings/clock/qcom,gcc-cliffs.h>
+#include <dt-bindings/clock/qcom,sm7675-videocc.h>
+/* Xiaomi Cliffs interconnect IDs, not the Pineapple binding. */
+#define UKE_MASTER_APPSS_PROC 2
+#define UKE_MASTER_VIDEO 28
+#define UKE_SLAVE_VENUS_CFG 548
+#define UKE_SLAVE_EBI1 512
+
+/* Native candidate graph; target firmware and codec acceptance are separate.
+ * OEM: MiCode 94c84aeb, cliffs.dtsi and cliffs-reserved-memory.dtsi.
+ * Video consumer: OnePlus SM7675 1138e00f, cliffs-vidc.dtsi.
+ * Shared nonsecure mapping follows upstream SM8650 Iris; its equivalence to
+ * OEM split pixel/nonpixel domains still requires explicit firmware testing.
+ */
+/ {
+    fragment@400 {
+        target = <&videocc>;
+        __overlay__ {
+            compatible = "qcom,sm7675-videocc";
+            clocks = <&rpmhcc 0>, <&gcc GCC_VIDEO_AHB_CLK>;
+            clock-names = "bi_tcxo", "iface";
+            vdd_mm-supply = <&VDD_MM_LEVEL>;
+            vdd_mxc-supply = <&VDD_MXC_LEVEL>;
+            vdd_mm_mxc-supply = <&VDD_MM_MXC_VOTER_LEVEL>;
+            #power-domain-cells = <1>;
+            status = "okay";
+        };
+    };
+    fragment@401 {
+        target-path = "/soc/qcom,vidc@aa00000";
+        __overlay__ { status = "disabled"; };
+    };
+    fragment@402 {
+        target = <&soc>;
+        __overlay__ {
+            #address-cells = <1>;
+            #size-cells = <1>;
+            uke_iris: video-codec@aa00000 {
+                compatible = "qcom,sm7675-iris";
+                reg = <0x0aa00000 0xf0000>;
+                interrupts = <0 174 4>;
+                power-domains = <&videocc VIDEO_CC_MVS0C_GDSC>,
+                                <&videocc VIDEO_CC_MVS0_GDSC>;
+                power-domain-names = "venus", "vcodec0";
+                clocks = <&gcc GCC_VIDEO_AXI0_CLK>, <&videocc VIDEO_CC_MVS0C_CLK>,
+                         <&videocc VIDEO_CC_MVS0_CLK>;
+                clock-names = "iface", "core", "vcodec0_core";
+                resets = <&gcc GCC_VIDEO_AXI0_CLK_ARES>,
+                         <&videocc VIDEO_CC_XO_CLK_ARES>,
+                         <&videocc VIDEO_CC_MVS0C_CLK_ARES>,
+                         <&videocc VIDEO_CC_MVS0_CLK_ARES>;
+                reset-names = "bus", "xo", "core", "vcodec";
+                interconnects = <&gem_noc UKE_MASTER_APPSS_PROC &cnoc_cfg UKE_SLAVE_VENUS_CFG>,
+                                <&mmss_noc UKE_MASTER_VIDEO &mc_virt UKE_SLAVE_EBI1>;
+                interconnect-names = "cpu-cfg", "video-mem";
+                memory-region = <&video_mem>;
+                iommus = <&apps_smmu 0x1940 0>, <&apps_smmu 0x1947 0>;
+                dma-coherent;
+                operating-points-v2 = <&uke_iris_opps>;
+                status = "okay";
+                uke_iris_opps: opp-table {
+                    compatible = "operating-points-v2";
+                    /* Exact Uke module SKU1 table, also present in SKU0; no SKU0-only OPP. */
+                    opp-192000000 { opp-hz = /bits/ 64 <192000000>; };
+                    opp-240000000 { opp-hz = /bits/ 64 <240000000>; };
+                    opp-338000000 { opp-hz = /bits/ 64 <338000000>; };
+                    opp-366000000 { opp-hz = /bits/ 64 <366000000>; };
+                };
+            };
+        };
+    };
+    /* Native VIDEOCC owns these same registers; do not bind OEM regulators. */
+    fragment@403 {
+        target = <&video_cc_mvs0_gdsc>;
+        __overlay__ { status = "disabled"; };
+    };
+    fragment@404 {
+        target = <&video_cc_mvs0c_gdsc>;
+        __overlay__ { status = "disabled"; };
+    };
+    fragment@405 {
+        target = <&video_cc_mvs1_gdsc>;
+        __overlay__ { status = "disabled"; };
+    };
+    fragment@406 {
+        target = <&video_cc_mvs1c_gdsc>;
+        __overlay__ { status = "disabled"; };
+    };
+};

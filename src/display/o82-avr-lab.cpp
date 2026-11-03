@@ -280,7 +280,7 @@ int main(int argc, char **argv) {
         std::cerr << "Usage: o82-avr-lab --self-test|--run [fixed] (unused VT; exact O82 experiment)\n"; return 2;
     }
     signal(SIGINT, stop); signal(SIGTERM, stop);
-    const int fd = open("/dev/dri/card1", O_RDWR | O_CLOEXEC);
+    const int fd = open("/dev/dri/by-path/platform-ae01000.display-controller-card", O_RDWR | O_CLOEXEC);
     if (fd < 0) { perror("KMS device"); return 1; }
     int result = 1;
     try { result = run(fd, argc == 2); }

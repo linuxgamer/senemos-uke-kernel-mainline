@@ -1,0 +1,73 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: qcom: bound graph events and buffer tokens
+
+Validate module event headers and declared event length before dispatch.
+Check DMA reply lengths before parsing their addresses and reject tokens
+outside the allocated period array while holding the graph mutex. Allow
+an absent optional event client. Keep the existing stream semantics and
+wire structures; no buffer allocation or board configuration changes.
+
+This extends the native response bounds rather than copying an OEM
+implementation. Original-source fixtures demonstrate an out-of-range
+period accepted as a completion. Full transport, DMA teardown and exact
+firmware acceptance remain separate from this parser correction.
+
+---
+--- a/sound/soc/qcom/qdsp6/q6apm.c
++++ b/sound/soc/qcom/qdsp6/q6apm.c
+@@ -595,16 +595,23 @@
+ 
+ 	switch (hdr->opcode) {
+ 	case APM_EVENT_MODULE_TO_CLIENT:
++		if (!data->payload || data->payload_size < (int)sizeof(*event))
++			return -EINVAL;
+ 		event = data->payload;
++		if (event->event_payload_size > data->payload_size - sizeof(*event))
++			return -EINVAL;
+ 		switch (event->event_id) {
+ 		case EVENT_ID_SH_MEM_PULL_PUSH_MODE_WATERMARK:
+ 			client_event = APM_CLIENT_EVENT_WATERMARK_EVENT;
+-			graph->cb(client_event, hdr->token, data->payload, graph->priv);
++			if (graph->cb)
++				graph->cb(client_event, hdr->token, data->payload, graph->priv);
+ 			break;
+ 		}
+ 
+ 		break;
+ 	case DATA_CMD_RSP_WR_SH_MEM_EP_DATA_BUFFER_DONE_V2:
++		if (!data->payload || data->payload_size < (int)sizeof(*done))
++			return -EINVAL;
+ 		if (!graph->ar_graph)
+ 			break;
+ 		client_event = APM_CLIENT_EVENT_DATA_WRITE_DONE;
+@@ -616,6 +623,10 @@
+ 			mutex_unlock(&graph->lock);
+ 			break;
+ 		}
++		if (token >= graph->rx_data.num_periods) {
++			mutex_unlock(&graph->lock);
++			return -EINVAL;
++		}
+ 		phys = graph->rx_data.buf[token].phys;
+ 		mutex_unlock(&graph->lock);
+ 		/* token numbering starts at 0 */
+@@ -633,6 +644,8 @@
+ 
+ 		break;
+ 	case DATA_CMD_RSP_RD_SH_MEM_EP_DATA_BUFFER_V2:
++		if (!data->payload || data->payload_size < (int)sizeof(*rd_done))
++			return -EINVAL;
+ 		if (!graph->ar_graph)
+ 			break;
+ 		client_event = APM_CLIENT_EVENT_DATA_READ_DONE;
+@@ -642,6 +655,10 @@
+ 			mutex_unlock(&graph->lock);
+ 			break;
+ 		}
++		if (hdr->token >= graph->tx_data.num_periods) {
++			mutex_unlock(&graph->lock);
++			return -EINVAL;
++		}
+ 		phys = graph->tx_data.buf[hdr->token].phys;
+ 		mutex_unlock(&graph->lock);
+ 		/* token numbering starts at 0 */

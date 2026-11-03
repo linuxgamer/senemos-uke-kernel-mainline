@@ -1,0 +1,29 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] clk: qcom: declare the Uke clock dependencies
+
+The native display profile adds qcom,sm7675-dispcc to dispcc-sm8550.c.
+Allow its existing Cliffs GCC supplier so Uke does not need an unrelated
+SM8550/SM8650 GCC enabled solely to satisfy Kconfig. The Cliffs GPUCC uses
+the shared GDSC implementation and must select it directly instead of
+inheriting that selection from unrelated enabled clock drivers. Other
+boards retain their original alternatives. No clock tables or DT values change.
+
+--- a/drivers/clk/qcom/Kconfig
++++ b/drivers/clk/qcom/Kconfig
+@@ -1352,7 +1352,7 @@
+ config SM_DISPCC_8550
+ 	tristate "SM8550 Display Clock Controller"
+ 	depends on ARM64 || COMPILE_TEST
+-	depends on SM_GCC_8550 || SM_GCC_8650 || SAR_GCC_2130P
++	depends on SM_GCC_8550 || SM_GCC_8650 || SAR_GCC_2130P || SM_GCC_CLIFFS
+ 	help
+ 	  Support for the display clock controller on Qualcomm Technologies, Inc
+ 	  SAR2130P, SM8550 or SM8650 devices.
+@@ -1507,6 +1507,7 @@
+ config SM_GPUCC_CLIFFS
+ 	tristate "Cliffs Graphics Clock Controller"
+ 	depends on ARM64 || COMPILE_TEST
+ 	select SM_GCC_CLIFFS
++	select QCOM_GDSC
+ 	help
+ 	  Support the GPU clock provider used by Xiaomi Uke.

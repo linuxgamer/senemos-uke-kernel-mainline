@@ -1,65 +1,45 @@
-From: Uke Fedora Maintainers <linuxgamer@users.noreply.github.com>
-Subject: [PATCH] arm64: allow opt-in native display on O82-36 Uke panels
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] arm64: select the isolated Uke native display graph
 
-Select the native O82-42 graph and the exact seven-mode O82-36 graph by
-the stock panel selector. Reject unknown or ambiguous selectors.
+The normal firmware-framebuffer path remains unchanged. This additional patch
+is applied only by the native candidate preparer after the normal ABL hook.
+Keep the bootloader-selected memory, reservations and panel selector; restore
+the output buffer capacity before applying the source-compiled display overlay.
+Reject an incompatible graph before OF scans it. This is not physical support
+evidence and must not be added to the normal release series.
 
 --- a/arch/arm64/kernel/uke-abl.c
 +++ b/arch/arm64/kernel/uke-abl.c
-@@ -1025,6 +1025,8 @@
+@@ -1069,6 +1069,8 @@
   */
  static unsigned char uke_fdt[UKE_FDT_CAPACITY] __ro_after_init __aligned(8);
  #include "uke-abl-overlays.h"
 +#include "uke-abl-native.h"
 +#include "uke-native-display.h"
+ #include "uke-lights.h"
  
  void *__init uke_abl_prepare_fdt(void *input, int size, phys_addr_t *physical)
- {
-@@ -1035,6 +1037,38 @@
+@@ -1080,6 +1082,14 @@
  	ret = uke_abl_transform(uke_fdt, sizeof(uke_fdt), input, size,
  			      uke_ufs_overlay, sizeof(uke_ufs_overlay),
  			      uke_usb_overlay, sizeof(uke_usb_overlay));
 +	if (ret > 0) {
-+		const char *bootargs, *selector;
-+		unsigned char *overlay;
-+		size_t overlay_bytes;
-+		int chosen, len, panel42, panel36, native36 = 0, native36rates = 0;
-+
-+		chosen = fdt_path_offset(uke_fdt, "/chosen");
-+		bootargs = fdt_getprop(uke_fdt, chosen, "bootargs", &len);
-+		panel42 = bootargs && strstr(bootargs, UKE_NATIVE_PANEL_SELECTOR) != NULL;
-+		panel36 = bootargs && strstr(bootargs, UKE_EXPERIMENTAL_PANEL_SELECTOR) != NULL;
-+		if (panel36) {
-+			native36 = 1;
-+			native36rates = 1;
-+		}
-+		if (!bootargs || len <= 0 || bootargs[len - 1] || panel42 == panel36 ||
-+		    (native36rates && (!native36 || !panel36))) {
-+			ret = -FDT_ERR_BADVALUE;
-+		} else if (panel42 || native36) {
-+			selector = panel42 ? UKE_NATIVE_PANEL_SELECTOR :
-+				UKE_EXPERIMENTAL_PANEL_SELECTOR;
-+			overlay = panel42 ? uke_native_overlay :
-+				native36rates ? uke_native_overlay_36_all_rates : uke_native_overlay_36;
-+			overlay_bytes = panel42 ? sizeof(uke_native_overlay) :
-+				native36rates ? sizeof(uke_native_overlay_36_all_rates) :
-+					sizeof(uke_native_overlay_36);
-+			ret = fdt_open_into(uke_fdt, uke_fdt, sizeof(uke_fdt));
-+			if (!ret)
-+				ret = uke_abl_native(uke_fdt, overlay, overlay_bytes, selector);
-+			if (!ret)
-+				ret = 1;
-+		}
++		ret = fdt_open_into(uke_fdt, uke_fdt, sizeof(uke_fdt));
++		if (!ret)
++			ret = uke_abl_native_select(uke_fdt, uke_native_panels,
++						    ARRAY_SIZE(uke_native_panels));
++		if (!ret)
++			ret = 1;
 +	}
  	if (ret < 0) {
  		pr_crit("Uke ABL DT adaptation rejected (%d); refusing incomplete board graph\n", ret);
  		while (true)
-@@ -1043,7 +1077,7 @@
- 	if (!ret)
- 		return input;
+@@ -1102,7 +1112,7 @@
+ 		pr_warn("Uke lights: OEM graph not admitted; light controls unavailable\n");
+ 	}
  	*physical = __pa_symbol(uke_fdt);
 -	pr_info("Uke ABL DT: selected RAM preserved; UFS, selected USB profile and simplefb prepared\n");
-+	pr_info("Uke ABL DT: selected RAM preserved; panel-selected display and USB profile prepared\n");
++	pr_info("Uke ABL DT: selected RAM preserved; native display and selected USB profile prepared\n");
  	return uke_fdt;
  }
- #endif
+ 

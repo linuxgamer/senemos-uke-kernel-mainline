@@ -1,0 +1,71 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] interconnect: add the Uke GPU memory path
+
+Add the exact Cliffs GFX3D endpoint, QoS ports and HLOS SH1 membership.
+Preserve the existing USB, UFS, QUP and LPASS topology.
+
+Source: Xiaomi SM7675 kernel 5712080a4b0c0b1a879e6d145c601c649ddaddfd.
+
+---
+diff --git a/drivers/interconnect/qcom/qnoc-cliffs-usb.c b/drivers/interconnect/qcom/qnoc-cliffs-usb.c
+--- a/drivers/interconnect/qcom/qnoc-cliffs-usb.c
++++ b/drivers/interconnect/qcom/qnoc-cliffs-usb.c
+@@ -21,6 +21,7 @@
+ #define MASTER_A1NOC_SNOC	8
+ #define MASTER_A2NOC_SNOC	9
+ #define MASTER_GEM_NOC_CNOC	15
++#define MASTER_GFX3D	17
+ #define MASTER_LPASS_GEM_NOC	18
+ #define MASTER_LPASS_LPINOC	19
+ #define MASTER_LPIAON_NOC	20
+@@ -63,6 +64,7 @@
+ static struct qcom_icc_node qsm_cfg;
+ static struct qcom_icc_node qnm_gemnoc_cnoc;
+ static struct qcom_icc_node chm_apps;
++static struct qcom_icc_node qnm_gpu;
+ static struct qcom_icc_node qnm_snoc_sf;
+ static struct qcom_icc_node llcc_mc;
+ static struct qcom_icc_node qnm_aggre1_noc;
+@@ -196,6 +198,23 @@
+ 	.prio_fwd_disable = 0,
+ };
+ 
++static const struct qcom_icc_qosbox qnm_gpu_qos = {
++	.num_ports = 2,
++	.port_offsets = { 0x31000, 0x71000 },
++	.prio = 0,
++	.urg_fwd = 0,
++	.prio_fwd_disable = 1,
++};
++
++static struct qcom_icc_node qnm_gpu = {
++	.name = "qnm_gpu",
++	.channels = 2,
++	.buswidth = 32,
++	.qosbox = &qnm_gpu_qos,
++	.num_links = 2,
++	.link_nodes = { &qns_gem_noc_cnoc, &qns_llcc },
++};
++
+ static struct qcom_icc_node qnm_snoc_sf = {
+ 	.name = "qnm_snoc_sf",
+ 	.channels = 1,
+@@ -446,8 +465,8 @@
+ static struct qcom_icc_bcm bcm_sh1 = {
+ 	.name = "SH1",
+ 	.enable_mask = 0x1,
+-	.num_nodes = 3,
+-	.nodes = { &chm_apps, &qnm_snoc_sf, &qns_gem_noc_cnoc },
++	.num_nodes = 4,
++	.nodes = { &chm_apps, &qnm_gpu, &qnm_snoc_sf, &qns_gem_noc_cnoc },
+ };
+ 
+ static struct qcom_icc_bcm bcm_sn0 = {
+@@ -563,6 +582,7 @@
+ 
+ static struct qcom_icc_node * const gem_noc_nodes[] = {
+ 	[MASTER_APPSS_PROC] = &chm_apps,
++	[MASTER_GFX3D] = &qnm_gpu,
+ 	[MASTER_LPASS_GEM_NOC] = &qnm_lpass_gemnoc,
+ 	[MASTER_SNOC_SF_MEM_NOC] = &qnm_snoc_sf,
+ 	[SLAVE_GEM_NOC_CNOC] = &qns_gem_noc_cnoc,

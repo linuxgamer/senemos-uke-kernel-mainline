@@ -1,0 +1,49 @@
+Subject: [PATCH] media: iris: recycle empty VP9 non-display capture buffers
+
+Valid VP9 hidden references produce PICTURE_P|NOSHOW and an empty raw
+completion without corrupt/overflow information on Cliffs. Both output orders
+return such metadata: decode-order VA superframes then deliver a nonempty
+show-existing completion with the same timestamp. Returning the empty buffer
+as ERROR prematurely completes the picture as damaged.
+
+Recycle the unused linear buffer in either output order. Preserve corrupt,
+overflow, LAST/PSC, pending-release, firmware-held, encoder and other-codec
+handling. Nonempty hidden frames keep the normal path; no frame is fabricated.
+
+Base: Linux 7.3.0 with the accepted Uke kernel19 video patches.
+License: GPL-2.0-only, matching iris_hfi_gen2_response.c.
+
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c
+@@ -348,6 +348,8 @@
+ static int iris_hfi_gen2_handle_output_buffer(struct iris_inst *inst,
+ 					      struct iris_hfi_buffer *hfi_buffer)
+ {
++	const struct iris_hfi_frame_info *frame =
++		&to_iris_inst_hfi_gen2(inst)->hfi_frame_info;
+ 	struct v4l2_m2m_ctx *m2m_ctx = inst->m2m_ctx;
+ 	struct v4l2_m2m_buffer *m2m_buffer, *n;
+ 	struct iris_buffer *buf;
+@@ -381,6 +383,22 @@
+ 	if (!(buf->attr & BUF_ATTR_QUEUED))
+ 		return -EINVAL;
+ 
++	if (inst->domain == DECODER && inst->state == IRIS_INST_STREAMING &&
++	    inst->fmt_src->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_VP9 &&
++	    (inst->fmt_dst->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_NV12 ||
++	     inst->fmt_dst->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_P010) &&
++	    (frame->picture_type & HFI_GEN2_PICTURE_NOSHOW) &&
++	    !frame->data_corrupt && !frame->overflow &&
++	    !hfi_buffer->data_size && !hfi_buffer->data_offset &&
++	    !(buf->attr & BUF_ATTR_PENDING_RELEASE) &&
++	    !(hfi_buffer->flags & (HFI_BUF_FW_FLAG_READONLY |
++				   HFI_BUF_FW_FLAG_LAST | HFI_BUF_FW_FLAG_PSC_LAST))) {
++		/* The unused linear buffer remains owned by the capture queue. */
++		buf->data_offset = 0;
++		buf->data_size = 0;
++		return iris_queue_buffer(inst, buf);
++	}
++
+ 	buf->data_offset = hfi_buffer->data_offset;
+ 	buf->data_size = hfi_buffer->data_size;
+ 	buf->timestamp = hfi_buffer->timestamp;

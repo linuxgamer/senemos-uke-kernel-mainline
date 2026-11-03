@@ -145,7 +145,7 @@ for item in CONFIG_PINCTRL_CLIFFS=y CONFIG_SM_GCC_CLIFFS=y \
     CONFIG_EFI=y CONFIG_EFI_STUB=y CONFIG_MODULES=y; do
     grep -Fx "$item" %{_uke_out}/.config || exit 1
 done
-make O=%{_uke_out} LOCALVERSION=-senemos-uke -j%{_uke_jobs} Image dtbs modules
+make O=%{_uke_out} LOCALVERSION=-senemos-uke -j%{_uke_jobs} Image qcom/sm7675-xiaomi-uke.dtb modules
 install -m644 senemos-applied-patches.txt %{_uke_out}/senemos-applied-patches.txt
 test "$(make -s O=%{_uke_out} LOCALVERSION=-senemos-uke kernelrelease)" = '%{krel}'
 %else

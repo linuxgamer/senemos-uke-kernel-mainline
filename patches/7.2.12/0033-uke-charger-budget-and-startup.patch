@@ -1,0 +1,166 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] power: supply: connect the Uke USB2 SDP budget and ADSP charger
+
+Use charge units for exact Uke telemetry and reject unqualified OEM power
+units. Do not let unsolicited Xiaomi status extensions acknowledge battery
+requests. Add a bounded USB2 SDP input-current path and reuse DWC3's existing
+power-supply worker when the Uke legacy PHY has no set_power callback.
+
+Start the exact Uke ADSP charger through remoteproc, with crash recovery
+held off while the unqualified SLIM DMA path is contained in the boot DT.
+PD, higher currents, charging voltage, thermal limits and other boards are
+outside this candidate; physical charging still needs qualification.
+
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -394,6 +394,9 @@
+ 		if (opcode == BATTMGR_BAT_PROPERTY_SET)
+ 			return -EOPNOTSUPP;
+ 		if (opcode == BATTMGR_BAT_PROPERTY_GET) {
++			/* OEM power units are unqualified; userspace can use voltage/current. */
++			if (property == BATT_POWER_NOW)
++				return -ENODATA;
+ 			property = qcom_battmgr_uke_battery_property(property, true);
+ 			if (property < 0)
+ 				return property;
+@@ -1071,6 +1074,52 @@
+ 	return 0;
+ }
+ 
++static int qcom_battmgr_usb_set_property(struct power_supply *psy,
++				       enum power_supply_property psp,
++				       const union power_supply_propval *val)
++{
++	struct qcom_battmgr *battmgr = power_supply_get_drvdata(psy);
++	const unsigned int properties[] = { USB_ONLINE, USB_TYPE, USB_CURR_MAX };
++	int ret;
++	unsigned int i;
++
++	if (battmgr->variant != QCOM_BATTMGR_UKE ||
++	    psp != POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT)
++		return -EOPNOTSUPP;
++	if (!battmgr->service_up)
++		return -EAGAIN;
++	if (val->intval < 0 || val->intval > 500000)
++		return -EINVAL;
++
++	mutex_lock(&battmgr->lock);
++	for (i = 0; i < ARRAY_SIZE(properties); i++) {
++		ret = qcom_battmgr_request_property(battmgr, BATTMGR_USB_PROPERTY_GET,
++						  properties[i], 0);
++		if (ret)
++			goto out;
++	}
++	/* This first path admits the configured USB2 SDP budget only. */
++	if (!battmgr->usb.online || battmgr->usb.usb_type != POWER_SUPPLY_USB_TYPE_SDP ||
++	    (unsigned int)val->intval > battmgr->usb.current_max) {
++		ret = -EINVAL;
++		goto out;
++	}
++	ret = qcom_battmgr_request_property(battmgr, BATTMGR_USB_PROPERTY_SET,
++					  USB_INPUT_CURR_LIMIT, val->intval);
++out:
++	mutex_unlock(&battmgr->lock);
++	return ret;
++}
++
++static int qcom_battmgr_usb_is_writeable(struct power_supply *psy,
++				      enum power_supply_property psp)
++{
++	struct qcom_battmgr *battmgr = power_supply_get_drvdata(psy);
++
++	return battmgr->variant == QCOM_BATTMGR_UKE &&
++	       psp == POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT;
++}
++
+ static const enum power_supply_property sc8280xp_usb_props[] = {
+ 	POWER_SUPPLY_PROP_ONLINE,
+ };
+@@ -1109,6 +1158,8 @@
+ 	.properties = sm8350_usb_props,
+ 	.num_properties = ARRAY_SIZE(sm8350_usb_props),
+ 	.get_property = qcom_battmgr_usb_get_property,
++	.set_property = qcom_battmgr_usb_set_property,
++	.property_is_writeable = qcom_battmgr_usb_is_writeable,
+ 	.usb_types = BIT(POWER_SUPPLY_USB_TYPE_UNKNOWN) |
+ 		     BIT(POWER_SUPPLY_USB_TYPE_SDP)     |
+ 		     BIT(POWER_SUPPLY_USB_TYPE_DCP)     |
+@@ -1230,6 +1281,8 @@
+ 
+ 	notification = le32_to_cpu(msg->notification);
+ 	notification &= 0xff;
++	if (battmgr->variant == QCOM_BATTMGR_UKE && notification == 0x50)
++		return;
+ 	switch (notification) {
+ 	case NOTIF_BAT_INFO:
+ 		battmgr->info.valid = false;
+@@ -1597,12 +1650,18 @@
+ 		}
+ 		break;
+ 	case BATTMGR_REQUEST_NOTIFICATION:
++		break;
++	case BATTMGR_USB_PROPERTY_SET:
++		if (payload_len != sizeof(resp->intval))
++			return;
++		battmgr->error = le32_to_cpu(resp->intval.result);
++		break;
+ 	case BATTMGR_CHG_CTRL_LIMIT_EN:
+ 		battmgr->error = 0;
+ 		break;
+ 	default:
+ 		dev_warn(battmgr->dev, "unknown message %#x\n", opcode);
+-		break;
++		return;
+ 	}
+ 
+ out_complete:
+@@ -1614,6 +1673,9 @@
+ 	const struct pmic_glink_hdr *hdr = data;
+ 	struct qcom_battmgr *battmgr = priv;
+ 	unsigned int opcode = le32_to_cpu(hdr->opcode);
++	/* Xiaomi status extensions are unsolicited, not a reply to our request. */
++	if (battmgr->variant == QCOM_BATTMGR_UKE && opcode == 0x50)
++		return;
+ 
+ 	if (opcode == BATTMGR_NOTIFICATION)
+ 		qcom_battmgr_notification(battmgr, data, len);
+@@ -1693,9 +1755,10 @@
+ 	init_completion(&battmgr->ack);
+ 
+ 	match = of_match_device(qcom_battmgr_of_variants, dev->parent);
+-	if (of_machine_is_compatible("xiaomi,uke"))
++	if (of_machine_is_compatible("xiaomi,uke")) {
+ 		battmgr->variant = QCOM_BATTMGR_UKE;
+-	else if (match)
++		battmgr->unit = QCOM_BATTMGR_UNIT_mAh;
++	} else if (match)
+ 		battmgr->variant = (unsigned long)match->data;
+ 	else
+ 		battmgr->variant = QCOM_BATTMGR_SM8350;
+--- a/drivers/usb/dwc3/gadget.c
++++ b/drivers/usb/dwc3/gadget.c
+@@ -3153,7 +3153,9 @@
+ {
+ 	struct dwc3		*dwc = gadget_to_dwc(g);
+ 
+-	if (dwc->usb2_phy)
++	if (dwc->usb2_phy && (dwc->usb2_phy->set_power ||
++	    !of_device_is_compatible(dwc->usb2_phy->dev->of_node,
++				     "qcom,usb-snps-eusb2-phy")))
+ 		return usb_phy_set_power(dwc->usb2_phy, mA);
+ 
+ 	if (!dwc->usb_psy)
+--- a/drivers/remoteproc/qcom_q6v5_pas.c
++++ b/drivers/remoteproc/qcom_q6v5_pas.c
+@@ -888,6 +888,11 @@
+ 
+ 	rproc->has_iommu = of_property_present(pdev->dev.of_node, "iommus");
+ 	rproc->auto_boot = desc->auto_boot;
++	if (of_machine_is_compatible("xiaomi,uke") &&
++	    of_device_is_compatible(pdev->dev.of_node, "qcom,cliffs-adsp-pas")) {
++		rproc->auto_boot = true;
++		rproc->recovery_disabled = true;
++	}
+ 	rproc_coredump_set_elf_info(rproc, ELFCLASS32, EM_NONE);
+ 
+ 	pas = rproc->priv;

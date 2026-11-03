@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# Host-only candidate preparation. Call in an isolated, clean source checkout.
+# Source metadata preparation only; COPR owns source RPMs and native checks.
 set -Eeuo pipefail
 release_fields() {
     local metadata=$1
     jq -er '
-      .latest_stable.version as $v |
+      . as $metadata |
+      [.releases[] | select(.version | test("^7[.]3([.][0-9]+)?$"))] |
+      sort_by(.version | split(".") | map(tonumber)) | last.version as $v |
       if ($v|test("^[0-9]+[.][0-9]+([.][0-9]+)?$")) then
-        [.releases[] | select(.version==$v)] as $r |
+        [$metadata.releases[] | select(.version==$v)] as $r |
         if ($r|length)==1 and ($r[0].moniker|IN("mainline","stable","longterm")) and
            $r[0].source==("https://cdn.kernel.org/pub/linux/kernel/v"+($v|split(".")[0])+".x/linux-"+$v+".tar.xz") and
            $r[0].pgp==("https://cdn.kernel.org/pub/linux/kernel/v"+($v|split(".")[0])+".x/linux-"+$v+".tar.sign") and
@@ -14,7 +16,7 @@ release_fields() {
            ($r[0].released.timestamp|.>0 and .==floor and .<=now) then
           [$v, $r[0].source, $r[0].pgp, ($r[0].released.timestamp|tostring)]|@tsv
         else error("Unadmitted upstream release metadata") end
-      else error("Invalid upstream version") end' "$metadata"
+      else error("No admitted Linux 7.3 release") end' "$metadata"
 }
 matching_build() {
     jq -cer --arg package "$2" --arg evr "$3" '
@@ -71,9 +73,6 @@ prepare_metadata() {
     if [[ $role == singleboot ]]; then
         sed -i '/^Release [0-9].*requires the exact/,$d' packaging/SINGLEBOOT.md
         printf '\nThe exact current tuple is recorded in the installed JSON descriptor.\nThe common kernel and physical acceptance retain their separate evidence.\n' >> packaging/SINGLEBOOT.md
-        make singleboot-srpm
-    else
-        make kvm-singleboot-srpm
     fi
     git add "$spec" "$json"
     for contract in tests/singleboot-package-contract.sh tests/kvm-singleboot-package-contract.sh packaging/SINGLEBOOT.md; do
@@ -91,11 +90,14 @@ prepare_common() {
     spec=packaging/senemos-uke-linux-kernel-mainline.spec
     current=$(rpmspec -q --srpm --qf '%{VERSION}' "$spec")
     release=$(rpmspec --define 'dist %{nil}' -q --srpm --qf '%{RELEASE}' "$spec")
+    [[ $current =~ ^7[.]3[.][0-9]+$ ]] || {
+        echo 'Automatic updates require an already reviewed Linux 7.3 source queue' >&2; return 1;
+    }
     if [[ $(printf '%s\n' "$current" "$next" | sort -V | tail -1) == "$current" ]]; then
         printf 'unchanged\t%s-%s\n' "$current" "$release"; return;
     fi
     base=$(git rev-parse HEAD)
-    cache=$PWD/source-cache/releases; mkdir -p "$cache"
+    cache=$PWD/referances/releases; mkdir -p "$cache"
     archive=$cache/linux-$next.tar.xz sig=$cache/linux-$next.tar.sign
     curl -fL --connect-timeout 20 --max-time 900 "$url" -o "$archive.part"
     curl -fL --connect-timeout 20 --max-time 90 "$signature" -o "$sig.part"
@@ -138,8 +140,6 @@ prepare_common() {
     fi
     git add Makefile "$spec" "$profile" "patches/$next" configs/keys/linux-stable.asc tests/mainline-package-contract.sh manifests/llcc-source-candidate-20261020.json
     git -c core.hooksPath=/dev/null -c commit.gpgsign=false -c user.name='Senemos Automation' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "Prepare signed Linux $raw source candidate"
-    make srpm
-    rpmbuild -bp --nodeps --target aarch64 --define "_topdir $PWD/build/srpm/rpmbuild" build/srpm/rpmbuild/SPECS/senemos-uke-linux-kernel-mainline.spec
     printf 'prepared\t%s-1\n' "$next"
 }
 main() {

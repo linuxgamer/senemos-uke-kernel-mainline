@@ -10,7 +10,7 @@ gadget callback. Keep supplier lifetime links and the existing 500 mA SDP gate.
 This is a local gadget-request generation, not proof of an atomic remote
 attach/PD contract. Firmware lacks such a token; the hardware race and USB
 suspend power behavior remain separate acceptance requirements.
-Tests and builds were explicitly deferred by the user.
+Use the explicit per-CPU workqueue for the current upstream API.
 
 --- a/drivers/usb/dwc3/core.c
 +++ b/drivers/usb/dwc3/core.c
@@ -206,7 +206,8 @@ Tests and builds were explicitly deferred by the user.
 +	dwc->vbus_draw_retries = 0;
 +	dwc->vbus_draw_generation++;
 +	dwc->vbus_draw_deadline = jiffies + 5 * HZ;
- 	mod_delayed_work(system_wq, &dwc->vbus_draw_work, 0);
+-	mod_delayed_work(system_wq, &dwc->vbus_draw_work, 0);
++	mod_delayed_work(system_percpu_wq, &dwc->vbus_draw_work, 0);
 +	spin_unlock_irqrestore(&dwc->vbus_draw_lock, flags);
  
  	return 0;

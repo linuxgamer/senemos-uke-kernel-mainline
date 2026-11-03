@@ -1,0 +1,31 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] drm/msm: keep fault completion independent of recovery's GPU lock
+
+The recovery worker holds gpu->lock while dropping its runtime-PM reference.
+GMU shutdown can then wait for fault_coredump_done after an OOB timeout. The
+SMMU fault thread must complete that event, but its optional crash-state capture
+currently waits for the same GPU lock. Neither side can proceed.
+
+Skip the optional capture when the lock is busy. Keep ordinary fault reporting,
+the handler's completion and SMMU resume path, and uncontended capture intact.
+This removes the recovery lock cycle; it does not prevent the original GPU fault.
+
+Compared with upstream Linux 90b754d40117 and the Uke GPU fault/worker stacks.
+The actual-function host fixture reproduces the blocking cycle before this
+change and checks ordinary capture, duplicate handling and cleanup afterward.
+
+Signed-off-by: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+---
+--- a/drivers/gpu/drm/msm/msm_gpu.c
++++ b/drivers/gpu/drm/msm/msm_gpu.c
+@@ -597,7 +597,9 @@ void msm_gpu_fault_crashstate_capture(struct msm_gpu *gpu, struct msm_gpu_fault_info *fault_info)
+ 	char *comm = NULL, *cmd = NULL;
+ 	unsigned int noreclaim_flag;
+ 
+-	mutex_lock(&gpu->lock);
++	/* Recovery may hold this lock while waiting for our fault completion. */
++	if (!mutex_trylock(&gpu->lock))
++		return;
+ 
+ 	submit = find_submit(cur_ring, cur_ring->memptrs->fence + 1);
+ 	if (submit && submit->fault_dumped)

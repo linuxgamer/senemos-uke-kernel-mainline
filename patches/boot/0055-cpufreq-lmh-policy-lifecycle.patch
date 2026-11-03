@@ -1,0 +1,136 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] cpufreq: qcom-hw: balance LMH state across policy hotplug
+
+The lightweight offline callback masks LMH, but the online callback only
+restores affinity. Reusing that policy leaves its throttle IRQ masked.
+Offlining while polling also adds a second disable reference to the one
+already held by the IRQ handler. A late threaded callback can queue work
+after cancellation, and canceled polling can still publish hardware pressure.
+
+Track the single disable reference under the existing throttle mutex.
+Offline blocks new polling before draining it, then clears inactive-policy
+pressure. Online validates affinity before restarting feedback. The poller
+releases the retained disable only after the hardware limit permits recovery.
+A canceled policy cannot publish pressure or acquire fresh polling work.
+Returning to IRQ mode also clears the last sampled pressure, including when
+reduced demand ends active clipping, so feedback is not left cached after
+polling stops. The OEM driver makes that recovery distinction through its
+older thermal-pressure interface; native Linux keeps arch_update_hw_pressure.
+
+Source: Linux v7.3.1 79a907609d53d5cd645b42c11550d295d43abf99,
+with the retained SM7675 core-count adaptation. MiCode Uke
+5712080a4b0c0b1a879e6d145c601c649ddaddfd and OnePlus SM7675
+fc892483f1d61f245924681eb5abd563564d9cba retain the same online gap;
+MiCode also clears inactive-policy pressure through its older thermal API.
+Linux GPL attribution remains unchanged. No donor code is executed.
+
+Validation: actual native callbacks under ASan/UBSan with counted IRQ
+references, affinity failure, canceled/late callbacks and 128 recovery cycles.
+The original callbacks leave the IRQ disabled after policy reactivation.
+Kernel build and physical hotplug/clipping/suspend acceptance remain separate.
+
+--- a/drivers/cpufreq/qcom-cpufreq-hw.c
++++ b/drivers/cpufreq/qcom-cpufreq-hw.c
+@@ -56,6 +56,8 @@
+ 	int throttle_irq;
+ 	char irq_name[15];
+ 	bool cancel_throttle;
++	/* Protected by throttle_lock; false after the initial IRQ enable. */
++	bool throttle_irq_disabled;
+ 	struct delayed_work throttle_work;
+ 	struct cpufreq_policy *policy;
+ 	struct clk_hw cpu_clk;
+@@ -357,9 +359,6 @@
+ 
+ 	throttled_freq = freq_hz / HZ_PER_KHZ;
+ 
+-	/* Update HW pressure (the boost frequencies are accepted) */
+-	arch_update_hw_pressure(policy->related_cpus, throttled_freq);
+-
+ 	/*
+ 	 * In the unlikely case policy is unregistered do not enable
+ 	 * polling or h/w interrupt
+@@ -372,11 +371,16 @@
+ 	 * If h/w throttled frequency is higher than what cpufreq has requested
+ 	 * for, then stop polling and switch back to interrupt mechanism.
+ 	 */
+-	if (throttled_freq >= qcom_cpufreq_get_freq(cpufreq_cpu_get_raw(cpu)))
++	if (throttled_freq >= qcom_cpufreq_get_freq(cpufreq_cpu_get_raw(cpu))) {
++		/* Feedback stops here; do not retain the last sampled frequency. */
++		arch_update_hw_pressure(policy->related_cpus, U32_MAX);
++		data->throttle_irq_disabled = false;
+ 		enable_irq(data->throttle_irq);
+-	else
++	} else {
++		arch_update_hw_pressure(policy->related_cpus, throttled_freq);
+ 		mod_delayed_work(system_highpri_wq, &data->throttle_work,
+ 				 msecs_to_jiffies(10));
++	}
+ 
+ out:
+ 	mutex_unlock(&data->throttle_lock);
+@@ -394,14 +398,19 @@
+ {
+ 	struct qcom_cpufreq_data *c_data = data;
+ 
+-	/* Disable interrupt and enable polling */
+-	disable_irq_nosync(c_data->throttle_irq);
+-	schedule_delayed_work(&c_data->throttle_work, 0);
+-
++	mutex_lock(&c_data->throttle_lock);
+ 	if (qcom_cpufreq.soc_data->reg_intr_clr)
+ 		writel_relaxed(GT_IRQ_STATUS,
+ 			       c_data->base + qcom_cpufreq.soc_data->reg_intr_clr);
+ 
++	/* An offline policy must not acquire a new polling/IRQ reference. */
++	if (!c_data->cancel_throttle && !c_data->throttle_irq_disabled) {
++		c_data->throttle_irq_disabled = true;
++		disable_irq_nosync(c_data->throttle_irq);
++		schedule_delayed_work(&c_data->throttle_work, 0);
++	}
++	mutex_unlock(&c_data->throttle_lock);
++
+ 	return IRQ_HANDLED;
+ }
+ 
+@@ -494,14 +503,19 @@
+ 	if (data->throttle_irq <= 0)
+ 		return 0;
+ 
+-	mutex_lock(&data->throttle_lock);
+-	data->cancel_throttle = false;
+-	mutex_unlock(&data->throttle_lock);
+-
+ 	ret = irq_set_affinity_and_hint(data->throttle_irq, policy->cpus);
+ 	if (ret)
+ 		dev_err(&pdev->dev, "Failed to set CPU affinity of %s[%d]\n",
+ 			data->irq_name, data->throttle_irq);
++	if (ret)
++		return ret;
++
++	mutex_lock(&data->throttle_lock);
++	data->cancel_throttle = false;
++	/* Refresh feedback before releasing the one retained IRQ disable. */
++	if (data->throttle_irq_disabled)
++		mod_delayed_work(system_highpri_wq, &data->throttle_work, 0);
++	mutex_unlock(&data->throttle_lock);
+ 
+ 	return ret;
+ }
+@@ -515,11 +529,15 @@
+ 
+ 	mutex_lock(&data->throttle_lock);
+ 	data->cancel_throttle = true;
++	if (!data->throttle_irq_disabled) {
++		data->throttle_irq_disabled = true;
++		disable_irq_nosync(data->throttle_irq);
++	}
+ 	mutex_unlock(&data->throttle_lock);
+ 
+ 	cancel_delayed_work_sync(&data->throttle_work);
+ 	irq_set_affinity_and_hint(data->throttle_irq, NULL);
+-	disable_irq_nosync(data->throttle_irq);
++	arch_update_hw_pressure(policy->related_cpus, U32_MAX);
+ 
+ 	return 0;
+ }

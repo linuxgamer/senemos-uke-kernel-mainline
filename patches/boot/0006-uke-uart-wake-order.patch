@@ -1,0 +1,37 @@
+From: Uke Linux project <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] serial: qcom-geni: arm the Uke Bluetooth wake IRQ after suspend
+
+Uke s2idle immediately wakes on the Bluetooth RX wake IRQ. Disabling only
+that wake source allows the RTC to resume the tablet after the alarm delay.
+OEM Uke and same-SoC Nord 4 GENI suspend code arm RX wake after resources
+are disabled. Use the standard reverse-order dedicated wake IRQ API for
+the exact Uke Bluetooth child, retaining normal ordering for other ports.
+
+The host fixture checks selection, OF lifetime and the existing error path.
+Physical suspend and Bluetooth wake validation are still required.
+
+diff --git a/drivers/tty/serial/qcom_geni_serial.c b/drivers/tty/serial/qcom_geni_serial.c
+index 88f9ba0..813d9c3 100644
+--- a/drivers/tty/serial/qcom_geni_serial.c
++++ b/drivers/tty/serial/qcom_geni_serial.c
+@@ -1917,9 +1917,18 @@ static int qcom_geni_serial_probe(struct platform_device *pdev)
+ 		goto error;
+ 
+ 	if (port->wakeup_irq > 0) {
++		struct device_node *bt;
++
+ 		device_init_wakeup(&pdev->dev, true);
+-		ret = dev_pm_set_dedicated_wake_irq(&pdev->dev,
+-						port->wakeup_irq);
++		bt = of_get_compatible_child(pdev->dev.of_node, "xiaomi,uke-wcn6750-bt");
++		/* Uke's RX wake line must be armed after the UART resources turn off. */
++		if (bt)
++			ret = dev_pm_set_dedicated_wake_irq_reverse(&pdev->dev,
++							port->wakeup_irq);
++		else
++			ret = dev_pm_set_dedicated_wake_irq(&pdev->dev,
++							port->wakeup_irq);
++		of_node_put(bt);
+ 		if (ret) {
+ 			device_init_wakeup(&pdev->dev, false);
+ 			ida_free(&port_ida, uport->line);

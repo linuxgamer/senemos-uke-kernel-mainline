@@ -1,0 +1,23 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] phy: qcom: qmp-combo: accept valid DP and USB assignments
+
+The Uke unknown-mode guard was added to a fallback shared with assignments
+D and F. It rejects those valid DP+USB modes before the PHY can leave USB.
+The Type-C mux framework ignores EOPNOTSUPP from an individual provider,
+so the WCD switch can report DP while QMP silently retains USB-only routing.
+
+Select USB3DP explicitly for D/F and keep the Uke rejection for unknown
+assignments. Retain all power, route-error and active-DP guards. This restores
+the upstream mode selection without changing PHY tables or board values.
+
+--- a/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
++++ b/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
+@@ -4884,6 +4884,8 @@
+ 		/* DP + USB */
+ 		case TYPEC_DP_STATE_D:
+ 		case TYPEC_DP_STATE_F:
++			new_mode = QMPPHY_MODE_USB3DP;
++			break;
+ 
+ 		/* Safe fallback...*/
+ 		default:

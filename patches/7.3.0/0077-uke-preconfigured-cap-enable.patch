@@ -1,0 +1,243 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] power: supply: qcom_battmgr: enable only the existing cap offline
+
+Preserve the firmware-reported 70/80 band. The synchronous root-only scope
+permits only feature enable with fresh offline/health checks and readback.
+General threshold/current admission remains separate. No electrical cutoff
+or autonomous protection qualification follows from configuration readback.
+
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -378,6 +378,9 @@
+ 		int temperature_min, temperature_max, last_error;
+ 		bool may_enable, standard_clients, enabled, verified;
+ 		char evidence[65];
++		/* One synchronous, fixed enable-only operation; never a general lease. */
++		bool preconfigured_enable, preconfigured_uncertain;
++		u32 preconfigured_generation;
+ 		bool current_admitted, current_verified;
+ 		u32 current_min_ua, current_max_ua, source_budget_ua, current_ua;
+ 		u32 current_read_generation, current_generation, current_firmware, current_source;
+@@ -442,6 +445,7 @@
+ 	const struct pmic_glink_hdr *hdr = data;
+ 	unsigned long flags, left;
+ 	u32 generation, opcode = le32_to_cpu(hdr->opcode);
++	bool preconfigured_enable;
+ 	int ret;
+ 
+ 	lockdep_assert_held(&battmgr->lock);
+@@ -467,18 +471,23 @@
+ 			ret = -EINVAL;
+ 			goto out_unlock;
+ 		}
+-		if (!qcom_battmgr_uke_control_live(battmgr, true)) {
++		preconfigured_enable = battmgr->control.preconfigured_enable &&
++			battmgr->control.preconfigured_generation == tx->generation &&
++			opcode == BATTMGR_BAT_PROPERTY_SET &&
++			le32_to_cpu(request->property) == BATT_CHG_CTRL_EN + 1 &&
++			le32_to_cpu(request->value) == 1;
++		if (!preconfigured_enable && !qcom_battmgr_uke_control_live(battmgr, true)) {
+ 			ret = -EACCES;
+ 			goto out_unlock;
+ 		}
+ 		/* A preceding guard must cover this exact lifecycle generation. */
+-		if (!battmgr->control.measurement_ns ||
++		if (!preconfigured_enable && (!battmgr->control.measurement_ns ||
+ 		    battmgr->control.measurement_generation != tx->generation ||
+-		    ktime_get_boottime_ns() - battmgr->control.measurement_ns > 5ULL * NSEC_PER_SEC) {
++		    ktime_get_boottime_ns() - battmgr->control.measurement_ns > 5ULL * NSEC_PER_SEC)) {
+ 			ret = -ESTALE;
+ 			goto out_unlock;
+ 		}
+-		if (opcode == BATTMGR_BAT_PROPERTY_SET &&
++		if (!preconfigured_enable && opcode == BATTMGR_BAT_PROPERTY_SET &&
+ 		    !((battmgr->control.may_enable &&
+ 		       le32_to_cpu(request->property) == BATT_CHG_CTRL_EN + 1 &&
+ 		       le32_to_cpu(request->value) <= 1) ||
+@@ -2296,6 +2305,7 @@
+ 	&dev_attr_uke_usb_source_state.attr,
+ 	&dev_attr_uke_charge_state.attr,
+ 	&dev_attr_uke_charge_settings.attr,
++	&dev_attr_uke_charge_enable_existing_cap.attr,
+ 	&dev_attr_uke_charge_lease.attr,
+ 	&dev_attr_uke_charge_thresholds.attr,
+ 	&dev_attr_uke_charge_refresh.attr,
+--- a/drivers/power/supply/qcom_battmgr_uke_control.h
++++ b/drivers/power/supply/qcom_battmgr_uke_control.h
+@@ -454,7 +454,7 @@
+ 
+ /* Explicit diagnostic GETs only; no admission, setters or verified-cache renewal. */
+ static int qcom_battmgr_uke_settings_read(struct qcom_battmgr *battmgr,
+-					struct qcom_battmgr_uke_settings *result)
++					struct qcom_battmgr_uke_settings *result, bool rate_limit)
+ {
+ 	const unsigned int props[] = {
+ 		BATT_CHG_CTRL_EN, BATT_CHG_CTRL_START_THR, BATT_CHG_CTRL_END_THR,
+@@ -474,9 +474,11 @@
+ 	if (!battmgr->service_up || !tx->instance_ns ||
+ 	    tx->desynced || tx->suspended || tx->removing)
+ 		ret = -EHOSTDOWN;
+-	else if (battmgr->control.expires_ns > began)
++	else if (battmgr->control.expires_ns > began ||
++		 (battmgr->control.verified && battmgr->control.verified_until_ns > began) ||
++		 (battmgr->control.current_verified && battmgr->control.current_until_ns > began))
+ 		ret = -EBUSY;
+-	else if (battmgr->control.settings_probe_ns &&
++	else if (rate_limit && battmgr->control.settings_probe_ns &&
+ 		 (began < battmgr->control.settings_probe_ns ||
+ 		  began - battmgr->control.settings_probe_ns < NSEC_PER_SEC))
+ 		ret = -EAGAIN;
+@@ -485,7 +487,8 @@
+ 		next.generation = tx->generation;
+ 		next.firmware = tx->firmware_generation;
+ 		next.source = tx->source_generation;
+-		battmgr->control.settings_probe_ns = began;
++		if (rate_limit)
++			battmgr->control.settings_probe_ns = began;
+ 	}
+ 	spin_unlock_irqrestore(&tx->lock, flags);
+ 	if (ret)
+@@ -529,7 +532,7 @@
+ 		return -EPERM;
+ 	if (!mutex_trylock(&battmgr->lock))
+ 		return -EBUSY;
+-	ret = qcom_battmgr_uke_settings_read(battmgr, &result);
++	ret = qcom_battmgr_uke_settings_read(battmgr, &result, true);
+ 	mutex_unlock(&battmgr->lock);
+ 	if (ret)
+ 		return ret;
+@@ -540,6 +543,104 @@
+ static struct device_attribute dev_attr_uke_charge_settings =
+ 	__ATTR(uke_charge_settings, 0400, uke_charge_settings_show, NULL);
+ 
++/* Enable only the firmware's existing 70/80 band with external input absent.
++ * This permission cannot set a target, disable the cap, or admit another writer.
++ * Firmware retains CV, FCC, JEITA and autonomous protection ownership.
++ */
++static int qcom_battmgr_uke_enable_existing_cap(struct qcom_battmgr *battmgr)
++{
++	const unsigned int props[] = { BATT_PRESENT, BATT_HEALTH };
++	struct qcom_battmgr_uke_transaction *tx = &battmgr->transaction;
++	struct qcom_battmgr_uke_settings before, after;
++	struct qcom_battmgr_property_request enable = {
++		.hdr.owner = cpu_to_le32(PMIC_GLINK_OWNER_BATTMGR),
++		.hdr.type = cpu_to_le32(PMIC_GLINK_REQ_RESP),
++		.hdr.opcode = cpu_to_le32(BATTMGR_BAT_PROPERTY_SET),
++		.property = cpu_to_le32(BATT_CHG_CTRL_EN + 1),
++		.value = cpu_to_le32(1),
++	};
++	u64 began = ktime_get_boottime_ns();
++	unsigned long flags;
++	unsigned int i;
++	int ret;
++
++	lockdep_assert_held(&battmgr->lock);
++	if (battmgr->control.preconfigured_uncertain)
++		return -EUCLEAN;
++	ret = qcom_battmgr_uke_settings_read(battmgr, &before, true);
++	if (ret)
++		return ret;
++	if (before.start != 70 || before.end != 80)
++		return -EOPNOTSUPP;
++	for (i = 0; i < ARRAY_SIZE(props); i++) {
++		ret = qcom_battmgr_request_property(battmgr, BATTMGR_BAT_PROPERTY_GET,
++						  props[i], 0);
++		if (ret)
++			return ret;
++	}
++	ret = qcom_battmgr_request_property(battmgr, BATTMGR_USB_PROPERTY_GET, USB_ONLINE, 0);
++	if (ret)
++		return ret;
++	if (!battmgr->info.present || battmgr->status.health != POWER_SUPPLY_HEALTH_GOOD ||
++	    battmgr->usb.online)
++		return -ERANGE;
++	spin_lock_irqsave(&tx->lock, flags);
++	if (!battmgr->service_up || tx->desynced || tx->suspended || tx->removing ||
++	    before.instance != tx->instance_ns || before.generation != tx->generation ||
++	    before.firmware != tx->firmware_generation || before.source != tx->source_generation ||
++	    ktime_get_boottime_ns() < began ||
++	    ktime_get_boottime_ns() - began > 5ULL * NSEC_PER_SEC) {
++		ret = -ESTALE;
++	} else {
++		battmgr->control.preconfigured_generation = before.generation;
++		battmgr->control.preconfigured_enable = true;
++		ret = 0;
++	}
++	spin_unlock_irqrestore(&tx->lock, flags);
++	if (ret)
++		return ret;
++	/* No replay or rollback, including an ambiguous delivery or readback. */
++	if (!before.enabled) {
++		battmgr->control.preconfigured_uncertain = true;
++		ret = qcom_battmgr_request(battmgr, &enable, sizeof(enable));
++	}
++	spin_lock_irqsave(&tx->lock, flags);
++	battmgr->control.preconfigured_enable = false;
++	spin_unlock_irqrestore(&tx->lock, flags);
++	if (ret)
++		return ret;
++	/* Mandatory readback belongs to this one operation, not another probe. */
++	ret = qcom_battmgr_uke_settings_read(battmgr, &after, false);
++	if (ret)
++		return ret;
++	if (!after.enabled || after.start != 70 || after.end != 80 ||
++	    after.instance != before.instance || after.generation != before.generation ||
++	    after.firmware != before.firmware || after.source != before.source ||
++	    after.received_ns < began || after.received_ns - began > 5ULL * NSEC_PER_SEC)
++		return -EREMOTEIO;
++	battmgr->control.preconfigured_uncertain = false;
++	return 0;
++}
++
++static ssize_t uke_charge_enable_existing_cap_store(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t count)
++{
++	struct qcom_battmgr *battmgr = dev_get_drvdata(dev);
++	int ret;
++
++	if (!capable(CAP_SYS_ADMIN))
++		return -EPERM;
++	if (!sysfs_streq(buf, "1"))
++		return -EINVAL;
++	if (!mutex_trylock(&battmgr->lock))
++		return -EBUSY;
++	ret = qcom_battmgr_uke_enable_existing_cap(battmgr);
++	mutex_unlock(&battmgr->lock);
++	return ret ? ret : (ssize_t)count;
++}
++static struct device_attribute dev_attr_uke_charge_enable_existing_cap =
++	__ATTR(uke_charge_enable_existing_cap, 0200, NULL, uke_charge_enable_existing_cap_store);
++
+ static int qcom_battmgr_uke_control_split(const char *buf, size_t count,
+ 					 char *data, size_t size, char **words, size_t capacity)
+ {
+--- a/Documentation/ABI/testing/sysfs-driver-qcom-battmgr-uke-control
++++ b/Documentation/ABI/testing/sysfs-driver-qcom-battmgr-uke-control
+@@ -127,3 +127,27 @@
+                 profile, battery isolation or a control permission. In particular,
+                 disabled thresholds are not converted to invented0/100 settings.
+                 Existing standard threshold clients still require admission.
++
++What:           /sys/bus/auxiliary/devices/*/uke_charge_enable_existing_cap
++Date:           October 2026
++Contact:        Senemos Maintainers
++Description:
++                Development-only CAP_SYS_ADMIN enable of the firmware's existing
++                70% restart / 80% stop configuration. The only accepted input is
++                1. Requires the Uke threshold option, healthy same-epoch service,
++                no active/recent admitted control, fresh battery presence/health
++                and external input OFF. A different firmware-reported band is
++                refused. No target, current, voltage, disable, XM or PD write.
++
++                Serialized preflight and readback use fixed standard GETs. The
++                sole possible SET is standard feature property25=1. It grants
++                no general lease or standard-client permission. Another probe's
++                rate limit does not prevent mandatory in-operation readback.
++                Ambiguous delivery/readback is never replayed or undone; this
++                fixed-cap writer remains quarantined for the driver instance.
++                A successful store verifies enabled70/80 in the same lifecycle,
++                within five seconds. It does not prove physical charge stop,
++                battery isolation, bypass or all autonomous protections.
++
++                This node does not persist intent or activate a service. Current
++                and arbitrary threshold controls retain independent admission.

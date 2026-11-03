@@ -1,0 +1,99 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] usb: repeater: prepare exact Uke host tuning and cleanup
+
+Use only the twelve normal host pairs from MiCode DT 94c84aeb9e517dbde546fc732033c184094c8e57 qcom/uke-sm8635.dtsi. Reconcile the 19.2 MHz forcing bits on every role initialization and preserve errors if cleanup fails. Malformed host data disables that path without rejecting the peripheral profile. DWC3 and eUSB2 host gates remain closed: VBUS ownership and WCD routing are still unqualified. This patch is source preparation, not host enablement.
+
+diff --git a/drivers/usb/repeater/repeater-qti-pmic-eusb2-uke.c b/drivers/usb/repeater/repeater-qti-pmic-eusb2-uke.c
+index 5ec92c2..3be76d1 100644
+--- a/drivers/usb/repeater/repeater-qti-pmic-eusb2-uke.c
++++ b/drivers/usb/repeater/repeater-qti-pmic-eusb2-uke.c
+@@ -11,6 +11,7 @@
+ #include <linux/platform_device.h>
+ #include <linux/regmap.h>
+ #include <linux/regulator/consumer.h>
++#include <linux/string.h>
+ #include <linux/usb/repeater.h>
+ 
+ 
+@@ -103,6 +104,15 @@ struct eusb2_repeater {
+ 
+ 	u32			*param_override_seq;
+ 	u8			param_override_seq_cnt;
++	u32			*host_param_override_seq;
++	u8			host_param_override_seq_cnt;
++};
++
++/* MiCode uke-v-oss: uke-sm8635.dtsi; factory tuning is deliberately excluded. */
++static const u32 uke_host_tuning[] = {
++	0x00, 0x50, 0x08, 0x51, 0x05, 0x52, 0x07, 0x53,
++	0x02, 0x54, 0x01, 0x55, 0x00, 0x56, 0x06, 0x57,
++	0x02, 0x58, 0x00, 0x59, 0x03, 0x5a, 0x02, 0x5b,
+ };
+ 
+ /* Perform one or more register read */
+@@ -303,6 +313,15 @@ static int eusb2_repeater_init(struct usb_repeater *ur)
+ 
+ 	WRITE_ONCE(diag_init, 10000 + EINPROGRESS);
+ 	ret = eusb2_repeater_init_impl(ur);
++	if (ret && ret != -EOPNOTSUPP && (ur->flags & BIT(0))) {
++		struct eusb2_repeater *er = container_of(ur, struct eusb2_repeater, ur);
++		int clear_enable, clear_value;
++
++		clear_enable = eusb2_repeater_masked_write(er, EUSB2_FORCE_EN_5, F_CLK_19P2M_EN, 0);
++		clear_value = eusb2_repeater_masked_write(er, EUSB2_FORCE_VAL_5, V_CLK_19P2M_EN, 0);
++		if (clear_enable || clear_value)
++			dev_err(ur->dev, "host clock cleanup indeterminate: %d/%d\n", clear_enable, clear_value);
++	}
+ 	WRITE_ONCE(diag_init, (READ_ONCE(diag_init) / 10000) * 10000 - ret);
+ 	return ret;
+ }
+@@ -314,20 +333,26 @@ static int eusb2_repeater_init_impl(struct usb_repeater *ur)
+ 	u8 status;
+ 	int ret;
+ 
+-	/* Uke experiment only supports the vendor device-mode sequence. */
+-	if (ur->flags & BIT(0))
++	bool host = ur->flags & BIT(0);
++
++	/* The controller/PHY gates remain closed until VBUS and WCD are qualified. */
++	if (host && (er->host_param_override_seq_cnt != ARRAY_SIZE(uke_host_tuning) ||
++		     memcmp(er->host_param_override_seq, uke_host_tuning, sizeof(uke_host_tuning))))
+ 		return -EOPNOTSUPP;
+ 	WRITE_ONCE(diag_init, 2 * 10000 + EINPROGRESS);
+-	ret = eusb2_repeater_update_seq(er, er->param_override_seq,
+-				      er->param_override_seq_cnt);
++	ret = eusb2_repeater_update_seq(er,
++		host ? er->host_param_override_seq : er->param_override_seq,
++		host ? er->host_param_override_seq_cnt : er->param_override_seq_cnt);
+ 	if (ret)
+ 		return ret;
+-	/* Clear retained host workaround exactly as in Xiaomi device mode. */
++	/* Shared rails retain host forcing; always reconcile it on device return. */
+ 	WRITE_ONCE(diag_init, 3 * 10000 + EINPROGRESS);
+-	ret = eusb2_repeater_masked_write(er, EUSB2_FORCE_EN_5, F_CLK_19P2M_EN, 0);
++	ret = eusb2_repeater_masked_write(er, EUSB2_FORCE_EN_5, F_CLK_19P2M_EN,
++					host ? F_CLK_19P2M_EN : 0);
+ 	if (ret)
+ 		return ret;
+-	ret = eusb2_repeater_masked_write(er, EUSB2_FORCE_VAL_5, V_CLK_19P2M_EN, 0);
++	ret = eusb2_repeater_masked_write(er, EUSB2_FORCE_VAL_5, V_CLK_19P2M_EN,
++					host ? V_CLK_19P2M_EN : 0);
+ 	if (ret)
+ 		return ret;
+ 	WRITE_ONCE(diag_init, 4 * 10000 + EINPROGRESS);
+@@ -462,6 +487,15 @@ static int eusb2_repeater_probe_impl(struct platform_device *pdev)
+ 		&er->param_override_seq, &er->param_override_seq_cnt);
+ 	if (ret < 0)
+ 		goto err_probe;
++	if (of_find_property(dev->of_node, "qcom,param-override-seq-host", NULL)) {
++		ret = eusb2_repeater_read_overrides(dev, "qcom,param-override-seq-host",
++			&er->host_param_override_seq, &er->host_param_override_seq_cnt);
++		if (ret || er->host_param_override_seq_cnt != ARRAY_SIZE(uke_host_tuning) ||
++		    memcmp(er->host_param_override_seq, uke_host_tuning, sizeof(uke_host_tuning))) {
++			er->host_param_override_seq_cnt = 0;
++			dev_warn(dev, "unqualified host tuning ignored; peripheral profile retained\n");
++		}
++	}
+ 
+ 	er->ur.dev = dev;
+ 	platform_set_drvdata(pdev, er);

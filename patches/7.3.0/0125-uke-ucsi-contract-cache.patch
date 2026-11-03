@@ -1,0 +1,186 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] power: expose a coherent cached UCSI contract on Uke
+
+Expose existing firmware observations without adding commands or a negotiation
+owner. Invalidate on status replacement, disconnect, suspend and teardown.
+Keep raw contract values separate from measurements and protocol qualification.
+
+diff --git a/Documentation/ABI/testing/sysfs-driver-ucsi-uke-contract b/Documentation/ABI/testing/sysfs-driver-ucsi-uke-contract
+new file mode 100644
+index 0000000..bee5d8b
+--- /dev/null
++++ b/Documentation/ABI/testing/sysfs-driver-ucsi-uke-contract
+@@ -0,0 +1,22 @@
++What:           /sys/class/power_supply/ucsi-source-psy-*/uke_pd_contract
++Date:           October 2026
++Contact:        Uke Linux maintainers
++Description:
++                Read-only cached firmware contract observation, exposed only
++                on xiaomi,uke. Reading sends no UCSI or PMIC command. Decimal
++                fields: version (1), status generation, status receipt boottime
++                ns, PDO receipt boottime ns, cache valid (0/1), raw RDO, selected
++                raw source PDO, RDO object index, cached source PDO count.
++
++                Cache validity requires a connected PD sink, a current partner,
++                matching RDO/status and PDO/status generations, and a bounded
++                object index. Every status query invalidates the old PDO record,
++                including failed queries. Disconnect, suspend and unregister
++                invalidate the cache. It becomes available only after ordinary
++                UCSI source-PDO discovery completes against a current status;
++                this attribute never forces rediscovery or resumes a controller.
++
++                This is a cached PPM report, not wire-level PS_RDY evidence,
++                measured VBUS/current, adapter authentication, firmware identity,
++                exact negotiated PD revision, electrical qualification or an
++                authorization to change charging. Receipt age remains visible.
+diff --git a/drivers/usb/typec/ucsi/psy.c b/drivers/usb/typec/ucsi/psy.c
+index c8ebab8..c03fa1f 100644
+--- a/drivers/usb/typec/ucsi/psy.c
++++ b/drivers/usb/typec/ucsi/psy.c
+@@ -8,6 +8,8 @@
+  */
+ 
+ #include <linux/property.h>
++#include <linux/of.h>
++#include <linux/timekeeping.h>
+ #include <linux/usb/pd.h>
+ 
+ #include "ucsi.h"
+@@ -309,6 +311,46 @@ static int ucsi_psy_get_prop(struct power_supply *psy,
+ 	}
+ }
+ 
++/* Cached firmware observations only; reading this attribute sends no command. */
++static ssize_t uke_pd_contract_show(struct device *dev,
++				   struct device_attribute *attr, char *buf)
++{
++	struct power_supply *psy = dev_get_drvdata(dev);
++	struct ucsi_connector *con = power_supply_get_drvdata(psy);
++	u32 rdo, pdo = 0, index;
++	bool valid;
++	ssize_t ret;
++
++	if (!mutex_trylock(&con->lock))
++		return -EAGAIN;
++	rdo = con->rdo;
++	index = rdo_index(rdo);
++	valid = con->partner && con->contract_status_ns &&
++		con->contract_boot_offset == ktime_to_ns(ktime_mono_to_any(0, TK_OFFS_BOOT)) &&
++		con->contract_pdos_ns >= con->contract_status_ns &&
++		con->contract_pdos_seq == con->contract_status_seq &&
++		UCSI_CONSTAT(con, CONNECTED) &&
++		UCSI_CONSTAT(con, PWR_DIR) == TYPEC_SINK &&
++		UCSI_CONSTAT(con, PWR_OPMODE) == UCSI_CONSTAT_PWR_OPMODE_PD &&
++		rdo == UCSI_CONSTAT(con, RDO) && index &&
++		con->num_pdos > 0 && index <= (u32)con->num_pdos &&
++		index <= PDO_MAX_OBJECTS;
++	if (valid)
++		pdo = con->src_pdos[index - 1];
++	ret = sysfs_emit(buf, "1 %llu %llu %llu %u %u %u %u %d\n",
++		con->contract_status_seq, con->contract_status_ns,
++		con->contract_pdos_ns, valid, rdo, pdo, index, con->num_pdos);
++	mutex_unlock(&con->lock);
++	return ret;
++}
++static DEVICE_ATTR_RO(uke_pd_contract);
++
++static struct attribute *uke_pd_attrs[] = {
++	&dev_attr_uke_pd_contract.attr,
++	NULL,
++};
++ATTRIBUTE_GROUPS(uke_pd);
++
+ int ucsi_register_port_psy(struct ucsi_connector *con)
+ {
+ 	struct power_supply_config psy_cfg = {};
+@@ -317,6 +359,8 @@ int ucsi_register_port_psy(struct ucsi_connector *con)
+ 
+ 	psy_cfg.drv_data = con;
+ 	psy_cfg.fwnode = dev_fwnode(dev);
++	if (of_machine_is_compatible("xiaomi,uke"))
++		psy_cfg.attr_grp = uke_pd_groups;
+ 
+ 	psy_name = devm_kasprintf(dev, GFP_KERNEL, "ucsi-source-psy-%s%d",
+ 				  dev_name(dev), con->num);
+diff --git a/drivers/usb/typec/ucsi/ucsi.c b/drivers/usb/typec/ucsi/ucsi.c
+index 743c6f5..ade8806 100644
+--- a/drivers/usb/typec/ucsi/ucsi.c
++++ b/drivers/usb/typec/ucsi/ucsi.c
+@@ -12,6 +12,7 @@
+ #include <linux/module.h>
+ #include <linux/delay.h>
+ #include <linux/slab.h>
++#include <linux/timekeeping.h>
+ #include <linux/usb/typec_dp.h>
+ #include <linux/usb/typec_tbt.h>
+ 
+@@ -851,8 +852,15 @@ static int ucsi_get_connector_status(struct ucsi_connector *con, bool conn_ack)
+ 			  UCSI_MAX_DATA_LENGTH(con->ucsi));
+ 	int ret;
+ 
++	con->contract_status_seq++;
++	con->contract_status_ns = 0;
++	con->contract_pdos_ns = 0;
+ 	ret = ucsi_send_command_common(con->ucsi, command, &con->status, size,
+ 				       NULL, 0, conn_ack);
++	if (ret >= 0) {
++		con->contract_status_ns = ktime_get_boottime_ns();
++		con->contract_boot_offset = ktime_to_ns(ktime_mono_to_any(0, TK_OFFS_BOOT));
++	}
+ 
+ 	return ret < 0 ? ret : 0;
+ }
+@@ -915,11 +923,14 @@ static int ucsi_get_src_pdos(struct ucsi_connector *con)
+ {
+ 	int ret;
+ 
++	con->contract_pdos_ns = 0;
+ 	ret = ucsi_get_pdos(con, TYPEC_SOURCE, 1, con->src_pdos);
+ 	if (ret < 0)
+ 		return ret;
+ 
+ 	con->num_pdos = ret;
++	con->contract_pdos_seq = con->contract_status_seq;
++	con->contract_pdos_ns = ktime_get_boottime_ns();
+ 
+ 	ucsi_port_psy_changed(con);
+ 
+@@ -1310,6 +1321,7 @@ static int ucsi_register_partner(struct ucsi_connector *con)
+ 
+ static void ucsi_unregister_partner(struct ucsi_connector *con)
+ {
++	con->contract_pdos_ns = 0;
+ 	if (!con->partner)
+ 		return;
+ 
+@@ -2203,8 +2215,13 @@ int ucsi_suspend(struct ucsi *ucsi)
+ 	if (!ucsi->connector)
+ 		return 0;
+ 
+-	for (i = 0; i < ucsi->cap.num_connectors; i++)
++	for (i = 0; i < ucsi->cap.num_connectors; i++) {
+ 		cancel_work_sync(&ucsi->connector[i].work);
++		mutex_lock(&ucsi->connector[i].lock);
++		ucsi->connector[i].contract_status_ns = 0;
++		ucsi->connector[i].contract_pdos_ns = 0;
++		mutex_unlock(&ucsi->connector[i].lock);
++	}
+ 
+ 	return 0;
+ }
+diff --git a/drivers/usb/typec/ucsi/ucsi.h b/drivers/usb/typec/ucsi/ucsi.h
+index dc59438..82e1f97 100644
+--- a/drivers/usb/typec/ucsi/ucsi.h
++++ b/drivers/usb/typec/ucsi/ucsi.h
+@@ -556,6 +556,11 @@ struct ucsi_connector {
+ 	u32 rdo;
+ 	u32 src_pdos[PDO_MAX_OBJECTS];
+ 	int num_pdos;
++	u64 contract_status_seq;
++	u64 contract_status_ns;
++	s64 contract_boot_offset;
++	u64 contract_pdos_seq;
++	u64 contract_pdos_ns;
+ 
+ 	u32 peak_current;
+ 	u32 avg_current;

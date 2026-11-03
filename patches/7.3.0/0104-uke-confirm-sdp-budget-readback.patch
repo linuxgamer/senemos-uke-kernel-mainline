@@ -1,0 +1,36 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] power: supply: confirm the retained Uke SDP input budget
+
+The Uke trial acknowledged an input-current SET of zero but a later fresh
+GET still reported 500000 uA. Confirm the existing bounded request with a
+fresh property-5 GET under the same lock and source generation. Accept a
+firmware clamp below the requested ceiling, but reject an exceeded budget.
+
+Return a terminal error after an unconfirmed SET; the DWC3 worker must not
+replay an actuator as though this were preflight readiness. Preserve the
+500 mA ceiling, both SDP observations and all existing lifecycle/wet guards.
+This readback does not qualify electrical USB suspend or battery charge stop.
+
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -1498,6 +1498,19 @@
+ 	ret = qcom_battmgr_request_property(battmgr, BATTMGR_USB_PROPERTY_SET,
+ 					  USB_INPUT_CURR_LIMIT, val->intval);
++	if (ret)
++		goto out;
++	/* An ACK alone does not confirm the retained input budget. */
++	ret = qcom_battmgr_request_property(battmgr, BATTMGR_USB_PROPERTY_GET,
++					  USB_INPUT_CURR_LIMIT, 0);
++	if (ret || generation != qcom_battmgr_uke_generation(battmgr) ||
++	    battmgr->usb.current_limit > (unsigned int)val->intval) {
++		dev_info_ratelimited(battmgr->dev,
++			 "SDP budget not confirmed: requested=%d reported=%u uA error=%d\n",
++			 val->intval, battmgr->usb.current_limit, ret);
++		/* Post-SET uncertainty must not enter the worker's readiness retry. */
++		ret = -EREMOTEIO;
++	}
+ out:
+ 	mutex_unlock(&battmgr->lock);
+ 	return ret;
+ }
+

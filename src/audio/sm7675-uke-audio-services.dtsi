@@ -11,16 +11,19 @@
 		reg = <1>;
 		#sound-dai-cells = <0>;
 
-		bedais {
+		uke_q6apm_bedais: bedais {
 			compatible = "qcom,q6apm-lpass-dais";
 			#sound-dai-cells = <1>;
 			status = "disabled";
 		};
 
-		dais {
+		uke_q6apm_dais: dais {
 			compatible = "qcom,q6apm-dais";
-			/* Exact OEM msm-audio-ion context banks; DAI remains disabled. */
+#ifndef UKE_AUDIO_CARD
+			/* Exact OEM context banks remain inactive in the service-only profile. */
 			iommus = <&apps_smmu 0x1001 0x80>, <&apps_smmu 0x1061 0>;
+#endif
+			/* Registration-only frontends neither attach an IOMMU nor request DMA. */
 			status = "disabled";
 		};
 	};
@@ -29,7 +32,7 @@
 		compatible = "qcom,q6prm";
 		reg = <2>;
 
-		clock-controller {
+		uke_q6prm_clocks: clock-controller {
 			compatible = "qcom,q6prm-lpass-clocks";
 			#clock-cells = <2>;
 		};

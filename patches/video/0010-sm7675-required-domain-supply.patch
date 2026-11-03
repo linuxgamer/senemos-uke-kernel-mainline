@@ -1,0 +1,34 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] clk: qcom: fail when the Cliffs controller parent is unavailable
+
+GDSC normally treats ENODEV from its optional regulator lookup as no
+supply. Validate the required Cliffs MXC/MMCX parent before clock setup.
+Preserve missing/deferred supplier errors; do not add a permanent enable vote.
+
+--- a/drivers/clk/qcom/videocc-sm8550.c
++++ b/drivers/clk/qcom/videocc-sm8550.c
+@@ -8,6 +8,7 @@
+ #include <linux/module.h>
+ #include <linux/platform_device.h>
+ #include <linux/regmap.h>
++#include <linux/regulator/consumer.h>
+ 
+ #include <dt-bindings/clock/qcom,sm7675-videocc.h>
+ 
+--- a/drivers/clk/qcom/uke-videocc-votes.c
++++ b/drivers/clk/qcom/uke-videocc-votes.c
+@@ -70,8 +70,14 @@
+ 
+ static int uke_video_voltage_init(struct device *dev)
+ {
++	struct regulator *domain_supply;
+ 	int ret;
+ 
++	/* GDSC's optional lookup must not silently omit this required parent. */
++	domain_supply = devm_regulator_get_optional(dev, "vdd_mm_mxc");
++	if (IS_ERR(domain_supply))
++		return PTR_ERR(domain_supply);
++
+ 	uke_video_mm.class_name = "vdd_mm";
+ 	uke_video_mxc.class_name = "vdd_mxc";
+ 	uke_video_mm.regulator_names[0] = "vdd_mm";

@@ -1,0 +1,16 @@
+name: Source contracts
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - run: sudo apt-get update && sudo apt-get install -y jq rpm binutils
+      - run: bash -n scripts/prepare-upstream-candidate.sh packaging/native/*.sh
+      - run: bash tests/upstream-candidate-contract.sh
+      - run: bash tests/prebuilt-helpers-contract.sh
+      - run: bash tests/copr-only-preparation-contract.sh

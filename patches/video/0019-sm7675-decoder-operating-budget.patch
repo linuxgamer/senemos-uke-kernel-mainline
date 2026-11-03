@@ -1,0 +1,88 @@
+Subject: [PATCH] media: iris: retain the SM7675 decoder operating budget
+
+Synchronous clients pace input by decode and exported-surface completion.
+Their input-arrival estimate can fall below the source frame rate, reducing
+clocks while a 4K60 stream is already late. The interconnect vote also remains
+fixed at 30 fps independently of that estimate.
+
+Give SM7675 decoding the conservative operating rate already implied by its
+codec budget at the maximum admitted frame size. Use the existing operating
+rate in decoder clock and bandwidth votes, as the pinned Cliffs power model
+does. Retain the measured rate when it is higher, normal runtime power-off,
+the existing OPP/voltage limits, other platforms and encoder behavior.
+
+Include the pinned Cliffs NRT scheduling headroom of 1/16 in the native
+decoder clock vote. Apply it to cycle estimates without changing the declared
+codec rate or the OPP table. The initial operating-budget-only tablet control
+improves throughput but remains below 60 fps.
+
+This is an unqualified throughput candidate pending recoverable tablet tests.
+The rate uses existing SM7675 capability values; no donor board values or
+new frequency/thermal override is introduced.
+
+--- a/drivers/media/platform/qcom/iris/iris_vdec.c
++++ b/drivers/media/platform/qcom/iris/iris_vdec.c
+@@ -19,6 +19,7 @@
+ int iris_vdec_inst_init(struct iris_inst *inst)
+ {
+ 	struct iris_core *core = inst->core;
++	const struct platform_inst_caps *caps = core->iris_platform_data->inst_caps;
+ 	struct v4l2_format *f;
+ 
+ 	inst->fmt_src = kzalloc_obj(*inst->fmt_src);
+@@ -55,6 +56,9 @@
+ 	inst->buffers[BUF_OUTPUT].min_count = iris_vpu_buf_count(inst, BUF_OUTPUT);
+ 	inst->buffers[BUF_OUTPUT].size = f->fmt.pix_mp.plane_fmt[0].sizeimage;
+ 	inst->frame_rate = MAXIMUM_FPS;
++	/* Synchronous clients must not throttle their own decode operating rate. */
++	if (core->iris_platform_data == &sm7675_data && caps->max_mbpf)
++		inst->operating_rate = caps->max_mbps / caps->max_mbpf;
+ 
+ 	memcpy(&inst->fw_caps[0], &core->inst_fw_caps_dec[0],
+ 	       INST_FW_CAP_MAX * sizeof(struct platform_inst_fw_cap));
+--- a/drivers/media/platform/qcom/iris/iris_power.c
++++ b/drivers/media/platform/qcom/iris/iris_power.c
+@@ -69,6 +69,8 @@
+ 	vote_data->width = inp_f->fmt.pix_mp.width;
+ 	vote_data->height = inp_f->fmt.pix_mp.height;
+ 	vote_data->fps = DEFAULT_FPS;
++	if (inst->domain == DECODER && inst->operating_rate)
++		vote_data->fps = max(inst->frame_rate, inst->operating_rate);
+ 
+ 	inst->power.icc_bw = iris_calc_bw(inst, vote_data);
+ 
+--- a/drivers/media/platform/qcom/iris/iris_vpu_common.c
++++ b/drivers/media/platform/qcom/iris/iris_vpu_common.c
+@@ -466,6 +466,7 @@
+ 	u32 height, width, mbs_per_second, mbpf;
+ 	u64 fw_cycles, fw_vpp_cycles;
+ 	u64 vsp_cycles, vpp_cycles;
++	u64 freq;
+ 	u32 fps = inst->frame_rate;
+ 	u32 pipes = inst->domain == ENCODER ? inst->core->iris_platform_data->num_vpp_pipe :
+ 					     inst->fw_caps[PIPE].value;
+@@ -473,6 +474,9 @@
+ 	if (!pipes)
+ 		return ULONG_MAX;
+ 
++	if (inst->domain == DECODER)
++		fps = max(fps, inst->operating_rate);
++
+ 	width = max(inp_f->fmt.pix_mp.width, inst->crop.width);
+ 	height = max(inp_f->fmt.pix_mp.height, inst->crop.height);
+ 
+@@ -502,7 +506,13 @@
+ 	if (inst->fw_caps[STAGE].value == STAGE_1)
+ 		vsp_cycles = vsp_cycles * 3;
+ 
+-	return max3(vpp_cycles, vsp_cycles, fw_cycles);
++	freq = max3(vpp_cycles, vsp_cycles, fw_cycles);
++	/* Retain Cliffs queueing headroom for the native operating budget. */
++	if (inst->domain == DECODER && inst->operating_rate &&
++	    inst->core->iris_platform_data == &sm7675_data)
++		freq += div_u64(freq, 16);
++
++	return freq;
+ }
+ 
+ int iris_vpu_power_on(struct iris_core *core)

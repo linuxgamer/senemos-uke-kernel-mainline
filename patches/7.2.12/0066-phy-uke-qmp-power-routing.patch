@@ -1,0 +1,450 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] phy: qcom: connect exact Uke QMP rails and checked route changes
+
+Source: MiCode/Xiaomi_Kernel_OpenSource 5712080a4b0c0b1a879e6d145c601c649ddaddfd
+Source: MiCode/kernel_devicetree 94c84aeb9e517dbde546fc732033c184094c8e57
+Source: MiCode/vendor_qcom_opensource_display-drivers 44275c404a677d9d9e5230fedd1af2ef02fc7b9a
+Base: Joint Uke kernel23 f429992feb638e7dffc0142ecb77c6b1a86fc16e
+License: GPL-2.0-only
+
+diff --git a/drivers/clk/qcom/gdsc-regulator-uke.c b/drivers/clk/qcom/gdsc-regulator-uke.c
+index befa053..ce46a79 100644
+--- a/drivers/clk/qcom/gdsc-regulator-uke.c
++++ b/drivers/clk/qcom/gdsc-regulator-uke.c
+@@ -60,6 +60,9 @@ static int uke_gdsc_get_regmap(struct platform_device *pdev,
+ 	if (of_device_is_compatible(dev->of_node, "qcom,sm7675-usb-gdsc")) {
+ 		if (res->start != 0x139004)
+ 			return -EINVAL;
++	} else if (of_device_is_compatible(dev->of_node, "qcom,sm7675-usb-phy-gdsc")) {
++		if (res->start != 0x150018)
++			return -EINVAL;
+ 	} else if (res->start != 0x177004 && res->start != 0x19e000) {
+ 		return -EINVAL;
+ 	}
+@@ -322,6 +325,7 @@ release_parent:
+ 
+ static const struct of_device_id uke_gdsc_of_match[] = {
+ 	{ .compatible = "qcom,sm7675-usb-gdsc" },
++	{ .compatible = "qcom,sm7675-usb-phy-gdsc" },
+ 	/* OEM UFS domains use the same GDSCR/CFG_GDSCR state machine. */
+ 	{ .compatible = "qcom,sm7675-ufs-gdsc" },
+ 	{ }
+diff --git a/drivers/phy/qualcomm/phy-qcom-qmp-combo.c b/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
+index 5dcf381..c7fb50f 100644
+--- a/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
++++ b/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
+@@ -2064,6 +2064,13 @@ static struct regulator_bulk_data qmp_phy_vreg_l[] = {
+ 	{ .supply = "vdda-pll", .init_load_uA = 36000, },
+ };
+ 
++/* Uke OEM cliffs-usb.dtsi and cliffs-sde.dtsi use three analog rails. */
++static const struct regulator_bulk_data uke_qmp_vregs[] = {
++	{ .supply = "vdda-phy", .init_load_uA = 47000 },
++	{ .supply = "vdda-pll", .init_load_uA = 30000 },
++	{ .supply = "vdda-usb", .init_load_uA = 6500 },
++};
++
+ static struct regulator_bulk_data qmp_phy_vreg_refgen[] = {
+ 	{ .supply = "vdda-phy", .init_load_uA = 21800 },
+ 	{ .supply = "vdda-pll", .init_load_uA = 36000 },
+@@ -2291,6 +2298,9 @@ struct qmp_combo {
+ 	int num_clks;
+ 	struct reset_control_bulk_data *resets;
+ 	struct regulator_bulk_data *vregs;
++	struct regulator *uke_gdsc;
++	int uke_route_error;
++	bool uke_powered;
+ 
+ 	struct mutex phy_mutex;
+ 	int init_count;
+@@ -3162,8 +3172,8 @@ static const struct qmp_phy_cfg sm7675_usb3dpphy_cfg = {
+ 	.regs			= qmp_v6_usb3phy_regs_layout,
+ 	.reset_list		= msm8996_usb3phy_reset_l,
+ 	.num_resets		= ARRAY_SIZE(msm8996_usb3phy_reset_l),
+-	.vreg_list		= qmp_phy_vreg_l,
+-	.num_vregs		= ARRAY_SIZE(qmp_phy_vreg_l),
++	.vreg_list		= uke_qmp_vregs,
++	.num_vregs		= ARRAY_SIZE(uke_qmp_vregs),
+ };
+ 
+ static const struct qmp_phy_cfg sm8650_usb3dpphy_cfg = {
+@@ -3880,6 +3890,19 @@ static int qmp_combo_dp_configure(struct phy *phy, union phy_configure_opts *opt
+ 	const struct phy_configure_opts_dp *dp_opts = &opts->dp;
+ 	struct qmp_combo *qmp = phy_get_drvdata(phy);
+ 	const struct qmp_phy_cfg *cfg = qmp->cfg;
++	unsigned int i;
++	if (qmp->uke_gdsc) {
++		if (qmp->uke_route_error)
++			return qmp->uke_route_error;
++		if ((dp_opts->lanes != 1 && dp_opts->lanes != 2 && dp_opts->lanes != 4) ||
++		    (dp_opts->link_rate != 1620 && dp_opts->link_rate != 2700 &&
++		     dp_opts->link_rate != 5400))
++			return -EINVAL;
++		for (i = 0; i < dp_opts->lanes; i++)
++			if (dp_opts->voltage[i] > 3 || dp_opts->pre[i] > 3 ||
++			    dp_opts->voltage[i] + dp_opts->pre[i] > 3)
++				return -EINVAL;
++	}
+ 
+ 	/* Keep sink compliance/debug requests within the Uke OEM HBR2 ceiling. */
+ 	if ((of_machine_is_compatible("xiaomi,uke") ||
+@@ -3923,13 +3946,20 @@ static int qmp_combo_com_init(struct qmp_combo *qmp, bool force)
+ 	int ret;
+ 	u32 val;
+ 
++	if (qmp->uke_route_error)
++		return qmp->uke_route_error;
+ 	if (!force && qmp->init_count++)
+ 		return 0;
+ 
++	if (qmp->uke_gdsc) {
++		ret = regulator_enable(qmp->uke_gdsc);
++		if (ret)
++			goto err_decrement_count;
++	}
+ 	ret = regulator_bulk_enable(cfg->num_vregs, qmp->vregs);
+ 	if (ret) {
+ 		dev_err(qmp->dev, "failed to enable regulators, err=%d\n", ret);
+-		goto err_decrement_count;
++		goto err_disable_gdsc;
+ 	}
+ 
+ 	ret = reset_control_bulk_assert(cfg->num_resets, qmp->resets);
+@@ -4010,6 +4040,8 @@ static int qmp_combo_com_init(struct qmp_combo *qmp, bool force)
+ 
+ 	qphy_setbits(qmp->pcs, cfg->regs[QPHY_PCS_POWER_DOWN_CONTROL],
+ 			SW_PWRDN);
++	if (qmp->uke_gdsc)
++		qmp->uke_powered = true;
+ 
+ 	return 0;
+ 
+@@ -4019,8 +4051,14 @@ err_assert_reset:
+ 	reset_control_bulk_assert(cfg->num_resets, qmp->resets);
+ err_disable_regulators:
+ 	regulator_bulk_disable(cfg->num_vregs, qmp->vregs);
++err_disable_gdsc:
++	if (qmp->uke_gdsc)
++		regulator_disable(qmp->uke_gdsc);
+ err_decrement_count:
+-	qmp->init_count--;
++	if (!force)
++		qmp->init_count--;
++	if (qmp->uke_gdsc)
++		qmp->uke_route_error = ret;
+ 
+ 	return ret;
+ }
+@@ -4028,18 +4066,62 @@ err_decrement_count:
+ static int qmp_combo_com_exit(struct qmp_combo *qmp, bool force)
+ {
+ 	const struct qmp_phy_cfg *cfg = qmp->cfg;
++	int ret;
++	if (qmp->uke_gdsc) {
++		/* A failed forced re-init already unwound its successful votes. */
++		if (!qmp->uke_powered) {
++			if (!force && qmp->init_count > 0)
++				qmp->init_count--;
++			return 0;
++		}
++		if (qmp->uke_route_error)
++			return qmp->uke_route_error;
++		if (qmp->init_count <= 0)
++			return -EINVAL;
++	}
+ 
+ 	if (!force && --qmp->init_count)
+ 		return 0;
+ 
+-	reset_control_bulk_assert(cfg->num_resets, qmp->resets);
++	ret = reset_control_bulk_assert(cfg->num_resets, qmp->resets);
++	if (ret && qmp->uke_gdsc)
++		goto uncertain;
+ 
+ 	clk_disable_unprepare(qmp->pipe_clk);
+ 	clk_bulk_disable_unprepare(qmp->num_clks, qmp->clks);
+ 
+-	regulator_bulk_disable(cfg->num_vregs, qmp->vregs);
++	ret = regulator_bulk_disable(cfg->num_vregs, qmp->vregs);
++	if (ret && qmp->uke_gdsc)
++		goto uncertain;
++	if (qmp->uke_gdsc) {
++		ret = regulator_disable(qmp->uke_gdsc);
++		if (ret)
++			goto uncertain;
++		qmp->uke_powered = false;
++	}
+ 
+ 	return 0;
++uncertain:
++	if (!force)
++		qmp->init_count++;
++	qmp->uke_route_error = ret;
++	return ret;
++}
++
++static int qmp_combo_uke_dp_vote(struct qmp_combo *qmp, bool dp)
++{
++	int ret;
++	if (!qmp->uke_gdsc)
++		return 0;
++	/* DP OEM: L3B=912 mV/115 mA, L2B=880 mV/6.5 mA, L4B=1.2 V/30.1 mA. */
++	ret = regulator_set_voltage(qmp->vregs[0].consumer, dp ? 912000 : 880000,
++				    dp ? 912000 : 920000);
++	if (ret)
++		return ret;
++	ret = regulator_set_load(qmp->vregs[0].consumer, dp ? 115000 : 47000);
++	if (ret)
++		return ret;
++	return regulator_set_load(qmp->vregs[1].consumer, dp ? 30100 : 30000);
+ }
+ 
+ static int qmp_combo_dp_init(struct phy *phy)
+@@ -4054,6 +4136,12 @@ static int qmp_combo_dp_init(struct phy *phy)
+ 	if (ret)
+ 		goto out_unlock;
+ 
++	ret = qmp_combo_uke_dp_vote(qmp, true);
++	if (ret) {
++		qmp_combo_uke_dp_vote(qmp, false);
++		qmp_combo_com_exit(qmp, false);
++		goto out_unlock;
++	}
+ 	cfg->dp_aux_init(qmp);
+ 
+ 	qmp->dp_init_count++;
+@@ -4066,16 +4154,21 @@ out_unlock:
+ static int qmp_combo_dp_exit(struct phy *phy)
+ {
+ 	struct qmp_combo *qmp = phy_get_drvdata(phy);
++	int ret;
+ 
+ 	mutex_lock(&qmp->phy_mutex);
+ 
+-	qmp_combo_com_exit(qmp, false);
+-
+ 	qmp->dp_init_count--;
++	ret = qmp_combo_uke_dp_vote(qmp, qmp->dp_init_count != 0);
++	{
++		int exit_ret = qmp_combo_com_exit(qmp, false);
++		if (!ret)
++			ret = exit_ret;
++	}
+ 
+ 	mutex_unlock(&qmp->phy_mutex);
+ 
+-	return 0;
++	return ret;
+ }
+ 
+ static int qmp_combo_dp_power_on(struct phy *phy)
+@@ -4084,8 +4177,13 @@ static int qmp_combo_dp_power_on(struct phy *phy)
+ 	const struct qmp_phy_cfg *cfg = qmp->cfg;
+ 	void __iomem *tx = qmp->dp_tx;
+ 	void __iomem *tx2 = qmp->dp_tx2;
++	int ret;
+ 
+ 	mutex_lock(&qmp->phy_mutex);
++	if (qmp->uke_route_error) {
++		ret = qmp->uke_route_error;
++		goto out_unlock;
++	}
+ 
+ 	qmp_combo_dp_serdes_init(qmp);
+ 
+@@ -4096,13 +4194,15 @@ static int qmp_combo_dp_power_on(struct phy *phy)
+ 	cfg->configure_dp_tx(qmp);
+ 
+ 	/* Configure link rate, swing, etc. */
+-	cfg->configure_dp_phy(qmp);
++	ret = cfg->configure_dp_phy(qmp);
++	if (ret)
++		goto out_unlock;
+ 
+ 	qmp->dp_powered_on = true;
+-
++out_unlock:
+ 	mutex_unlock(&qmp->phy_mutex);
+ 
+-	return 0;
++	return ret;
+ }
+ 
+ static int qmp_combo_dp_power_off(struct phy *phy)
+@@ -4680,17 +4780,64 @@ static int qmp_combo_register_clocks(struct qmp_combo *qmp, struct device_node *
+ }
+ 
+ #if IS_ENABLED(CONFIG_TYPEC)
++/* A route acknowledgement must include successful rail/clock/PHY restoration. */
++static int qmp_combo_uke_reconfigure(struct qmp_combo *qmp)
++{
++	int ret;
++
++	if (qmp->uke_route_error)
++		return qmp->uke_route_error;
++	if (!qmp->init_count)
++		return 0;
++	if (qmp->usb_init_count) {
++		ret = qmp_combo_usb_power_off(qmp->usb_phy);
++		if (ret)
++			goto failed;
++	}
++	if (qmp->dp_init_count)
++		writel(DP_PHY_PD_CTL_PSR_PWRDN, qmp->dp_dp_phy + QSERDES_DP_PHY_PD_CTL);
++	ret = qmp_combo_com_exit(qmp, true);
++	if (ret)
++		goto failed;
++	ret = qmp_combo_com_init(qmp, true);
++	if (ret)
++		goto failed;
++	if (qmp->usb_init_count && qmp->qmpphy_mode != QMPPHY_MODE_DP_ONLY) {
++		ret = qmp_combo_usb_power_on(qmp->usb_phy);
++		if (ret)
++			goto failed;
++	}
++	if (qmp->dp_init_count)
++		qmp->cfg->dp_aux_init(qmp);
++	return 0;
++failed:
++	qmp->uke_route_error = ret;
++	dev_err(qmp->dev, "Uke Type-C route restoration failed: %d\n", ret);
++	return ret;
++}
++
+ static int qmp_combo_typec_switch_set(struct typec_switch_dev *sw,
+ 				      enum typec_orientation orientation)
+ {
+ 	struct qmp_combo *qmp = typec_switch_get_drvdata(sw);
+ 	const struct qmp_phy_cfg *cfg = qmp->cfg;
++	if (qmp->uke_gdsc && READ_ONCE(qmp->uke_route_error))
++		return READ_ONCE(qmp->uke_route_error);
+ 
+ 	if (orientation == qmp->orientation || orientation == TYPEC_ORIENTATION_NONE)
+ 		return 0;
+ 
+ 	mutex_lock(&qmp->phy_mutex);
++	if (qmp->uke_gdsc && qmp->dp_powered_on) {
++		mutex_unlock(&qmp->phy_mutex);
++		return -EBUSY;
++	}
+ 	qmp->orientation = orientation;
++	if (qmp->uke_gdsc) {
++		int ret = qmp_combo_uke_reconfigure(qmp);
++		mutex_unlock(&qmp->phy_mutex);
++		return ret;
++	}
+ 
+ 	if (qmp->init_count) {
+ 		if (qmp->usb_init_count)
+@@ -4716,13 +4863,17 @@ static int qmp_combo_typec_mux_set(struct typec_mux_dev *mux, struct typec_mux_s
+ 	unsigned int svid;
+ 
+ 	guard(mutex)(&qmp->phy_mutex);
++	if (qmp->uke_route_error)
++		return qmp->uke_route_error;
+ 
+ 	if (state->alt)
+ 		svid = state->alt->svid;
+ 	else
+ 		svid = 0;
+ 
+-	if (svid == USB_TYPEC_DP_SID) {
++	if (qmp->uke_gdsc && state->mode < TYPEC_STATE_MODAL) {
++		new_mode = QMPPHY_MODE_USB3_ONLY;
++	} else if (svid == USB_TYPEC_DP_SID) {
+ 		switch (state->mode) {
+ 		/* DP Only */
+ 		case TYPEC_DP_STATE_C:
+@@ -4736,11 +4887,16 @@ static int qmp_combo_typec_mux_set(struct typec_mux_dev *mux, struct typec_mux_s
+ 
+ 		/* Safe fallback...*/
+ 		default:
++			if (qmp->uke_gdsc)
++				return -EOPNOTSUPP;
+ 			new_mode = QMPPHY_MODE_USB3DP;
+ 			break;
+ 		}
+ 	} else {
+ 		/* No DP SVID => don't care, assume it's just USB3 */
++		if (qmp->uke_gdsc && (svid ||
++		    (state->mode != TYPEC_MODE_USB2 && state->mode != TYPEC_MODE_USB3)))
++			return -EOPNOTSUPP;
+ 		new_mode = QMPPHY_MODE_USB3_ONLY;
+ 	}
+ 
+@@ -4751,13 +4907,15 @@ static int qmp_combo_typec_mux_set(struct typec_mux_dev *mux, struct typec_mux_s
+ 
+ 	if (qmp->qmpphy_mode != QMPPHY_MODE_USB3_ONLY && qmp->dp_powered_on) {
+ 		dev_dbg(qmp->dev, "typec_mux_set: DP PHY is still in use, delaying switch\n");
+-		return 0;
++		return qmp->uke_gdsc ? -EBUSY : 0;
+ 	}
+ 
+ 	dev_dbg(qmp->dev, "typec_mux_set: switching from qmpphy mode %d to %d\n",
+ 		qmp->qmpphy_mode, new_mode);
+ 
+ 	qmp->qmpphy_mode = new_mode;
++	if (qmp->uke_gdsc)
++		return qmp_combo_uke_reconfigure(qmp);
+ 
+ 	if (qmp->init_count) {
+ 		if (qmp->usb_init_count)
+@@ -5131,6 +5289,18 @@ static int qmp_combo_probe(struct platform_device *pdev)
+ 					qmp->cfg->vreg_list, &qmp->vregs);
+ 	if (ret)
+ 		return ret;
++	if (qmp->cfg == &sm7675_usb3dpphy_cfg) {
++		qmp->uke_gdsc = devm_regulator_get(dev, "gdsc");
++		if (IS_ERR(qmp->uke_gdsc))
++			return dev_err_probe(dev, PTR_ERR(qmp->uke_gdsc), "missing Uke PHY GDSC\n");
++		ret = regulator_set_voltage(qmp->vregs[0].consumer, 880000, 920000);
++		if (!ret)
++			ret = regulator_set_voltage(qmp->vregs[1].consumer, 1200000, 1200000);
++		if (!ret)
++			ret = regulator_set_voltage(qmp->vregs[2].consumer, 880000, 880000);
++		if (ret)
++			return dev_err_probe(dev, ret, "Uke PHY analog voltage vote failed\n");
++	}
+ 
+ 	/* Check for legacy binding with child nodes. */
+ 	usb_np = of_get_child_by_name(dev->of_node, "usb3-phy");
+@@ -5312,12 +5482,39 @@ static const struct of_device_id qmp_combo_of_match_table[] = {
+ };
+ MODULE_DEVICE_TABLE(of, qmp_combo_of_match_table);
+ 
++/* Cached requests and completion status only; reading never accesses the PHY. */
++static ssize_t uke_route_state_show(struct device *dev,
++				  struct device_attribute *attr, char *buf)
++{
++	struct qmp_combo *qmp = dev_get_drvdata(dev);
++	ssize_t bytes;
++	mutex_lock(&qmp->phy_mutex);
++	bytes = sysfs_emit(buf, "version=1 orientation=%u mode=%u users=%d usb_users=%u dp_users=%u dp_powered=%u errno=%d\n",
++		qmp->orientation, qmp->qmpphy_mode, qmp->init_count,
++		qmp->usb_init_count, qmp->dp_init_count, qmp->dp_powered_on,
++		qmp->uke_route_error);
++	mutex_unlock(&qmp->phy_mutex);
++	return bytes;
++}
++static DEVICE_ATTR_RO(uke_route_state);
++static struct attribute *qmp_combo_uke_attrs[] = { &dev_attr_uke_route_state.attr, NULL };
++static umode_t qmp_combo_uke_visible(struct kobject *kobj, struct attribute *attr, int index)
++{
++	struct qmp_combo *qmp = dev_get_drvdata(kobj_to_dev(kobj));
++	return qmp && qmp->uke_gdsc ? attr->mode : 0;
++}
++static const struct attribute_group qmp_combo_uke_group = {
++	.attrs = qmp_combo_uke_attrs, .is_visible = qmp_combo_uke_visible,
++};
++static const struct attribute_group *qmp_combo_uke_groups[] = { &qmp_combo_uke_group, NULL };
++
+ static struct platform_driver qmp_combo_driver = {
+ 	.probe		= qmp_combo_probe,
+ 	.driver = {
+ 		.name	= "qcom-qmp-combo-phy",
+ 		.pm	= &qmp_combo_pm_ops,
+ 		.of_match_table = qmp_combo_of_match_table,
++		.dev_groups = qmp_combo_uke_groups,
+ 	},
+ };
+ 

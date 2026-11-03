@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "kernel_release": "7.3.0-52",
+  "base_source_commit": "8cbe0435f05c8a26dd891bd842ec8533a1504421",
+  "video_change_commit": "1024dc8aa5cddc73c5bb8f6f7949f62f1bda941f",
+  "video_overlay_publication_commit": "b81f2cc666ffc3fcae9cf87c37bbe573d369dc83",
+  "video_overlay_sha256": "93876a3d8c047e396c9cf35a472eab3047ece61cbb61e9d7cc68427232e15530",
+  "parent_copr_build": 11228360,
+  "parent_srpm_sha256": "93b1a04660b5bc208031900985649a10c433ef5302f98e10cc883732fd001d28",
+  "parent_spec_sha256": "b22c6a8995a5a97f2b703aa6fe726b6e24784670a9bd20693a8b6baea2ed2de8",
+  "packaging_commit": "ec1d61b3436b949792b90daddbe7b81ce5773294",
+  "copr_build": 11228578,
+  "non_spec_source_inputs_changed": false,
+  "embedded_commit_scope": "video change; parent SRPM and full profile checksums bind the combined source",
+  "physical_acceptance": false
+}

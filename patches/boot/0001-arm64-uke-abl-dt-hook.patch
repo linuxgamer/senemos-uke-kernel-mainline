@@ -26,7 +26,7 @@ index d2690c3..87e15c9 100644
  			   syscall.o proton-pack.o idle.o patching.o pi/	\
  			   rsi.o jump_label.o
  
-+obj-$(CONFIG_QCOM_UKE_ABL_DT)		+= uke-abl.o
++obj-$(CONFIG_QCOM_UKE_ABL_DT)		+= uke-abl.o uke-identity.o
 +
  obj-$(CONFIG_COMPAT)			+= sys32.o signal32.o			\
  					   sys_compat.o

@@ -1,0 +1,31 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] drm/msm/dpu: print the stored video vblank reference count
+
+Both video IRQ tracepoints store refcnt correctly but print drm_id again
+in its place. This made the Uke slave report 35 references despite not
+owning a vblank IRQ. Print the actual stored field without changing IRQ
+registration, reference accounting or event layout.
+
+Signed-off-by: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+---
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_trace.h b/drivers/gpu/drm/msm/disp/dpu1/dpu_trace.h
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_trace.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_trace.h
+@@ -622,7 +622,7 @@
+ 	),
+ 	TP_printk("id=%u, intf_idx=%d refcnt=%d", __entry->drm_id,
+ 		  __entry->intf_idx,
+-		  __entry->drm_id)
++		  __entry->refcnt)
+ );
+ 
+ TRACE_EVENT(dpu_enc_phys_vid_irq_disable,
+@@ -641,7 +641,7 @@
+ 	),
+ 	TP_printk("id=%u, intf_idx=%d refcnt=%d", __entry->drm_id,
+ 		  __entry->intf_idx,
+-		  __entry->drm_id)
++		  __entry->refcnt)
+ );
+ 
+ TRACE_EVENT(dpu_crtc_setup_mixer,

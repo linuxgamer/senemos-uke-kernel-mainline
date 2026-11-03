@@ -1,0 +1,1382 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] drm/msm: retain old scanout and writeback pins until proved retirement
+
+Reserve old-plane cleanup in the already allocated CRTC state, order the
+proof with the actual timer or synchronous flush, and defer video cleanup
+past a subsequent vblank. Keep one-shot completion and proved teardown
+separate from software counters. A failed proof retains ownership and
+refuses another update instead of unpinning potentially active DMA.
+
+The deferred-retirement problem and vblank-work direction were discussed
+in Qualcomm's drm/msm KMS SMMU v5 series. This implementation avoids its
+cleanup-time allocation fallback and handles the Uke timer-batched tail.
+
+Keep writeback jobs in the DRM queue after timeout, with a device reference,
+until actual WB_DONE or successful CTL teardown. Store prepared geometry
+per job so preparing a later job cannot replace the active destination.
+No board timing, address, firmware or device-tree value is introduced.
+
+Source, fault-injection and native-build evidence do not qualify physical
+scanout, controller resets or hot-unplug with active userspace.
+
+Link: https://patchew.org/linux/20261024-fd-kms-fix-smmu-v5-0-a5b0b284aead@oss.qualcomm.com/
+
+diff --git a/drivers/gpu/drm/msm/Makefile b/drivers/gpu/drm/msm/Makefile
+index edee040..37b0fdc 100644
+--- a/drivers/gpu/drm/msm/Makefile
++++ b/drivers/gpu/drm/msm/Makefile
+@@ -71,6 +71,7 @@ msm-display-$(CONFIG_DRM_MSM_MDP5) += \
+ msm-display-$(CONFIG_DRM_MSM_DPU) += \
+ 	disp/dpu1/dpu_core_perf.o \
+ 	disp/dpu1/dpu_crtc.o \
++	disp/dpu1/dpu_crtc_retire.o \
+ 	disp/dpu1/dpu_encoder.o \
+ 	disp/dpu1/dpu_encoder_phys_cmd.o \
+ 	disp/dpu1/dpu_encoder_phys_vid.o \
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c
+index df9df05..3da56fe 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c
+@@ -1020,6 +1020,7 @@ static void dpu_crtc_destroy_state(struct drm_crtc *crtc,
+ {
+ 	struct dpu_crtc_state *cstate = to_dpu_crtc_state(state);
+ 
++	WARN_ON_ONCE(cstate->retire.state);
+ 	DRM_DEBUG_ATOMIC("crtc%d\n", crtc->base.id);
+ 
+ 	__drm_atomic_helper_crtc_destroy_state(state);
+@@ -1069,8 +1070,8 @@ static int dpu_crtc_kickoff_clone_mode(struct drm_crtc *crtc)
+ 		return -EINVAL;
+ 	}
+ 
+-	dpu_encoder_prepare_for_kickoff(wb_encoder);
+-	dpu_encoder_prepare_for_kickoff(rt_encoder);
++	dpu_encoder_prepare_for_kickoff(wb_encoder, true);
++	dpu_encoder_prepare_for_kickoff(rt_encoder, true);
+ 
+ 	dpu_vbif_clear_errors(dpu_kms);
+ 
+@@ -1092,12 +1093,13 @@ static int dpu_crtc_kickoff_clone_mode(struct drm_crtc *crtc)
+  * dpu_crtc_commit_kickoff - trigger kickoff of the commit for this crtc
+  * @crtc: Pointer to drm crtc object
+  */
+-void dpu_crtc_commit_kickoff(struct drm_crtc *crtc)
++bool dpu_crtc_commit_kickoff(struct drm_crtc *crtc)
+ {
+ 	struct drm_encoder *encoder;
+ 	struct dpu_crtc *dpu_crtc = to_dpu_crtc(crtc);
+ 	struct dpu_kms *dpu_kms = _dpu_crtc_get_kms(crtc);
+ 	struct dpu_crtc_state *cstate = to_dpu_crtc_state(crtc->state);
++	bool kicked = false;
+ 
+ 	/*
+ 	 * If no mixers has been allocated in dpu_crtc_atomic_check(),
+@@ -1105,7 +1107,7 @@ void dpu_crtc_commit_kickoff(struct drm_crtc *crtc)
+ 	 * nothing else needs to be done.
+ 	 */
+ 	if (unlikely(!cstate->num_mixers))
+-		return;
++		return false;
+ 
+ 	DPU_ATRACE_BEGIN("crtc_commit");
+ 
+@@ -1127,7 +1129,7 @@ void dpu_crtc_commit_kickoff(struct drm_crtc *crtc)
+ 		 */
+ 		drm_for_each_encoder_mask(encoder, crtc->dev,
+ 				crtc->state->encoder_mask)
+-			dpu_encoder_prepare_for_kickoff(encoder);
++			dpu_encoder_prepare_for_kickoff(encoder, false);
+ 
+ 		dpu_vbif_clear_errors(dpu_kms);
+ 
+@@ -1138,6 +1140,7 @@ void dpu_crtc_commit_kickoff(struct drm_crtc *crtc)
+ 		}
+ 	}
+ 
++	kicked = true;
+ 	if (atomic_inc_return(&dpu_crtc->frame_pending) == 1) {
+ 		/* acquire bandwidth and other resources */
+ 		DRM_DEBUG_ATOMIC("crtc%d first commit\n", crtc->base.id);
+@@ -1150,6 +1153,7 @@ void dpu_crtc_commit_kickoff(struct drm_crtc *crtc)
+ 
+ end:
+ 	DPU_ATRACE_END("crtc_commit");
++	return kicked;
+ }
+ 
+ static void dpu_crtc_reset(struct drm_crtc *crtc)
+@@ -1181,6 +1185,7 @@ static struct drm_crtc_state *dpu_crtc_duplicate_state(struct drm_crtc *crtc)
+ 
+ 	/* duplicate base helper */
+ 	__drm_atomic_helper_crtc_duplicate_state(crtc, &cstate->base);
++	memset(&cstate->retire, 0, sizeof(cstate->retire));
+ 
+ 	return &cstate->base;
+ }
+@@ -1209,6 +1214,7 @@ static void dpu_crtc_disable(struct drm_crtc *crtc,
+ 	struct drm_encoder *encoder;
+ 	unsigned long flags;
+ 	bool release_bandwidth = false;
++	bool stopped = true;
+ 
+ 	DRM_DEBUG_KMS("crtc%d\n", crtc->base.id);
+ 
+@@ -1225,7 +1231,9 @@ static void dpu_crtc_disable(struct drm_crtc *crtc,
+ 	}
+ 
+ 	/* Disable/save vblank irq handling */
+-	drm_crtc_vblank_off(crtc);
++	drm_for_each_encoder_mask(encoder, crtc->dev, old_crtc_state->encoder_mask)
++		stopped &= dpu_encoder_retire_stopped(encoder);
++	dpu_crtc_retire_vblank_off(crtc, stopped);
+ 
+ 	drm_for_each_encoder_mask(encoder, crtc->dev,
+ 				  old_crtc_state->encoder_mask) {
+@@ -1313,7 +1321,7 @@ static void dpu_crtc_enable(struct drm_crtc *crtc,
+ 	}
+ 
+ 	/* Enable/restore vblank irq handling */
+-	drm_crtc_vblank_on(crtc);
++	dpu_crtc_retire_vblank_on(crtc);
+ }
+ 
+ static bool dpu_crtc_needs_dirtyfb(struct drm_crtc_state *cstate)
+@@ -1576,6 +1584,9 @@ static int dpu_crtc_atomic_check(struct drm_crtc *crtc,
+ 	int rc = 0;
+ 
+ 	bool needs_dirtyfb = dpu_crtc_needs_dirtyfb(crtc_state);
++	rc = dpu_crtc_retire_check(crtc, crtc_state);
++	if (rc)
++		return rc;
+ 
+ 	if (crtc_state->vrr_enabled && crtc_state->active) {
+ 		struct drm_encoder *encoder;
+@@ -1946,6 +1957,7 @@ struct drm_crtc *dpu_crtc_init(struct drm_device *dev, struct drm_plane *plane,
+ 
+ 	crtc = &dpu_crtc->base;
+ 	crtc->dev = dev;
++	dpu_crtc_retire_init(crtc);
+ 
+ 	spin_lock_init(&dpu_crtc->spin_lock);
+ 	atomic_set(&dpu_crtc->frame_pending, 0);
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.h b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.h
+index 6eaba56..4a40e98 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.h
+@@ -11,6 +11,7 @@
+ 
+ #include <linux/kthread.h>
+ #include <drm/drm_crtc.h>
++#include <drm/drm_vblank_work.h>
+ #include "dpu_kms.h"
+ #include "dpu_core_perf.h"
+ 
+@@ -19,6 +20,32 @@
+ /* define the maximum number of in-flight frame events */
+ #define DPU_CRTC_FRAME_EVENT_SIZE	4
+ 
++struct dpu_crtc_retire_work {
++	struct drm_vblank_work work;
++	struct list_head node;
++	struct drm_atomic_commit *state;
++	struct drm_crtc *crtc;
++	u64 epoch;
++	u64 flush;
++	bool scheduled;
++	bool prepared;
++	bool submitted;
++};
++
++struct dpu_crtc_retire {
++	spinlock_t lock;
++	struct list_head pending;
++	u64 epoch;
++	u64 flushed;
++	u64 vblank;
++	bool off;
++	bool one_shot;
++	bool failed;
++	bool stopping;
++	bool quarantined;
++	bool vblank_ready;
++};
++
+ /**
+  * enum dpu_crtc_client_type: crtc client type
+  * @RT_CLIENT:	RealTime client like video/cmd mode display
+@@ -155,6 +182,7 @@ struct dpu_crtc_frame_event {
+  */
+ struct dpu_crtc {
+ 	struct drm_crtc base;
++	struct dpu_crtc_retire retire;
+ 	char name[DPU_CRTC_NAME_SIZE];
+ 
+ 	struct drm_pending_vblank_event *event;
+@@ -207,6 +235,7 @@ struct dpu_crtc {
+  */
+ struct dpu_crtc_state {
+ 	struct drm_crtc_state base;
++	struct dpu_crtc_retire_work retire;
+ 
+ 	bool bw_control;
+ 	bool bw_split_vote;
+@@ -246,10 +275,26 @@ int dpu_crtc_vblank(struct drm_crtc *crtc, bool en);
+ 
+ void dpu_crtc_vblank_callback(struct drm_crtc *crtc);
+ 
+-void dpu_crtc_commit_kickoff(struct drm_crtc *crtc);
++bool dpu_crtc_commit_kickoff(struct drm_crtc *crtc);
+ 
+ void dpu_crtc_complete_commit(struct drm_crtc *crtc);
+ 
++void dpu_crtc_retire_init(struct drm_crtc *crtc);
++void dpu_crtc_retire_prepare(struct drm_crtc *crtc,
++			     struct drm_atomic_commit *state);
++void dpu_crtc_retire_cleanup(struct drm_crtc *crtc,
++			     struct drm_atomic_commit *state);
++void dpu_crtc_retire_flush(struct drm_crtc *crtc, bool valid, bool one_shot);
++void dpu_crtc_retire_vblank_on(struct drm_crtc *crtc);
++void dpu_crtc_retire_vblank_off(struct drm_crtc *crtc, bool stopped);
++void dpu_crtc_retire_fini(struct drm_crtc *crtc);
++int dpu_crtc_retire_check(struct drm_crtc *crtc,
++			  struct drm_crtc_state *state);
++bool dpu_crtc_retire_quarantined(struct drm_crtc *crtc);
++bool dpu_crtc_retire_failed(struct drm_crtc *crtc);
++void dpu_crtc_retire_wait_status(struct drm_crtc *crtc, int error);
++bool dpu_crtc_retire_stopped(struct drm_crtc *crtc);
++
+ struct drm_crtc *dpu_crtc_init(struct drm_device *dev, struct drm_plane *plane,
+ 			       struct drm_plane *cursor);
+ 
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc_retire.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc_retire.c
+new file mode 100644
+index 0000000..54c4612
+--- /dev/null
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc_retire.c
+@@ -0,0 +1,329 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* Deferred old-plane ownership; storage belongs to the old CRTC state. */
++#include <drm/drm_atomic.h>
++#include <drm/drm_atomic_helper.h>
++#include <drm/drm_crtc_helper.h>
++#include <drm/drm_modeset_helper_vtables.h>
++#include <drm/drm_plane_helper.h>
++#include <drm/drm_print.h>
++#include <drm/drm_vblank.h>
++#include <drm/drm_vblank_work.h>
++#include "dpu_crtc.h"
++
++static void dpu_crtc_retire_release(struct dpu_crtc_retire_work *work)
++{
++	struct drm_atomic_commit *state = work->state;
++	struct drm_crtc *crtc = work->crtc;
++	struct drm_plane_state *old;
++	struct drm_plane *plane;
++	int i;
++
++	work->state = NULL;
++	for_each_old_plane_in_state(state, plane, old, i) {
++		const struct drm_plane_helper_funcs *funcs = plane->helper_private;
++
++		if (old->fb && old->crtc == crtc && funcs->cleanup_fb)
++			funcs->cleanup_fb(plane, old);
++	}
++	drm_atomic_commit_put(state);
++}
++
++static void dpu_crtc_retire_work(struct kthread_work *base)
++{
++	struct dpu_crtc_retire_work *work = container_of(to_drm_vblank_work(base),
++						struct dpu_crtc_retire_work, work);
++	struct dpu_crtc_retire *pending = &to_dpu_crtc(work->crtc)->retire;
++	unsigned long flags;
++	bool owned;
++
++	spin_lock_irqsave(&pending->lock, flags);
++	owned = !list_empty(&work->node);
++	if (owned) {
++		list_del_init(&work->node);
++		work->scheduled = false;
++	}
++	spin_unlock_irqrestore(&pending->lock, flags);
++	if (owned)
++		dpu_crtc_retire_release(work);
++}
++
++void dpu_crtc_retire_init(struct drm_crtc *crtc)
++{
++	struct dpu_crtc_retire *pending = &to_dpu_crtc(crtc)->retire;
++
++	spin_lock_init(&pending->lock);
++	INIT_LIST_HEAD(&pending->pending);
++	pending->off = true;
++}
++
++static void dpu_crtc_retire_quarantine(struct dpu_crtc_retire *pending)
++{
++	unsigned long flags;
++
++	spin_lock_irqsave(&pending->lock, flags);
++	pending->quarantined = true;
++	spin_unlock_irqrestore(&pending->lock, flags);
++}
++
++void dpu_crtc_retire_prepare(struct drm_crtc *crtc,
++			     struct drm_atomic_commit *state)
++{
++	struct drm_crtc_state *old = drm_atomic_get_old_crtc_state(state, crtc);
++	struct dpu_crtc_retire *pending = &to_dpu_crtc(crtc)->retire;
++	struct dpu_crtc_retire_work *work;
++	unsigned long flags;
++
++	if (WARN_ON_ONCE(!old)) {
++		dpu_crtc_retire_quarantine(pending);
++		return;
++	}
++	work = &to_dpu_crtc_state(old)->retire;
++	if (WARN_ON_ONCE(work->prepared || work->state)) {
++		dpu_crtc_retire_quarantine(pending);
++		return;
++	}
++	INIT_LIST_HEAD(&work->node);
++	drm_vblank_work_init(&work->work, crtc, dpu_crtc_retire_work);
++	work->crtc = crtc;
++	work->scheduled = false;
++	work->prepared = true;
++	work->submitted = false;
++	spin_lock_irqsave(&pending->lock, flags);
++	work->epoch = pending->epoch;
++	work->flush = pending->flushed + 1;
++	spin_unlock_irqrestore(&pending->lock, flags);
++}
++
++static void dpu_crtc_retire_schedule(struct dpu_crtc_retire *pending,
++				    struct dpu_crtc_retire_work *work)
++{
++	int ret;
++
++	if (work->scheduled)
++		return;
++	ret = drm_vblank_work_schedule(&work->work, pending->vblank, false);
++	if (ret == 1)
++		work->scheduled = true;
++	else
++		pending->failed = true;
++}
++
++void dpu_crtc_retire_cleanup(struct drm_crtc *crtc,
++			     struct drm_atomic_commit *state)
++{
++	struct drm_crtc_state *old = drm_atomic_get_old_crtc_state(state, crtc);
++	struct dpu_crtc_retire *pending = &to_dpu_crtc(crtc)->retire;
++	struct dpu_crtc_retire_work *work;
++	unsigned long flags;
++	bool release = false;
++
++	if (WARN_ON_ONCE(!old)) {
++		dpu_crtc_retire_quarantine(pending);
++		drm_atomic_commit_get(state);
++		return;
++	}
++	work = &to_dpu_crtc_state(old)->retire;
++	if (WARN_ON_ONCE(work->submitted))
++		return;
++	if (WARN_ON_ONCE(!work->prepared || work->crtc != crtc)) {
++		dpu_crtc_retire_quarantine(pending);
++		drm_atomic_commit_get(state);
++		return;
++	}
++	work->submitted = true;
++	work->state = drm_atomic_commit_get(state);
++	spin_lock_irqsave(&pending->lock, flags);
++	if (pending->epoch != work->epoch || pending->off) {
++		release = true;
++	} else if (pending->stopping || pending->quarantined) {
++		/* Unproved teardown: keep the state and pins until recovery. */
++		pending->failed = true;
++	} else if (pending->flushed >= work->flush &&
++		   !pending->failed && pending->one_shot) {
++		release = true;
++	} else {
++		list_add_tail(&work->node, &pending->pending);
++		if (pending->flushed >= work->flush && !pending->failed)
++			dpu_crtc_retire_schedule(pending, work);
++	}
++	spin_unlock_irqrestore(&pending->lock, flags);
++	if (release)
++		dpu_crtc_retire_release(work);
++}
++
++void dpu_crtc_retire_flush(struct drm_crtc *crtc, bool valid, bool one_shot)
++{
++	struct dpu_crtc_retire *pending = &to_dpu_crtc(crtc)->retire;
++	struct dpu_crtc_retire_work *work, *next;
++	LIST_HEAD(release);
++	unsigned long flags;
++
++	spin_lock_irqsave(&pending->lock, flags);
++	if (!valid || pending->stopping || pending->quarantined) {
++		pending->failed = true;
++		if (!valid)
++			pending->quarantined = true;
++		spin_unlock_irqrestore(&pending->lock, flags);
++		return;
++	}
++	pending->failed = false;
++	pending->flushed++;
++	pending->one_shot = one_shot;
++	pending->vblank = drm_crtc_vblank_count(crtc) + 1;
++	list_for_each_entry_safe(work, next, &pending->pending, node) {
++		if (work->scheduled || work->flush > pending->flushed)
++			continue;
++		if (one_shot)
++			list_move_tail(&work->node, &release);
++		else
++			dpu_crtc_retire_schedule(pending, work);
++	}
++	spin_unlock_irqrestore(&pending->lock, flags);
++	list_for_each_entry_safe(work, next, &release, node) {
++		list_del_init(&work->node);
++		dpu_crtc_retire_release(work);
++	}
++}
++
++static void dpu_crtc_retire_drain(struct drm_crtc *crtc, bool stopped)
++{
++	struct dpu_crtc_retire *pending = &to_dpu_crtc(crtc)->retire;
++	struct dpu_crtc_retire_work *work;
++	unsigned long flags;
++	bool ready;
++
++	for (;;) {
++		spin_lock_irqsave(&pending->lock, flags);
++		work = list_first_entry_or_null(&pending->pending,
++					      struct dpu_crtc_retire_work, node);
++		if (work)
++			list_del_init(&work->node);
++		spin_unlock_irqrestore(&pending->lock, flags);
++		if (!work)
++			break;
++		if (work->scheduled)
++			drm_vblank_work_cancel_sync(&work->work);
++		work->scheduled = false;
++		if (stopped)
++			dpu_crtc_retire_release(work);
++		else
++			drm_warn(crtc->dev,
++				"Retaining old scanout after unproved teardown\n");
++	}
++	spin_lock_irqsave(&pending->lock, flags);
++	ready = pending->vblank_ready;
++	spin_unlock_irqrestore(&pending->lock, flags);
++	/* Partial KMS initialization can unwind before DRM creates its workers. */
++	if (ready)
++		drm_vblank_work_flush_all(crtc);
++}
++
++void dpu_crtc_retire_vblank_on(struct drm_crtc *crtc)
++{
++	struct dpu_crtc_retire *pending = &to_dpu_crtc(crtc)->retire;
++	unsigned long flags;
++
++	drm_crtc_vblank_on(crtc);
++	spin_lock_irqsave(&pending->lock, flags);
++	pending->off = false;
++	pending->vblank_ready = true;
++	spin_unlock_irqrestore(&pending->lock, flags);
++}
++
++void dpu_crtc_retire_vblank_off(struct drm_crtc *crtc, bool stopped)
++{
++	struct dpu_crtc_retire *pending = &to_dpu_crtc(crtc)->retire;
++	unsigned long flags;
++
++	spin_lock_irqsave(&pending->lock, flags);
++	if (stopped) {
++		pending->off = true;
++		pending->epoch++;
++		pending->failed = false;
++	} else {
++		pending->off = false;
++		pending->failed = true;
++		pending->quarantined = true;
++	}
++	spin_unlock_irqrestore(&pending->lock, flags);
++	dpu_crtc_retire_drain(crtc, stopped);
++	drm_crtc_vblank_off(crtc);
++}
++
++void dpu_crtc_retire_fini(struct drm_crtc *crtc)
++{
++	struct dpu_crtc_retire *pending = &to_dpu_crtc(crtc)->retire;
++	unsigned long flags;
++	bool stopped;
++
++	spin_lock_irqsave(&pending->lock, flags);
++	pending->stopping = true;
++	stopped = pending->off;
++	spin_unlock_irqrestore(&pending->lock, flags);
++	dpu_crtc_retire_drain(crtc, stopped);
++}
++
++int dpu_crtc_retire_check(struct drm_crtc *crtc,
++			  struct drm_crtc_state *state)
++{
++	struct dpu_crtc_retire *pending = &to_dpu_crtc(crtc)->retire;
++	unsigned long flags;
++	bool failed, blocked;
++
++	spin_lock_irqsave(&pending->lock, flags);
++	failed = pending->failed;
++	blocked = pending->stopping || pending->quarantined;
++	spin_unlock_irqrestore(&pending->lock, flags);
++	return blocked || (failed && !drm_atomic_crtc_needs_modeset(state)) ?
++		-EIO : 0;
++}
++
++bool dpu_crtc_retire_quarantined(struct drm_crtc *crtc)
++{
++	struct dpu_crtc_retire *pending = &to_dpu_crtc(crtc)->retire;
++	unsigned long flags;
++	bool blocked;
++
++	spin_lock_irqsave(&pending->lock, flags);
++	blocked = pending->stopping || pending->quarantined;
++	spin_unlock_irqrestore(&pending->lock, flags);
++	return blocked;
++}
++
++bool dpu_crtc_retire_failed(struct drm_crtc *crtc)
++{
++	struct dpu_crtc_retire *pending = &to_dpu_crtc(crtc)->retire;
++	unsigned long flags;
++	bool failed;
++
++	spin_lock_irqsave(&pending->lock, flags);
++	failed = pending->failed;
++	spin_unlock_irqrestore(&pending->lock, flags);
++	return failed;
++}
++
++void dpu_crtc_retire_wait_status(struct drm_crtc *crtc, int error)
++{
++	struct dpu_crtc_retire *pending = &to_dpu_crtc(crtc)->retire;
++	unsigned long flags;
++
++	spin_lock_irqsave(&pending->lock, flags);
++	if (error) {
++		pending->failed = true;
++		/* Hardware ownership is unknown; a cleared software count is no proof. */
++		pending->quarantined = true;
++	}
++	spin_unlock_irqrestore(&pending->lock, flags);
++}
++
++bool dpu_crtc_retire_stopped(struct drm_crtc *crtc)
++{
++	struct dpu_crtc_retire *pending = &to_dpu_crtc(crtc)->retire;
++	unsigned long flags;
++	bool stopped;
++
++	spin_lock_irqsave(&pending->lock, flags);
++	stopped = pending->off;
++	spin_unlock_irqrestore(&pending->lock, flags);
++	return stopped;
++}
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c
+index 923739c..f30f948 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c
+@@ -180,6 +180,7 @@ struct dpu_encoder_virt {
+ 	spinlock_t enc_spinlock;
+ 
+ 	bool enabled;
++	int retire_stop_error;
+ 	bool avr_enabled;
+ 	bool avr_failed;
+ 	bool commit_done_timedout;
+@@ -1690,19 +1691,29 @@ static void dpu_encoder_virt_atomic_disable(struct drm_encoder *drm_enc,
+ 
+ 	/* wait for idle */
+ 	dpu_encoder_uke_avr_disable(dpu_enc);
+-	dpu_encoder_wait_for_tx_complete(drm_enc);
++	ret = dpu_encoder_wait_for_tx_complete(drm_enc);
++	/* Video/writeback teardown proves stop through the physical CTL reset. */
++	dpu_enc->retire_stop_error =
++		dpu_encoder_get_intf_mode(drm_enc) == INTF_MODE_CMD &&
++		ret != -EWOULDBLOCK ? ret : 0;
+ 
+ 	dpu_encoder_resource_control(drm_enc, DPU_ENC_RC_EVENT_PRE_STOP);
+ 
+ 	for (i = 0; i < dpu_enc->num_phys_encs; i++) {
+ 		struct dpu_encoder_phys *phys = dpu_enc->phys_encs[i];
+ 
++		if (phys->enable_state != DPU_ENC_DISABLED)
++			phys->retire_disable_error = -EINPROGRESS;
+ 		if (phys->ops.disable)
+ 			phys->ops.disable(phys);
++		if (phys->retire_disable_error && !dpu_enc->retire_stop_error)
++			dpu_enc->retire_stop_error = phys->retire_disable_error;
+ 	}
+ 
+ 
+ 	ret = msm_dsi_manager_uke_video_stop(drm_enc);
++	if (ret && !dpu_enc->retire_stop_error)
++		dpu_enc->retire_stop_error = ret;
+ 	if (ret)
+ 		DPU_ERROR_ENC(dpu_enc, "DSI video stop failed: %d\n", ret);
+ 
+@@ -2378,7 +2389,7 @@ static void dpu_encoder_prep_dsc(struct dpu_encoder_virt *dpu_enc,
+  *	Delayed: Block until next trigger can be issued.
+  * @drm_enc:	encoder pointer
+  */
+-void dpu_encoder_prepare_for_kickoff(struct drm_encoder *drm_enc)
++void dpu_encoder_prepare_for_kickoff(struct drm_encoder *drm_enc, bool clone_mode)
+ {
+ 	struct dpu_encoder_virt *dpu_enc;
+ 	struct dpu_encoder_phys *phys;
+@@ -2393,6 +2404,12 @@ void dpu_encoder_prepare_for_kickoff(struct drm_encoder *drm_enc)
+ 	DPU_ATRACE_BEGIN("enc_prepare_for_kickoff");
+ 	for (i = 0; i < dpu_enc->num_phys_encs; i++) {
+ 		phys = dpu_enc->phys_encs[i];
++		if (phys->intf_mode == INTF_MODE_WB_LINE) {
++			struct dpu_encoder_phys_wb *wb =
++				container_of(phys, struct dpu_encoder_phys_wb, base);
++
++			WRITE_ONCE(wb->clone_mode, clone_mode);
++		}
+ 		if (phys->ops.prepare_for_kickoff)
+ 			phys->ops.prepare_for_kickoff(phys);
+ 		if (phys->enable_state == DPU_ENC_ERR_NEEDS_HW_RESET)
+@@ -2606,7 +2623,8 @@ void dpu_encoder_helper_phys_cleanup(struct dpu_encoder_phys *phys_enc)
+ 
+ 	dpu_enc = to_dpu_encoder_virt(phys_enc->parent);
+ 
+-	ctl->ops.reset(ctl);
++	phys_enc->retire_disable_error = ctl->ops.reset ?
++		ctl->ops.reset(ctl) : -EOPNOTSUPP;
+ 
+ 	dpu_encoder_helper_reset_mixers(phys_enc);
+ 
+@@ -3251,6 +3269,51 @@ int dpu_encoder_wait_for_tx_complete(struct drm_encoder *drm_enc)
+ 	return ret;
+ }
+ 
++bool dpu_encoder_retire_stopped(struct drm_encoder *drm_enc)
++{
++	struct dpu_encoder_virt *dpu_enc = to_dpu_encoder_virt(drm_enc);
++	unsigned int i;
++
++	if (dpu_enc->enabled || dpu_enc->retire_stop_error || !dpu_enc->num_phys_encs)
++		return false;
++	for (i = 0; i < dpu_enc->num_phys_encs; i++) {
++		struct dpu_encoder_phys *phys = dpu_enc->phys_encs[i];
++
++		if (phys->enable_state != DPU_ENC_DISABLED || phys->retire_disable_error)
++			return false;
++	}
++	return true;
++}
++
++int dpu_encoder_retire_wait(struct drm_encoder *drm_enc, bool *video)
++{
++	struct dpu_encoder_virt *dpu_enc = to_dpu_encoder_virt(drm_enc);
++	enum dpu_intf_mode mode = dpu_encoder_get_intf_mode(drm_enc);
++	unsigned int i;
++	int ret;
++
++	if (!dpu_enc->num_phys_encs)
++		return -ENODEV;
++	*video = mode == INTF_MODE_VIDEO;
++	if (mode != INTF_MODE_VIDEO && mode != INTF_MODE_CMD && mode != INTF_MODE_WB_LINE)
++		return -EOPNOTSUPP;
++	for (i = 0; i < dpu_enc->num_phys_encs; i++) {
++		struct dpu_encoder_phys *phys = dpu_enc->phys_encs[i];
++
++		if (mode == INTF_MODE_CMD) {
++			if (!phys->ops.wait_for_tx_complete)
++				return -EOPNOTSUPP;
++		} else if (!phys->ops.wait_for_commit_done) {
++			return -EOPNOTSUPP;
++		}
++	}
++	/* Video/WB completion is cached before an error path can clear its counter. */
++	if (mode != INTF_MODE_CMD)
++		return 0;
++	ret = dpu_encoder_wait_for_tx_complete(drm_enc);
++	return ret == -EWOULDBLOCK ? 0 : ret;
++}
++
+ /**
+  * dpu_encoder_get_intf_mode - get interface mode of the given encoder
+  * @encoder: Pointer to drm encoder object
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.h b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.h
+index f8917f6..7f1358b 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.h
+@@ -49,7 +49,7 @@ void dpu_encoder_assign_crtc(struct drm_encoder *encoder,
+ void dpu_encoder_toggle_vblank_for_crtc(struct drm_encoder *encoder,
+ 					struct drm_crtc *crtc, bool enable);
+ 
+-void dpu_encoder_prepare_for_kickoff(struct drm_encoder *encoder);
++void dpu_encoder_prepare_for_kickoff(struct drm_encoder *encoder, bool clone_mode);
+ 
+ void dpu_encoder_trigger_kickoff_pending(struct drm_encoder *encoder);
+ 
+@@ -60,6 +60,8 @@ int dpu_encoder_vsync_time(struct drm_encoder *drm_enc, ktime_t *wakeup_time);
+ int dpu_encoder_wait_for_commit_done(struct drm_encoder *drm_encoder);
+ 
+ int dpu_encoder_wait_for_tx_complete(struct drm_encoder *drm_encoder);
++bool dpu_encoder_retire_stopped(struct drm_encoder *encoder);
++int dpu_encoder_retire_wait(struct drm_encoder *encoder, bool *video);
+ 
+ enum dpu_intf_mode dpu_encoder_get_intf_mode(struct drm_encoder *encoder);
+ 
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys.h b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys.h
+index e0ea767..aef9c05 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys.h
+@@ -192,6 +192,7 @@ struct dpu_encoder_phys {
+ 	enum dpu_intf_mode intf_mode;
+ 	spinlock_t *enc_spinlock;
+ 	enum dpu_enc_enable_state enable_state;
++	int retire_disable_error;
+ 	int vblank_refcount;
+ 	atomic_t vsync_cnt;
+ 	atomic_t underrun_cnt;
+@@ -216,7 +217,8 @@ static inline int dpu_encoder_phys_inc_pending(struct dpu_encoder_phys *phys)
+  * @wb_done_timeout_cnt: number of wb done irq timeout errors
+  * @wb_cfg:  writeback block config to store fb related details
+  * @wb_conn: backpointer to writeback connector
+- * @wb_job: backpointer to current writeback job
++ * @active_conn: connector whose queued job still owns the destination pin
++ * @wb_failed: completion failed; refuse another job until proved teardown
+  * @dest:   dpu buffer layout for current writeback output buffer
+  */
+ struct dpu_encoder_phys_wb {
+@@ -225,7 +227,10 @@ struct dpu_encoder_phys_wb {
+ 	int wb_done_timeout_cnt;
+ 	struct dpu_hw_wb_cfg wb_cfg;
+ 	struct drm_writeback_connector *wb_conn;
+-	struct drm_writeback_job *wb_job;
++	/* Queued job ownership is distinct from a subsequent prepared job. */
++	struct drm_writeback_connector *active_conn;
++	bool wb_failed;
++	bool clone_mode;
+ 	struct dpu_hw_fmt_layout dest;
+ };
+ 
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_cmd.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_cmd.c
+index 45079ee..be79bc2 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_cmd.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_cmd.c
+@@ -575,6 +575,7 @@ static void dpu_encoder_phys_cmd_disable(struct dpu_encoder_phys *phys_enc)
+ 		ctl->ops.update_pending_flush_intf(ctl, phys_enc->hw_intf->idx);
+ 	}
+ 
++	phys_enc->retire_disable_error = 0;
+ 	phys_enc->enable_state = DPU_ENC_DISABLED;
+ }
+ 
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_vid.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_vid.c
+index 3f2f1b9..1ef9875 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_vid.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_vid.c
+@@ -659,6 +659,13 @@ static void dpu_encoder_phys_vid_disable(struct dpu_encoder_phys *phys_enc)
+ 
+ 	dpu_encoder_helper_split_flush_cleanup(phys_enc, ret);
+ 	dpu_encoder_helper_phys_cleanup(phys_enc);
++	if (phys_enc->hw_intf->ops.get_status) {
++		phys_enc->hw_intf->ops.get_status(phys_enc->hw_intf, &intf_status);
++		if (intf_status.is_en && !phys_enc->retire_disable_error)
++			phys_enc->retire_disable_error = -EBUSY;
++	} else if (!phys_enc->retire_disable_error) {
++		phys_enc->retire_disable_error = -EOPNOTSUPP;
++	}
+ 	phys_enc->enable_state = DPU_ENC_DISABLED;
+ }
+ 
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_wb.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_wb.c
+index daeb7e5..0d582ff 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_wb.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_wb.c
+@@ -8,6 +8,7 @@
+ #include <linux/debugfs.h>
+ 
+ #include <drm/drm_framebuffer.h>
++#include <drm/drm_drv.h>
+ #include <drm/drm_managed.h>
+ 
+ #include "dpu_encoder_phys.h"
+@@ -25,6 +26,29 @@
+ #define to_dpu_encoder_phys_wb(x) \
+ 	container_of(x, struct dpu_encoder_phys_wb, base)
+ 
++struct dpu_wb_job {
++	struct dpu_hw_wb_cfg cfg;
++	struct drm_device *dev;
++};
++
++static void dpu_encoder_phys_wb_complete(struct dpu_encoder_phys *phys_enc,
++					int status)
++{
++	struct dpu_encoder_phys_wb *wb_enc = to_dpu_encoder_phys_wb(phys_enc);
++	struct drm_writeback_connector *conn;
++	unsigned long flags;
++
++	spin_lock_irqsave(phys_enc->enc_spinlock, flags);
++	conn = wb_enc->active_conn;
++	wb_enc->active_conn = NULL;
++	if (wb_enc->wb_failed)
++		status = -ETIMEDOUT;
++	atomic_add_unless(&phys_enc->pending_kickoff_cnt, -1, 0);
++	spin_unlock_irqrestore(phys_enc->enc_spinlock, flags);
++	if (conn)
++		drm_writeback_signal_completion(conn, status);
++}
++
+ /**
+  * dpu_encoder_phys_wb_is_master - report wb always as master encoder
+  * @phys_enc:	Pointer to physical encoder
+@@ -318,14 +342,13 @@ static void _dpu_encoder_phys_wb_update_flush(struct dpu_encoder_phys *phys_enc)
+  * @phys_enc:	Pointer to physical encoder
+  */
+ static void dpu_encoder_phys_wb_setup(
+-		struct dpu_encoder_phys *phys_enc)
++		struct dpu_encoder_phys *phys_enc, struct drm_framebuffer *fb)
+ {
+ 	struct dpu_hw_wb *hw_wb = phys_enc->hw_wb;
+ 	struct drm_display_mode mode = phys_enc->cached_mode;
+-	struct dpu_encoder_phys_wb *wb_enc = to_dpu_encoder_phys_wb(phys_enc);
+ 	const struct msm_format *format;
+ 
+-	format = msm_framebuffer_format(wb_enc->wb_job->fb);
++	format = msm_framebuffer_format(fb);
+ 
+ 	DPU_DEBUG("[mode_set:%d, \"%s\",%d,%d]\n",
+ 			hw_wb->idx - WB_0, mode.name,
+@@ -354,23 +377,18 @@ static void dpu_encoder_phys_wb_done_irq(void *arg)
+ {
+ 	struct dpu_encoder_phys *phys_enc = arg;
+ 	struct dpu_encoder_phys_wb *wb_enc = to_dpu_encoder_phys_wb(phys_enc);
+-
+ 	struct dpu_hw_wb *hw_wb = phys_enc->hw_wb;
+-	unsigned long lock_flags;
+ 	u32 event = DPU_ENCODER_FRAME_EVENT_DONE;
+ 
+ 	DPU_DEBUG("[wb:%d]\n", hw_wb->idx - WB_0);
+ 
+ 	dpu_encoder_frame_done_callback(phys_enc->parent, phys_enc, event);
+ 
+-	dpu_encoder_vblank_callback(phys_enc->parent, phys_enc);
++	/* In clone mode only the real-time display proves a video boundary. */
++	if (!READ_ONCE(wb_enc->clone_mode))
++		dpu_encoder_vblank_callback(phys_enc->parent, phys_enc);
+ 
+-	spin_lock_irqsave(phys_enc->enc_spinlock, lock_flags);
+-	atomic_add_unless(&phys_enc->pending_kickoff_cnt, -1, 0);
+-	spin_unlock_irqrestore(phys_enc->enc_spinlock, lock_flags);
+-
+-	if (wb_enc->wb_conn)
+-		drm_writeback_signal_completion(wb_enc->wb_conn, 0);
++	dpu_encoder_phys_wb_complete(phys_enc, 0);
+ 
+ 	/* Signal any waiting atomic commit thread */
+ 	wake_up_all(&phys_enc->pending_kickoff_wq);
+@@ -412,6 +430,8 @@ static void dpu_encoder_phys_wb_atomic_mode_set(
+ {
+ 
+ 	phys_enc->irq[INTR_IDX_WB_DONE] = phys_enc->hw_wb->caps->intr_wb_done;
++	to_dpu_encoder_phys_wb(phys_enc)->wb_conn =
++		drm_connector_to_writeback(conn_state->connector);
+ }
+ 
+ static void _dpu_encoder_phys_wb_handle_wbdone_timeout(
+@@ -419,19 +439,22 @@ static void _dpu_encoder_phys_wb_handle_wbdone_timeout(
+ {
+ 	struct dpu_encoder_phys_wb *wb_enc = to_dpu_encoder_phys_wb(phys_enc);
+ 	u32 frame_event = DPU_ENCODER_FRAME_EVENT_ERROR;
++	unsigned long flags;
+ 
+ 	wb_enc->wb_done_timeout_cnt++;
+ 
+ 	if (wb_enc->wb_done_timeout_cnt == 1)
+ 		msm_disp_snapshot_state(phys_enc->parent->dev);
+ 
++	spin_lock_irqsave(phys_enc->enc_spinlock, flags);
++	wb_enc->wb_failed = true;
+ 	atomic_add_unless(&phys_enc->pending_kickoff_cnt, -1, 0);
++	spin_unlock_irqrestore(phys_enc->enc_spinlock, flags);
+ 
+ 	/* request a ctl reset before the next kickoff */
+ 	phys_enc->enable_state = DPU_ENC_ERR_NEEDS_HW_RESET;
+ 
+-	if (wb_enc->wb_conn)
+-		drm_writeback_signal_completion(wb_enc->wb_conn, 0);
++	/* The DRM queue keeps the destination pinned until DONE or proved reset. */
+ 
+ 	dpu_encoder_frame_done_callback(phys_enc->parent, phys_enc, frame_event);
+ }
+@@ -447,6 +470,9 @@ static int dpu_encoder_phys_wb_wait_for_commit_done(
+ 	struct dpu_encoder_wait_info wait_info;
+ 	struct dpu_encoder_phys_wb *wb_enc = to_dpu_encoder_phys_wb(phys_enc);
+ 
++	if (READ_ONCE(wb_enc->wb_failed))
++		return -ETIMEDOUT;
++
+ 	wait_info.wq = &phys_enc->pending_kickoff_wq;
+ 	wait_info.atomic_cnt = &phys_enc->pending_kickoff_cnt;
+ 	wait_info.timeout_ms = KICKOFF_TIMEOUT_MS;
+@@ -473,21 +499,39 @@ static void dpu_encoder_phys_wb_prepare_for_kickoff(
+ 	struct dpu_encoder_phys_wb *wb_enc = to_dpu_encoder_phys_wb(phys_enc);
+ 	struct drm_connector *drm_conn;
+ 	struct drm_connector_state *state;
++	struct drm_writeback_job *job;
++	struct dpu_wb_job *prepared;
++	unsigned long flags;
+ 
+ 	DPU_DEBUG("[wb:%d]\n", phys_enc->hw_wb->idx - WB_0);
+ 
+-	if (!wb_enc->wb_conn || !wb_enc->wb_job) {
+-		DPU_ERROR("invalid wb_conn or wb_job\n");
++	if (!wb_enc->wb_conn) {
++		WRITE_ONCE(wb_enc->wb_failed, true);
+ 		return;
+ 	}
+ 
+ 	drm_conn = &wb_enc->wb_conn->base;
+ 	state = drm_conn->state;
+-
+-	if (wb_enc->wb_conn && wb_enc->wb_job)
+-		drm_writeback_queue_job(wb_enc->wb_conn, state);
+-
+-	dpu_encoder_phys_wb_setup(phys_enc);
++	job = state->writeback_job;
++	if (!job || !job->priv) {
++		WRITE_ONCE(wb_enc->wb_failed, true);
++		return;
++	}
++	prepared = job->priv;
++	wb_enc->wb_cfg = prepared->cfg;
++	dpu_encoder_phys_wb_setup(phys_enc, job->fb);
++
++	spin_lock_irqsave(phys_enc->enc_spinlock, flags);
++	if (WARN_ON_ONCE(wb_enc->active_conn || wb_enc->wb_failed)) {
++		wb_enc->wb_failed = true;
++		spin_unlock_irqrestore(phys_enc->enc_spinlock, flags);
++		return;
++	}
++	prepared->dev = phys_enc->parent->dev;
++	drm_dev_get(prepared->dev);
++	drm_writeback_queue_job(wb_enc->wb_conn, state);
++	wb_enc->active_conn = wb_enc->wb_conn;
++	spin_unlock_irqrestore(phys_enc->enc_spinlock, flags);
+ 
+ 	_dpu_encoder_phys_wb_update_flush(phys_enc);
+ }
+@@ -552,7 +596,13 @@ static void dpu_encoder_phys_wb_disable(struct dpu_encoder_phys *phys_enc)
+ 	 */
+ 	if (phys_enc->dpu_kms->catalog->mdss_ver->core_major_ver >= 5)
+ 		dpu_encoder_helper_phys_cleanup(phys_enc);
++	else
++		phys_enc->retire_disable_error = -EOPNOTSUPP;
+ 
++	if (!phys_enc->retire_disable_error) {
++		dpu_encoder_phys_wb_complete(phys_enc, -ECANCELED);
++		WRITE_ONCE(to_dpu_encoder_phys_wb(phys_enc)->wb_failed, false);
++	}
+ 	phys_enc->enable_state = DPU_ENC_DISABLED;
+ }
+ 
+@@ -560,21 +610,25 @@ static int dpu_encoder_phys_wb_prepare_wb_job(struct dpu_encoder_phys *phys_enc,
+ 		struct drm_writeback_job *job)
+ {
+ 	const struct msm_format *format;
+-	struct dpu_hw_wb_cfg next_cfg = {};
++	struct dpu_wb_job *prepared;
+ 	struct dpu_hw_wb_cfg *wb_cfg;
+ 	int ret;
+ 	struct dpu_encoder_phys_wb *wb_enc = to_dpu_encoder_phys_wb(phys_enc);
+ 
+ 	if (!job->fb)
+ 		return 0;
++	if (READ_ONCE(wb_enc->wb_failed))
++		return -EIO;
+ 
+-	wb_cfg = &next_cfg;
+-
+-	memset(wb_cfg, 0, sizeof(struct dpu_hw_wb_cfg));
++	prepared = kzalloc(sizeof(*prepared), GFP_KERNEL);
++	if (!prepared)
++		return -ENOMEM;
++	wb_cfg = &prepared->cfg;
+ 
+ 	ret = msm_framebuffer_prepare(job->fb, false);
+ 	if (ret) {
+ 		DPU_ERROR("prep fb failed, %d\n", ret);
++		kfree(prepared);
+ 		return ret;
+ 	}
+ 
+@@ -584,6 +638,7 @@ static int dpu_encoder_phys_wb_prepare_wb_job(struct dpu_encoder_phys *phys_enc,
+ 	if (ret) {
+ 		DPU_DEBUG("failed to populate plane sizes%d\n", ret);
+ 		msm_framebuffer_cleanup(job->fb, false);
++		kfree(prepared);
+ 		return ret;
+ 	}
+ 
+@@ -605,33 +660,33 @@ static int dpu_encoder_phys_wb_prepare_wb_job(struct dpu_encoder_phys *phys_enc,
+ 			wb_cfg->dest.plane_pitch[0], wb_cfg->dest.plane_pitch[1],
+ 			wb_cfg->dest.plane_pitch[2], wb_cfg->dest.plane_pitch[3]);
+ 
+-	wb_enc->wb_cfg = next_cfg;
+-	wb_enc->wb_job = job;
+-	wb_enc->wb_conn = job->connector;
++	job->priv = prepared;
+ 	return 0;
+ }
+ 
+ static void dpu_encoder_phys_wb_cleanup_wb_job(struct dpu_encoder_phys *phys_enc,
+ 		struct drm_writeback_job *job)
+ {
+-	struct dpu_encoder_phys_wb *wb_enc = to_dpu_encoder_phys_wb(phys_enc);
++	struct dpu_wb_job *prepared = job->priv;
++	struct drm_device *dev;
+ 
+ 	if (!job->fb)
+ 		return;
+ 
+ 	msm_framebuffer_cleanup(job->fb, false);
+-	wb_enc->wb_job = NULL;
+-	wb_enc->wb_conn = NULL;
++	dev = prepared->dev;
++	job->priv = NULL;
++	kfree(prepared);
++	if (dev)
++		drm_dev_put(dev);
+ }
+ 
+ static bool dpu_encoder_phys_wb_is_valid_for_commit(struct dpu_encoder_phys *phys_enc)
+ {
+ 	struct dpu_encoder_phys_wb *wb_enc = to_dpu_encoder_phys_wb(phys_enc);
+ 
+-	if (wb_enc->wb_job)
+-		return true;
+-	else
+-		return false;
++	return wb_enc->wb_conn && !READ_ONCE(wb_enc->wb_failed) &&
++		wb_enc->wb_conn->base.state->writeback_job;
+ }
+ 
+ /**
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
+index 9ff366c..c7d879e 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
+@@ -17,6 +17,7 @@
+ #include <drm/drm_crtc.h>
+ #include <drm/drm_file.h>
+ #include <drm/drm_framebuffer.h>
++#include <drm/drm_modeset_helper_vtables.h>
+ #include <drm/drm_self_refresh_helper.h>
+ #include <drm/drm_vblank.h>
+ #include <drm/drm_writeback.h>
+@@ -468,11 +469,15 @@ static void dpu_kms_flush_commit(struct msm_kms *kms, unsigned crtc_mask)
+ 	struct drm_crtc *crtc;
+ 
+ 	for_each_crtc_mask(dpu_kms->dev, crtc, crtc_mask) {
+-		if (!crtc->state->active)
++		if (!crtc->state->active) {
++			if (to_dpu_crtc(crtc)->enabled)
++				dpu_crtc_retire_wait_status(crtc, -EIO);
+ 			continue;
++		}
+ 
+ 		trace_dpu_kms_commit(DRMID(crtc));
+-		dpu_crtc_commit_kickoff(crtc);
++		if (!dpu_crtc_commit_kickoff(crtc))
++			dpu_crtc_retire_wait_status(crtc, -EIO);
+ 	}
+ }
+ 
+@@ -489,33 +494,28 @@ static void dpu_kms_complete_commit(struct msm_kms *kms, unsigned crtc_mask)
+ 	DPU_ATRACE_END("kms_complete_commit");
+ }
+ 
+-static void dpu_kms_wait_for_commit_done(struct msm_kms *kms,
++static int dpu_kms_wait_for_commit_done(struct msm_kms *kms,
+ 		struct drm_crtc *crtc)
+ {
+ 	struct drm_encoder *encoder;
+ 	struct drm_device *dev;
+-	int ret;
++	int ret = 0;
++	bool found = false;
+ 
+ 	if (!kms || !crtc || !crtc->state) {
+ 		DPU_ERROR("invalid params\n");
+-		return;
++		return -EINVAL;
+ 	}
+ 
+ 	dev = crtc->dev;
+ 
+-	if (!crtc->state->enable) {
+-		DPU_DEBUG("[crtc:%d] not enable\n", crtc->base.id);
+-		return;
+-	}
+-
+-	if (!drm_atomic_crtc_effectively_active(crtc->state)) {
+-		DPU_DEBUG("[crtc:%d] not active\n", crtc->base.id);
+-		return;
+-	}
++	if (!to_dpu_crtc(crtc)->enabled)
++		return 0;
+ 
+ 	list_for_each_entry(encoder, &dev->mode_config.encoder_list, head) {
+ 		if (encoder->crtc != crtc)
+ 			continue;
++		found = true;
+ 		/*
+ 		 * Wait for post-flush if necessary to delay before
+ 		 * plane_cleanup. For example, wait for vsync in case of video
+@@ -528,6 +528,7 @@ static void dpu_kms_wait_for_commit_done(struct msm_kms *kms,
+ 			break;
+ 		}
+ 	}
++	return found ? (ret == -EWOULDBLOCK ? 0 : ret) : -ENODEV;
+ }
+ 
+ static void dpu_kms_wait_flush(struct msm_kms *kms, unsigned crtc_mask)
+@@ -536,7 +537,97 @@ static void dpu_kms_wait_flush(struct msm_kms *kms, unsigned crtc_mask)
+ 	struct drm_crtc *crtc;
+ 
+ 	for_each_crtc_mask(dpu_kms->dev, crtc, crtc_mask)
+-		dpu_kms_wait_for_commit_done(kms, crtc);
++		dpu_crtc_retire_wait_status(crtc, dpu_kms_wait_for_commit_done(kms, crtc));
++}
++
++static void dpu_kms_prepare_retire(struct msm_kms *kms,
++				 struct drm_atomic_commit *state)
++{
++	struct drm_crtc_state *old;
++	struct drm_crtc *crtc;
++	int i;
++
++	for_each_old_crtc_in_state(state, crtc, old, i)
++		dpu_crtc_retire_prepare(crtc, state);
++}
++
++static bool dpu_kms_commit_failed(struct msm_kms *kms,
++				  struct drm_atomic_commit *state, bool allow_modeset)
++{
++	struct drm_crtc_state *new;
++	struct drm_crtc *crtc;
++	int i;
++
++	for_each_new_crtc_in_state(state, crtc, new, i)
++		if (dpu_crtc_retire_quarantined(crtc) ||
++		    (dpu_crtc_retire_failed(crtc) &&
++		     (!allow_modeset || !drm_atomic_crtc_needs_modeset(new)))) {
++			/* A modeset which did not prove stop cannot be retried unboundedly. */
++			if (!allow_modeset)
++				dpu_crtc_retire_wait_status(crtc, -EIO);
++			return true;
++		}
++	return false;
++}
++
++static void dpu_kms_retire_flush(struct msm_kms *kms, unsigned int mask)
++{
++	struct dpu_kms *dpu_kms = to_dpu_kms(kms);
++	struct drm_crtc *crtc;
++
++	for_each_crtc_mask(dpu_kms->dev, crtc, mask) {
++		struct drm_encoder *encoder;
++		bool valid = !dpu_crtc_retire_failed(crtc);
++		bool video = false, found = false;
++
++		if (!to_dpu_crtc(crtc)->enabled) {
++			dpu_crtc_retire_flush(crtc, dpu_crtc_retire_stopped(crtc), true);
++			continue;
++		}
++		if (valid) {
++			list_for_each_entry(encoder, &dpu_kms->dev->mode_config.encoder_list, head) {
++				bool encoder_video;
++
++				if (encoder->crtc != crtc)
++					continue;
++				found = true;
++				if (dpu_encoder_retire_wait(encoder, &encoder_video)) {
++					valid = false;
++					break;
++				}
++				video |= encoder_video;
++			}
++		}
++		dpu_crtc_retire_flush(crtc, valid && found, !video);
++	}
++}
++
++static void dpu_kms_cleanup_planes(struct msm_kms *kms,
++				  struct drm_atomic_commit *state)
++{
++	struct drm_crtc_state *old_crtc;
++	struct drm_plane_state *old_plane;
++	struct drm_crtc *crtc;
++	struct drm_plane *plane;
++	int i, j;
++
++	for_each_old_plane_in_state(state, plane, old_plane, i) {
++		const struct drm_plane_helper_funcs *funcs = plane->helper_private;
++
++		if (old_plane->fb && !old_plane->crtc && funcs->cleanup_fb)
++			funcs->cleanup_fb(plane, old_plane);
++		if (old_plane->fb && old_plane->crtc &&
++		    !drm_atomic_get_old_crtc_state(state, old_plane->crtc))
++			dpu_crtc_retire_cleanup(old_plane->crtc, state);
++	}
++	for_each_old_crtc_in_state(state, crtc, old_crtc, i) {
++		for_each_old_plane_in_state(state, plane, old_plane, j) {
++			if (old_plane->fb && old_plane->crtc == crtc) {
++				dpu_crtc_retire_cleanup(crtc, state);
++				break;
++			}
++		}
++	}
+ }
+ 
+ static const char *dpu_vsync_sources[] = {
+@@ -927,8 +1018,10 @@ static void dpu_kms_self_refresh_cleanup(struct dpu_kms *dpu_kms)
+ {
+ 	struct drm_crtc *crtc;
+ 
+-	drm_for_each_crtc(crtc, dpu_kms->dev)
++	drm_for_each_crtc(crtc, dpu_kms->dev) {
+ 		drm_self_refresh_helper_cleanup(crtc);
++		dpu_crtc_retire_fini(crtc);
++	}
+ }
+ 
+ static void _dpu_kms_hw_destroy(struct dpu_kms *dpu_kms)
+@@ -1127,6 +1220,10 @@ static const struct msm_kms_funcs kms_funcs = {
+ 	.enable_commit   = dpu_kms_enable_commit,
+ 	.disable_commit  = dpu_kms_disable_commit,
+ 	.check_mode_changed = dpu_kms_check_mode_changed,
++	.prepare_retire  = dpu_kms_prepare_retire,
++	.commit_failed   = dpu_kms_commit_failed,
++	.retire_flush    = dpu_kms_retire_flush,
++	.cleanup_planes  = dpu_kms_cleanup_planes,
+ 	.flush_commit    = dpu_kms_flush_commit,
+ 	.wait_flush      = dpu_kms_wait_flush,
+ 	.complete_commit = dpu_kms_complete_commit,
+diff --git a/drivers/gpu/drm/msm/msm_atomic.c b/drivers/gpu/drm/msm/msm_atomic.c
+index 2ca753b..7ffe2e7 100644
+--- a/drivers/gpu/drm/msm/msm_atomic.c
++++ b/drivers/gpu/drm/msm/msm_atomic.c
+@@ -99,6 +99,8 @@ static void msm_atomic_async_commit(struct msm_kms *kms, int crtc_idx)
+ 	trace_msm_atomic_wait_flush_start(crtc_mask);
+ 	kms->funcs->wait_flush(kms, crtc_mask);
+ 	trace_msm_atomic_wait_flush_finish(crtc_mask);
++	if (kms->funcs->retire_flush)
++		kms->funcs->retire_flush(kms, crtc_mask);
+ 
+ 	vblank_put(kms, crtc_mask);
+ 
+@@ -428,9 +430,13 @@ void msm_atomic_commit_tail(struct drm_atomic_commit *state)
+ 	lock_crtcs(kms, crtc_mask);
+ 	if (msm_uke_dfps_failed())
+ 		goto quarantined;
++	if (kms->funcs->prepare_retire)
++		kms->funcs->prepare_retire(kms, state);
+ 	trace_msm_atomic_wait_flush_start(crtc_mask);
+ 	kms->funcs->wait_flush(kms, crtc_mask);
+ 	trace_msm_atomic_wait_flush_finish(crtc_mask);
++	if (kms->funcs->commit_failed && kms->funcs->commit_failed(kms, state, true))
++		goto quarantined;
+ 
+ 	atomic_set(&kms->fault_snapshot_capture, 0);
+ 
+@@ -455,6 +461,8 @@ void msm_atomic_commit_tail(struct drm_atomic_commit *state)
+ 	msm_uke_dfps_mask(state, dfps_mask, true);
+ 	drm_atomic_helper_commit_modeset_disables(dev, state);
+ 	msm_uke_dfps_mask(state, dfps_mask, false);
++	if (kms->funcs->commit_failed && kms->funcs->commit_failed(kms, state, false))
++		goto quarantined;
+ 	drm_atomic_helper_commit_planes(dev, state, 0);
+ 	/* atomic_begin clears CTL flush bits: update INTF timing after planes. */
+ 	if (dfps_mask && msm_uke_dfps_modeset(state, dfps_mask)) {
+@@ -501,7 +509,10 @@ void msm_atomic_commit_tail(struct drm_atomic_commit *state)
+ 		 * go ahead and signal that it is done:
+ 		 */
+ 		drm_atomic_helper_commit_hw_done(state);
+-		drm_atomic_helper_cleanup_planes(dev, state);
++		if (kms->funcs->cleanup_planes)
++			kms->funcs->cleanup_planes(kms, state);
++		else
++			drm_atomic_helper_cleanup_planes(dev, state);
+ 
+ 		trace_msm_atomic_commit_tail_finish(async, crtc_mask);
+ 
+@@ -531,7 +542,8 @@ fallback:
+ 		vblank_put(kms, crtc_mask);
+ 		goto quarantined;
+ 	}
+-	if (!dfps_mask)
++	/* Retirement proof must remain ordered with the next hardware update. */
++	if (!dfps_mask && !kms->funcs->retire_flush)
+ 		unlock_crtcs(kms, crtc_mask);
+ 	/*
+ 	 * Wait for flush to complete:
+@@ -546,8 +558,11 @@ fallback:
+ 			vblank_put(kms, crtc_mask);
+ 			goto quarantined;
+ 		}
+-		unlock_crtcs(kms, crtc_mask);
+ 	}
++	if (kms->funcs->retire_flush)
++		kms->funcs->retire_flush(kms, crtc_mask);
++	if (dfps_mask || kms->funcs->retire_flush)
++		unlock_crtcs(kms, crtc_mask);
+ 	vblank_put(kms, crtc_mask);
+ 
+ 	lock_crtcs(kms, crtc_mask);
+@@ -556,7 +571,10 @@ fallback:
+ 	kms->funcs->disable_commit(kms);
+ 
+ 	drm_atomic_helper_commit_hw_done(state);
+-	drm_atomic_helper_cleanup_planes(dev, state);
++	if (kms->funcs->cleanup_planes)
++		kms->funcs->cleanup_planes(kms, state);
++	else
++		drm_atomic_helper_cleanup_planes(dev, state);
+ 
+ 	trace_msm_atomic_commit_tail_finish(async, crtc_mask);
+ 	return;
+@@ -565,7 +583,7 @@ quarantined:
+ 	unlock_crtcs(kms, crtc_mask);
+ 	kms->funcs->disable_commit(kms);
+ 	drm_atomic_helper_commit_hw_done(state);
+-	/* Failed latch: retain old scanout references and prepared pins until reboot. */
++	/* Unproved completion: retain old scanout and prepared pins until reboot. */
+ 	drm_atomic_commit_get(state);
+ 	trace_msm_atomic_commit_tail_finish(async, crtc_mask);
+ }
+diff --git a/drivers/gpu/drm/msm/msm_kms.h b/drivers/gpu/drm/msm/msm_kms.h
+index 86d7271..5867bd7 100644
+--- a/drivers/gpu/drm/msm/msm_kms.h
++++ b/drivers/gpu/drm/msm/msm_kms.h
+@@ -75,6 +75,12 @@ struct msm_kms_funcs {
+ 	 * (async or otherwise) commit has completed.
+ 	 */
+ 	void (*prepare_commit)(struct msm_kms *kms, struct drm_atomic_commit *state);
++	/* Reserve retirement ownership before waiting or programming hardware. */
++	void (*prepare_retire)(struct msm_kms *kms, struct drm_atomic_commit *state);
++	bool (*commit_failed)(struct msm_kms *kms, struct drm_atomic_commit *state,
++			      bool allow_modeset);
++	void (*retire_flush)(struct msm_kms *kms, unsigned crtc_mask);
++	void (*cleanup_planes)(struct msm_kms *kms, struct drm_atomic_commit *state);
+ 
+ 	/**
+ 	 * Flush an atomic commit.  This is called after the hardware

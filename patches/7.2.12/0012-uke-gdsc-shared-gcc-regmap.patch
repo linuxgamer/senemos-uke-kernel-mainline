@@ -1,0 +1,218 @@
+From: Senemos Uke contributors
+Subject: [PATCH] clk: qcom: share the Cliffs GCC regmap with Uke GDSCs
+
+GCC reserves its complete MMIO window with devm_platform_ioremap_resource.
+The standalone regulator facade tried to reserve GDSC subranges again, so
+probe order could fail with EBUSY. Require an explicit GCC phandle and use
+that bound supplier's existing regmap with validated OEM offsets. Preserve
+supplier lifetime through the device link and defer until GCC is ready.
+Do not bypass resource ownership or create a second unchecked mapping.
+
+Only the reviewed USB 0x139004 and UFS 0x177004/0x19e000 domains are admitted.
+The bounded sequencer and conservative parent-voltage behavior are unchanged.
+A matching DT must add qcom,clock-controller and retain an eight-byte reg.
+
+Source: MiCode/vendor_qcom_opensource_devicetree
+Commit: 94c84aeb9e517dbde546fc732033c184094c8e57
+File: qcom/cliffs-regulators.dtsi
+Source: Linux v7.2.9, drivers/clk/qcom/common.c
+License: GPL-2.0-only
+
+--- a/drivers/clk/qcom/gdsc-regulator-uke.c
++++ b/drivers/clk/qcom/gdsc-regulator-uke.c
+@@ -15,6 +15,7 @@
+ #include <linux/io.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
++#include <linux/of_platform.h>
+ #include <linux/platform_device.h>
+ #include <linux/regmap.h>
+ #include <linux/regulator/consumer.h>
+@@ -36,25 +37,75 @@
+ 	struct regulator_desc desc;
+ 	struct regulator_dev *rdev;
+ 	struct regmap *regmap;
++	u32 reg;
+ 	struct regulator *parent;
+ 	bool retain_regs;
+ 	bool parent_on;
+ 	int power_error;
+ };
+ 
+-static const struct regmap_config uke_gdsc_regmap_config = {
+-	.reg_bits = 32,
+-	.reg_stride = 4,
+-	.val_bits = 32,
+-	.max_register = CFG_GDSCR,
+-};
++/* GCC owns the containing register window. Never reserve/map it twice. */
++static int uke_gdsc_get_regmap(struct platform_device *pdev,
++			      struct uke_gdsc *gdsc)
++{
++	struct device *dev = &pdev->dev;
++	struct device_node *np;
++	struct platform_device *gcc;
++	struct resource *res, *window;
++	int ret = 0;
++
++	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	if (!res || resource_size(res) != 8)
++		return -EINVAL;
++	if (of_device_is_compatible(dev->of_node, "qcom,sm7675-usb-gdsc")) {
++		if (res->start != 0x139004)
++			return -EINVAL;
++	} else if (res->start != 0x177004 && res->start != 0x19e000) {
++		return -EINVAL;
++	}
++
++	np = of_parse_phandle(dev->of_node, "qcom,clock-controller", 0);
++	if (!np)
++		return dev_err_probe(dev, -EINVAL, "missing GCC regmap owner\n");
++	if (!of_device_is_compatible(np, "qcom,cliffs-gcc")) {
++		of_node_put(np);
++		return -EINVAL;
++	}
++	gcc = of_find_device_by_node(np);
++	of_node_put(np);
++	if (!gcc)
++		return -EPROBE_DEFER;
++	if (!device_is_bound(&gcc->dev)) {
++		ret = -EPROBE_DEFER;
++		goto put_gcc;
++	}
++	window = platform_get_resource(gcc, IORESOURCE_MEM, 0);
++	if (!window || window->start != 0x100000 ||
++	    res->start < window->start || res->end > window->end) {
++		ret = -EINVAL;
++		goto put_gcc;
++	}
++	gdsc->regmap = dev_get_regmap(&gcc->dev, NULL);
++	if (!gdsc->regmap) {
++		ret = -EPROBE_DEFER;
++		goto put_gcc;
++	}
++	if (!device_link_add(dev, &gcc->dev, DL_FLAG_AUTOREMOVE_CONSUMER)) {
++		ret = -ENOMEM;
++		goto put_gcc;
++	}
++	gdsc->reg = res->start - window->start;
++put_gcc:
++	put_device(&gcc->dev);
++	return ret;
++}
+ 
+ static int uke_gdsc_poll(struct uke_gdsc *gdsc, bool on)
+ {
+ 	u32 val;
+ 	int ret;
+ 
+-	ret = regmap_read_poll_timeout(gdsc->regmap, CFG_GDSCR, val,
++	ret = regmap_read_poll_timeout(gdsc->regmap, gdsc->reg + CFG_GDSCR, val,
+ 				on ? val & CFG_GDSCR_POWER_UP :
+ 				     val & CFG_GDSCR_POWER_DOWN,
+ 				     1, GDSC_TIMEOUT_US);
+@@ -96,13 +147,13 @@
+ 	ret = uke_gdsc_parent_enable(gdsc);
+ 	if (ret)
+ 		return ret;
+-	ret = regmap_read(gdsc->regmap, 0, &val);
++	ret = regmap_read(gdsc->regmap, gdsc->reg, &val);
+ 	if (ret)
+ 		goto uncertain;
+ 	if (val & GDSCR_HW_CONTROL)
+ 		return -EBUSY;
+ 
+-	ret = regmap_clear_bits(gdsc->regmap, 0, GDSCR_SW_COLLAPSE);
++	ret = regmap_clear_bits(gdsc->regmap, gdsc->reg, GDSCR_SW_COLLAPSE);
+ 	if (ret)
+ 		goto uncertain;
+ 	/* Xiaomi: allow eight XO cycles before reading completion. */
+@@ -113,7 +164,7 @@
+ 		goto uncertain;
+ 
+ 	if (gdsc->retain_regs) {
+-		ret = regmap_set_bits(gdsc->regmap, 0, GDSCR_RETAIN_FF);
++		ret = regmap_set_bits(gdsc->regmap, gdsc->reg, GDSCR_RETAIN_FF);
+ 		if (ret)
+ 			goto uncertain;
+ 	}
+@@ -137,7 +188,7 @@
+ 		return gdsc->power_error;
+ 	/* Xiaomi: staggered memory power-down before asserting collapse. */
+ 	udelay(1);
+-	ret = regmap_set_bits(gdsc->regmap, 0, GDSCR_SW_COLLAPSE);
++	ret = regmap_set_bits(gdsc->regmap, gdsc->reg, GDSCR_SW_COLLAPSE);
+ 	if (ret)
+ 		goto uncertain;
+ 	/* Complete the collapse write before waiting eight XO cycles. */
+@@ -159,7 +210,7 @@
+ 	u32 val;
+ 	int ret;
+ 
+-	ret = regmap_read(gdsc->regmap, CFG_GDSCR, &val);
++	ret = regmap_read(gdsc->regmap, gdsc->reg + CFG_GDSCR, &val);
+ 	if (ret)
+ 		return ret;
+ 	return !!(val & CFG_GDSCR_POWER_UP);
+@@ -189,8 +240,6 @@
+ 	struct regulator_config config = {};
+ 	struct regulator_init_data *init_data;
+ 	struct uke_gdsc *gdsc;
+-	struct resource *res;
+-	void __iomem *base;
+ 	u32 val;
+ 	int ret;
+ 
+@@ -198,15 +247,9 @@
+ 	if (!gdsc)
+ 		return -ENOMEM;
+ 
+-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+-	if (!res || resource_size(res) < CFG_GDSCR + sizeof(u32))
+-		return -EINVAL;
+-	base = devm_ioremap_resource(dev, res);
+-	if (IS_ERR(base))
+-		return PTR_ERR(base);
+-	gdsc->regmap = devm_regmap_init_mmio(dev, base, &uke_gdsc_regmap_config);
+-	if (IS_ERR(gdsc->regmap))
+-		return PTR_ERR(gdsc->regmap);
++	ret = uke_gdsc_get_regmap(pdev, gdsc);
++	if (ret)
++		return dev_err_probe(dev, ret, "failed to acquire GCC GDSC regmap\n");
+ 
+ 	gdsc->parent = regulator_get(dev, "parent");
+ 	if (IS_ERR(gdsc->parent))
+@@ -229,13 +272,13 @@
+ 	ret = uke_gdsc_parent_enable(gdsc);
+ 	if (ret)
+ 		return ret;
+-	ret = regmap_clear_bits(gdsc->regmap, 0,
++	ret = regmap_clear_bits(gdsc->regmap, gdsc->reg,
+ 				GDSCR_HW_CONTROL | GDSCR_SW_OVERRIDE);
+ 	if (ret)
+ 		goto release_parent;
+ 	/* Finish selecting the hardware sequencer before checking boot state. */
+ 	mb();
+-	ret = regmap_read(gdsc->regmap, 0, &val);
++	ret = regmap_read(gdsc->regmap, gdsc->reg, &val);
+ 	if (ret)
+ 		goto release_parent;
+ 	ret = uke_gdsc_poll(gdsc, !(val & GDSCR_SW_COLLAPSE));
+@@ -247,7 +290,7 @@
+ 		if (ret)
+ 			goto release_parent;
+ 	} else if (gdsc->retain_regs) {
+-		ret = regmap_set_bits(gdsc->regmap, 0, GDSCR_RETAIN_FF);
++		ret = regmap_set_bits(gdsc->regmap, gdsc->reg, GDSCR_RETAIN_FF);
+ 		if (ret)
+ 			goto release_parent;
+ 	}
+@@ -271,7 +314,7 @@
+ release_parent:
+ 	/* Release only after positively observing a collapsed domain. */
+ 	if (!gdsc->power_error &&
+-	    !regmap_read(gdsc->regmap, 0, &val) &&
++	    !regmap_read(gdsc->regmap, gdsc->reg, &val) &&
+ 	    (val & GDSCR_SW_COLLAPSE) && !uke_gdsc_poll(gdsc, false))
+ 		uke_gdsc_parent_disable(gdsc);
+ 	return ret;

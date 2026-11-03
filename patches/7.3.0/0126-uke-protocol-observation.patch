@@ -1,0 +1,194 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] power: add default-off fixed Uke protocol observations
+
+Keep USB6, OEM USB7/USB11 and XM namespaces separate. Expose only a privileged,
+rate-limited pair of fixed USB GETs behind an EXPERT option defaulting to n.
+Refuse active control and unstable transport epochs. No negotiation, current,
+voltage, authentication or generic property writer is introduced. Exact active
+firmware ABI and physical sessions remain unqualified.
+
+diff --git a/drivers/power/supply/Kconfig b/drivers/power/supply/Kconfig
+index e03a9c8..11261b8 100644
+--- a/drivers/power/supply/Kconfig
++++ b/drivers/power/supply/Kconfig
+@@ -218,6 +218,17 @@ config BATTERY_QCOM_BATTMGR
+ 	  which is used on modern Qualcomm platforms to provide battery and
+ 	  power supply information.
+ 
++config BATTERY_QCOM_BATTMGR_UKE_PROTOCOL_DIAGNOSTICS
++	bool "Development-only Uke USB protocol observations"
++	depends on BATTERY_QCOM_BATTMGR && EXPERT
++	default n
++	help
++	  Build a root-only, rate-limited observational USB7/USB11 GET pair.
++	  Keep this off until the active Uke firmware ABI has been reviewed in an
++	  attended test window. No automatic polling, XM probing, protocol selection,
++	  voltage/current writes or authentication override is provided. Results are
++	  firmware-reported classes, not negotiated revision or electrical proof.
++
+ config BATTERY_QCOM_BATTMGR_UKE_THRESHOLDS
+ 	bool "Reviewed Uke autonomous charge-threshold transport"
+ 	depends on BATTERY_QCOM_BATTMGR && EXPERT
+diff --git a/drivers/power/supply/qcom_battmgr.c b/drivers/power/supply/qcom_battmgr.c
+index 3367730..48e4105 100644
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -104,6 +104,7 @@ enum qcom_battmgr_variant {
+ #define USB_INPUT_CURR_LIMIT		5
+ #define USB_TYPE			6
+ #define USB_ADAP_TYPE			7
++#define UKE_USB_REAL_TYPE		11
+ #define USB_MOISTURE_DET_EN		8
+ #define USB_MOISTURE_DET_STS		9
+ 
+@@ -317,6 +318,8 @@ struct qcom_battmgr_usb {
+ 	unsigned int current_max;
+ 	unsigned int current_limit;
+ 	u32 adapter_type;
++	u32 real_type;
++	u64 protocol_probe_ns;
+ 	u32 moisture_enabled, moisture_status;
+ 	unsigned int usb_type;
+ 	/* Raw legacy USB wire6 observation; not OEM adapter wire7/XM real_type. */
+@@ -2109,6 +2112,13 @@ static void qcom_battmgr_sm8350_callback(struct qcom_battmgr *battmgr,
+ 		case USB_ADAP_TYPE:
+ 			battmgr->usb.adapter_type = le32_to_cpu(resp->intval.value);
+ 			break;
++		case UKE_USB_REAL_TYPE:
++			if (battmgr->variant != QCOM_BATTMGR_UKE) {
++				battmgr->error = -EOPNOTSUPP;
++				break;
++			}
++			battmgr->usb.real_type = le32_to_cpu(resp->intval.value);
++			break;
+ 		case USB_TYPE:
+ 			if (battmgr->variant == QCOM_BATTMGR_UKE) {
+ 				battmgr->usb.type_raw = le32_to_cpu(resp->intval.value);
+@@ -2412,7 +2422,97 @@ static ssize_t uke_usb_source_state_show(struct device *dev,
+ }
+ static DEVICE_ATTR_RO(uke_usb_source_state);
+ 
++struct qcom_battmgr_uke_protocols {
++	u64 instance, received_ns;
++	u32 generation, firmware, source, adapter_type, real_type;
++};
++
++/* Fixed OEM USB7/USB11 GETs only; never change negotiation or authentication. */
++static int qcom_battmgr_uke_protocols_read(struct qcom_battmgr *battmgr,
++					 struct qcom_battmgr_uke_protocols *result)
++{
++	const unsigned int props[] = { USB_ADAP_TYPE, UKE_USB_REAL_TYPE };
++	struct qcom_battmgr_uke_transaction *tx = &battmgr->transaction;
++	struct qcom_battmgr_uke_protocols next = { };
++	u64 began = ktime_get_boottime_ns();
++	unsigned long flags;
++	unsigned int i;
++	int ret = 0;
++
++	lockdep_assert_held(&battmgr->lock);
++	if (!IS_ENABLED(CONFIG_BATTERY_QCOM_BATTMGR_UKE_PROTOCOL_DIAGNOSTICS) ||
++	    battmgr->variant != QCOM_BATTMGR_UKE)
++		return -EOPNOTSUPP;
++	spin_lock_irqsave(&tx->lock, flags);
++	if (!battmgr->service_up || !tx->instance_ns || tx->desynced ||
++	    tx->suspended || tx->removing)
++		ret = -EHOSTDOWN;
++	else if (battmgr->control.expires_ns > began ||
++		 (battmgr->control.verified && battmgr->control.verified_until_ns > began) ||
++		 (battmgr->control.current_verified && battmgr->control.current_until_ns > began))
++		ret = -EBUSY;
++	else if (battmgr->usb.protocol_probe_ns &&
++		 (began < battmgr->usb.protocol_probe_ns ||
++		  began - battmgr->usb.protocol_probe_ns < NSEC_PER_SEC))
++		ret = -EAGAIN;
++	else {
++		next.instance = tx->instance_ns;
++		next.generation = tx->generation;
++		next.firmware = tx->firmware_generation;
++		next.source = tx->source_generation;
++		battmgr->usb.protocol_probe_ns = began;
++	}
++	spin_unlock_irqrestore(&tx->lock, flags);
++	if (ret)
++		return ret;
++	for (i = 0; i < ARRAY_SIZE(props); i++) {
++		ret = qcom_battmgr_request_property(battmgr, BATTMGR_USB_PROPERTY_GET, props[i], 0);
++		if (ret)
++			return ret;
++		if (next.generation != qcom_battmgr_uke_generation(battmgr))
++			return -ESTALE;
++	}
++	next.received_ns = ktime_get_boottime_ns();
++	spin_lock_irqsave(&tx->lock, flags);
++	if (!battmgr->service_up || tx->desynced || tx->suspended || tx->removing ||
++	    next.instance != tx->instance_ns || next.generation != tx->generation ||
++	    next.firmware != tx->firmware_generation || next.source != tx->source_generation ||
++	    next.received_ns < began || next.received_ns - began > 3ULL * NSEC_PER_SEC)
++		ret = -ESTALE;
++	else {
++		next.adapter_type = battmgr->usb.adapter_type;
++		next.real_type = battmgr->usb.real_type;
++	}
++	spin_unlock_irqrestore(&tx->lock, flags);
++	if (!ret)
++		*result = next;
++	return ret;
++}
++
++static ssize_t uke_charge_protocols_show(struct device *dev,
++				       struct device_attribute *attr, char *buf)
++{
++	struct qcom_battmgr *battmgr = dev_get_drvdata(dev);
++	struct qcom_battmgr_uke_protocols result;
++	int ret;
++
++	if (!capable(CAP_SYS_ADMIN))
++		return -EPERM;
++	if (!mutex_trylock(&battmgr->lock))
++		return -EBUSY;
++	ret = qcom_battmgr_uke_protocols_read(battmgr, &result);
++	mutex_unlock(&battmgr->lock);
++	if (ret)
++		return ret;
++	return sysfs_emit(buf, "1 %llu %u %u %u %llu %u %u\n",
++		result.instance, result.generation, result.firmware, result.source,
++		result.received_ns, result.adapter_type, result.real_type);
++}
++static struct device_attribute dev_attr_uke_charge_protocols =
++	__ATTR(uke_charge_protocols, 0400, uke_charge_protocols_show, NULL);
++
+ static struct attribute *qcom_battmgr_uke_attrs[] = {
++	&dev_attr_uke_charge_protocols.attr,
+ 	&dev_attr_uke_charge_protection_state.attr,
+ 	&dev_attr_uke_charge_wet_guard.attr,
+ 	&dev_attr_uke_charge_protection.attr,
+diff --git a/Documentation/ABI/testing/sysfs-driver-qcom-battmgr-uke-protocols b/Documentation/ABI/testing/sysfs-driver-qcom-battmgr-uke-protocols
+new file mode 100644
+index 0000000..99a6ba9
+--- /dev/null
++++ b/Documentation/ABI/testing/sysfs-driver-qcom-battmgr-uke-protocols
+@@ -0,0 +1,24 @@
++What:           /sys/devices/platform/*/pmic_glink_power_supply/uke_charge_protocols
++Date:           October 2026
++Contact:        Uke Linux maintainers
++Description:
++                Root-only (0400 and CAP_SYS_ADMIN), explicit observational GET
++                pair, enabled only by the default-off EXPERT option
++                BATTERY_QCOM_BATTMGR_UKE_PROTOCOL_DIAGNOSTICS. Unsupported
++                configurations return EOPNOTSUPP without firmware requests.
++                Active firmware ABI review and an attended test window are
++                required before enabling or using this development interface.
++
++                Decimal fields: version (1), driver instance boottime ns,
++                transaction generation, firmware generation, source generation,
++                receipt boottime ns, USB_ADAP_TYPE (wire7), USB_REAL_TYPE (wire11).
++                Requests use USB family GET 0x32 with value zero; no XM requests,
++                authentication flags, protocol/voltage/current SET or lease
++                renewal. The pair is sequential, not a remote atomic snapshot.
++
++                Transport loss, desync, suspend/removal, active charging control,
++                rate limiting, busy lock and epoch changes refuse the operation.
++                Raw values are not normalized into the mainline USB enum. USB6,
++                USB7, USB11 and XM real_type are different namespaces. Neither
++                generic PD nor HVDCP class establishes a negotiated protocol
++                revision, authentication, safe limits or measured electrical state.

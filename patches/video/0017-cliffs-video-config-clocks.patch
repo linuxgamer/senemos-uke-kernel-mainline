@@ -1,0 +1,37 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] clk: qcom: keep the Cliffs video configuration clocks enabled
+
+The exact Uke OEM gcc-cliffs.c enables the video AHB and XO gates at
+0x32004 and 0x32030 before registering GCC. The current upstream SM8650
+driver does the same for this shared block. Restore only those video
+gates, retaining the separate camera, display and GPU clock policy.
+
+On Uke 7.3.0-6 both CBCRs read 0x80000000 and MVS0C never reaches the
+power-up-complete state. Clock registration alone does not enable these
+unexported gates. Propagate each regmap failure before exposing GCC.
+
+OEM: MiCode 5712080a4b0c0b1a879e6d145c601c649ddaddfd,
+drivers/clk/qcom/gcc-cliffs.c (GPL-2.0-only).
+This source correction requires a separate native power/firmware trial.
+
+---
+diff --git a/drivers/clk/qcom/gcc-cliffs.c b/drivers/clk/qcom/gcc-cliffs.c
+--- a/drivers/clk/qcom/gcc-cliffs.c
++++ b/drivers/clk/qcom/gcc-cliffs.c
+@@ -3171,7 +3171,15 @@ static int gcc_cliffs_probe(struct platform_device *pdev)
+ 	if (IS_ERR(regmap))
+ 		return PTR_ERR(regmap);
+ 
+-	/* USB data bring-up does not force camera/display/GPU/video gates. */
++	/* OEM requires both configuration gates before any video GDSC access. */
++	ret = regmap_update_bits(regmap, 0x32004, BIT(0), BIT(0));
++	if (ret)
++		return ret;
++	ret = regmap_update_bits(regmap, 0x32030, BIT(0), BIT(0));
++	if (ret)
++		return ret;
++
++	/* Video bring-up does not force camera/display/GPU gates. */
+ 	ret = clk_vdd_proxy_vote(&pdev->dev, &gcc_cliffs_desc);
+ 	if (ret)
+ 		return ret;

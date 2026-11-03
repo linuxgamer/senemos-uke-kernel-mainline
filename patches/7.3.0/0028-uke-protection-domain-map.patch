@@ -1,0 +1,29 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] soc: qcom: pd-mapper: describe the exact Uke OEM domains
+
+The pinned Uke Global OS3.0.304.0 modem image contains adspr, adsps,
+adspua, battmgr and cdspr service registries. Their domain names,
+instances and services exactly match these existing mainline entries.
+Use a Uke-only match; do not infer mappings for other SM7675 devices.
+This advertises service locations, not FastRPC memory permissions or
+automatic remote-processor startup.
+
+--- a/drivers/soc/qcom/qcom_pd_mapper.c
++++ b/drivers/soc/qcom/qcom_pd_mapper.c
+@@ -582,1 +582,11 @@
++/* Exact domains from Uke's OEM service registries. */
++static const struct qcom_pdm_domain_data *uke_domains[] = {
++	&adsp_audio_pd,
++	&adsp_root_pd,
++	&adsp_charger_pd,
++	&adsp_sensor_pd,
++	&cdsp_root_pd,
++	NULL,
++};
++
+ static const struct of_device_id qcom_pdm_domains[] __maybe_unused = {
+@@ -630,2 +640,3 @@
+-	{},
++	{ .compatible = "xiaomi,uke", .data = uke_domains, },
++	{},
+ };

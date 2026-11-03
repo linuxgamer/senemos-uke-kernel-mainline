@@ -1,0 +1,28 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: qcom: allow the Uke mono capture frontend
+
+The Uke capture topology admits one channel, but the component's two-channel
+minimum intersects it to an invalid [2,1] interval during PCM open. A bounded
+device return probe confirms that ALSA rejects this interval before hw_params.
+
+Lower only the minimum for graph 2 on the explicit Uke microphone card.
+Keep the upstream hardware defaults, other cards and all playback limits.
+This does not qualify the physical input or change codec electrical settings.
+
+--- a/sound/soc/qcom/qdsp6/q6apm-dai.c
++++ b/sound/soc/qcom/qdsp6/q6apm-dai.c
+@@ -402,7 +402,13 @@
+ 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+ 		runtime->hw = q6apm_dai_hardware_playback;
+-	else if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
++	else if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
+ 		runtime->hw = q6apm_dai_hardware_capture;
++		/* Match the restricted mono frontend without relaxing other cards. */
++		if (of_machine_is_compatible("xiaomi,uke") && graph_id == 2 &&
++		    of_device_is_compatible(soc_prtd->card->dev->of_node,
++					"xiaomi,uke-microphone-audio-card"))
++			runtime->hw.channels_min = 1;
++	}
+ 
+ 	/* Ensure that buffer size is a multiple of period size */
+ 	ret = snd_pcm_hw_constraint_integer(runtime, SNDRV_PCM_HW_PARAM_PERIODS);

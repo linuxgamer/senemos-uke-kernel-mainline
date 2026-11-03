@@ -1,0 +1,111 @@
+From: Uke Linux project <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] interconnect: qcom: qualify paired SM7675 CPU and L3 votes
+
+Identify the shared L3 vote register and retain legacy clamp behavior for
+existing platforms. Refuse an SM7675 request beyond its firmware LUT so a
+paired monitor never silently succeeds below its requested secondary floor.
+Describe the exact SoC provider and the CPU monitor two-path contract.
+
+--- a/drivers/interconnect/qcom/osm-l3.c
++++ b/drivers/interconnect/qcom/osm-l3.c
+@@ -40,6 +40,7 @@
+ 	void __iomem *base;
+ 	unsigned int max_state;
+ 	unsigned int reg_perf_state;
++	bool reject_overvote;
+ 	unsigned long lut_tables[LUT_MAX_ENTRIES];
+ 	struct icc_provider provider;
+ };
+@@ -61,6 +62,7 @@
+ 	unsigned int reg_freq_lut;
+ 	unsigned int reg_perf_state;
+ 	unsigned int lut_max_entries;
++	bool reject_overvote;
+ };
+ 
+ #define DEFINE_QNODE(_name, _buswidth)					\
+@@ -121,6 +123,16 @@
+ 	.lut_max_entries = LUT_MAX_ENTRIES,
+ };
+ 
++static const struct qcom_osm_l3_desc sm7675_epss_l3 = {
++	.nodes = epss_l3_nodes,
++	.num_nodes = ARRAY_SIZE(epss_l3_nodes),
++	.lut_row_size = EPSS_LUT_ROW_SIZE,
++	.reg_freq_lut = EPSS_REG_FREQ_LUT,
++	.reg_perf_state = EPSS_REG_L3_VOTE,
++	.lut_max_entries = LUT_MAX_ENTRIES,
++	.reject_overvote = true,
++};
++
+ static int qcom_osm_l3_set(struct icc_node *src, struct icc_node *dst)
+ {
+ 	struct qcom_osm_l3_icc_provider *qp;
+@@ -135,6 +147,8 @@
+ 
+ 	rate = icc_units_to_bps(dst->peak_bw);
+ 	do_div(rate, qn->buswidth);
++	if (qp->reject_overvote && rate > qp->lut_tables[qp->max_state - 1])
++		return -ERANGE;
+ 
+ 	for (index = 0; index < qp->max_state - 1; index++) {
+ 		if (qp->lut_tables[index] >= rate)
+@@ -205,6 +219,7 @@
+ 		return -EINVAL;
+ 
+ 	qp->reg_perf_state = desc->reg_perf_state;
++	qp->reject_overvote = desc->reject_overvote;
+ 
+ 	for (i = 0; i < desc->lut_max_entries; i++) {
+ 		info = readl_relaxed(qp->base + desc->reg_freq_lut +
+@@ -290,6 +305,7 @@
+ }
+ 
+ static const struct of_device_id osm_l3_of_match[] = {
++	{ .compatible = "qcom,sm7675-epss-l3", .data = &sm7675_epss_l3 },
+ 	{ .compatible = "qcom,epss-l3", .data = &epss_l3_l3_vote },
+ 	{ .compatible = "qcom,osm-l3", .data = &osm_l3 },
+ 	{ .compatible = "qcom,sa8775p-epss-l3", .data = &epss_l3_perf_state },
+--- a/Documentation/devicetree/bindings/interconnect/qcom,osm-l3.yaml
++++ b/Documentation/devicetree/bindings/interconnect/qcom,osm-l3.yaml
+@@ -35,6 +35,7 @@
+               - qcom,sc7280-epss-l3
+               - qcom,sc8280xp-epss-l3
+               - qcom,sm6375-cpucp-l3
++              - qcom,sm7675-epss-l3
+               - qcom,sm8250-epss-l3
+               - qcom,sm8350-epss-l3
+               - qcom,sm8550-epss-l3
+--- a/Documentation/devicetree/bindings/interconnect/qcom,msm8998-bwmon.yaml
++++ b/Documentation/devicetree/bindings/interconnect/qcom,msm8998-bwmon.yaml
+@@ -68,7 +68,8 @@
+       - const: qcom,sdm845-llcc-bwmon   # BWMON v5
+ 
+   interconnects:
+-    maxItems: 1
++    minItems: 1
++    maxItems: 2
+ 
+   interrupts:
+     maxItems: 1
+@@ -101,6 +102,20 @@
+   - if:
+       properties:
+         compatible:
++          contains:
++            const: qcom,sm7675-cpu-bwmon
++    then:
++      properties:
++        interconnects:
++          minItems: 2
++          maxItems: 2
++    else:
++      properties:
++        interconnects:
++          maxItems: 1
++  - if:
++      properties:
++        compatible:
+           const: qcom,msm8998-bwmon
+     then:
+       properties:

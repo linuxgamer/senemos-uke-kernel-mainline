@@ -1,0 +1,193 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] usb: dwc3: report completed Uke roles and check PHY mode errors
+
+The full Uke profile exposes OEM repeater errors through generic PHY mode
+changes. Configure those PHYs after the old role is stopped and before
+activating host/gadget. Report the completed driver role separately from
+GCTL's requested role, and report none after initialization failure.
+This does not establish device enumeration or delivered source power.
+
+License: GPL-2.0-only
+
+diff --git a/drivers/usb/dwc3/core.c b/drivers/usb/dwc3/core.c
+index d987ae2..66fd193 100644
+--- a/drivers/usb/dwc3/core.c
++++ b/drivers/usb/dwc3/core.c
+@@ -162,11 +162,28 @@ void dwc3_set_prtcap(struct dwc3 *dwc, u32 mode, bool ignore_susphy)
+ }
+ EXPORT_SYMBOL_GPL(dwc3_set_prtcap);
+ 
++static int dwc3_uke_set_phy_mode(struct dwc3 *dwc, enum phy_mode mode)
++{
++	int i, ret;
++	for (i = 0; i < dwc->num_usb2_ports; i++) {
++		ret = phy_set_mode(dwc->usb2_generic_phy[i], mode);
++		if (ret)
++			return ret;
++	}
++	for (i = 0; i < dwc->num_usb3_ports; i++) {
++		ret = phy_set_mode(dwc->usb3_generic_phy[i], mode);
++		if (ret)
++			return ret;
++	}
++	return 0;
++}
++
+ static void __dwc3_set_mode(struct work_struct *work)
+ {
+ 	struct dwc3 *dwc = work_to_dwc(work);
++	bool uke = of_device_is_compatible(dwc->dev->of_node, "qcom,sm7675-dwc3-typec");
+ 	unsigned long flags;
+-	int ret;
++	int ret = 0;
+ 	u32 reg;
+ 	u32 desired_dr_role;
+ 	int i;
+@@ -176,7 +193,12 @@ static void __dwc3_set_mode(struct work_struct *work)
+ 	desired_dr_role = dwc->desired_dr_role;
+ 	spin_unlock_irqrestore(&dwc->lock, flags);
+ 
+-	pm_runtime_get_sync(dwc->dev);
++	ret = pm_runtime_get_sync(dwc->dev);
++	if (ret < 0 && uke) {
++		WRITE_ONCE(dwc->uke_role_error, ret);
++		WRITE_ONCE(dwc->uke_completed_role, USB_ROLE_NONE);
++		goto out;
++	}
+ 
+ 	if (dwc->current_dr_role == DWC3_GCTL_PRTCAP_OTG)
+ 		dwc3_otg_update(dwc, 0);
+@@ -213,6 +235,10 @@ static void __dwc3_set_mode(struct work_struct *work)
+ 	 * When current_dr_role is not set, there's no role switching.
+ 	 * Only perform GCTL.CoreSoftReset when there's DRD role switching.
+ 	 */
++	if (uke) {
++		WRITE_ONCE(dwc->uke_completed_role, USB_ROLE_NONE);
++		WRITE_ONCE(dwc->uke_role_error, -EINPROGRESS);
++	}
+ 	if (dwc->current_dr_role && ((DWC3_IP_IS(DWC3) ||
+ 			DWC3_VER_IS_PRIOR(DWC31, 190A)) &&
+ 			desired_dr_role != DWC3_GCTL_PRTCAP_OTG)) {
+@@ -241,6 +267,11 @@ static void __dwc3_set_mode(struct work_struct *work)
+ 
+ 	switch (desired_dr_role) {
+ 	case DWC3_GCTL_PRTCAP_HOST:
++		if (uke) {
++			ret = dwc3_uke_set_phy_mode(dwc, PHY_MODE_USB_HOST);
++			if (ret)
++				goto uke_failed;
++		}
+ 		ret = dwc3_host_init(dwc);
+ 		if (ret) {
+ 			dev_err(dwc->dev, "failed to initialize host\n");
+@@ -248,10 +279,12 @@ static void __dwc3_set_mode(struct work_struct *work)
+ 			if (dwc->usb2_phy)
+ 				otg_set_vbus(dwc->usb2_phy->otg, true);
+ 
+-			for (i = 0; i < dwc->num_usb2_ports; i++)
+-				phy_set_mode(dwc->usb2_generic_phy[i], PHY_MODE_USB_HOST);
+-			for (i = 0; i < dwc->num_usb3_ports; i++)
+-				phy_set_mode(dwc->usb3_generic_phy[i], PHY_MODE_USB_HOST);
++			if (!uke) {
++				for (i = 0; i < dwc->num_usb2_ports; i++)
++					phy_set_mode(dwc->usb2_generic_phy[i], PHY_MODE_USB_HOST);
++				for (i = 0; i < dwc->num_usb3_ports; i++)
++					phy_set_mode(dwc->usb3_generic_phy[i], PHY_MODE_USB_HOST);
++			}
+ 
+ 			if (dwc->dis_split_quirk) {
+ 				reg = dwc3_readl(dwc, DWC3_GUCTL3);
+@@ -261,18 +294,30 @@ static void __dwc3_set_mode(struct work_struct *work)
+ 		}
+ 		break;
+ 	case DWC3_GCTL_PRTCAP_DEVICE:
+-		dwc3_core_soft_reset(dwc);
++		ret = dwc3_core_soft_reset(dwc);
++		if (ret && uke)
++			goto uke_failed;
++		if (uke) {
++			ret = dwc3_uke_set_phy_mode(dwc, PHY_MODE_USB_DEVICE);
++			if (ret)
++				goto uke_failed;
++		}
+ 
+ 		dwc3_event_buffers_setup(dwc);
+ 
+ 		if (dwc->usb2_phy)
+ 			otg_set_vbus(dwc->usb2_phy->otg, false);
+-		phy_set_mode(dwc->usb2_generic_phy[0], PHY_MODE_USB_DEVICE);
+-		phy_set_mode(dwc->usb3_generic_phy[0], PHY_MODE_USB_DEVICE);
++		if (!uke) {
++			phy_set_mode(dwc->usb2_generic_phy[0], PHY_MODE_USB_DEVICE);
++			phy_set_mode(dwc->usb3_generic_phy[0], PHY_MODE_USB_DEVICE);
++		}
+ 
+ 		ret = dwc3_gadget_init(dwc);
+-		if (ret)
++		if (ret) {
+ 			dev_err(dwc->dev, "failed to initialize peripheral\n");
++			if (uke)
++				dwc3_event_buffers_cleanup(dwc);
++		}
+ 		break;
+ 	case DWC3_GCTL_PRTCAP_OTG:
+ 		dwc3_otg_init(dwc);
+@@ -282,6 +327,22 @@ static void __dwc3_set_mode(struct work_struct *work)
+ 		break;
+ 	}
+ 
++	if (uke) {
++		if (ret)
++			goto uke_failed;
++		WRITE_ONCE(dwc->uke_role_error, 0);
++		WRITE_ONCE(dwc->uke_completed_role, desired_dr_role == DWC3_GCTL_PRTCAP_HOST ?
++			   USB_ROLE_HOST : USB_ROLE_DEVICE);
++	}
++	goto out;
++uke_failed:
++	WRITE_ONCE(dwc->uke_role_error, ret);
++	WRITE_ONCE(dwc->uke_completed_role, USB_ROLE_NONE);
++	spin_lock_irqsave(&dwc->lock, flags);
++	dwc->current_dr_role = 0;
++	spin_unlock_irqrestore(&dwc->lock, flags);
++	dwc3_pre_set_role(dwc, USB_ROLE_NONE);
++	dev_err(dwc->dev, "Uke role initialization failed: %d\n", ret);
+ out:
+ 	pm_runtime_put_autosuspend(dwc->dev);
+ 	mutex_unlock(&dwc->mutex);
+diff --git a/drivers/usb/dwc3/core.h b/drivers/usb/dwc3/core.h
+index f2c18ff..c42cf70 100644
+--- a/drivers/usb/dwc3/core.h
++++ b/drivers/usb/dwc3/core.h
+@@ -1058,6 +1058,8 @@ struct dwc3_glue_ops {
+  * @version_type: VERSIONTYPE register contents, a sub release of a revision
+  * @dr_mode: requested mode of operation
+  * @current_dr_role: current role of operation when in dual-role mode
++ * @uke_completed_role: full Uke role after successful PHY and driver initialization
++ * @uke_role_error: full Uke role-worker error, or zero after successful initialization
+  * @desired_dr_role: desired role of operation when in dual-role mode
+  * @edev: extcon handle
+  * @edev_nb: extcon notifier
+@@ -1264,6 +1266,9 @@ struct dwc3 {
+ 
+ 	enum usb_dr_mode	dr_mode;
+ 	u32			current_dr_role;
++	/* Full Uke profile: completed driver role, separate from a GCTL request. */
++	u32			uke_completed_role;
++	int			uke_role_error;
+ 	u32			desired_dr_role;
+ 	struct extcon_dev	*edev;
+ 	struct notifier_block	edev_nb;
+diff --git a/drivers/usb/dwc3/drd.c b/drivers/usb/dwc3/drd.c
+index 6ce989e..c435663 100644
+--- a/drivers/usb/dwc3/drd.c
++++ b/drivers/usb/dwc3/drd.c
+@@ -478,6 +478,8 @@ static enum usb_role dwc3_usb_role_switch_get(struct usb_role_switch *sw)
+ 	struct dwc3 *dwc = usb_role_switch_get_drvdata(sw);
+ 	unsigned long flags;
+ 	enum usb_role role;
++	if (of_device_is_compatible(dwc->dev->of_node, "qcom,sm7675-dwc3-typec"))
++		return READ_ONCE(dwc->uke_completed_role);
+ 
+ 	spin_lock_irqsave(&dwc->lock, flags);
+ 	switch (dwc->current_dr_role) {

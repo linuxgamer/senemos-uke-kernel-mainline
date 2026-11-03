@@ -1,0 +1,216 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] power: supply: qcom_battmgr: probe the fixed existing charge band once
+
+The OEM feature flag and target application are separate operations. Add an
+offline-only, root-only request for the already enabled 70/80 band. Correlated
+opaque replies are receipt metadata only; the fixed writers remain quarantined
+after an attempt. Never qualify a generic ACK or claim actuator/bypass success.
+
+OEM: MiCode uke-v-oss 5712080a4b0c0b1a879e6d145c601c649ddaddfd,
+drivers/power/supply/qti_battery_charger.c, battery_psy_set_charge_threshold.
+
+diff --git a/drivers/power/supply/qcom_battmgr.c b/drivers/power/supply/qcom_battmgr.c
+index 1bb4086..6d89563 100644
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -380,6 +380,7 @@ struct qcom_battmgr {
+ 		char evidence[65];
+ 		/* One synchronous, fixed enable-only operation; never a general lease. */
+ 		bool preconfigured_enable, preconfigured_uncertain;
++		bool preconfigured_apply, preconfigured_limit_attempted;
+ 		u32 preconfigured_generation;
+ 		bool current_admitted, current_verified;
+ 		u32 current_min_ua, current_max_ua, source_budget_ua, current_ua;
+@@ -442,6 +443,7 @@ static int qcom_battmgr_uke_request(struct qcom_battmgr *battmgr, void *data, si
+ {
+ 	struct qcom_battmgr_uke_transaction *tx = &battmgr->transaction;
+ 	const struct qcom_battmgr_property_request *request = data;
++	const struct qcom_battmgr_charge_ctrl_request *limit = data;
+ 	const struct pmic_glink_hdr *hdr = data;
+ 	unsigned long flags, left;
+ 	u32 generation, opcode = le32_to_cpu(hdr->opcode);
+@@ -471,11 +473,23 @@ static int qcom_battmgr_uke_request(struct qcom_battmgr *battmgr, void *data, si
+ 			ret = -EINVAL;
+ 			goto out_unlock;
+ 		}
++		if (opcode == BATTMGR_CHG_CTRL_LIMIT_EN && len != sizeof(*limit)) {
++			ret = -EINVAL;
++			goto out_unlock;
++		}
+ 		preconfigured_enable = battmgr->control.preconfigured_enable &&
+ 			battmgr->control.preconfigured_generation == tx->generation &&
+ 			opcode == BATTMGR_BAT_PROPERTY_SET &&
+ 			le32_to_cpu(request->property) == BATT_CHG_CTRL_EN + 1 &&
+ 			le32_to_cpu(request->value) == 1;
++		preconfigured_enable |= battmgr->control.preconfigured_apply &&
++			battmgr->control.preconfigured_generation == tx->generation &&
++			le32_to_cpu(hdr->owner) == PMIC_GLINK_OWNER_BATTMGR &&
++			le32_to_cpu(hdr->type) == PMIC_GLINK_REQ_RESP &&
++			opcode == BATTMGR_CHG_CTRL_LIMIT_EN &&
++			le32_to_cpu(limit->enable) == 1 &&
++			le32_to_cpu(limit->target_soc) == 80 &&
++			le32_to_cpu(limit->delta_soc) == 10;
+ 		if (!preconfigured_enable && !qcom_battmgr_uke_control_live(battmgr, true)) {
+ 			ret = -EACCES;
+ 			goto out_unlock;
+@@ -2122,7 +2136,14 @@ static void qcom_battmgr_uke_callback(struct qcom_battmgr *battmgr,
+ 		goto out;
+ 	if (opcode == BATTMGR_CHG_CTRL_LIMIT_EN) {
+ 		/* The reviewed exact envelope is opaque. Success requires later GETs. */
+-		if (len != battmgr->control.ack_bytes || len < sizeof(resp->hdr) ||
++		/* The one-shot fixed diagnostic only records a bounded opaque reply.
++		 * It never qualifies its envelope or clears outcome uncertainty.
++		 */
++		bool fixed_probe = battmgr->control.preconfigured_apply &&
++			battmgr->control.preconfigured_limit_attempted &&
++			battmgr->control.preconfigured_generation == tx->generation;
++
++		if ((!fixed_probe && len != battmgr->control.ack_bytes) || len < sizeof(resp->hdr) ||
+ 		    len > sizeof(*resp)) {
+ 			battmgr->error = -EPROTO;
+ 			tx->desynced = true;
+@@ -2306,6 +2327,7 @@ static struct attribute *qcom_battmgr_uke_attrs[] = {
+ 	&dev_attr_uke_charge_state.attr,
+ 	&dev_attr_uke_charge_settings.attr,
+ 	&dev_attr_uke_charge_enable_existing_cap.attr,
++	&dev_attr_uke_charge_apply_existing_cap.attr,
+ 	&dev_attr_uke_charge_lease.attr,
+ 	&dev_attr_uke_charge_thresholds.attr,
+ 	&dev_attr_uke_charge_refresh.attr,
+diff --git a/drivers/power/supply/qcom_battmgr_uke_control.h b/drivers/power/supply/qcom_battmgr_uke_control.h
+index f73820b..49106f7 100644
+--- a/drivers/power/supply/qcom_battmgr_uke_control.h
++++ b/drivers/power/supply/qcom_battmgr_uke_control.h
+@@ -641,6 +641,108 @@ static ssize_t uke_charge_enable_existing_cap_store(struct device *dev,
+ static struct device_attribute dev_attr_uke_charge_enable_existing_cap =
+ 	__ATTR(uke_charge_enable_existing_cap, 0200, NULL, uke_charge_enable_existing_cap_store);
+ 
++/* Feature permission and target application are separate OEM operations.
++ * Send the existing 70/80 band once, offline. No configurable target or lease.
++ * Even a successful ACK/readback is not physical charge-stop or bypass proof.
++ */
++static int qcom_battmgr_uke_apply_existing_cap(struct qcom_battmgr *battmgr)
++{
++	const unsigned int props[] = { BATT_PRESENT, BATT_HEALTH };
++	struct qcom_battmgr_uke_transaction *tx = &battmgr->transaction;
++	struct qcom_battmgr_uke_settings before, after;
++	struct qcom_battmgr_charge_ctrl_request limit = {
++		.hdr.owner = cpu_to_le32(PMIC_GLINK_OWNER_BATTMGR),
++		.hdr.type = cpu_to_le32(PMIC_GLINK_REQ_RESP),
++		.hdr.opcode = cpu_to_le32(BATTMGR_CHG_CTRL_LIMIT_EN),
++		.enable = cpu_to_le32(1),
++		.target_soc = cpu_to_le32(80),
++		.delta_soc = cpu_to_le32(10),
++	};
++	u64 began = ktime_get_boottime_ns();
++	unsigned long flags;
++	unsigned int i;
++	int ret;
++
++	lockdep_assert_held(&battmgr->lock);
++	if (battmgr->control.preconfigured_uncertain)
++		return -EUCLEAN;
++	if (battmgr->control.preconfigured_limit_attempted)
++		return -EALREADY;
++	ret = qcom_battmgr_uke_settings_read(battmgr, &before, true);
++	if (ret)
++		return ret;
++	if (!before.enabled || before.start != 70 || before.end != 80)
++		return -EOPNOTSUPP;
++	for (i = 0; i < ARRAY_SIZE(props); i++) {
++		ret = qcom_battmgr_request_property(battmgr, BATTMGR_BAT_PROPERTY_GET,
++						  props[i], 0);
++		if (ret)
++			return ret;
++	}
++	ret = qcom_battmgr_request_property(battmgr, BATTMGR_USB_PROPERTY_GET, USB_ONLINE, 0);
++	if (ret)
++		return ret;
++	if (!battmgr->info.present || battmgr->status.health != POWER_SUPPLY_HEALTH_GOOD ||
++	    battmgr->usb.online)
++		return -ERANGE;
++	spin_lock_irqsave(&tx->lock, flags);
++	if (!battmgr->service_up || tx->desynced || tx->suspended || tx->removing ||
++	    before.instance != tx->instance_ns || before.generation != tx->generation ||
++	    before.firmware != tx->firmware_generation || before.source != tx->source_generation ||
++	    ktime_get_boottime_ns() < began ||
++	    ktime_get_boottime_ns() - began > 5ULL * NSEC_PER_SEC) {
++		ret = -ESTALE;
++	} else {
++		battmgr->control.preconfigured_generation = before.generation;
++		battmgr->control.preconfigured_apply = true;
++		battmgr->control.preconfigured_limit_attempted = true;
++		battmgr->control.preconfigured_uncertain = true;
++		ret = 0;
++	}
++	spin_unlock_irqrestore(&tx->lock, flags);
++	if (ret)
++		return ret;
++	ret = qcom_battmgr_request(battmgr, &limit, sizeof(limit));
++	spin_lock_irqsave(&tx->lock, flags);
++	battmgr->control.preconfigured_apply = false;
++	spin_unlock_irqrestore(&tx->lock, flags);
++	if (ret)
++		return ret;
++	dev_info(battmgr->dev, "existing 70/80 request: opaque %zu-byte reply, effect unverified\n",
++		 battmgr->transaction.response_len);
++	ret = qcom_battmgr_uke_settings_read(battmgr, &after, false);
++	if (ret)
++		return ret;
++	if (!after.enabled || after.start != 70 || after.end != 80 ||
++	    after.instance != before.instance || after.generation != before.generation ||
++	    after.firmware != before.firmware || after.source != before.source ||
++	    after.received_ns < began || after.received_ns - began > 5ULL * NSEC_PER_SEC)
++		return -EREMOTEIO;
++	/* Opaque reply plus unchanged settings cannot prove actuator success.
++	 * Keep both fixed writers quarantined; physical validation is separate.
++	 */
++	return 0;
++}
++
++static ssize_t uke_charge_apply_existing_cap_store(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t count)
++{
++	struct qcom_battmgr *battmgr = dev_get_drvdata(dev);
++	int ret;
++
++	if (!capable(CAP_SYS_ADMIN))
++		return -EPERM;
++	if (!sysfs_streq(buf, "1"))
++		return -EINVAL;
++	if (!mutex_trylock(&battmgr->lock))
++		return -EBUSY;
++	ret = qcom_battmgr_uke_apply_existing_cap(battmgr);
++	mutex_unlock(&battmgr->lock);
++	return ret ? ret : (ssize_t)count;
++}
++static struct device_attribute dev_attr_uke_charge_apply_existing_cap =
++	__ATTR(uke_charge_apply_existing_cap, 0200, NULL, uke_charge_apply_existing_cap_store);
++
+ static int qcom_battmgr_uke_control_split(const char *buf, size_t count,
+ 					 char *data, size_t size, char **words, size_t capacity)
+ {
+--- a/Documentation/ABI/testing/sysfs-driver-qcom-battmgr-uke-control
++++ b/Documentation/ABI/testing/sysfs-driver-qcom-battmgr-uke-control
+@@ -151,3 +151,20 @@
+ 
+                 This node does not persist intent or activate a service. Current
+                 and arbitrary threshold controls retain independent admission.
++
++What:           /sys/bus/auxiliary/devices/*/uke_charge_apply_existing_cap
++Date:           October 2026
++Contact:        Senemos Maintainers
++Description:
++                One-shot CAP_SYS_ADMIN development request, accepted input 1.
++                Requires the existing feature enabled with reported restart70 /
++                stop80, fresh battery presence/Good health and external input OFF,
++                no live/recent general control, matching lifecycle and five-second
++                bound. Sends only OEM opcode0x48 {enable1,target80,delta10}.
++                No current, voltage, disable, XM, PD or arbitrary target writer.
++
++                A bounded correlated opaque reply and mandatory same-epoch
++                settings readback finish the diagnostic request. They do not
++                prove actuator acceptance, physical current stop or bypass.
++                Uncertainty remains set after the attempt; both fixed writers
++                refuse another operation for this driver instance. No replay,
++                rollback, persisted policy, service or general ACK qualification.

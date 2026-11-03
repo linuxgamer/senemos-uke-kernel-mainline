@@ -1,0 +1,42 @@
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
+@@ -807,7 +807,7 @@
+ 	struct drm_plane *cursor_planes[MAX_PLANES] = { NULL };
+ 	struct drm_crtc *crtc;
+ 	struct drm_encoder *encoder;
+-	unsigned int num_encoders;
++	unsigned int num_encoders, num_dsi = 0, num_tmds = 0;
+ 
+ 	struct msm_drm_private *priv;
+ 	const struct dpu_mdss_cfg *catalog;
+@@ -829,6 +829,10 @@
+ 	num_encoders = 0;
+ 	drm_for_each_encoder(encoder, dev) {
+ 		num_encoders++;
++		if (encoder->encoder_type == DRM_MODE_ENCODER_DSI)
++			num_dsi++;
++		if (encoder->encoder_type == DRM_MODE_ENCODER_TMDS)
++			num_tmds++;
+ 		if (catalog->cwb_count > 0)
+ 			encoder->possible_clones = dpu_encoder_get_clones(encoder);
+ 	}
+@@ -879,9 +883,17 @@
+ 		}
+ 	}
+ 
+-	/* All CRTCs are compatible with all encoders */
+-	drm_for_each_encoder(encoder, dev)
++	/* Keep the Uke SST pipelines separate when its internal panel changes state. */
++	drm_for_each_encoder(encoder, dev) {
+ 		encoder->possible_crtcs = (1 << dev->mode_config.num_crtc) - 1;
++		if (catalog == &dpu_sm7675_cfg && num_dsi == 1 && num_tmds == 1 &&
++		    dev->mode_config.num_crtc >= 2) {
++			if (encoder->encoder_type == DRM_MODE_ENCODER_DSI)
++				encoder->possible_crtcs = BIT(0);
++			else if (encoder->encoder_type == DRM_MODE_ENCODER_TMDS)
++				encoder->possible_crtcs &= ~BIT(0);
++		}
++	}
+ 
+ 	return 0;
+ }

@@ -1,0 +1,53 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] arm64: add isolated Uke EL2 entry experiments
+
+Keep early Gunyah exit separate from the default KVM observer. The optional
+entry code runs before Linux configures exception-level registers and checks
+secondary PSCI entry as well. No Uke firmware support is established.
+
+diff --git a/arch/arm64/Kconfig b/arch/arm64/Kconfig
+--- a/arch/arm64/Kconfig
++++ b/arch/arm64/Kconfig
+@@ -2542,2 +2542,20 @@
+ source "arch/arm64/kvm/Kconfig"
++
++config QCOM_UKE_EL2_ENTRY
++	bool "Require EL2 on primary and secondary Uke entry"
++	depends on ARCH_QCOM && KVM
++	default n
++	help
++	  Experimental early entry check. Refuse EL1 rather than booting without
++	  KVM. This does not acquire EL2 from firmware. Keep off in normal images.
++
++config QCOM_UKE_GUNYAH_EXIT
++	bool "Attempt early Qualcomm Gunyah exit on Uke (unqualified)"
++	depends on QCOM_UKE_EL2_ENTRY
++	default n
++	help
++	  Issue the Qualcomm early EL2-switch SMC before Linux register setup.
++	  Uke firmware support, SMMU/DMA ownership and PSCI return are unqualified.
++	  A failed or partial transfer parks the CPU; userspace cannot recover it.
++	  Requires exact firmware review and physical recovery access before use.
+ 
+diff --git a/arch/arm64/kernel/Makefile b/arch/arm64/kernel/Makefile
+--- a/arch/arm64/kernel/Makefile
++++ b/arch/arm64/kernel/Makefile
+@@ -81,2 +81,3 @@
+ obj-y					+= head.o
++obj-$(CONFIG_QCOM_UKE_EL2_ENTRY)		+= uke-el2-entry.o
+ always-$(KBUILD_BUILTIN)		+= vmlinux.lds
+diff --git a/arch/arm64/kernel/head.S b/arch/arm64/kernel/head.S
+--- a/arch/arm64/kernel/head.S
++++ b/arch/arm64/kernel/head.S
+@@ -88,2 +88,5 @@
+ SYM_CODE_START(primary_entry)
++#ifdef CONFIG_QCOM_UKE_EL2_ENTRY
++	bl	uke_el2_primary_entry
++#endif
+ 	bl	record_mmu_state
+@@ -355,2 +358,5 @@
+ SYM_FUNC_START(secondary_entry)
++#ifdef CONFIG_QCOM_UKE_EL2_ENTRY
++	bl	uke_el2_secondary_entry
++#endif
+ 	mov	x0, xzr

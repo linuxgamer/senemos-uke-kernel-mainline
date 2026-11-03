@@ -1,0 +1,39 @@
+Subject: [PATCH] drm/msm: retain the tested O82 touch cadence on opt-in
+
+Normalize legacy opted-in 30-89 Hz requests to the observed 90 Hz trial
+floor at the existing parameter boundary. Timing, connector metadata and
+sysfs readback then use one effective value. Zero remains disabled, and
+the standard unsigned parser and existing invalid-mode guards are retained.
+
+This restricts the experiment; it does not establish optical cadence,
+complete touch recovery or an independent controller report-rate setter.
+
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c
+@@ -225,9 +225,24 @@
+ #define to_dpu_encoder_virt(x) container_of(x, struct dpu_encoder_virt, base)
+ 
+ static unsigned int o82_vrr_test_min_hz;
+-module_param(o82_vrr_test_min_hz, uint, 0400);
++static int o82_set_vrr_floor(const char *value, const struct kernel_param *kp)
++{
++	int ret = param_set_uint(value, kp);
++
++	/* Display-driven touch delivery regresses at the lower experiment floors. */
++	if (!ret && o82_vrr_test_min_hz >= 30 && o82_vrr_test_min_hz < 90)
++		o82_vrr_test_min_hz = 90;
++	return ret;
++}
++
++static const struct kernel_param_ops o82_vrr_floor_ops = {
++	.set = o82_set_vrr_floor,
++	.get = param_get_uint,
++};
++
++module_param_cb(o82_vrr_test_min_hz, &o82_vrr_floor_ops, &o82_vrr_test_min_hz, 0400);
+ MODULE_PARM_DESC(o82_vrr_test_min_hz,
+-	"Unqualified O82-42 receiver experiment; 0 disables, OEM modes only");
++	"Unqualified O82-42 receiver experiment; 0 disables, requests 30-89 use 90 Hz");
+ 
+ static u32 dither_matrix[DITHER_MATRIX_SZ] = {
+ 	15, 7, 13, 5, 3, 11, 1, 9, 12, 4, 14, 6, 0, 8, 2, 10

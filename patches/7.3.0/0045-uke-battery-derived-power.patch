@@ -1,0 +1,54 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] power: supply: derive Uke battery power from qualified voltage and current
+
+Keep the unqualified OEM power opcode blocked. Serialize two fresh read-only
+gauge samples, convert uV*uA to signed uW and reject overflow or failed reads.
+The arithmetic follows upstream cpcap-battery; no donor board values are used.
+
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -16,6 +16,7 @@
+ #include <linux/soc/qcom/pdr.h>
+ #include <linux/soc/qcom/pmic_glink.h>
+ #include <linux/math.h>
++#include <linux/math64.h>
+ #include <linux/units.h>
+ 
+ #define BATTMGR_CHEMISTRY_LEN	4
+@@ -487,6 +488,7 @@
+ 					  enum power_supply_property psp)
+ {
+ 	unsigned int prop;
++	s64 power;
+ 	int ret;
+ 
+ 	if (psp >= ARRAY_SIZE(sm8350_bat_prop_map))
+@@ -495,7 +497,28 @@
+ 	prop = sm8350_bat_prop_map[psp];
+ 
+ 	mutex_lock(&battmgr->lock);
++	if (battmgr->variant == QCOM_BATTMGR_UKE &&
++	    psp == POWER_SUPPLY_PROP_POWER_NOW) {
++		/* Derive uW from fresh uV/uA samples; OEM power units are unknown. */
++		ret = qcom_battmgr_request_property(battmgr, BATTMGR_BAT_PROPERTY_GET,
++						    BATT_VOLT_NOW, 0);
++		if (ret)
++			goto out_unlock;
++		ret = qcom_battmgr_request_property(battmgr, BATTMGR_BAT_PROPERTY_GET,
++						    BATT_CURR_NOW, 0);
++		if (ret)
++			goto out_unlock;
++		power = div_s64((s64)battmgr->status.voltage_now *
++				battmgr->status.current_now, 1000000);
++		if (power < INT_MIN || power > INT_MAX) {
++			ret = -ERANGE;
++			goto out_unlock;
++		}
++		battmgr->status.power_now = power;
++		goto out_unlock;
++	}
+ 	ret = qcom_battmgr_request_property(battmgr, BATTMGR_BAT_PROPERTY_GET, prop, 0);
++out_unlock:
+ 	mutex_unlock(&battmgr->lock);
+ 
+ 	return ret;

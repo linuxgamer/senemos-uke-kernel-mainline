@@ -1,0 +1,48 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] drm/msm: create connector state through the Linux 7.3 callback
+
+Linux 7.3 bridge connectors provide atomic_create_state and no legacy reset
+callback. Calling reset while attaching the Uke color-depth property faults
+at PC zero during DSI registration and prevents the entire DRM device from
+registering. The DP initializer has the same obsolete call.
+
+Follow drm_mode_config_connector_create_state and drmm_connector_hdmi_init:
+create the connector's own state, propagate its error and assign it before
+the property helper writes it. Keep the panel and DP capability scopes.
+No panel commands, clocks, backlight values or hardware timing change.
+
+--- a/drivers/gpu/drm/msm/dsi/dsi_manager.c
++++ b/drivers/gpu/drm/msm/dsi/dsi_manager.c
+@@ -833,9 +833,12 @@ int msm_dsi_manager_connector_init(struct msm_dsi *msm_dsi,
+ 	}
+ 	if (dsi_bridge->o82_panel) {
+ 		if (!connector->state) {
+-			connector->funcs->reset(connector);
+-			if (!connector->state)
+-				return -ENOMEM;
++			struct drm_connector_state *state;
++
++			state = connector->funcs->atomic_create_state(connector);
++			if (IS_ERR(state))
++				return PTR_ERR(state);
++			connector->state = state;
+ 		}
+ 		/* O82 has one qualified transport depth, including DSC input. */
+ 		ret = drm_connector_attach_max_bpc_property(connector, 10, 10);
+--- a/drivers/gpu/drm/msm/dp/dp_drm.c
++++ b/drivers/gpu/drm/msm/dp/dp_drm.c
+@@ -427,8 +427,11 @@ struct drm_connector *msm_dp_drm_connector_init(struct msm_dp *msm_dp_display,
+ 		/* The property helper writes the connector's atomic state. */
+ 		if (!connector->state) {
+-			connector->funcs->reset(connector);
+-			if (!connector->state)
+-				return ERR_PTR(-ENOMEM);
++			struct drm_connector_state *state;
++
++			state = connector->funcs->atomic_create_state(connector);
++			if (IS_ERR(state))
++				return ERR_CAST(state);
++			connector->state = state;
+ 		}
+ 		ret = drm_connector_attach_max_bpc_property(connector, 6, 10);
+ 		if (ret)

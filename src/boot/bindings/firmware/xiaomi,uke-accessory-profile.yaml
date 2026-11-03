@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/firmware/xiaomi,uke-accessory-profile.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Xiaomi Uke accessory presentation profile
+
+maintainers:
+  - MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+
+description: |
+  Product-family presentation names selected from the existing board SKU.
+  The POCO Focus Keyboard label is a requested presentation alias; the retail
+  product is sold as POCO Pad X1 Floating Keyboard. This profile does not
+  declare that an accessory is attached, paired, charged or functional.
+
+properties:
+  compatible:
+    const: xiaomi,uke-accessory-profile
+  pen-model:
+    $ref: /schemas/types.yaml#/definitions/string
+    enum: [Xiaomi Focus Pen, POCO Focus Pen]
+  keyboard-model:
+    $ref: /schemas/types.yaml#/definitions/string
+    enum: [Xiaomi Focus Keyboard, POCO Focus Keyboard]
+
+required: [compatible, pen-model, keyboard-model]
+additionalProperties: false

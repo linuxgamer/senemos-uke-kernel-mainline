@@ -1,0 +1,661 @@
+diff --git a/Makefile b/Makefile
+index 9246d62..40ae32d 100644
+--- a/Makefile
++++ b/Makefile
+@@ -14,7 +14,8 @@ validate: test-touch-protocol test-touch-transport
+ 	bash -n tests/dp-eld-notification-contract.sh
+ 	bash -n tests/dpu-output-affinity-contract.sh tests/ucsi-debugfs-bounds-contract.sh tests/dpu-mixer-reservation-contract.sh
+ 	bash -n src/leds/prepare-source.sh tests/rgb-policy.sh tests/rgb-lifetime.sh tests/rgb-sysfs.sh tests/rgb-syntax.sh
+-	bash -n src/video/prepare-source.sh tests/iris-sm7675-caps-contract.sh tests/iris-sm7675-schema-contract.sh
++	bash -n src/video/prepare-source.sh tests/iris-sm7675-caps-contract.sh tests/iris-sm7675-schema-contract.sh tests/iris-capture-cache-contract.sh tests/iris-serial-budget-contract.sh
++	bash -n tests/iris-decode-order-stage-contract.sh
+ 	bash tests/rgb-policy.sh
+ 	bash tests/rgb-supplier.sh
+ 	bash -n tests/light-cleanup.sh tests/light-dt.sh tests/light-brightness.sh
+diff --git a/manifests/llcc-source-candidate-20261020.json b/manifests/llcc-source-candidate-20261020.json
+index 5d3da47..33bd3b4 100644
+--- a/manifests/llcc-source-candidate-20261020.json
++++ b/manifests/llcc-source-candidate-20261020.json
+@@ -672,7 +672,7 @@
+     "requires_three_candidate_patches_preapplied": true,
+     "package_selector": "packaging/native/llcc-profile"
+   },
+-  "kernel_release": "7.3.0-50",
++  "kernel_release": "7.3.0-51",
+   "boot_argument_handoff": {
+     "source_commit": "84b172c09fee0b60e901bfe40a2d7b6244aa726a",
+     "integrated_commit": "3d78e6c",
+diff --git a/manifests/video-linux73-candidate-20261025.json b/manifests/video-linux73-candidate-20261025.json
+index 9e35981..2a917d6 100644
+--- a/manifests/video-linux73-candidate-20261025.json
++++ b/manifests/video-linux73-candidate-20261025.json
+@@ -1,6 +1,6 @@
+ {
+   "schema_version": 1,
+-  "date": "2026-10-28",
++  "date": "2026-10-29",
+   "base_commit": "470d18160dac9f9adf65ee8ff6f86472573504c1",
+   "upstream_version": "7.3.0",
+   "prior_candidate": "67c9ee7a02ad27f76beecd7d2590dffa11575acf",
+@@ -78,6 +78,22 @@
+     {
+       "path": "patches/video/0018-iris-vp9-nonshow-recycle.patch",
+       "sha256": "b94e1c8259b08d245613e3dd9c6d2619298cb0c55af9f87e57293c9a5da21893"
++    },
++    {
++      "path": "patches/video/0019-sm7675-decoder-operating-budget.patch",
++      "sha256": "f810bc0efd23f1dbf9df60e2d8fc63dc661de110f001cc7908128e476052fa7f"
++    },
++    {
++      "path": "patches/video/0020-sm7675-cached-capture.patch",
++      "sha256": "983d80d8a0d7369abb6edbfe59cecabf3aefbc280d1091641883b4deafa71e35"
++    },
++    {
++      "path": "patches/video/0021-sm7675-serial-uhd-budget.patch",
++      "sha256": "332c351cbfd257320a9638e702ff047ad4cd4e098b35785680f2fc92b3f36442"
++    },
++    {
++      "path": "patches/video/0022-sm7675-decode-order-stage.patch",
++      "sha256": "57d73611286561d1ca568d630fb1985becbb3393da09e43aa4ba0e3d4023997f"
+     }
+   ],
+   "checks": {
+@@ -196,9 +212,10 @@
+     "Complete native graph preparation and gated source activation",
+     "Full kernel/RPM and recoverable native V4L2 validation",
+     "Main10 encode, extended controls, lifecycle, performance and application matrix",
+-    "Failed PAS/power teardown during administrative removal remains unqualified"
++    "Failed PAS/power teardown during administrative removal remains unqualified",
++    "Assign a fresh signed package release after original-profile sustained 4K60, error/lifecycle and HDR acceptance; matched release49 modules are runtime diagnostics only"
+   ],
+   "native_prepare_active": true,
+   "integration_base_commit": "9b56bd4894fb72680d87c56cf500ccb1b54c3b11",
+-  "candidate_kernel_release": "7.3.0-39"
++  "candidate_kernel_release": "7.3.0-49"
+ }
+diff --git a/packaging/native/README.md b/packaging/native/README.md
+index 715e917..b69326a 100644
+--- a/packaging/native/README.md
++++ b/packaging/native/README.md
+@@ -1,5 +1,16 @@
+ # Mainline native source profile
+ 
++29 October 2026, Linux 7.3.0-51 source candidate: retain the release-50 display
++changes and add the four bounded SM7675 synchronous-decoder controls. On a
++matched RAM-only release-49 module, the installed VA GPU-copy path completes
++5690 native outputs in70.367 seconds and passes240 NV12/P010 reference hashes.
++Hidden VP9 pictures are included in that throughput count. Original-profile
++Chrome remains below complete4K60/HDR acceptance: its five-minute compositor
++submission counter reports59.80 FPS with202 quality-reported drops and no
++non-4K callback samples. Release-51 build, installation, reboot and physical
++presentation qualification are separate requirements. Existing OPP limits,
++thermal constraints, idle collapse and recovery routes are retained.
++
+ 29 October 2026, Linux 7.3.0-50 source candidate: keep FEC error counting
+ disabled during link training and enable it after verified decoder/FEC startup.
+ Read back the requested selector before publishing active compression. Every
+diff --git a/packaging/senemos-uke-linux-kernel-mainline.spec b/packaging/senemos-uke-linux-kernel-mainline.spec
+index 9925f35..dc69588 100644
+--- a/packaging/senemos-uke-linux-kernel-mainline.spec
++++ b/packaging/senemos-uke-linux-kernel-mainline.spec
+@@ -7,7 +7,7 @@
+ Name: senemos-uke-linux-kernel-mainline
+ Version: 7.3.0
+ %if "%{version}" == "7.3.0"
+-%global senemos_build_release 50
++%global senemos_build_release 51
+ %else
+ %global senemos_build_release 1
+ %endif
+diff --git a/patches/video/0019-sm7675-decoder-operating-budget.patch b/patches/video/0019-sm7675-decoder-operating-budget.patch
+new file mode 100644
+index 0000000..2281642
+--- /dev/null
++++ b/patches/video/0019-sm7675-decoder-operating-budget.patch
+@@ -0,0 +1,88 @@
++Subject: [PATCH] media: iris: retain the SM7675 decoder operating budget
++
++Synchronous clients pace input by decode and exported-surface completion.
++Their input-arrival estimate can fall below the source frame rate, reducing
++clocks while a 4K60 stream is already late. The interconnect vote also remains
++fixed at 30 fps independently of that estimate.
++
++Give SM7675 decoding the conservative operating rate already implied by its
++codec budget at the maximum admitted frame size. Use the existing operating
++rate in decoder clock and bandwidth votes, as the pinned Cliffs power model
++does. Retain the measured rate when it is higher, normal runtime power-off,
++the existing OPP/voltage limits, other platforms and encoder behavior.
++
++Include the pinned Cliffs NRT scheduling headroom of 1/16 in the native
++decoder clock vote. Apply it to cycle estimates without changing the declared
++codec rate or the OPP table. The initial operating-budget-only tablet control
++improves throughput but remains below 60 fps.
++
++This is an unqualified throughput candidate pending recoverable tablet tests.
++The rate uses existing SM7675 capability values; no donor board values or
++new frequency/thermal override is introduced.
++
++--- a/drivers/media/platform/qcom/iris/iris_vdec.c
+++++ b/drivers/media/platform/qcom/iris/iris_vdec.c
++@@ -19,6 +19,7 @@
++ int iris_vdec_inst_init(struct iris_inst *inst)
++ {
++ 	struct iris_core *core = inst->core;
+++	const struct platform_inst_caps *caps = core->iris_platform_data->inst_caps;
++ 	struct v4l2_format *f;
++ 
++ 	inst->fmt_src = kzalloc_obj(*inst->fmt_src);
++@@ -55,6 +56,9 @@
++ 	inst->buffers[BUF_OUTPUT].min_count = iris_vpu_buf_count(inst, BUF_OUTPUT);
++ 	inst->buffers[BUF_OUTPUT].size = f->fmt.pix_mp.plane_fmt[0].sizeimage;
++ 	inst->frame_rate = MAXIMUM_FPS;
+++	/* Synchronous clients must not throttle their own decode operating rate. */
+++	if (core->iris_platform_data == &sm7675_data && caps->max_mbpf)
+++		inst->operating_rate = caps->max_mbps / caps->max_mbpf;
++ 
++ 	memcpy(&inst->fw_caps[0], &core->inst_fw_caps_dec[0],
++ 	       INST_FW_CAP_MAX * sizeof(struct platform_inst_fw_cap));
++--- a/drivers/media/platform/qcom/iris/iris_power.c
+++++ b/drivers/media/platform/qcom/iris/iris_power.c
++@@ -69,6 +69,8 @@
++ 	vote_data->width = inp_f->fmt.pix_mp.width;
++ 	vote_data->height = inp_f->fmt.pix_mp.height;
++ 	vote_data->fps = DEFAULT_FPS;
+++	if (inst->domain == DECODER && inst->operating_rate)
+++		vote_data->fps = max(inst->frame_rate, inst->operating_rate);
++ 
++ 	inst->power.icc_bw = iris_calc_bw(inst, vote_data);
++ 
++--- a/drivers/media/platform/qcom/iris/iris_vpu_common.c
+++++ b/drivers/media/platform/qcom/iris/iris_vpu_common.c
++@@ -466,6 +466,7 @@
++ 	u32 height, width, mbs_per_second, mbpf;
++ 	u64 fw_cycles, fw_vpp_cycles;
++ 	u64 vsp_cycles, vpp_cycles;
+++	u64 freq;
++ 	u32 fps = inst->frame_rate;
++ 	u32 pipes = inst->domain == ENCODER ? inst->core->iris_platform_data->num_vpp_pipe :
++ 					     inst->fw_caps[PIPE].value;
++@@ -473,6 +474,9 @@
++ 	if (!pipes)
++ 		return ULONG_MAX;
++ 
+++	if (inst->domain == DECODER)
+++		fps = max(fps, inst->operating_rate);
+++
++ 	width = max(inp_f->fmt.pix_mp.width, inst->crop.width);
++ 	height = max(inp_f->fmt.pix_mp.height, inst->crop.height);
++ 
++@@ -502,7 +506,13 @@
++ 	if (inst->fw_caps[STAGE].value == STAGE_1)
++ 		vsp_cycles = vsp_cycles * 3;
++ 
++-	return max3(vpp_cycles, vsp_cycles, fw_cycles);
+++	freq = max3(vpp_cycles, vsp_cycles, fw_cycles);
+++	/* Retain Cliffs queueing headroom for the native operating budget. */
+++	if (inst->domain == DECODER && inst->operating_rate &&
+++	    inst->core->iris_platform_data == &sm7675_data)
+++		freq += div_u64(freq, 16);
+++
+++	return freq;
++ }
++ 
++ int iris_vpu_power_on(struct iris_core *core)
+diff --git a/patches/video/0020-sm7675-cached-capture.patch b/patches/video/0020-sm7675-cached-capture.patch
+new file mode 100644
+index 0000000..eb3374a
+--- /dev/null
++++ b/patches/video/0020-sm7675-cached-capture.patch
+@@ -0,0 +1,31 @@
++Subject: [PATCH] media: iris: cache SM7675 decoder CAPTURE MMAP buffers
++
++Use the existing vb2 DMA-contiguous streaming allocation and cache-maintenance
++path for native decoder MMAP output. Shared exported client surfaces retain
++their own allocation policy. Imported DMA-BUFs, compressed input, encoders and
++other platforms keep their existing behavior. No cache synchronization is
++skipped.
++
++The generic allocator choice follows the cacheable CAPTURE experiment in
++CFM880/nabu-iris 6323e3184ec6156e44f1fe894cbcc221341cb38a, iris_vb2.c.
++SM8150/HFI Gen1 and SM7675/HFI Gen2 are different platforms: no IOVA hole,
++firmware packet, register, frequency or board value is ported. Uke uses
++upstream vb2's existing DMA_FROM_DEVICE direction and paired prepare/finish.
++The standalone queue-setup fixture covers import, encoder and legacy limits;
++physical cache integrity and sustained Chrome throughput remain separate gates.
++
++Link: https://github.com/CFM880/nabu-iris/blob/6323e3184ec6156e44f1fe894cbcc221341cb38a/kernel-overlay/drivers/media/platform/qcom/iris/iris_vb2.c
++
++--- a/drivers/media/platform/qcom/iris/iris_vb2.c
+++++ b/drivers/media/platform/qcom/iris/iris_vb2.c
++@@ -117,6 +117,10 @@
++ 
++ 	core = inst->core;
++ 	f = V4L2_TYPE_IS_OUTPUT(q->type) ? inst->fmt_src : inst->fmt_dst;
+++	/* Use vb2's streaming DMA cache maintenance for CPU-readable output. */
+++	if (core->iris_platform_data == &sm7675_data && inst->domain == DECODER &&
+++	    V4L2_TYPE_IS_CAPTURE(q->type))
+++		q->non_coherent_mem = q->memory == VB2_MEMORY_MMAP;
++ 
++ 	if (*num_planes) {
++ 		if (*num_planes != f->fmt.pix_mp.num_planes ||
+diff --git a/patches/video/0021-sm7675-serial-uhd-budget.patch b/patches/video/0021-sm7675-serial-uhd-budget.patch
+new file mode 100644
+index 0000000..edfcc8a
+--- /dev/null
++++ b/patches/video/0021-sm7675-serial-uhd-budget.patch
+@@ -0,0 +1,68 @@
++Subject: [PATCH] media: iris: reserve one existing OPP for serial UHD decode
++
++A single queued UHD decoder input cannot overlap subsequent client work. Raise the calculated SM7675 decoder vote by one currently available OPP. Keep higher queued demand, thermal OPP availability, other platforms, encoders, lower resolutions and runtime idle collapse. This is an experimental latency candidate; original Chrome acceptance remains separate.
++
++--- a/drivers/media/platform/qcom/iris/iris_power.c
+++++ b/drivers/media/platform/qcom/iris/iris_power.c
++@@ -11,6 +11,7 @@
++ #include "iris_instance.h"
++ #include "iris_power.h"
++ #include "iris_resources.h"
+++#include "iris_utils.h"
++ #include "iris_vpu_common.h"
++ 
++ static u32 iris_calc_bw(struct iris_inst *inst, struct icc_vote_data *data)
++@@ -99,17 +100,45 @@
++ 	return ret;
++ }
++ 
+++static u64 iris_serial_decoder_rate(struct iris_inst *inst, unsigned int queued, u64 freq)
+++{
+++	struct v4l2_pix_format_mplane *f = &inst->fmt_src->fmt.pix_mp;
+++	unsigned long rate = min_t(u64, freq, ULONG_MAX);
+++	struct dev_pm_opp *opp;
+++
+++	if (inst->core->iris_platform_data != &sm7675_data || inst->domain != DECODER ||
+++	    queued != 1 || !inst->operating_rate ||
+++	    NUM_MBS_PER_FRAME(f->height, f->width) < NUM_MBS_PER_FRAME(2160, 3840))
+++		return freq;
+++
+++	/* A serial UHD client needs service-time headroom before its next input. */
+++	opp = dev_pm_opp_find_freq_ceil(inst->core->dev, &rate);
+++	if (IS_ERR(opp))
+++		return freq;
+++	dev_pm_opp_put(opp);
+++	if (rate == ULONG_MAX)
+++		return freq;
+++	rate++;
+++	opp = dev_pm_opp_find_freq_ceil(inst->core->dev, &rate);
+++	if (IS_ERR(opp))
+++		return freq;
+++	dev_pm_opp_put(opp);
+++	return rate;
+++}
+++
++ static int iris_scale_clocks(struct iris_inst *inst)
++ {
++ 	const struct vpu_ops *vpu_ops = inst->core->iris_platform_data->vpu_ops;
++ 	struct v4l2_m2m_ctx *m2m_ctx = inst->m2m_ctx;
++ 	struct v4l2_m2m_buffer *buffer, *n;
++ 	struct iris_buffer *buf;
+++	unsigned int queued = 0;
++ 	size_t data_size = 0;
++ 
++ 	v4l2_m2m_for_each_src_buf_safe(m2m_ctx, buffer, n) {
++ 		buf = to_iris_buffer(&buffer->vb);
++ 		data_size = max(data_size, buf->data_size);
+++		queued++;
++ 	}
++ 
++ 	inst->max_input_data_size = data_size;
++@@ -117,6 +146,7 @@
++ 		return 0;
++ 
++ 	inst->power.min_freq = vpu_ops->calc_freq(inst, inst->max_input_data_size);
+++	inst->power.min_freq = iris_serial_decoder_rate(inst, queued, inst->power.min_freq);
++ 
++ 	return iris_set_clocks(inst);
++ }
+diff --git a/patches/video/0022-sm7675-decode-order-stage.patch b/patches/video/0022-sm7675-decode-order-stage.patch
+new file mode 100644
+index 0000000..e777cca
+--- /dev/null
++++ b/patches/video/0022-sm7675-decode-order-stage.patch
+@@ -0,0 +1,36 @@
++Subject: [PATCH] media: iris: use one stage for SM7675 decode-order VP9
++
++SM7675 VA clients explicitly request zero display delay and submit each exported
++picture synchronously. Two firmware stages cannot overlap that serial workload.
++Use the existing single-stage HFI mode only for VP9 decoder sessions on SM7675
++with client-set zero-delay decode-order output. Keep ordinary display-order
++sessions, other codecs, encoders and other platforms unchanged.
++
++This follows the Iris33 low-latency work-mode policy in Qualcomm's GPL-2.0-only
++Android implementation, as retained in OnePlus SM7675 commit
++1138e00fee63582a0cc6a53af3286621786827b7 and Xiaomi shared modules commit
++ed4ad0d1ad00b755af2fe61387dcc5397ad20b8f, variant/iris33/src/msm_vidc_iris33.c.
++No board resource, clock limit, firmware or buffer value is imported.
++
++Cache the selected work mode before sending it, as in Sachin Kumar Garg's
++upstream "media: iris: cache work mode after computing it in iris_set_stage"
++fix (2026-07-24, Fixes 3a19d7b9e08b). Frequency calculation reads that cache.
++--- a/drivers/media/platform/qcom/iris/iris_ctrls.c
+++++ b/drivers/media/platform/qcom/iris/iris_ctrls.c
++@@ -593,8 +593,16 @@
++ 	if (inst->domain == DECODER) {
++ 		if (iris_res_is_less_than(width, height, 1280, 720))
++ 			work_mode = STAGE_1;
+++		if (inst->core->iris_platform_data == &sm7675_data &&
+++		    inst->codec == V4L2_PIX_FMT_VP9 &&
+++		    (inst->fw_caps[DISPLAY_DELAY_ENABLE].flags & CAP_FLAG_CLIENT_SET) &&
+++		    inst->fw_caps[DISPLAY_DELAY_ENABLE].value &&
+++		    !inst->fw_caps[DISPLAY_DELAY].value)
+++			work_mode = STAGE_1;
++ 	}
++ 
+++	inst->fw_caps[cap_id].value = work_mode;
+++
++ 	return hfi_ops->session_set_property(inst, hfi_id,
++ 					     HFI_HOST_FLAGS_NONE,
++ 					     iris_get_port_info(inst, cap_id),
+diff --git a/patches/video/README.md b/patches/video/README.md
+index ce60ebf..79a23fd 100644
+--- a/patches/video/README.md
++++ b/patches/video/README.md
+@@ -70,3 +70,19 @@ separate required work.
+ A failed domain `put_sync` consumes its reference and latches an error; the
+ candidate retains firmware mappings instead of guessing a safe recovery.
+ Administrative unbind after failed PAS or power teardown remains unqualified.
++
++## 29 October 2026: experimental synchronous decoder controls
++
++Patches `0019`-`0022` retain the SM7675 decoder operating budget, use standard
++vb2 cache maintenance for CAPTURE MMAP buffers, reserve one available OPP for
++a single queued UHD input and select the existing one-stage mode for explicitly
++requested zero-delay VP9 decoding. Other codecs retain their existing stage
++policy. Donor attribution and compatibility limits are recorded in each patch.
++
++On the signed49 source baseline, all four actual-function contracts and the
++strict full kernel/module build pass. A matched RAM-only Iris module on
++POCO Pad X1 with the installed VA GPU-copy backend passes240 NV12/P010
++CPU/Vulkan reference hashes. The Vulkan controls use the separately scoped
++FFmpeg imported-image fix. Native throughput improves; its hidden VP9 reference
++units are not presented FPS. Chrome4K60, HDR and persistent installation remain
++separate acceptance requirements. See the canonical UKE-YT-L024 lesson.
+diff --git a/src/video/prepare-source.sh b/src/video/prepare-source.sh
+index ad45d45..f812c43 100755
+--- a/src/video/prepare-source.sh
++++ b/src/video/prepare-source.sh
+@@ -19,7 +19,8 @@ done < <(jq -er '.patches[] | [.path,.sha256] | @tsv' "$manifest")
+ iris=$kernel/drivers/media/platform/qcom/iris
+ for fixture in iris-2p-lifecycle iris-boot-status iris-power-domain iris-resource-fault \
+                iris-va-order iris-fw-memory iris-fw-lifetime iris-fw-queue \
+-               iris-sm7675-power iris-oneshot-irq iris-sm7675-caps iris-vp9-nonshow; do
++               iris-sm7675-power iris-oneshot-irq iris-sm7675-caps iris-vp9-nonshow \
++               iris-capture-cache iris-serial-budget iris-decode-order-stage; do
+     bash "$root/tests/$fixture-contract.sh" "$iris"
+ done
+ bash "$root/tests/iris-smmu-contract.sh" "$kernel/drivers/iommu/arm/arm-smmu"
+diff --git a/tests/iris-capture-cache-contract.sh b/tests/iris-capture-cache-contract.sh
+new file mode 100644
+index 0000000..40c45de
+--- /dev/null
++++ b/tests/iris-capture-cache-contract.sh
+@@ -0,0 +1,55 @@
++#!/usr/bin/env bash
++# Exercise the actual queue setup; no device or allocator is invoked.
++set -Eeuo pipefail
++iris=${1:?Pass the prepared Iris directory}
++work=$(mktemp -d)
++trap 'rm -rf -- "$work"' EXIT
++cat > "$work/check.cpp" <<'CPP'
++#include <cassert>
++#include <cerrno>
++#include <linux/videodev2.h>
++constexpr int DECODER=0,ENCODER=1,VB2_MEMORY_MMAP=1,VB2_MEMORY_DMABUF=4;
++constexpr int IRIS_INST_ERROR=9,IRIS_INST_INIT=1;
++struct iris_platform_data {};
++static iris_platform_data sm7675_data,legacy_data;
++struct iris_core {struct iris_platform_data *iris_platform_data;void *dev=nullptr;};
++struct iris_inst;
++struct session_ops {int (*session_open)(iris_inst *);};
++struct iris_inst {
++ iris_core *core;int domain=DECODER,state=0,lock=0;v4l2_format *fmt_src,*fmt_dst;
++ bool once_per_session_set=true;session_ops *hfi_session_ops=nullptr;
++};
++struct vb2_queue {iris_inst *inst;unsigned type,memory;bool non_coherent_mem=false;};
++static iris_inst *vb2_get_drv_priv(vb2_queue *q) {return q->inst;}
++static void mutex_lock(int *) {} static void mutex_unlock(int *) {}
++static int iris_check_session_supported(iris_inst *) {return 0;}
++static int iris_inst_change_state(iris_inst *,int) {return 0;}
++static void dev_err(void *,const char *) {}
++CPP
++awk '/^int iris_vb2_queue_setup\(/ {emit=1} emit {print} emit && /^}/ {exit}' "$iris/iris_vb2.c" >> "$work/check.cpp"
++cat >> "$work/check.cpp" <<'CPP'
++int main() {
++ iris_core core{&sm7675_data};v4l2_format src{},dst{};
++ src.fmt.pix_mp.num_planes=dst.fmt.pix_mp.num_planes=1;
++ src.fmt.pix_mp.plane_fmt[0].sizeimage=dst.fmt.pix_mp.plane_fmt[0].sizeimage=4096;
++ iris_inst inst{&core,DECODER,0,0,&src,&dst};
++ vb2_queue q{&inst,V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,VB2_MEMORY_MMAP};
++ unsigned count=32,planes=0,size[1]{};
++ assert(iris_vb2_queue_setup(&q,&count,&planes,size,nullptr)==0);
++ assert(q.non_coherent_mem&&planes==1&&size[0]==4096);
++ // The allocator's owner controls imported DMABUF cache policy.
++ q.memory=VB2_MEMORY_DMABUF;
++ assert(iris_vb2_queue_setup(&q,&count,&planes,size,nullptr)==0&&!q.non_coherent_mem);
++ q.memory=VB2_MEMORY_MMAP;q.type=V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
++ assert(iris_vb2_queue_setup(&q,&count,&planes,size,nullptr)==0&&!q.non_coherent_mem);
++ q.type=V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;inst.domain=ENCODER;
++ assert(iris_vb2_queue_setup(&q,&count,&planes,size,nullptr)==0&&!q.non_coherent_mem);
++ inst.domain=DECODER;core.iris_platform_data=&legacy_data;
++ assert(iris_vb2_queue_setup(&q,&count,&planes,size,nullptr)==0&&!q.non_coherent_mem);
++ core.iris_platform_data=&sm7675_data;inst.state=IRIS_INST_ERROR;
++ assert(iris_vb2_queue_setup(&q,&count,&planes,size,nullptr)==-EBUSY&&!q.non_coherent_mem);
++}
++CPP
++${CXX:-c++} -std=c++17 -Wall -Wextra -Werror -Wno-unused-parameter "$work/check.cpp" -o "$work/check"
++"$work/check"
++printf '%s\n' 'PASS: actual SM7675 decoder CAPTURE cache policy and unchanged import/encoder/legacy/error paths'
+diff --git a/tests/iris-decode-order-stage-contract.sh b/tests/iris-decode-order-stage-contract.sh
+new file mode 100644
+index 0000000..0542337
+--- /dev/null
++++ b/tests/iris-decode-order-stage-contract.sh
+@@ -0,0 +1,49 @@
++#!/usr/bin/env bash
++set -Eeuo pipefail
++iris=${1:?Pass prepared Iris directory}
++work=$(mktemp -d)
++trap 'rm -rf -- "$work"' EXIT
++cat > "$work/check.cpp" <<'CPP'
++#include <cassert>
++#include <cstdint>
++#include <linux/videodev2.h>
++using u32=uint32_t;
++enum platform_inst_fw_cap_type {STAGE,DISPLAY_DELAY_ENABLE,DISPLAY_DELAY};
++constexpr int DECODER=0,ENCODER=1,STAGE_1=1,STAGE_2=2;
++constexpr u32 CAP_FLAG_CLIENT_SET=4,HFI_HOST_FLAGS_NONE=0,HFI_PAYLOAD_U32=7;
++struct platform_data{};static platform_data sm7675_data,other;
++struct iris_core {platform_data *iris_platform_data=&sm7675_data;};
++struct fw_cap {u32 hfi_id=17,flags=0,value=0;};
++struct iris_inst;
++struct iris_hfi_session_ops {int (*session_set_property)(iris_inst*,u32,u32,u32,u32,void*,u32);};
++struct iris_inst {const iris_hfi_session_ops *hfi_session_ops;v4l2_format *fmt_src;
++ iris_core *core;int domain=DECODER;u32 codec=V4L2_PIX_FMT_VP9;fw_cap fw_caps[3];};
++static u32 sent;static int result;
++static int set_property(iris_inst *i,u32 id,u32 flags,u32 port,u32 payload,void *data,u32 size) {
++ assert(id==17&&!flags&&port==2&&payload==HFI_PAYLOAD_U32&&size==sizeof(u32));
++ sent=*static_cast<u32*>(data);assert(i->fw_caps[STAGE].value==sent);return result;
++}
++static u32 iris_get_port_info(iris_inst*,platform_inst_fw_cap_type) {return 2;}
++static bool iris_res_is_less_than(u32 w,u32 h,u32 mw,u32 mh){return uint64_t(w)*h<uint64_t(mw)*mh;}
++CPP
++awk '/^int iris_set_stage\(/ {emit=1} emit {print} emit && /^}/ {exit}' "$iris/iris_ctrls.c" >> "$work/check.cpp"
++cat >> "$work/check.cpp" <<'CPP'
++int main() {
++ iris_core core;v4l2_format fmt{};fmt.fmt.pix_mp.width=3840;fmt.fmt.pix_mp.height=2160;
++ iris_hfi_session_ops ops{set_property};iris_inst i{};i.hfi_session_ops=&ops;i.fmt_src=&fmt;i.core=&core;
++ auto test=[&](u32 expected){sent=0;assert(iris_set_stage(&i,STAGE)==result);assert(sent==expected);};
++ test(STAGE_2);i.fw_caps[DISPLAY_DELAY_ENABLE].value=1;test(STAGE_2);
++ i.fw_caps[DISPLAY_DELAY_ENABLE].flags=CAP_FLAG_CLIENT_SET;test(STAGE_1);
++ result=-5;test(STAGE_1);result=0;
++ i.fw_caps[DISPLAY_DELAY].value=1;test(STAGE_2);i.fw_caps[DISPLAY_DELAY].value=0;
++ i.domain=ENCODER;test(STAGE_2);i.domain=DECODER;
++ i.codec=V4L2_PIX_FMT_H264;test(STAGE_2);i.codec=V4L2_PIX_FMT_VP9;
++ core.iris_platform_data=&other;test(STAGE_2);core.iris_platform_data=&sm7675_data;
++ i.fw_caps[DISPLAY_DELAY_ENABLE].value=0;test(STAGE_2);
++ fmt.fmt.pix_mp.width=640;fmt.fmt.pix_mp.height=480;test(STAGE_1);
++ i.domain=ENCODER;test(STAGE_2);
++}
++CPP
++c++ -std=c++17 -O2 -Wall -Wextra -Werror "$work/check.cpp" -o "$work/check"
++"$work/check"
++echo 'PASS actual stage function: client/platform/codec/domain/delay gates, cache and firmware errors (host only)'
+diff --git a/tests/iris-serial-budget-contract.sh b/tests/iris-serial-budget-contract.sh
+new file mode 100644
+index 0000000..0304eeb
+--- /dev/null
++++ b/tests/iris-serial-budget-contract.sh
+@@ -0,0 +1,56 @@
++#!/usr/bin/env bash
++set -Eeuo pipefail
++iris=${1:?Pass the prepared Iris directory}
++work=$(mktemp -d)
++trap 'rm -rf -- "$work"' EXIT
++cat > "$work/check.cpp" <<'CPP'
++#include <algorithm>
++#include <cassert>
++#include <climits>
++#include <cstdint>
++#include <linux/videodev2.h>
++using u64=uint64_t;
++#define min_t(t,a,b) std::min<t>(a,b)
++#define DIV_ROUND_UP(n,d) (((n)+(d)-1)/(d))
++#define NUM_MBS_PER_FRAME(h,w) (DIV_ROUND_UP(h,16)*DIV_ROUND_UP(w,16))
++constexpr int DECODER=0,ENCODER=1;
++struct platform_data{};
++static platform_data sm7675_data,other;
++struct iris_core {platform_data *iris_platform_data=&sm7675_data;void *dev=nullptr;};
++struct iris_inst {iris_core *core;int domain=DECODER;unsigned operating_rate=60;v4l2_format *fmt_src;};
++struct dev_pm_opp{};
++static dev_pm_opp good,bad;
++static int calls,puts,fail_at;
++static bool max_rate;
++static dev_pm_opp *dev_pm_opp_find_freq_ceil(void *,unsigned long *rate) {
++    ++calls;if(calls==fail_at)return &bad;
++    if(max_rate) {*rate=ULONG_MAX;return &good;}
++    for(unsigned long candidate:{100ul,200ul,300ul})if(*rate<=candidate){*rate=candidate;return &good;}
++    return &bad;
++}
++static bool IS_ERR(dev_pm_opp *p){return p==&bad;}
++static void dev_pm_opp_put(dev_pm_opp *p){assert(p==&good);++puts;}
++CPP
++awk '/^static u64 iris_serial_decoder_rate\(/ {emit=1} emit {print} emit && /^}/ {exit}' "$iris/iris_power.c" >> "$work/check.cpp"
++cat >> "$work/check.cpp" <<'CPP'
++int main() {
++ iris_core core;v4l2_format fmt{};fmt.fmt.pix_mp.width=3840;fmt.fmt.pix_mp.height=2160;
++ iris_inst inst{&core,DECODER,60,&fmt};
++ auto reset=[] {calls=puts=fail_at=0;max_rate=false;};
++ reset();assert(iris_serial_decoder_rate(&inst,1,150)==300 && calls==2 && puts==2);
++ reset();assert(iris_serial_decoder_rate(&inst,1,250)==250 && calls==2 && puts==1);
++ for(unsigned depth:{0u,2u,32u}){reset();assert(iris_serial_decoder_rate(&inst,depth,150)==150 && !calls);}
++ core.iris_platform_data=&other;reset();assert(iris_serial_decoder_rate(&inst,1,150)==150&&!calls);
++ core.iris_platform_data=&sm7675_data;inst.domain=ENCODER;reset();assert(iris_serial_decoder_rate(&inst,1,150)==150&&!calls);
++ inst.domain=DECODER;inst.operating_rate=0;reset();assert(iris_serial_decoder_rate(&inst,1,150)==150&&!calls);
++ inst.operating_rate=60;fmt.fmt.pix_mp.width=2560;fmt.fmt.pix_mp.height=1440;
++ reset();assert(iris_serial_decoder_rate(&inst,1,150)==150&&!calls);
++ fmt.fmt.pix_mp.width=3840;fmt.fmt.pix_mp.height=2160;
++ for(int failure:{1,2}){reset();fail_at=failure;assert(iris_serial_decoder_rate(&inst,1,150)==150 && puts==failure-1);}
++ reset();max_rate=true;assert(iris_serial_decoder_rate(&inst,1,150)==150 && calls==1 && puts==1);
++ reset();assert(iris_serial_decoder_rate(&inst,1,ULONG_MAX)==ULONG_MAX && calls==1 && puts==0);
++}
++CPP
++"${CXX:-c++}" -std=c++17 -O2 -Wall -Wextra -Werror "$work/check.cpp" -o "$work/check"
++"$work/check"
++echo 'Actual serial UHD budget: one existing OPP step, queue/platform/domain/rate/dimension gates, ceiling errors, refcounts and overflow passed (host only)'
+diff --git a/tests/iris-sm7675-caps-contract.sh b/tests/iris-sm7675-caps-contract.sh
+index c95e1a0..bd4ede4 100755
+--- a/tests/iris-sm7675-caps-contract.sh
++++ b/tests/iris-sm7675-caps-contract.sh
+@@ -36,7 +36,7 @@ enum {DECODER, ENCODER};
+ struct iris_core;
+ struct iris_inst;
+ CPP
+-for tag in 'struct platform_inst_caps' 'enum platform_inst_fw_cap_type' 'enum platform_inst_fw_cap_flags' 'struct platform_inst_fw_cap'; do
++for tag in 'struct platform_inst_caps' 'enum platform_inst_fw_cap_type' 'enum platform_inst_fw_cap_flags' 'struct platform_inst_fw_cap' 'struct bw_info' 'struct iris_inst_power' 'struct icc_vote_data'; do
+     awk -v tag="$tag" '$0 == tag " {" {emit=1} emit {print} emit && /^};/ {exit}' \
+         "$iris/iris_platform_common.h" >> "$work/check.cpp"
+ done
+@@ -45,6 +45,8 @@ struct iris_platform_data {
+     platform_inst_caps *inst_caps;
+     const platform_inst_caps *(*get_inst_caps)(iris_inst *, u32);
+     u32 max_core_mbps, num_vpp_pipe;
++    const bw_info *bw_tbl_dec{};
++    u32 bw_tbl_dec_size{};
+ };
+ struct vb2_queue {bool streaming;};
+ struct context {vb2_queue src{}, dst{};};
+@@ -60,12 +62,17 @@ struct iris_inst {
+     v4l2_format *fmt_src; v4l2_rect crop{};
+     platform_inst_fw_cap fw_caps[INST_FW_CAP_MAX]{};
+     context *m2m_ctx;
++    icc_vote_data icc_data{};
++    iris_inst_power power{};
+ };
+ CPP
+ # Include the actual immutable platform table and selector, not a copied model.
+ printf '#include "iris_platform_sm7675.h"\n' >> "$work/check.cpp"
++awk '/^static const struct bw_info iris_bw_table_dec_vpu3x\[\] =/ {emit=1} emit {print} emit && /^};/ {exit}' \
++    "$iris/iris_platform_vpu3x.c" >> "$work/check.cpp"
+ cat >> "$work/check.cpp" <<'CPP'
+-static const iris_platform_data sm7675_data{&platform_inst_cap_sm7675, sm7675_get_inst_caps, 2088960, 2};
++static const iris_platform_data sm7675_data{&platform_inst_cap_sm7675, sm7675_get_inst_caps, 2088960, 2,
++    iris_bw_table_dec_vpu3x, ARRAY_SIZE(iris_bw_table_dec_vpu3x)};
+ static platform_inst_caps old_caps{96,8192,96,8192,139264,0,25,200,489583,66234,480,480};
+ static const iris_platform_data legacy_data{&old_caps,nullptr,7777777,4};
+ static u64 div_u64(u64 n, u32 d) {assert(d); return n/d;}
+@@ -77,6 +84,8 @@ static int aggregate_error;
+ static int iris_check_core_mbpf(iris_inst *) {return aggregate_error;}
+ static void mutex_lock(int *) {}
+ static void mutex_unlock(int *) {}
++static int interconnect_error;
++static int iris_set_interconnects(iris_inst *) { return interconnect_error; }
+ #define list_for_each_entry(pos,head,member) \
+     for (auto it=(head)->begin(); it!=(head)->end() && ((pos=*it),true); ++it)
+ struct file {iris_inst *inst;};
+@@ -96,6 +105,8 @@ extract '^int iris_check_core_mbps\(' "$iris/iris_utils.c"
+ extract '^static void iris_sm7675_limit_level\(' "$iris/iris_ctrls.c"
+ extract '^static void iris_sm7675_limit_caps\(' "$iris/iris_ctrls.c"
+ extract '^u64 iris_vpu3x_vpu4x_calculate_frequency\(' "$iris/iris_vpu_common.c"
++extract '^static u32 iris_calc_bw\(' "$iris/iris_power.c"
++extract '^static int iris_vote_interconnects\(' "$iris/iris_power.c"
+ extract '^static int iris_enum_framesizes\(' "$iris/iris_vidc.c"
+ extract '^static int iris_enum_frameintervals\(' "$iris/iris_vidc.c"
+ extract '^int iris_venc_s_param\(' "$iris/iris_venc.c"
+@@ -221,6 +232,29 @@ int main() {
+     inst.domain=DECODER; assert(iris_vpu3x_vpu4x_calculate_frequency(&inst,10000)==ULONG_MAX);
+     inst.fw_caps[PIPE].value=2;
+     assert(iris_vpu3x_vpu4x_calculate_frequency(&inst,10000)>0);
++    format.fmt.pix_mp.width=3840; format.fmt.pix_mp.height=2160;
++    inst.codec=V4L2_PIX_FMT_VP9; inst.frame_rate=30;
++    inst.operating_rate=platform_inst_cap_sm7675.max_mbps/platform_inst_cap_sm7675.max_mbpf;
++    assert(inst.operating_rate==60);
++    assert(iris_vpu3x_vpu4x_calculate_frequency(&inst,10000)==241156936);
++    assert(iris_vote_interconnects(&inst)==0 && inst.icc_data.fps==60 && inst.power.icc_bw==1608000);
++    inst.frame_rate=90;
++    assert(iris_vpu3x_vpu4x_calculate_frequency(&inst,10000)==361735404);
++    assert(iris_vote_interconnects(&inst)==0 && inst.icc_data.fps==90);
++    interconnect_error=-EIO;
++    assert(iris_vote_interconnects(&inst)==-EIO);
++    interconnect_error=0; inst.frame_rate=30; inst.operating_rate=0;
++    assert(iris_vpu3x_vpu4x_calculate_frequency(&inst,10000)==113485617);
++    assert(iris_vote_interconnects(&inst)==0 && inst.icc_data.fps==30 && inst.power.icc_bw==826000);
++    core.iris_platform_data=&legacy_data; inst.operating_rate=60;
++    assert(iris_vpu3x_vpu4x_calculate_frequency(&inst,10000)==226971234);
++    core.iris_platform_data=&sm7675_data; inst.operating_rate=0;
++    inst.domain=ENCODER;
++    const auto encoder_frequency=iris_vpu3x_vpu4x_calculate_frequency(&inst,10000);
++    inst.operating_rate=60;
++    assert(iris_vpu3x_vpu4x_calculate_frequency(&inst,10000)==encoder_frequency);
++    assert(iris_vote_interconnects(&inst)==0 && inst.icc_data.fps==30);
++    inst.domain=DECODER;
+     for (unsigned domain=0; domain<2; ++domain) {
+         auto table=domain ? core.inst_fw_caps_enc : core.inst_fw_caps_dec;
+         for (unsigned id=1; id<INST_FW_CAP_MAX; ++id)

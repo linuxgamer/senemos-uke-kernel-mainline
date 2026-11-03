@@ -1,0 +1,21 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: hwmon: qcom-bcl: reject empty PM7550BA current samples
+
+The exact OEM driver treats a zero PM7550BA current ADC sample as
+unavailable and retains its previous reading. Return ENODATA without
+renewing the cache instead of publishing a false fresh zero. Keep other
+PMIC descriptors unchanged.
+
+--- a/drivers/hwmon/qcom-bcl-hwmon.c
++++ b/drivers/hwmon/qcom-bcl-hwmon.c
+@@ -906,6 +906,10 @@
+ 	 * Current ADC reading is in 2's complement form.
+ 	 * Sign extend the value based on data field bit size.
+ 	 */
++	/* PM7550BA can return an empty sample; it does not prove zero current. */
++	if (desc == &pm7550ba_data && !raw_val)
++		return -ENODATA;
++
+ 	signed_val = sign_extend32(raw_val, desc->data_field_bits_size - 1);
+ 
+ 	bcl->last_curr_input =

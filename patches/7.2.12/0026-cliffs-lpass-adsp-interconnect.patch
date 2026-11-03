@@ -1,0 +1,206 @@
+From: Mürşit Can Cihan <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] interconnect: qcom: retain the Cliffs LPASS DDR path
+
+ADSP's actual Uke DT first interconnect starts at MASTER_LPASS_PROC.
+Add the LPICX, LPIAON and LPASS aggregate providers and retained GEM
+master using the exact Xiaomi Cliffs topology, node IDs, QoS and HLOS
+LP0 membership from OEM revision 5712080a4b0c0b1a879e6d145c601c649ddaddfd.
+
+The configuration/DDR path is in scope; the unported PCIe edge remains
+outside this partial provider. Do not add LPASS GEM to the OEM SH1 BCM.
+This supplies a missing dependency; DSP authentication, FastRPC and sensor
+operation still need separate physical validation. Startup stays manual.
+
+Signed-off-by: Mürşit Can Cihan <75160848+MCC45TR@users.noreply.github.com>
+---
+--- a/drivers/interconnect/qcom/qnoc-cliffs-usb.c
++++ b/drivers/interconnect/qcom/qnoc-cliffs-usb.c
+@@ -21,10 +21,14 @@
+ #define MASTER_A1NOC_SNOC	8
+ #define MASTER_A2NOC_SNOC	9
+ #define MASTER_GEM_NOC_CNOC	15
++#define MASTER_LPASS_GEM_NOC	18
++#define MASTER_LPASS_LPINOC	19
++#define MASTER_LPIAON_NOC	20
+ #define MASTER_SNOC_SF_MEM_NOC	27
+ #define MASTER_CNOC_CFG	32
+ #define MASTER_QUP_CORE_0	36
+ #define MASTER_QUP_CORE_1	37
++#define MASTER_LPASS_PROC	40
+ #define MASTER_UFS_MEM	48
+ #define MASTER_USB3_0	49
+ #define SLAVE_EBI1	512
+@@ -37,6 +41,9 @@
+ #define SLAVE_GEM_NOC_CNOC	553
+ #define SLAVE_SNOC_GEM_NOC_SF	554
+ #define SLAVE_LLCC	555
++#define SLAVE_LPASS_GEM_NOC	556
++#define SLAVE_LPIAON_NOC_LPASS_AG_NOC	557
++#define SLAVE_LPICX_NOC_LPIAON_NOC	558
+ #define SLAVE_CNOC_CFG	565
+ #define SLAVE_QUP_CORE_0	572
+ #define SLAVE_QUP_CORE_1	573
+@@ -73,6 +80,13 @@
+ static struct qcom_icc_node qns_llcc;
+ static struct qcom_icc_node ebi;
+ static struct qcom_icc_node qns_gemnoc_sf;
++static struct qcom_icc_node qxm_lpinoc_dsp_axim;
++static struct qcom_icc_node qns_lpi_aon_noc;
++static struct qcom_icc_node qnm_lpass_lpinoc;
++static struct qcom_icc_node qns_lpass_aggnoc;
++static struct qcom_icc_node qnm_lpiaon_noc;
++static struct qcom_icc_node qns_lpass_ag_noc_gemnoc;
++static struct qcom_icc_node qnm_lpass_gemnoc;
+ 
+ static const struct qcom_icc_qosbox qhm_qup0_qos = {
+ 	.num_ports = 1,
+@@ -191,6 +205,72 @@
+ 	.link_nodes = { &qns_gem_noc_cnoc, &qns_llcc },
+ };
+ 
++static struct qcom_icc_node qxm_lpinoc_dsp_axim = {
++	.name = "qxm_lpinoc_dsp_axim",
++	.channels = 1,
++	.buswidth = 16,
++	.num_links = 1,
++	.link_nodes = { &qns_lpi_aon_noc },
++};
++
++static struct qcom_icc_node qns_lpi_aon_noc = {
++	.name = "qns_lpi_aon_noc",
++	.channels = 1,
++	.buswidth = 16,
++	.num_links = 1,
++	.link_nodes = { &qnm_lpass_lpinoc },
++};
++
++static struct qcom_icc_node qnm_lpass_lpinoc = {
++	.name = "qnm_lpass_lpinoc",
++	.channels = 1,
++	.buswidth = 16,
++	.num_links = 1,
++	.link_nodes = { &qns_lpass_aggnoc },
++};
++
++static struct qcom_icc_node qns_lpass_aggnoc = {
++	.name = "qns_lpass_aggnoc",
++	.channels = 1,
++	.buswidth = 16,
++	.num_links = 1,
++	.link_nodes = { &qnm_lpiaon_noc },
++};
++
++static struct qcom_icc_node qnm_lpiaon_noc = {
++	.name = "qnm_lpiaon_noc",
++	.channels = 1,
++	.buswidth = 16,
++	.num_links = 1,
++	.link_nodes = { &qns_lpass_ag_noc_gemnoc },
++};
++
++static struct qcom_icc_node qns_lpass_ag_noc_gemnoc = {
++	.name = "qns_lpass_ag_noc_gemnoc",
++	.channels = 1,
++	.buswidth = 16,
++	.num_links = 1,
++	.link_nodes = { &qnm_lpass_gemnoc },
++};
++
++static const struct qcom_icc_qosbox qnm_lpass_gemnoc_qos = {
++	.num_ports = 1,
++	.port_offsets = { 0xb5000 },
++	.prio = 0,
++	.urg_fwd = 1,
++	.prio_fwd_disable = 0,
++};
++
++static struct qcom_icc_node qnm_lpass_gemnoc = {
++	.name = "qnm_lpass_gemnoc",
++	.channels = 1,
++	.buswidth = 16,
++	.qosbox = &qnm_lpass_gemnoc_qos,
++	/* Only the OEM configuration/DDR edges; PCIe is outside this provider. */
++	.num_links = 2,
++	.link_nodes = { &qns_gem_noc_cnoc, &qns_llcc },
++};
++
+ static struct qcom_icc_node llcc_mc = {
+ 	.name = "llcc_mc",
+ 	.channels = 4,
+@@ -335,6 +415,12 @@
+ 	.nodes = { &qhs_qup0 },
+ };
+ 
++static struct qcom_icc_bcm bcm_lp0 = {
++	.name = "LP0",
++	.num_nodes = 2,
++	.nodes = { &qnm_lpass_lpinoc, &qns_lpass_aggnoc },
++};
++
+ static struct qcom_icc_bcm bcm_mc0 = {
+ 	.name = "MC0",
+ 	.keepalive = true,
+@@ -477,6 +563,7 @@
+ 
+ static struct qcom_icc_node * const gem_noc_nodes[] = {
+ 	[MASTER_APPSS_PROC] = &chm_apps,
++	[MASTER_LPASS_GEM_NOC] = &qnm_lpass_gemnoc,
+ 	[MASTER_SNOC_SF_MEM_NOC] = &qnm_snoc_sf,
+ 	[SLAVE_GEM_NOC_CNOC] = &qns_gem_noc_cnoc,
+ 	[SLAVE_LLCC] = &qns_llcc,
+@@ -496,6 +583,45 @@
+ 	.qos_required = true,
+ };
+ 
++static struct qcom_icc_node * const lpass_ag_noc_nodes[] = {
++	[MASTER_LPIAON_NOC] = &qnm_lpiaon_noc,
++	[SLAVE_LPASS_GEM_NOC] = &qns_lpass_ag_noc_gemnoc,
++};
++
++static const struct qcom_icc_desc cliffs_lpass_ag_noc = {
++	.config = &cliffs_icc_regmap_config,
++	.nodes = lpass_ag_noc_nodes,
++	.num_nodes = ARRAY_SIZE(lpass_ag_noc_nodes),
++};
++
++static struct qcom_icc_node * const lpass_lpiaon_noc_nodes[] = {
++	[MASTER_LPASS_LPINOC] = &qnm_lpass_lpinoc,
++	[SLAVE_LPIAON_NOC_LPASS_AG_NOC] = &qns_lpass_aggnoc,
++};
++
++static struct qcom_icc_bcm * const lpass_lpiaon_noc_bcms[] = {
++	&bcm_lp0,
++};
++
++static const struct qcom_icc_desc cliffs_lpass_lpiaon_noc = {
++	.config = &cliffs_icc_regmap_config,
++	.nodes = lpass_lpiaon_noc_nodes,
++	.num_nodes = ARRAY_SIZE(lpass_lpiaon_noc_nodes),
++	.bcms = lpass_lpiaon_noc_bcms,
++	.num_bcms = ARRAY_SIZE(lpass_lpiaon_noc_bcms),
++};
++
++static struct qcom_icc_node * const lpass_lpicx_noc_nodes[] = {
++	[MASTER_LPASS_PROC] = &qxm_lpinoc_dsp_axim,
++	[SLAVE_LPICX_NOC_LPIAON_NOC] = &qns_lpi_aon_noc,
++};
++
++static const struct qcom_icc_desc cliffs_lpass_lpicx_noc = {
++	.config = &cliffs_icc_regmap_config,
++	.nodes = lpass_lpicx_noc_nodes,
++	.num_nodes = ARRAY_SIZE(lpass_lpicx_noc_nodes),
++};
++
+ static struct qcom_icc_node * const mc_virt_nodes[] = {
+ 	[MASTER_LLCC] = &llcc_mc,
+ 	[SLAVE_EBI1] = &ebi,
+@@ -539,6 +665,9 @@
+ 	{ .compatible = "qcom,cliffs-cnoc_cfg", .data = &cliffs_cnoc_cfg },
+ 	{ .compatible = "qcom,cliffs-cnoc_main", .data = &cliffs_cnoc_main },
+ 	{ .compatible = "qcom,cliffs-gem_noc", .data = &cliffs_gem_noc },
++	{ .compatible = "qcom,cliffs-lpass_ag_noc", .data = &cliffs_lpass_ag_noc },
++	{ .compatible = "qcom,cliffs-lpass_lpiaon_noc", .data = &cliffs_lpass_lpiaon_noc },
++	{ .compatible = "qcom,cliffs-lpass_lpicx_noc", .data = &cliffs_lpass_lpicx_noc },
+ 	{ .compatible = "qcom,cliffs-mc_virt", .data = &cliffs_mc_virt },
+ 	{ .compatible = "qcom,cliffs-system_noc", .data = &cliffs_system_noc },
+ 	{ }

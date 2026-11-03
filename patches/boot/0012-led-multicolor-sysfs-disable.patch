@@ -1,0 +1,20 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] leds: multicolor: honor disabled sysfs ownership for intensity writes
+
+Match the existing brightness and trigger write gates while a kernel consumer
+owns the LED. Read-only status remains available.
+
+--- a/drivers/leds/led-class-multicolor.c
++++ b/drivers/leds/led-class-multicolor.c
+@@ -86,6 +86,11 @@
+ 
+ 	mutex_lock(&led_cdev->led_access);
+ 
++	if (led_sysfs_is_disabled(led_cdev)) {
++		ret = -EBUSY;
++		goto err_out;
++	}
++
+ 	for (i = 0; i < mcled_cdev->num_colors; i++) {
+ 		ret = sscanf(buf + offset, "%u%n",
+ 			     &intensity_value[i], &nrchars);

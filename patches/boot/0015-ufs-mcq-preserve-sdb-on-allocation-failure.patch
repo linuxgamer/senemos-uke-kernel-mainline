@@ -1,0 +1,112 @@
+From: Uke Linux contributors
+Subject: [PATCH] scsi: ufs: preserve SDB buffers until MCQ allocation commits
+
+Keep the working SDB DMA buffers and queue metadata until all MCQ allocations
+succeed. Release replacement DMA allocations and restore the original fields
+on failure, so the existing SDB fallback does not use freed or partial buffers.
+
+Source comparison: Linux 7.3 Uke ordered source; Peridot Linux
+Peridot commit: 2ed9eadbecae21ef51134e556951e7305ba65f88
+File: drivers/ufs/core/ufshcd.c
+License: GPL-2.0-or-later
+
+--- a/drivers/ufs/core/ufshcd.c
++++ b/drivers/ufs/core/ufshcd.c
+@@ -9284,24 +9284,32 @@
+ }
+ 
+ /* SDB - Single Doorbell */
+-static void ufshcd_release_sdb_queue(struct ufs_hba *hba, int nutrs)
++static void ufshcd_release_sdb_queue(struct ufs_hba *hba, int nutrs,
++		struct utp_transfer_cmd_desc *ucdl, dma_addr_t ucdl_dma,
++		struct utp_transfer_req_desc *utrdl, dma_addr_t utrdl_dma)
+ {
+ 	size_t ucdl_size, utrdl_size;
+ 
+ 	ucdl_size = ufshcd_get_ucd_size(hba) * (nutrs - UFSHCD_NUM_RESERVED);
+-	dmam_free_coherent(hba->dev, ucdl_size, hba->ucdl_base_addr,
+-			   hba->ucdl_dma_addr);
+-
++	dmam_free_coherent(hba->dev, ucdl_size, ucdl, ucdl_dma);
+ 	utrdl_size = sizeof(struct utp_transfer_req_desc) * nutrs;
+-	dmam_free_coherent(hba->dev, utrdl_size, hba->utrdl_base_addr,
+-			   hba->utrdl_dma_addr);
++	dmam_free_coherent(hba->dev, utrdl_size, utrdl, utrdl_dma);
+ }
+ 
+ static int ufshcd_alloc_mcq(struct ufs_hba *hba)
+ {
+-	int ret;
++	struct utp_transfer_cmd_desc *old_ucdl = hba->ucdl_base_addr;
++	struct utp_transfer_req_desc *old_utrdl = hba->utrdl_base_addr;
++	dma_addr_t old_ucdl_dma = hba->ucdl_dma_addr;
++	dma_addr_t old_utrdl_dma = hba->utrdl_dma_addr;
++	unsigned int old_nr_queues[HCTX_MAX_TYPES];
++	unsigned int old_host_queues = hba->host->nr_hw_queues;
++	unsigned int old_hw_queues = hba->nr_hw_queues;
+ 	int old_nutrs = hba->nutrs;
++	void *group;
++	int ret, i;
+ 
++	memcpy(old_nr_queues, hba->nr_queues, sizeof(old_nr_queues));
+ 	ret = ufshcd_get_hba_mac(hba);
+ 	if (ret < 0)
+ 		return ret;
+@@ -9310,28 +9318,48 @@
+ 	ret = ufshcd_mcq_init(hba);
+ 	if (ret)
+ 		goto err;
++	group = devres_open_group(hba->dev, NULL, GFP_KERNEL);
++	if (!group) {
++		ret = -ENOMEM;
++		goto err;
++	}
+ 
+-	/*
+-	 * Previously allocated memory for nutrs may not be enough in MCQ mode.
+-	 * Number of supported tags in MCQ mode may be larger than SDB mode.
+-	 */
++	/* Keep the live SDB buffers until every replacement allocation succeeds. */
+ 	if (hba->nutrs != old_nutrs) {
+-		ufshcd_release_sdb_queue(hba, old_nutrs);
+ 		ret = ufshcd_memory_alloc(hba);
+ 		if (ret)
+-			goto err;
++			goto release;
+ 		ufshcd_host_memory_configure(hba);
+ 	}
+ 
+ 	ret = ufshcd_mcq_memory_alloc(hba);
+ 	if (ret)
+-		goto err;
+-
++		goto release;
++	devres_close_group(hba->dev, group);
++	devres_remove_group(hba->dev, group);
++	if (hba->nutrs != old_nutrs)
++		ufshcd_release_sdb_queue(hba, old_nutrs, old_ucdl, old_ucdl_dma,
++					old_utrdl, old_utrdl_dma);
+ 	hba->host->can_queue = hba->nutrs - UFSHCD_NUM_RESERVED;
+-
+ 	return 0;
++
++release:
++	devres_release_group(hba->dev, group);
++	hba->ucdl_base_addr = old_ucdl;
++	hba->ucdl_dma_addr = old_ucdl_dma;
++	hba->utrdl_base_addr = old_utrdl;
++	hba->utrdl_dma_addr = old_utrdl_dma;
++	for (i = 0; i < hba->nr_hw_queues; i++) {
++		hba->uhq[i].sqe_base_addr = NULL;
++		hba->uhq[i].sqe_dma_addr = 0;
++		hba->uhq[i].cqe_base_addr = NULL;
++		hba->uhq[i].cqe_dma_addr = 0;
++	}
+ err:
+ 	hba->nutrs = old_nutrs;
++	hba->nr_hw_queues = old_hw_queues;
++	hba->host->nr_hw_queues = old_host_queues;
++	memcpy(hba->nr_queues, old_nr_queues, sizeof(old_nr_queues));
+ 	return ret;
+ }
+ 

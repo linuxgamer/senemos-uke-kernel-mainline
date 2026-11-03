@@ -1,0 +1,106 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: wcd939x: reject failed or unknown codec identification
+
+Do not treat a failed revision read as revision 2 or an unchecked
+component field read as a valid codec variant. Read the three
+identification fields uncached after SoundWire initialization
+and runtime resume. Publish only known WCD9390/WCD9395 identities
+and major revisions 0/1, matching the existing native and MiCode
+8eb0eccb source encodings.
+
+Move the earlier bind-time debug reads to this checked
+initialization path.  Return before bias programming and I/O setup
+on any read or identity error, releasing the acquired runtime-PM
+reference. This does not identify the live Uke silicon or qualify
+a board supply, reset or SoundWire configuration.
+
+---
+diff --git a/sound/soc/codecs/wcd939x.c b/sound/soc/codecs/wcd939x.c
+--- a/sound/soc/codecs/wcd939x.c
++++ b/sound/soc/codecs/wcd939x.c
+@@ -44,6 +44,7 @@
+ 
+ /* Version major: 1.x */
+ #define CHIPID_WCD939X_VER_MAJOR_1	0x0
++#define CHIPID_WCD939X_VER_MAJOR_2	0x1
+ /* Version minor: x.1 */
+ #define CHIPID_WCD939X_VER_MINOR_1	0x3
+ 
+@@ -2882,6 +2883,36 @@
+ 	{"EAR", NULL, "EAR PGA"},
+ };
+ 
++static int wcd939x_read_chip_info(struct device *dev, struct wcd939x_priv *wcd939x)
++{
++	unsigned int id1, status1, variant, version;
++	int ret;
++
++	ret = regmap_read_bypassed(wcd939x->regmap, WCD939X_DIGITAL_CHIP_ID1, &id1);
++	if (ret)
++		return dev_err_probe(dev, ret, "Failed to read codec revision\n");
++	if (id1 != CHIPID_WCD939X_VER_MAJOR_1 && id1 != CHIPID_WCD939X_VER_MAJOR_2)
++		return dev_err_probe(dev, -ENODEV, "Unsupported codec revision\n");
++	ret = regmap_read_bypassed(wcd939x->regmap, WCD939X_EAR_STATUS_REG_1, &status1);
++	if (ret)
++		return dev_err_probe(dev, ret, "Failed to read codec status\n");
++	ret = regmap_read_bypassed(wcd939x->regmap, WCD939X_DIGITAL_EFUSE_REG_0, &variant);
++	if (ret)
++		return dev_err_probe(dev, ret, "Failed to read codec identity\n");
++	variant = FIELD_GET(WCD939X_EFUSE_REG_0_WCD939X_ID, variant);
++	if (variant != CHIPID_WCD9390 && variant != CHIPID_WCD9395)
++		return dev_err_probe(dev, -ENODEV, "Unsupported codec identity\n");
++
++	if (id1 == CHIPID_WCD939X_VER_MAJOR_1)
++		version = status1 & CHIPID_WCD939X_VER_MINOR_1 ?
++			WCD939X_VERSION_1_1 : WCD939X_VERSION_1_0;
++	else
++		version = WCD939X_VERSION_2_0;
++	wcd939x->variant = variant;
++	dev_dbg(dev, "wcd939x version: %s\n", version_to_str(version));
++	return 0;
++}
++
+ static int wcd939x_set_micbias_data(struct device *dev, struct wcd939x_priv *wcd939x)
+ {
+ 	static const unsigned int micbias_regs[] = {
+@@ -2994,9 +3025,11 @@
+ 	if (ret < 0)
+ 		return ret;
+ 
+-	wcd939x->variant = snd_soc_component_read_field(component,
+-							WCD939X_DIGITAL_EFUSE_REG_0,
+-							WCD939X_EFUSE_REG_0_WCD939X_ID);
++	ret = wcd939x_read_chip_info(dev, wcd939x);
++	if (ret) {
++		pm_runtime_put(dev);
++		return ret;
++	}
+ 
+ 	ret = wcd939x_set_micbias_data(dev, wcd939x);
+ 	if (ret) {
+@@ -3361,7 +3394,6 @@
+ static int wcd939x_bind(struct device *dev)
+ {
+ 	struct wcd939x_priv *wcd939x = dev_get_drvdata(dev);
+-	unsigned int version, id1, status1;
+ 	int ret;
+ 
+ #if IS_ENABLED(CONFIG_TYPEC)
+@@ -3446,17 +3478,6 @@
+ 	wcd939x->sdw_priv[AIF1_PB]->slave_irq = wcd939x->virq;
+ 	wcd939x->sdw_priv[AIF1_CAP]->slave_irq = wcd939x->virq;
+ 
+-	/* Check WCD9395 version */
+-	regmap_read(wcd939x->regmap, WCD939X_DIGITAL_CHIP_ID1, &id1);
+-	regmap_read(wcd939x->regmap, WCD939X_EAR_STATUS_REG_1, &status1);
+-
+-	if (id1 == CHIPID_WCD939X_VER_MAJOR_1)
+-		version = ((status1 & CHIPID_WCD939X_VER_MINOR_1) ? WCD939X_VERSION_1_1 : WCD939X_VERSION_1_0);
+-	else
+-		version = WCD939X_VERSION_2_0;
+-
+-	dev_dbg(dev, "wcd939x version: %s\n", version_to_str(version));
+-
+ 	ret = snd_soc_register_component(dev, &soc_codec_dev_wcd939x,
+ 					 wcd939x_dais, ARRAY_SIZE(wcd939x_dais));
+ 	if (ret) {

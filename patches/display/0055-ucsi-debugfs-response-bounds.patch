@@ -1,0 +1,12 @@
+--- a/drivers/usb/typec/ucsi/debugfs.c
++++ b/drivers/usb/typec/ucsi/debugfs.c
+@@ -60,7 +60,8 @@
+ 	case UCSI_GET_LPM_PPM_INFO:
+ 		ret = ucsi_send_command(ucsi, val,
+ 					&ucsi->debugfs->response,
+-					sizeof(ucsi->debugfs->response));
++					min_t(size_t, sizeof(ucsi->debugfs->response),
++					      UCSI_MAX_DATA_LENGTH(ucsi)));
+ 		break;
+ 	default:
+ 		ret = -EOPNOTSUPP;

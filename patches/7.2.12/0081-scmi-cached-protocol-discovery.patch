@@ -1,0 +1,145 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] firmware: arm_scmi: expose qualified cached protocol discovery
+
+Expose the list already discovered by the base protocol, without sending any
+new command when read. Preserve discovery errors, including incomplete lists,
+so missing data cannot appear as a successful empty or partial inventory.
+Keep existing internal consumer matching and transport behavior unchanged.
+
+Signed-off-by: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+---
+--- a/drivers/firmware/arm_scmi/base.c
++++ b/drivers/firmware/arm_scmi/base.c
+@@ -202,13 +202,22 @@
+ 		if (ret)
+ 			break;
+ 
++		if (t->rx.len < sizeof(*num_ret)) {
++			ret = -EPROTO;
++			break;
++		}
++
+ 		loop_num_ret = le32_to_cpu(*num_ret);
+-		if (!loop_num_ret)
++		if (!loop_num_ret) {
++			if (tot_num_ret < rev->num_protocols)
++				ret = -EPROTO;
+ 			break;
++		}
+ 
+ 		if (loop_num_ret > rev->num_protocols - tot_num_ret) {
+ 			dev_err(dev,
+ 				"No. Returned protocols > Total protocols.\n");
++			ret = -EPROTO;
+ 			break;
+ 		}
+ 
+@@ -406,9 +415,9 @@
+ 	scmi_base_vendor_id_get(ph, false);
+ 	scmi_base_vendor_id_get(ph, true);
+ 	scmi_base_implementation_version_get(ph);
+-	scmi_base_implementation_list_get(ph, prot_imp);
++	ret = scmi_base_implementation_list_get(ph, prot_imp);
+ 
+-	scmi_setup_protocol_implemented(ph, prot_imp);
++	scmi_setup_protocol_implemented(ph, prot_imp, ret);
+ 
+ 	dev_info(dev, "SCMI Protocol v%d.%d '%s:%s' Firmware version 0x%x\n",
+ 		 rev->major_ver, rev->minor_ver, rev->vendor_id,
+--- a/drivers/firmware/arm_scmi/common.h
++++ b/drivers/firmware/arm_scmi/common.h
+@@ -144,7 +144,7 @@
+ struct scmi_base_info *
+ scmi_revision_area_get(const struct scmi_protocol_handle *ph);
+ void scmi_setup_protocol_implemented(const struct scmi_protocol_handle *ph,
+-				     u8 *prot_imp);
++				     u8 *prot_imp, int status);
+ 
+ extern const struct bus_type scmi_bus_type;
+ 
+--- a/drivers/firmware/arm_scmi/driver.c
++++ b/drivers/firmware/arm_scmi/driver.c
+@@ -137,6 +137,7 @@
+  * @protocols_imp: List of protocols implemented, currently maximum of
+  *		   scmi_base_info.num_protocols elements allocated by the
+  *		   base protocol
++ * @protocols_discovery_status: Error from base protocol-list discovery, or zero.
+  * @active_protocols: IDR storing device_nodes for protocols actually defined
+  *		      in the DT and confirmed as implemented by fw.
+  * @notify_priv: Pointer to private data structure specific to notifications.
+@@ -163,6 +164,7 @@
+ 	/* Ensure mutual exclusive access to protocols instance array */
+ 	struct mutex protocols_mtx;
+ 	u8 *protocols_imp;
++	int protocols_discovery_status;
+ 	struct idr active_protocols;
+ 	void *notify_priv;
+ 	struct list_head node;
+@@ -2396,12 +2398,13 @@
+ }
+ 
+ void scmi_setup_protocol_implemented(const struct scmi_protocol_handle *ph,
+-				     u8 *prot_imp)
++				     u8 *prot_imp, int status)
+ {
+ 	const struct scmi_protocol_instance *pi = ph_to_pi(ph);
+ 	struct scmi_info *info = handle_to_scmi_info(pi->handle);
+ 
+ 	info->protocols_imp = prot_imp;
++	info->protocols_discovery_status = status;
+ }
+ 
+ static bool
+@@ -3266,6 +3269,7 @@
+ 	mutex_init(&info->devreq_mtx);
+ 
+ 	platform_set_drvdata(pdev, info);
++	info->protocols_discovery_status = -ENODATA;
+ 	idr_init(&info->tx_idr);
+ 	idr_init(&info->rx_idr);
+ 
+@@ -3479,7 +3483,28 @@
+ }
+ static DEVICE_ATTR_RO(sub_vendor_id);
+ 
++static ssize_t implemented_protocols_show(struct device *dev,
++					struct device_attribute *attr, char *buf)
++{
++	struct scmi_info *info = dev_get_drvdata(dev);
++	ssize_t len = 0;
++	int i;
++
++	if (info->protocols_discovery_status)
++		return info->protocols_discovery_status;
++
++	/* Base discovery is cached at probe; reading this never contacts firmware. */
++	for (i = 0; i < info->version.num_protocols; i++)
++		len += sysfs_emit_at(buf, len, "%s0x%02x", i ? " " : "",
++				     info->protocols_imp[i]);
++	len += sysfs_emit_at(buf, len, "\n");
++
++	return len;
++}
++static DEVICE_ATTR_RO(implemented_protocols);
++
+ static struct attribute *versions_attrs[] = {
++	&dev_attr_implemented_protocols.attr,
+ 	&dev_attr_firmware_version.attr,
+ 	&dev_attr_protocol_version.attr,
+ 	&dev_attr_vendor_id.attr,
+--- /dev/null
++++ b/Documentation/ABI/testing/sysfs-firmware-arm-scmi-protocols
+@@ -0,0 +1,13 @@
++What:           /sys/bus/platform/drivers/arm-scmi/*/implemented_protocols
++Date:           October 2026
++Contact:        Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
++Description:
++                Read-only space-separated hexadecimal protocol IDs discovered
++                by the SCMI base protocol for this agent at probe time.
++                The base protocol itself is implicit and omitted. An empty
++                discovered list is a newline. Failed or incomplete discovery
++                returns an error. Reading does not contact firmware, acquire
++                a vendor protocol, change policy or wake a remote processor.
++                IDs establish agent-visible protocol discovery, not support
++                for individual vendor algorithms, messages or Linux consumers.
++                The snapshot is unchanged until the SCMI instance is reprobed.

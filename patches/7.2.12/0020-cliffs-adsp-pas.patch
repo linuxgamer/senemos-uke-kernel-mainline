@@ -1,0 +1,59 @@
+From: Uke platform maintainers
+Subject: [PATCH] remoteproc: qcom: describe the exact Cliffs ADSP PAS
+
+The Uke OEM ADSP uses PAS 1, DTB PAS 0x24, CX/MX TURBO proxy votes and
+AOP load-state QMP. Reuse the checked Cliffs proxy path and keep startup
+manual until exact owner firmware and transport dependencies are reviewed.
+CDSP's additional NSP and memory-assignment contract remains separate.
+
+--- a/drivers/remoteproc/qcom_q6v5_pas.c
++++ b/drivers/remoteproc/qcom_q6v5_pas.c
+@@ -654,7 +654,7 @@
+ 		/* Cliffs votes ARC levels through the OEM CX/MX regulator graph. */
+ 		if (!of_property_present(pas->dev->of_node, "cx-supply") ||
+ 		    !of_property_present(pas->dev->of_node, "mx-supply"))
+-			return dev_err_probe(pas->dev, -EINVAL, "WPSS requires CX and MX supplies\n");
++			return dev_err_probe(pas->dev, -EINVAL, "Cliffs PAS requires CX and MX supplies\n");
+ 		pas->proxy_regs[0].supply = "cx";
+ 		pas->proxy_regs[1].supply = "mx";
+ 		return devm_regulator_bulk_get(pas->dev, ARRAY_SIZE(pas->proxy_regs),
+@@ -942,7 +942,7 @@
+ 		goto detach_proxy_pds;
+ 
+ 	if (pas->proxy_regulator_level && !pas->q6v5.qmp) {
+-		ret = dev_err_probe(pas->dev, -ENODEV, "WPSS requires AOP load-state QMP\n");
++		ret = dev_err_probe(pas->dev, -ENODEV, "Cliffs PAS requires AOP load-state QMP\n");
+ 		goto deinit_q6v5;
+ 	}
+ 
+@@ -1564,6 +1564,22 @@
+ 	.region_assign_vmid = QCOM_SCM_VMID_MSS_MSA,
+ };
+ 
++static const struct qcom_pas_data cliffs_adsp_resource = {
++	.crash_reason_smem = 423,
++	.firmware_name = "adsp.mdt",
++	.dtb_firmware_name = "adsp_dtb.mdt",
++	.pas_id = 1,
++	.dtb_pas_id = 0x24,
++	.minidump_id = 5,
++	.auto_boot = false,
++	.proxy_regulator_level = RPMH_REGULATOR_LEVEL_TURBO,
++	.load_state = "adsp",
++	.ssr_name = "lpass",
++	.sysmon_name = "adsp",
++	.ssctl_id = 0x14,
++	.smem_host_id = 2,
++};
++
+ static const struct qcom_pas_data cliffs_wpss_resource = {
+ 	.crash_reason_smem = 626,
+ 	.firmware_name = "qca6750/wpss.mdt",
+@@ -1713,6 +1729,7 @@
+ };
+ 
+ static const struct of_device_id qcom_pas_of_match[] = {
++	{ .compatible = "qcom,cliffs-adsp-pas", .data = &cliffs_adsp_resource },
+ 	{ .compatible = "qcom,cliffs-wpss-pas", .data = &cliffs_wpss_resource },
+ 	{ .compatible = "qcom,eliza-adsp-pas", .data = &sm8550_adsp_resource },
+ 	{ .compatible = "qcom,milos-adsp-pas", .data = &sm8550_adsp_resource },

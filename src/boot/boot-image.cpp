@@ -101,8 +101,13 @@ int main(int argc, char** argv) {
             const auto b = read(argv[2]); const auto h = inspect(b);
             write_new(argv[3], std::vector<uint8_t>(b.begin() + page, b.begin() + page + h.kernel));
         } else if ((argc == 6 && std::string(argv[1]) == "pack") ||
-                   (argc == 4 && std::string(argv[1]) == "create")) {
+                   ((argc == 4 || argc == 5) && std::string(argv[1]) == "create")) {
             const bool create = std::string(argv[1]) == "create";
+            const std::string profile = create && argc == 5 ? argv[4] : "";
+            if (!profile.empty() && profile != "linux" && profile != "userdata")
+                throw std::runtime_error("Root profile must be linux or userdata");
+            if (create && argc == 5 && profile.empty())
+                throw std::runtime_error("Empty root profile refused");
             // Uke stock-ABL metadata and capacity from the accepted boot_b header.
             const auto stock = create ? std::vector<uint8_t>(100663296) : read(argv[2]);
             const auto h = create ? Header{0, 0, 570425768, 0, 0, false} : inspect(stock);
@@ -117,11 +122,15 @@ int main(int argc, char** argv) {
             std::memcpy(b.data(), "ANDROID!", 8);
             put32(b.data() + 8, static_cast<uint32_t>(kernel.size()));
             put32(b.data() + 16, h.os); put32(b.data() + 20, 1584); put32(b.data() + 40, 4);
+            if (!profile.empty()) {
+                const std::string selector = "senemos.root=" + profile;
+                std::memcpy(b.data() + 44, selector.c_str(), selector.size());
+            }
             std::memcpy(b.data() + page, kernel.data(), kernel.size());
             write_new(argv[create ? 3 : 4], b);
             inspect(b);
         } else {
-            throw std::runtime_error("Usage: boot-image inspect IMAGE | extract IMAGE NEW_KERNEL | pack STOCK IMAGE NEW_BOOT CAPACITY_BYTES | create IMAGE NEW_BOOT");
+            throw std::runtime_error("Usage: boot-image inspect IMAGE | extract IMAGE NEW_KERNEL | pack STOCK IMAGE NEW_BOOT CAPACITY_BYTES | create IMAGE NEW_BOOT [linux|userdata]");
         }
     } catch (const std::exception& e) { std::cerr << "boot-image: " << e.what() << '\n'; return 1; }
 }

@@ -1,0 +1,32 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] iio: adc: expose ADC5 Gen3 processed voltage in millivolts
+
+Keep the shared hardware scaler in microvolts. Return a fractional IIO value
+so userspace and iio-hwmon receive the documented millivolt unit without
+truncating the conversion. Temperature channels remain millidegrees Celsius.
+
+--- a/drivers/iio/adc/qcom-spmi-adc5-gen3.c
++++ b/drivers/iio/adc/qcom-spmi-adc5-gen3.c
+@@ -379,6 +379,11 @@
+ 		if (ret)
+ 			return ret;
+ 
++		if (chan->type == IIO_VOLTAGE) {
++			/* Hardware scaling returns uV; the IIO voltage ABI uses mV. */
++			*val2 = 1000;
++			return IIO_VAL_FRACTIONAL;
++		}
+ 		return IIO_VAL_INT;
+ 	default:
+ 		return -EINVAL;
+@@ -431,8 +436,8 @@
+ 	[ADC5_GEN3_1P25VREF]		= ADC5_CHAN_VOLT(0, SCALE_HW_CALIB_DEFAULT)
+ 	[ADC5_GEN3_VPH_PWR]		= ADC5_CHAN_VOLT(1, SCALE_HW_CALIB_DEFAULT)
+ 	[ADC5_GEN3_VBAT_SNS_QBG]	= ADC5_CHAN_VOLT(1, SCALE_HW_CALIB_DEFAULT)
+-	[ADC5_GEN3_USB_SNS_V_16]	= ADC5_CHAN_TEMP(8, SCALE_HW_CALIB_DEFAULT)
+-	[ADC5_GEN3_VIN_DIV16_MUX]	= ADC5_CHAN_TEMP(8, SCALE_HW_CALIB_DEFAULT)
++	[ADC5_GEN3_USB_SNS_V_16]	= ADC5_CHAN_VOLT(8, SCALE_HW_CALIB_DEFAULT)
++	[ADC5_GEN3_VIN_DIV16_MUX]	= ADC5_CHAN_VOLT(8, SCALE_HW_CALIB_DEFAULT)
+ 	[ADC5_GEN3_DIE_TEMP]		= ADC5_CHAN_TEMP(0,
+ 						SCALE_HW_CALIB_PMIC_THERM_PM7)
+ 	[ADC5_GEN3_AMUX1_THM_100K_PU]	= ADC5_CHAN_TEMP(0,

@@ -27,7 +27,8 @@ cat > "$work/check.cpp" <<'CPP'
 #define dev_err(dev,...) ((void)(dev))
 #define pr_err(...) ((void)0)
 struct drm_bridge;
-struct drm_bridge_funcs {void (*disable)(drm_bridge *);void (*post_disable)(drm_bridge *);};
+struct drm_atomic_commit;
+struct drm_bridge_funcs {void (*atomic_disable)(drm_bridge *,drm_atomic_commit *);void (*atomic_post_disable)(drm_bridge *,drm_atomic_commit *);};
 struct drm_bridge {const drm_bridge_funcs *funcs;};
 struct drm_encoder {drm_bridge *bridge;};
 static int bridge_refs;
@@ -92,16 +93,16 @@ CPP
         'static int dsi_mgr_bridge_power_on(struct drm_bridge *bridge)' \
         'static int dsi_mgr_bridge_power_off(struct drm_bridge *bridge)' \
         'static int dsi_mgr_bridge_enable_hosts(struct drm_bridge *bridge)' \
-        'static void dsi_mgr_bridge_pre_enable(struct drm_bridge *bridge)' \
-        'static void dsi_mgr_bridge_enable(struct drm_bridge *bridge)' \
+        'static void dsi_mgr_bridge_pre_enable(struct drm_bridge *bridge,' \
+        'static void dsi_mgr_bridge_enable(struct drm_bridge *bridge,' \
         'static int dsi_mgr_bridge_stop_video(struct drm_bridge *bridge)' \
-        'static void dsi_mgr_bridge_post_disable(struct drm_bridge *bridge)' \
+        'static void dsi_mgr_bridge_post_disable(struct drm_bridge *bridge,' \
         'static struct drm_panel *dsi_mgr_o82_panel(struct msm_dsi *msm_dsi)'; do
         extract "$callback"
     done
     printf 'static const struct drm_bridge_funcs dsi_mgr_bridge_funcs = {\n'
     sed -n '/^static const struct drm_bridge_funcs dsi_mgr_bridge_funcs = {/,/^};/p' "$manager" | \
-        sed -n '/^[[:space:]]*\.\(disable\|post_disable\) =/p'
+        sed -n '/^[[:space:]]*\.atomic_\(disable\|post_disable\) =/p'
     printf '};\n'
     extract 'int msm_dsi_manager_uke_video_stop(struct drm_encoder *encoder)'
     cat <<'CPP'
@@ -133,40 +134,40 @@ int main() {
     dsi_bridge bridge{{},0,&panel,false,false};
     bridge.base.funcs=&dsi_mgr_bridge_funcs;
     drm_encoder encoder{&bridge.base};
-    assert(!dsi_mgr_bridge_funcs.disable);
-    dsi_mgr_bridge_enable(&bridge.base); expect({});
-    dsi_mgr_bridge_pre_enable(&bridge.base);
+    assert(!dsi_mgr_bridge_funcs.atomic_disable);
+    dsi_mgr_bridge_enable(&bridge.base, nullptr); expect({});
+    dsi_mgr_bridge_pre_enable(&bridge.base, nullptr);
     expect({"phy_on","power0","power1","clk_req","retime","irq0","irq1"});
-    dsi_mgr_bridge_enable(&bridge.base); expect({});
-    prepare(); dsi_mgr_bridge_enable(&bridge.base);
+    dsi_mgr_bridge_enable(&bridge.base, nullptr); expect({});
+    prepare(); dsi_mgr_bridge_enable(&bridge.base, nullptr);
     expect({"reset","panel_on","pps","video0","video1"});
     assert(bridge.video_enabled);
     intf_active=true;
-    if(dsi_mgr_bridge_funcs.disable)dsi_mgr_bridge_funcs.disable(&bridge.base);
+    if(dsi_mgr_bridge_funcs.atomic_disable)dsi_mgr_bridge_funcs.atomic_disable(&bridge.base, nullptr);
     intf_active=false; // The DPU stops both source timing engines here.
     assert(!msm_dsi_manager_uke_video_stop(&encoder));
     assert(!bridge_refs);unprepare();
-    dsi_mgr_bridge_post_disable(&bridge.base);
+    dsi_mgr_bridge_post_disable(&bridge.base, nullptr);
     expect({"stop1","stop0","panel_off","save_pll","noirq0","noirq1","off1","off0","phy_off"});
     assert(!bridge.powered && !bridge.video_enabled);
     assert(!msm_dsi_manager_uke_video_stop(&encoder));
-    dsi_mgr_bridge_post_disable(&bridge.base); expect({});
+    dsi_mgr_bridge_post_disable(&bridge.base, nullptr); expect({});
 
     // A failed stop must preserve command clocks and propagate the exact error.
     for(const char *failure:{"stop1","stop0","dma0","dma1","missing"}) {
-        dsi_mgr_bridge_pre_enable(&bridge.base);events.clear();
-        prepare();dsi_mgr_bridge_enable(&bridge.base);events.clear();
+        dsi_mgr_bridge_pre_enable(&bridge.base, nullptr);events.clear();
+        prepare();dsi_mgr_bridge_enable(&bridge.base, nullptr);events.clear();
         fault=failure;dma_blocked[0]=fault=="dma0";dma_blocked[1]=fault=="dma1";
         missing_secondary=fault=="missing";
         int ret=msm_dsi_manager_uke_video_stop(&encoder);
         assert(ret==(fault=="missing" ? -ENODEV : -EIO));
         assert(bridge.powered&&bridge.video_enabled&&clocks_ready[0]&&clocks_ready[1]&&!bridge_refs);
-        dsi_mgr_bridge_post_disable(&bridge.base);
+        dsi_mgr_bridge_post_disable(&bridge.base, nullptr);
         assert(bridge.powered&&clocks_ready[0]&&clocks_ready[1]);
         for(const auto &name:events)assert(name!="off0"&&name!="off1"&&name!="phy_off");
         events.clear();fault.clear();dma_blocked[0]=dma_blocked[1]=missing_secondary=false;
         assert(!msm_dsi_manager_uke_video_stop(&encoder));events.clear();
-        unprepare();dsi_mgr_bridge_post_disable(&bridge.base);events.clear();
+        unprepare();dsi_mgr_bridge_post_disable(&bridge.base, nullptr);events.clear();
     }
     drm_bridge foreign{};encoder.bridge=&foreign;
     assert(!msm_dsi_manager_uke_video_stop(&encoder)&&!bridge_refs);expect({});
@@ -175,98 +176,98 @@ int main() {
 
     // Every host/PHY power failure must suppress the later enable callback.
     for (const char *failure : {"phy_on","power0","power1"}) {
-        fault=failure; dsi_mgr_bridge_pre_enable(&bridge.base);
-        panel.prepared=true; dsi_mgr_bridge_enable(&bridge.base);
+        fault=failure; dsi_mgr_bridge_pre_enable(&bridge.base, nullptr);
+        panel.prepared=true; dsi_mgr_bridge_enable(&bridge.base, nullptr);
         assert(!bridge.powered && !bridge.video_enabled);
         for (const auto &name : events) assert(name!="video0" && name!="video1");
         if (fault=="phy_on") expect({"phy_on"});
         else if (fault=="power0") expect({"phy_on","power0","phy_off"});
         else expect({"phy_on","power0","power1","off0","phy_off"});
-        dsi_mgr_bridge_post_disable(&bridge.base); expect({});
+        dsi_mgr_bridge_post_disable(&bridge.base, nullptr); expect({});
         panel.prepared=false;
     }
     // Refused post-link synchronization must unwind BOTH hosts before the PHY.
     for(const char *failure:{"retime","clk_req"}) {
-        fault=failure; dsi_mgr_bridge_pre_enable(&bridge.base);
+        fault=failure; dsi_mgr_bridge_pre_enable(&bridge.base, nullptr);
         assert(!bridge.powered && !bridge.video_enabled && !clocks_ready[0] && !clocks_ready[1]);
         expect({"phy_on","power0","power1","clk_req","retime","off1","off0","phy_off"});
-        panel.prepared=true; dsi_mgr_bridge_enable(&bridge.base); expect({});
-        dsi_mgr_bridge_post_disable(&bridge.base); expect({}); panel.prepared=false;
+        panel.prepared=true; dsi_mgr_bridge_enable(&bridge.base, nullptr); expect({});
+        dsi_mgr_bridge_post_disable(&bridge.base, nullptr); expect({}); panel.prepared=false;
     }
     fault.clear(); missing_secondary=true;
-    dsi_mgr_bridge_pre_enable(&bridge.base);
+    dsi_mgr_bridge_pre_enable(&bridge.base, nullptr);
     assert(!bridge.powered && !clocks_ready[0]);
     expect({"phy_on","power0","off0","phy_off"}); missing_secondary=false;
-    bonded=false; dsi_mgr_bridge_pre_enable(&bridge.base);
+    bonded=false; dsi_mgr_bridge_pre_enable(&bridge.base, nullptr);
     assert(!bridge.powered && !clocks_ready[0]);
     expect({"phy_on","power0","off0","phy_off"}); bonded=true;
-    fault.clear(); dsi_mgr_bridge_pre_enable(&bridge.base); events.clear();
-    prepare(false); dsi_mgr_bridge_enable(&bridge.base);
+    fault.clear(); dsi_mgr_bridge_pre_enable(&bridge.base, nullptr); events.clear();
+    prepare(false); dsi_mgr_bridge_enable(&bridge.base, nullptr);
     expect({"reset","panel_on","pps"});
-    dsi_mgr_bridge_post_disable(&bridge.base);
+    dsi_mgr_bridge_post_disable(&bridge.base, nullptr);
     expect({"save_pll","noirq0","noirq1","off1","off0","phy_off"});
 
     // Failed ON preparation may automatically unwind while DMA is quarantined.
-    dsi_mgr_bridge_pre_enable(&bridge.base);events.clear();prepare(false);events.clear();
-    fault="off1";dsi_mgr_bridge_post_disable(&bridge.base);
+    dsi_mgr_bridge_pre_enable(&bridge.base, nullptr);events.clear();prepare(false);events.clear();
+    fault="off1";dsi_mgr_bridge_post_disable(&bridge.base, nullptr);
     expect({"save_pll","noirq0","noirq1","off1"});
     assert(bridge.powered&&!bridge.video_enabled&&clocks_ready[0]&&clocks_ready[1]);
-    dsi_mgr_bridge_post_disable(&bridge.base);
+    dsi_mgr_bridge_post_disable(&bridge.base, nullptr);
     expect({"save_pll","noirq0","noirq1","off1"});
     assert(bridge.powered&&clocks_ready[0]&&clocks_ready[1]);
-    fault.clear();dsi_mgr_bridge_post_disable(&bridge.base);
+    fault.clear();dsi_mgr_bridge_post_disable(&bridge.base, nullptr);
     expect({"save_pll","noirq0","noirq1","off1","off0","phy_off"});
     assert(!bridge.powered);
-    dsi_mgr_bridge_pre_enable(&bridge.base);events.clear();prepare(false);events.clear();
+    dsi_mgr_bridge_pre_enable(&bridge.base, nullptr);events.clear();prepare(false);events.clear();
     dma_blocked[0]=dma_blocked[1]=true;
-    dsi_mgr_bridge_post_disable(&bridge.base);expect({});
-    dsi_mgr_bridge_pre_enable(&bridge.base);expect({});
+    dsi_mgr_bridge_post_disable(&bridge.base, nullptr);expect({});
+    dsi_mgr_bridge_pre_enable(&bridge.base, nullptr);expect({});
     assert(bridge.powered&&clocks_ready[0]&&clocks_ready[1]);
     dsi_bridge blocked_slave{{},1,nullptr,true,false};
-    dsi_mgr_bridge_post_disable(&blocked_slave.base);expect({});
-    dsi_mgr_bridge_pre_enable(&blocked_slave.base);expect({});
+    dsi_mgr_bridge_post_disable(&blocked_slave.base, nullptr);expect({});
+    dsi_mgr_bridge_pre_enable(&blocked_slave.base, nullptr);expect({});
     assert(blocked_slave.powered&&clocks_ready[0]&&clocks_ready[1]);
     dma_blocked[0]=dma_blocked[1]=false;
-    dsi_mgr_bridge_post_disable(&bridge.base);
+    dsi_mgr_bridge_post_disable(&bridge.base, nullptr);
     expect({"save_pll","noirq0","noirq1","off1","off0","phy_off"});
 
     // Failed second video enable unwinds the first, keeping command power for OFF.
-    dsi_mgr_bridge_pre_enable(&bridge.base); events.clear(); prepare(); events.clear();
-    fault="video1"; dsi_mgr_bridge_enable(&bridge.base);
+    dsi_mgr_bridge_pre_enable(&bridge.base, nullptr); events.clear(); prepare(); events.clear();
+    fault="video1"; dsi_mgr_bridge_enable(&bridge.base, nullptr);
     expect({"video0","video1","stop0"});
     assert(!bridge.video_enabled && bridge.powered);
-    fault.clear(); unprepare(); dsi_mgr_bridge_post_disable(&bridge.base);
+    fault.clear(); unprepare(); dsi_mgr_bridge_post_disable(&bridge.base, nullptr);
     expect({"panel_off","save_pll","noirq0","noirq1","off1","off0","phy_off"});
-    dsi_mgr_bridge_pre_enable(&bridge.base); events.clear(); prepare(); events.clear();
-    fault="video0"; dsi_mgr_bridge_enable(&bridge.base); expect({"video0"});
+    dsi_mgr_bridge_pre_enable(&bridge.base, nullptr); events.clear(); prepare(); events.clear();
+    fault="video0"; dsi_mgr_bridge_enable(&bridge.base, nullptr); expect({"video0"});
     assert(!bridge.video_enabled && bridge.powered);
-    fault.clear(); unprepare(); dsi_mgr_bridge_post_disable(&bridge.base);
+    fault.clear(); unprepare(); dsi_mgr_bridge_post_disable(&bridge.base, nullptr);
     expect({"panel_off","save_pll","noirq0","noirq1","off1","off0","phy_off"});
 
     dsi_bridge slave{{},1,&panel,false,false};
-    dsi_mgr_bridge_pre_enable(&slave.base); dsi_mgr_bridge_enable(&slave.base);
-    expect({}); dsi_mgr_bridge_post_disable(&slave.base); expect({"phy_off"});
+    dsi_mgr_bridge_pre_enable(&slave.base, nullptr); dsi_mgr_bridge_enable(&slave.base, nullptr);
+    expect({}); dsi_mgr_bridge_post_disable(&slave.base, nullptr); expect({"phy_off"});
 
     // Non-O82 bonded and standalone hosts keep their previous callback order.
     bridge.o82_panel=nullptr;
-    dsi_mgr_bridge_pre_enable(&bridge.base); dsi_mgr_bridge_enable(&bridge.base);
+    dsi_mgr_bridge_pre_enable(&bridge.base, nullptr); dsi_mgr_bridge_enable(&bridge.base, nullptr);
     expect({"phy_on","power0","power1","irq0","irq1","video0","video1"});
     assert(!msm_dsi_manager_uke_video_stop(&encoder)); expect({});
-    dsi_mgr_bridge_post_disable(&bridge.base);
+    dsi_mgr_bridge_post_disable(&bridge.base, nullptr);
     expect({"stop0","stop1","noirq0","noirq1","save_pll","off0","off1","phy_off"});
-    fault="video1"; dsi_mgr_bridge_pre_enable(&bridge.base);
+    fault="video1"; dsi_mgr_bridge_pre_enable(&bridge.base, nullptr);
     expect({"phy_on","power0","power1","irq0","irq1","video0","video1","stop0","noirq0","noirq1","off1","off0","phy_off"});
     fault.clear();
     bonded=false;
-    dsi_mgr_bridge_pre_enable(&bridge.base); dsi_mgr_bridge_enable(&bridge.base);
+    dsi_mgr_bridge_pre_enable(&bridge.base, nullptr); dsi_mgr_bridge_enable(&bridge.base, nullptr);
     expect({"phy_on","power0","irq0","video0"});
-    dsi_mgr_bridge_post_disable(&bridge.base);
+    dsi_mgr_bridge_post_disable(&bridge.base, nullptr);
     expect({"stop0","noirq0","save_pll","off0","phy_off"});
 }
 CPP
 } >> "$work/check.cpp"
 "${CXX:-c++}" -std=c++20 -O2 -Wall -Wextra -Werror \
-    -Wno-missing-field-initializers -fsanitize=undefined \
+    -Wno-missing-field-initializers -Wno-unused-parameter -fsanitize=undefined \
     -fsanitize-undefined-trap-on-error "$work/check.cpp" -o "$work/check"
 "$work/check"
 printf 'Real DSI callbacks: both source timing engines must stop before DSI reset and panel OFF; failed stops preserve power, bridge references balance and generic paths stay unchanged\n'

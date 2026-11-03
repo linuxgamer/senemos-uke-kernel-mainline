@@ -1,0 +1,178 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: wcd939x: allow a coordinated reset controller
+
+Use an explicitly described reset provider for boards that must coordinate
+codec reset with USBSS protection. Keep the legacy GPIO path and its timing,
+using the sleepable GPIO accessor for LPASS providers. Propagate reset errors
+before registering SoundWire components. Keep GPIO reset required on other
+WCD93xx codec bindings. The Uke USBSS provider uses the standard reset core.
+
+--- a/Documentation/devicetree/bindings/reset/xiaomi,uke-wcd939x-codec-reset.yaml
++++ b/Documentation/devicetree/bindings/reset/xiaomi,uke-wcd939x-codec-reset.yaml
+@@ -0,0 +1,38 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/reset/xiaomi,uke-wcd939x-codec-reset.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Xiaomi Uke WCD939x codec reset coordinated by USBSS
++
++maintainers:
++  - Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
++
++description:
++  Child of the Uke WCD939x USBSS I2C device. Reset line zero coordinates
++  codec pin states with the USBSS OVP threshold fuse override. Registration
++  must not select either pin state. The active state drives LPASS GPIO12
++  high at 16 mA with bias disabled; sleep selects input with pull-down at 2 mA.
++
++properties:
++  compatible:
++    const: xiaomi,uke-wcd939x-codec-reset
++  "#reset-cells":
++    const: 1
++  pinctrl-names:
++    items:
++      - const: active
++      - const: sleep
++  pinctrl-0: true
++  pinctrl-1: true
++
++required:
++  - compatible
++  - "#reset-cells"
++  - pinctrl-names
++  - pinctrl-0
++  - pinctrl-1
++
++additionalProperties: false
++...
+--- a/Documentation/devicetree/bindings/sound/qcom,wcd937x.yaml
++++ b/Documentation/devicetree/bindings/sound/qcom,wcd937x.yaml
+@@ -29,6 +29,7 @@
+     description: A reference to the 1.8V I/O supply
+ 
+ required:
++  - reset-gpios
+   - compatible
+   - vdd-px-supply
+ 
+--- a/Documentation/devicetree/bindings/sound/qcom,wcd938x.yaml
++++ b/Documentation/devicetree/bindings/sound/qcom,wcd938x.yaml
+@@ -34,6 +34,7 @@
+     deprecated: true
+ 
+ required:
++  - reset-gpios
+   - compatible
+ 
+ unevaluatedProperties: false
+--- a/Documentation/devicetree/bindings/sound/qcom,wcd939x.yaml
++++ b/Documentation/devicetree/bindings/sound/qcom,wcd939x.yaml
+@@ -21,8 +21,15 @@
+ allOf:
+   - $ref: dai-common.yaml#
+   - $ref: qcom,wcd93xx-common.yaml#
++  - oneOf:
++      - required: [reset-gpios]
++      - required: [resets]
+ 
+ properties:
++  resets:
++    maxItems: 1
++    description: Reset controller coordinating the codec with its USBSS protection.
++
+   compatible:
+     oneOf:
+       - const: qcom,wcd9390-codec
+--- a/Documentation/devicetree/bindings/sound/qcom,wcd93xx-common.yaml
++++ b/Documentation/devicetree/bindings/sound/qcom,wcd93xx-common.yaml
+@@ -83,7 +83,6 @@
+     const: 1
+ 
+ required:
+-  - reset-gpios
+   - qcom,tx-device
+   - qcom,rx-device
+   - qcom,micbias1-microvolt
+--- a/drivers/usb/typec/mux/Kconfig
++++ b/drivers/usb/typec/mux/Kconfig
+@@ -98,7 +98,7 @@
+ config TYPEC_MUX_UKE_WCD939X
+ 	tristate "Uke WCD939x USB2 and DisplayPort AUX switch"
+-	depends on I2C && OF
++	depends on I2C && OF && REGULATOR && GPIOLIB && PINCTRL && RESET_CONTROLLER
+ 	select REGMAP_I2C
+ 	help
+ 	  Exact Uke WCD2.0 Type-C USB2/AUX routing. Firmware owns CC/PD.
+ 	  The fixed USB2 rescue profile uses its existing separate driver.
+--- a/sound/soc/codecs/wcd939x.c
++++ b/sound/soc/codecs/wcd939x.c
+@@ -21,6 +21,7 @@
+ #include <sound/pcm.h>
+ #include <sound/pcm_params.h>
+ #include <linux/regmap.h>
++#include <linux/reset.h>
+ #include <sound/soc.h>
+ #include <sound/soc-dapm.h>
+ #include <linux/regulator/consumer.h>
+@@ -203,6 +204,7 @@
+ 	u32 tx_mode[TX_ADC_MAX];
+ 	int variant;
+ 	struct gpio_desc *reset_gpio;
++	struct reset_control *reset;
+ 	int hphr_pdm_wd_int;
+ 	int hphl_pdm_wd_int;
+ 	int ear_pdm_wd_int;
+@@ -3185,10 +3187,19 @@
+ #endif /* CONFIG_TYPEC */
+ 	int ret;
+ 
+-	wcd939x->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_LOW);
+-	if (IS_ERR(wcd939x->reset_gpio))
+-		return dev_err_probe(dev, PTR_ERR(wcd939x->reset_gpio),
+-				     "Failed to get reset gpio\n");
++	if (of_property_present(dev->of_node, "resets")) {
++		if (of_property_present(dev->of_node, "reset-gpios"))
++			return -EINVAL;
++		wcd939x->reset = devm_reset_control_get_exclusive(dev, NULL);
++		if (IS_ERR(wcd939x->reset))
++			return dev_err_probe(dev, PTR_ERR(wcd939x->reset),
++					     "Failed to get reset controller\n");
++	} else {
++		wcd939x->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_LOW);
++		if (IS_ERR(wcd939x->reset_gpio))
++			return dev_err_probe(dev, PTR_ERR(wcd939x->reset_gpio),
++					     "Failed to get reset gpio\n");
++	}
+ 
+ 	ret = devm_regulator_bulk_get_enable(dev, ARRAY_SIZE(wcd939x_supplies),
+ 					     wcd939x_supplies);
+@@ -3228,10 +3239,13 @@
+ 
+ static int wcd939x_reset(struct wcd939x_priv *wcd939x)
+ {
+-	gpiod_set_value(wcd939x->reset_gpio, 1);
++	if (wcd939x->reset)
++		return reset_control_reset(wcd939x->reset);
++
++	gpiod_set_value_cansleep(wcd939x->reset_gpio, 1);
+ 	/* 20us sleep required after pulling the reset gpio to LOW */
+ 	usleep_range(20, 30);
+-	gpiod_set_value(wcd939x->reset_gpio, 0);
++	gpiod_set_value_cansleep(wcd939x->reset_gpio, 0);
+ 	/* 20us sleep required after pulling the reset gpio to HIGH */
+ 	usleep_range(20, 30);
+ 
+@@ -3568,7 +3582,9 @@
+ 	if (ret)
+ 		return ret;
+ 
+-	wcd939x_reset(wcd939x);
++	ret = wcd939x_reset(wcd939x);
++	if (ret)
++		return dev_err_probe(dev, ret, "Codec reset failed\n");
+ 
+ 	ret = component_master_add_with_match(dev, &wcd939x_comp_ops, match);
+ 	if (ret)

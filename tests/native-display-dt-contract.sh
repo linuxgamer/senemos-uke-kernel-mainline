@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Offline graph only: no kernel configuration, boot image or device is changed.
+# Offline overlay graph only; actual native entry is covered by the C++ fixtures.
 set -Eeuo pipefail
 [[ $# -ge 3 && $# -le 4 && -s $1 && -s $2 && ! -e $3 ]] || exit 2
 input=$1 overlay=$2 out=$3 initial_rate=${4:-60}
@@ -15,8 +15,9 @@ for rail in vsp vsn; do
     fdtput -t s "$out/input.dtb" /__symbols__ "display_panel_$rail" "/soc/display_gpio_regulator_$rail"
 done
 fdtoverlay -i "$out/input.dtb" -o "$out/native.dtb" "$overlay"
-fdtput -t s "$out/native.dtb" "$framebuffer" status disabled
-fdtput -d "$out/native.dtb" /chosen stdout-path
+fdtput -d "$out/native.dtb" "$framebuffer" backlight
+[[ $(fdtget -t s "$out/native.dtb" "$framebuffer" status) == okay ]]
+[[ $(fdtget -t s "$out/native.dtb" /chosen stdout-path) == "$framebuffer" ]]
 mdss=/soc/display-subsystem@ae00000
 dpu=$mdss/display-controller@ae01000
 dsi0=$mdss/dsi@ae94000
@@ -48,7 +49,7 @@ for id in 0 1; do
 done
 phy0=$(fdtget -t x "$out/native.dtb" "$mdss/phy@ae95000" phandle)
 [[ $(fdtget -t x "$out/native.dtb" "$dsi1" assigned-clock-parents) == "$phy0 0 $phy0 1" ]]
-for node in /soc/qcom,mdss_mdp@ae00000 /soc/qcom,mdss_dsi_ctrl0@ae94000 /soc/qcom,mdss_dsi_ctrl1@ae96000 /soc/qcom,mdss_dsi_phy0@ae95500 /soc/qcom,mdss_dsi_phy1@ae97500 /soc/qcom,dp_display@ae154000 "$framebuffer"; do
+for node in /soc/qcom,mdss_mdp@ae00000 /soc/qcom,mdss_dsi_ctrl0@ae94000 /soc/qcom,mdss_dsi_ctrl1@ae96000 /soc/qcom,mdss_dsi_phy0@ae95500 /soc/qcom,mdss_dsi_phy1@ae97500 /soc/qcom,dp_display@ae154000; do
     [[ $(fdtget -t s "$out/native.dtb" "$node" status) == disabled ]]
 done
 for property in reg qcom,handoff-smrs qcom,actlr; do

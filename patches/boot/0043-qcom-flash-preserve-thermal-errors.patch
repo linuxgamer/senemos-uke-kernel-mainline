@@ -1,0 +1,85 @@
+From: Uke platform maintainers
+Subject: [PATCH] leds: qcom-flash: preserve thermal faults and minimum budgets
+
+Keep the first thermal transaction error while attempting every saved threshold
+restore, including an ambiguous first write. Account for the minimum physical
+torch current before reserving a budget and refuse a sub-step granted budget.
+No current ceiling, hardware threshold, timer or flash ABI is increased.
+
+diff --git a/drivers/leds/flash/leds-qcom-flash.c b/drivers/leds/flash/leds-qcom-flash.c
+index de03a0b..b625aba 100644
+--- a/drivers/leds/flash/leds-qcom-flash.c
++++ b/drivers/leds/flash/leds-qcom-flash.c
+@@ -220,7 +220,7 @@ static int update_allowed_flash_current(struct qcom_flash_led *led, u32 *current
+ {
+ 	struct qcom_flash_data *flash_data = led->flash_data;
+ 	u32 therm_ma, avail_ma, thrsh[3], min_thrsh, sts;
+-	int rc = 0;
++	int rc = 0, restore_rc;
+ 
+ 	mutex_lock(&flash_data->lock);
+ 	/*
+@@ -267,7 +267,7 @@ static int update_allowed_flash_current(struct qcom_flash_led *led, u32 *current
+ 
+ 	rc = regmap_field_write(flash_data->r_fields[REG_THERM_THRSH1], min_thrsh);
+ 	if (rc < 0)
+-		goto unlock;
++		goto restore;
+ 
+ 	if (flash_data->hw_type == QCOM_MVFLASH_4CH)
+ 		min_thrsh = OTST2_4CH_MIN_VAL;
+@@ -321,16 +321,19 @@ static int update_allowed_flash_current(struct qcom_flash_led *led, u32 *current
+ 
+ restore:
+ 	/* Restore to default thermal threshold settings */
+-	rc = regmap_field_write(flash_data->r_fields[REG_THERM_THRSH1], thrsh[0]);
+-	if (rc < 0)
+-		goto unlock;
++	restore_rc = regmap_field_write(flash_data->r_fields[REG_THERM_THRSH1], thrsh[0]);
++	if (!rc)
++		rc = restore_rc;
+ 
+-	rc = regmap_field_write(flash_data->r_fields[REG_THERM_THRSH2], thrsh[1]);
+-	if (rc < 0)
+-		goto unlock;
++	restore_rc = regmap_field_write(flash_data->r_fields[REG_THERM_THRSH2], thrsh[1]);
++	if (!rc)
++		rc = restore_rc;
+ 
+-	if (flash_data->hw_type == QCOM_MVFLASH_3CH)
+-		rc = regmap_field_write(flash_data->r_fields[REG_THERM_THRSH3], thrsh[2]);
++	if (flash_data->hw_type == QCOM_MVFLASH_3CH) {
++		restore_rc = regmap_field_write(flash_data->r_fields[REG_THERM_THRSH3], thrsh[2]);
++		if (!rc)
++			rc = restore_rc;
++	}
+ 
+ unlock:
+ 	mutex_unlock(&flash_data->lock);
+@@ -587,6 +590,7 @@ static int qcom_flash_led_brightness_set(struct led_classdev *led_cdev,
+ 	struct led_classdev_flash *fled_cdev = lcdev_to_flcdev(led_cdev);
+ 	struct qcom_flash_led *led = flcdev_to_qcom_fled(fled_cdev);
+ 	u32 current_ma = brightness * led->max_torch_current_ma / led_cdev->max_brightness;
++	u32 min_current_ma = TORCH_IRES_UA * led->chan_count / UA_PER_MA;
+ 	bool enable = !!brightness;
+ 	int rc;
+ 
+@@ -598,9 +602,18 @@ static int qcom_flash_led_brightness_set(struct led_classdev *led_cdev,
+ 	if (rc)
+ 		return rc;
+ 
++	/* Account for the minimum current which a nonzero torch request programs. */
++	if (enable && led->max_torch_current_ma < min_current_ma)
++		return -ERANGE;
++	if (enable && current_ma < min_current_ma)
++		current_ma = min_current_ma;
++
+ 	rc = update_allowed_flash_current(led, &current_ma, enable);
+ 	if (rc < 0)
+ 		return rc;
++	/* A zero/sub-step budget must not enable the minimum physical current. */
++	if (enable && current_ma < min_current_ma)
++		return -EAGAIN;
+ 
+ 	rc = set_flash_current(led, current_ma, TORCH_MODE);
+ 	if (rc)

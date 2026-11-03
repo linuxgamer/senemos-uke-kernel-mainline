@@ -1,0 +1,21 @@
+From: SenemOS contributors <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] spi: geni-qcom: retain in-progress status after a GPI transfer
+
+The SPI core owns message completion and byte accounting. Setting status to
+zero in a successful transfer callback makes spi_transfer_one_message() leave
+before adding the transfer length or processing subsequent transfers. A Uke
+SPI trace reports a successful three-byte transfer as message length 0/3.
+
+Keep the message in progress on successful DMA completion. Preserve -EIO for
+DMA errors and nonzero residue. Do not weaken clients' short-transfer checks.
+
+--- a/drivers/spi/spi-geni-qcom.c
++++ b/drivers/spi/spi-geni-qcom.c
+@@ -393,5 +393,6 @@
+ 	if (!result->residue) {
+-		spi->cur_msg->status = 0;
++		/* The SPI core still owns message accounting and completion. */
++		spi->cur_msg->status = -EINPROGRESS;
+ 		dev_dbg(&spi->dev, "DMA txn completed\n");
+ 	} else {
+ 		dev_err(&spi->dev, "DMA xfer has pending: %d\n", result->residue);

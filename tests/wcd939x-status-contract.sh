@@ -15,12 +15,14 @@ enum typec_orientation { TYPEC_ORIENTATION_NONE, TYPEC_ORIENTATION_NORMAL, TYPEC
 enum { TYPEC_STATE_SAFE, TYPEC_STATE_USB, TYPEC_STATE_MODAL, TYPEC_MODE_USB2, TYPEC_MODE_USB3,
        TYPEC_DP_STATE_C, TYPEC_DP_STATE_D, TYPEC_DP_STATE_E, TYPEC_DP_STATE_F };
 #define USB_TYPEC_DP_SID 0xff01
-struct regmap { unsigned int value[0x500]; int calls, fail; unsigned int read_address; };
+struct regmap { unsigned int value[0x500]; int calls, fail, eq_drops; unsigned int read_address; };
 struct uke_usbss { struct regmap *regmap; bool removing,applied; enum typec_orientation orientation;
  unsigned long mode; unsigned int svid; int last_error; };
 static int regmap_update_bits(struct regmap *r,unsigned int a,unsigned int m,unsigned int v) {
  if(++r->calls==r->fail)return -EREMOTEIO;
- assert(a<0x500);r->value[a]=(r->value[a]&~m)|(v&m);return 0;
+ assert(a<0x500);
+ if(a==0x415 && (r->value[a]&0x80) && (m&0x80) && !(v&0x80))++r->eq_drops;
+ r->value[a]=(r->value[a]&~m)|(v&m);return 0;
 }
 static int regmap_clear_bits(struct regmap *r,unsigned int a,unsigned int m){return regmap_update_bits(r,a,m,0);}
 static int regmap_set_bits(struct regmap *r,unsigned int a,unsigned int m){return regmap_update_bits(r,a,m,m);}
@@ -56,10 +58,21 @@ int main(void) {
  memset(&r,0,sizeof(r));memset(&u,0,sizeof(u));u.regmap=&r;
  assert(uke_usbss_apply(&u,TYPEC_ORIENTATION_NORMAL,TYPEC_STATE_USB,0)==0 && !r.read_address);
  assert((r.value[0x403]&(BIT(4)|BIT(3)))==(BIT(4)|BIT(3)));
+ int calls=r.calls;
+ assert(uke_usbss_apply(&u,TYPEC_ORIENTATION_NORMAL,TYPEC_STATE_USB,0)==0 && r.calls==calls);
+ for(unsigned long mode=TYPEC_DP_STATE_C;mode<=TYPEC_DP_STATE_F;++mode) {
+  r.value[0x407]=0x48;r.eq_drops=0;
+  assert(uke_usbss_apply(&u,TYPEC_ORIENTATION_NORMAL,mode,USB_TYPEC_DP_SID)==0);
+  assert(!r.eq_drops && (r.value[0x403]&(BIT(4)|BIT(3)))==(BIT(4)|BIT(3)));
+  calls=r.calls;
+  assert(uke_usbss_apply(&u,TYPEC_ORIENTATION_NORMAL,mode,USB_TYPEC_DP_SID)==0 && r.calls==calls);
+ }
+ assert(uke_usbss_apply(&u,TYPEC_ORIENTATION_NORMAL,TYPEC_DP_STATE_C,0x1234)==-EOPNOTSUPP && !u.applied);
+ assert(uke_usbss_apply(&u,TYPEC_ORIENTATION_NORMAL,TYPEC_STATE_USB,0)==0 && u.applied);
  u.removing=true;assert(uke_usbss_apply(&u,TYPEC_ORIENTATION_NORMAL,TYPEC_STATE_USB,0)==-ESHUTDOWN);
  return 0;
 }
 EOF
 ${CC:-cc} -std=c11 -Wall -Wextra -Werror "$work/check.c" -o "$work/check"
 "$work/check"
-echo 'Actual WCD apply: both orientations/all status bytes, unrelated bits, read/write faults and USB-only path passed; no hardware test'
+echo 'Actual WCD apply: orientation/status/fault checks, unchanged-route no-op and uninterrupted USB EQ across DP transitions passed; no hardware test'

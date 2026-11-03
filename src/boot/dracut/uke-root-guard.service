@@ -1,5 +1,5 @@
 [Unit]
-Description=Admit only the Fedora image in the linux partition
+Description=Admit only the selected provisioned Uke Fedora root
 DefaultDependencies=no
 After=systemd-udev-trigger.service
 Before=sysroot.mount

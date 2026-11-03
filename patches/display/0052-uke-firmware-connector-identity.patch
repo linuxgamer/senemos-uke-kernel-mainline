@@ -1,0 +1,30 @@
+diff --git a/drivers/gpu/drm/sysfb/simpledrm.c b/drivers/gpu/drm/sysfb/simpledrm.c
+index 97aff7e..262250c 100644
+--- a/drivers/gpu/drm/sysfb/simpledrm.c
++++ b/drivers/gpu/drm/sysfb/simpledrm.c
+@@ -647,7 +647,6 @@ static struct simpledrm_device *simpledrm_device_create(struct drm_driver *drv,
+ 	struct drm_device *dev;
+ 	int width, height, stride;
+ 	u16 width_mm = 0, height_mm = 0;
+-	bool uke_internal_panel = false;
+ 	struct device_node *panel_node;
+ 	enum drm_panel_orientation orientation = DRM_MODE_PANEL_ORIENTATION_UNKNOWN;
+ 	const struct drm_format_info *format;
+@@ -729,9 +728,6 @@ static struct simpledrm_device *simpledrm_device_create(struct drm_driver *drv,
+ 			ret = simplefb_get_panel_height_mm_of(dev, panel_node);
+ 			if (ret > 0)
+ 				height_mm = ret;
+-			uke_internal_panel = width_mm && height_mm &&
+-				of_machine_is_compatible("xiaomi,uke") &&
+-				of_device_is_compatible(panel_node, "xiaomi,uke-panel-handoff");
+ 			/*
+ 			 * Ignore errors from parsing the panel orientation. With
+ 			 * the orientation initialized to UNKNOWN, the connector
+@@ -897,7 +893,6 @@ static struct simpledrm_device *simpledrm_device_create(struct drm_driver *drv,
+ 
+ 	connector = &sdev->connector;
+ 	ret = drm_connector_init(dev, connector, &simpledrm_connector_funcs,
+-				 uke_internal_panel ? DRM_MODE_CONNECTOR_DSI :
+ 				 DRM_MODE_CONNECTOR_Unknown);
+ 	if (ret)
+ 		return ERR_PTR(ret);

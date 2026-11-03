@@ -1,0 +1,188 @@
+From: Senemos Uke maintainers
+Subject: [PATCH] Input: report paired SMP2P switches without taking remote GPIOs
+
+Expose standard EV_SW devices for remotely owned switches that publish
+mutually exclusive open/closed bits. Read current IRQ line state for startup
+and every event; ignore absent/contradictory state rather than guessing.
+
+Uke OEM DT: MiCode/kernel_devicetree, 94c84aeb9e517dbde546fc732033c184094c8e57,
+qcom/uke-sm8635.dtsi. The stock xiaomi_hall module inspected at prebuilt commit
+446629e5d30c76848bfde9e3a67bcf6386ac24fa requests ONESHOT/RISING and maps
+open/close to 0/1. Live Uke traces independently confirm stable open=1 and
+closed=2 entry values. No donor module is loaded or executed.
+
+Upstream smp2p already implements IRQCHIP_STATE_LINE_LEVEL. This driver uses
+that interface, standard input events and normal module discovery. It does
+not acquire physical GPIOs, poll, change DSP ownership or claim system wake.
+
+--- a/drivers/input/misc/Kconfig
++++ b/drivers/input/misc/Kconfig
+@@ -993,4 +993,10 @@
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called stpmic1_onkey.
+ 
++config INPUT_QCOM_SMP2P_SWITCH
++	tristate "Qualcomm SMP2P paired switches"
++	depends on QCOM_SMP2P
++	help
++	  Report remotely owned hall switches through paired SMP2P events.
++
+ endif
+--- a/drivers/input/misc/Makefile
++++ b/drivers/input/misc/Makefile
+@@ -95,3 +95,4 @@
+ obj-$(CONFIG_INPUT_XEN_KBDDEV_FRONTEND)	+= xen-kbdfront.o
+ obj-$(CONFIG_INPUT_YEALINK)		+= yealink.o
+ obj-$(CONFIG_INPUT_IDEAPAD_SLIDEBAR)	+= ideapad_slidebar.o
++obj-$(CONFIG_INPUT_QCOM_SMP2P_SWITCH) += qcom-smp2p-switch.o
+--- /dev/null
++++ b/drivers/input/misc/qcom-smp2p-switch.c
+@@ -0,0 +1,107 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* Paired Qualcomm SMP2P switch events; physical GPIOs remain remote-owned. */
++#include <linux/input.h>
++#include <linux/interrupt.h>
++#include <linux/irq.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/property.h>
++#include <linux/slab.h>
++
++struct smp2p_switch {
++	struct input_dev *input;
++	unsigned int code;
++	int open_irq;
++	int closed_irq;
++};
++
++static int smp2p_switch_read(struct smp2p_switch *sw)
++{
++	bool open, closed;
++	int ret;
++
++	ret = irq_get_irqchip_state(sw->open_irq, IRQCHIP_STATE_LINE_LEVEL, &open);
++	if (ret)
++		return ret;
++	ret = irq_get_irqchip_state(sw->closed_irq, IRQCHIP_STATE_LINE_LEVEL, &closed);
++	if (ret)
++		return ret;
++	/* Zero is not an initial-state report; both asserted is inconsistent. */
++	if (open == closed)
++		return -EAGAIN;
++	return closed;
++}
++
++static irqreturn_t smp2p_switch_irq(int irq, void *data)
++{
++	struct smp2p_switch *sw = data;
++	int state = smp2p_switch_read(sw);
++
++	if (state >= 0) {
++		input_report_switch(sw->input, sw->code, state);
++		input_sync(sw->input);
++	}
++	return IRQ_HANDLED;
++}
++
++static int smp2p_switch_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct smp2p_switch *sw;
++	const char *label;
++	int ret;
++
++	sw = devm_kzalloc(dev, sizeof(*sw), GFP_KERNEL);
++	if (!sw)
++		return -ENOMEM;
++	ret = device_property_read_u32(dev, "linux,code", &sw->code);
++	if (ret || sw->code > SW_MAX)
++		return dev_err_probe(dev, -EINVAL, "Invalid switch code\n");
++	sw->open_irq = platform_get_irq_byname(pdev, "open");
++	if (sw->open_irq < 0)
++		return sw->open_irq;
++	sw->closed_irq = platform_get_irq_byname(pdev, "closed");
++	if (sw->closed_irq < 0)
++		return sw->closed_irq;
++	if (sw->open_irq == sw->closed_irq)
++		return -EINVAL;
++	sw->input = devm_input_allocate_device(dev);
++	if (!sw->input)
++		return -ENOMEM;
++	if (device_property_read_string(dev, "label", &label))
++		label = dev_name(dev);
++	sw->input->name = label;
++	sw->input->id.bustype = BUS_HOST;
++	input_set_capability(sw->input, EV_SW, sw->code);
++	ret = input_register_device(sw->input);
++	if (ret)
++		return ret;
++	ret = devm_request_threaded_irq(dev, sw->open_irq, NULL, smp2p_switch_irq,
++			IRQF_ONESHOT | IRQF_TRIGGER_RISING, label, sw);
++	if (ret)
++		return dev_err_probe(dev, ret, "Cannot request open event\n");
++	ret = devm_request_threaded_irq(dev, sw->closed_irq, NULL, smp2p_switch_irq,
++			IRQF_ONESHOT | IRQF_TRIGGER_RISING, label, sw);
++	if (ret)
++		return dev_err_probe(dev, ret, "Cannot request closed event\n");
++	smp2p_switch_irq(0, sw);
++	return 0;
++}
++
++static const struct of_device_id smp2p_switch_of_match[] = {
++	{ .compatible = "qcom,smp2p-switch" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, smp2p_switch_of_match);
++
++static struct platform_driver smp2p_switch_driver = {
++	.probe = smp2p_switch_probe,
++	.driver = {
++		.name = "qcom-smp2p-switch",
++		.of_match_table = smp2p_switch_of_match,
++	},
++};
++module_platform_driver(smp2p_switch_driver);
++MODULE_DESCRIPTION("Qualcomm SMP2P paired switch input");
++MODULE_LICENSE("GPL");
+--- /dev/null
++++ b/Documentation/devicetree/bindings/input/qcom,smp2p-switch.yaml
+@@ -0,0 +1,38 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/input/qcom,smp2p-switch.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Qualcomm SMP2P paired switch events
++
++maintainers:
++  - Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
++
++description:
++  A remotely owned switch reports mutually exclusive open and closed bits in
++  one SMP2P entry. Each bit has a rising-edge interrupt and supports reading
++  its current line level. No local GPIO ownership or polling is required.
++
++properties:
++  compatible:
++    const: qcom,smp2p-switch
++  label: true
++  linux,code:
++    $ref: /schemas/types.yaml#/definitions/uint32
++    maximum: 16
++  interrupts-extended:
++    minItems: 2
++    maxItems: 2
++  interrupt-names:
++    items:
++      - const: open
++      - const: closed
++
++required:
++  - compatible
++  - linux,code
++  - interrupts-extended
++  - interrupt-names
++
++additionalProperties: false

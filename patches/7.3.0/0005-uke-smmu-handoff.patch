@@ -1,0 +1,199 @@
+diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c b/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
+index e2c914fccd6f..436f13e239b7 100644
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
+@@ -14,6 +14,9 @@
+ #include "arm-smmu.h"
+ #include "arm-smmu-qcom.h"
+ 
++/* MMU-500 ACR cache lock, also used by arm-smmu-impl.c. */
++#define ARM_MMU500_ACR_CACHE_LOCK	BIT(26)
++
+ #define QCOM_DUMMY_VAL	-1
+ 
+ /*
+@@ -739,6 +742,115 @@ static const struct qcom_smmu_match_data qcom_smmu_500_impl0_data = {
+  * Do not add any more qcom,SOC-smmu-500 entries to this list, unless they need
+  * special handling and can not be covered by the qcom,smmu-500 entry.
+  */
++/*
++ * Copyright (c) 2019-2021, The Linux Foundation. All rights reserved.
++ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
++ *
++ * Uke USB-only QSMMUv500 integration, from Xiaomi arm_smmu_handoff_cbs()
++ * and qsmmuv500_cfg_probe(). Keep firmware display mappings reserved; the
++ * USB and GPI streams get normal v6.12 DMA domains. No bypass substitution.
++ */
++static int qcom_uke_smmu_cfg_probe(struct arm_smmu_device *smmu)
++{
++	const __be32 *handoff;
++	int len, i, j;
++	u32 reg;
++
++	if (!smmu->smrs || (smmu->features & ARM_SMMU_FEAT_EXIDS))
++		return -EOPNOTSUPP;
++	handoff = of_get_property(smmu->dev->of_node, "qcom,handoff-smrs", &len);
++	if (!handoff || len != 2 * sizeof(u32) ||
++	    be32_to_cpu(handoff[0]) != 0x1c00 || be32_to_cpu(handoff[1]) != 2)
++		return dev_err_probe(smmu->dev, -EINVAL, "unexpected Uke handoff streams\n");
++
++	for (i = 0; i < smmu->num_mapping_groups; i++) {
++		u32 smr = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_SMR(i));
++		u32 id, mask, s2cr, cb;
++
++		if (!(smr & ARM_SMMU_SMR_VALID))
++			continue;
++		id = FIELD_GET(ARM_SMMU_SMR_ID, smr);
++		mask = FIELD_GET(ARM_SMMU_SMR_MASK, smr & ~ARM_SMMU_SMR_VALID);
++		for (j = 0; j < len / sizeof(u32); j += 2) {
++			u32 hid = be32_to_cpu(handoff[j]);
++			u32 hmask = be32_to_cpu(handoff[j + 1]);
++
++			if ((hmask & mask) != mask || ((hid ^ id) & ~hmask))
++				continue;
++			s2cr = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_S2CR(i));
++			cb = FIELD_GET(ARM_SMMU_S2CR_CBNDX, s2cr);
++			if (FIELD_GET(ARM_SMMU_S2CR_TYPE, s2cr) == S2CR_TYPE_TRANS) {
++				if (cb >= smmu->num_context_banks)
++					return -EINVAL;
++				set_bit(cb, smmu->context_map);
++				set_bit(cb, smmu->boot_context_map);
++			}
++			smmu->smrs[i].id = id;
++			smmu->smrs[i].mask = mask;
++			smmu->smrs[i].valid = true;
++			smmu->s2crs[i].boot_reserved = true;
++			smmu->s2crs[i].type = FIELD_GET(ARM_SMMU_S2CR_TYPE, s2cr);
++			smmu->s2crs[i].privcfg = FIELD_GET(ARM_SMMU_S2CR_PRIVCFG, s2cr);
++			smmu->s2crs[i].cbndx = cb;
++			break;
++		}
++	}
++
++	reg = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_sACR);
++	reg &= ~ARM_MMU500_ACR_CACHE_LOCK;
++	arm_smmu_gr0_write(smmu, ARM_SMMU_GR0_sACR, reg);
++	reg = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_sACR);
++	if (reg & ARM_MMU500_ACR_CACHE_LOCK)
++		return dev_err_probe(smmu->dev, -EACCES, "SMMU cache remains locked\n");
++
++	/* Hardware ATOS needs the downstream TBU debug/halt path. Use page tables. */
++	smmu->features &= ~ARM_SMMU_FEAT_TRANS_OPS;
++	return 0;
++}
++
++static int qcom_uke_smmu_alloc_context_bank(struct arm_smmu_domain *domain,
++		struct arm_smmu_device *smmu, struct device *dev, int start)
++{
++	struct iommu_fwspec *fwspec = dev_iommu_fwspec_get(dev);
++	const __be32 *actlr;
++	int len, i, j;
++
++	/* Keep this port scoped to the proven DT streams: DWC3 and GPI0. */
++	if (!fwspec || !fwspec->num_ids)
++		return -EINVAL;
++	actlr = of_get_property(smmu->dev->of_node, "qcom,actlr", &len);
++	if (actlr && len % (3 * sizeof(u32)))
++		return -EINVAL;
++	for (i = 0; i < fwspec->num_ids; i++) {
++		u32 sid = fwspec->ids[i];
++
++		if (sid != 0x40 && sid != 0xb6)
++			return dev_err_probe(dev, -EOPNOTSUPP, "outside Uke USB SMMU scope\n");
++		/* Neither USB stream has an ACTLR override in the public Uke DT. */
++		for (j = 0; actlr && j < len / sizeof(u32); j += 3)
++			if (!((sid ^ be32_to_cpu(actlr[j])) & ~be32_to_cpu(actlr[j + 1])))
++				return dev_err_probe(dev, -EOPNOTSUPP,
++						     "USB stream needs an ACTLR override\n");
++	}
++	return __arm_smmu_alloc_bitmap(smmu->context_map, start, smmu->num_context_banks);
++}
++
++static int qcom_uke_smmu_def_domain_type(struct device *dev)
++{
++	/* Require translation and the USB stream checks even with passthrough. */
++	return IOMMU_DOMAIN_DMA;
++}
++
++static const struct arm_smmu_impl qcom_uke_smmu_impl = {
++	.def_domain_type = qcom_uke_smmu_def_domain_type,
++	.cfg_probe = qcom_uke_smmu_cfg_probe,
++	.alloc_context_bank = qcom_uke_smmu_alloc_context_bank,
++};
++
++static const struct qcom_smmu_match_data qcom_uke_smmu_data = {
++	.impl = &qcom_uke_smmu_impl,
++};
++
+ static const struct of_device_id __maybe_unused qcom_smmu_impl_of_match[] = {
+ 	{ .compatible = "qcom,msm8996-smmu-v2", .data = &msm8996_smmu_data },
+ 	{ .compatible = "qcom,msm8998-smmu-v2", .data = &qcom_smmu_v2_data },
+@@ -765,6 +877,7 @@ static const struct of_device_id __maybe_unused qcom_smmu_impl_of_match[] = {
+ 	{ .compatible = "qcom,sm8350-smmu-500", .data = &qcom_smmu_500_impl0_data },
+ 	{ .compatible = "qcom,sm8450-smmu-500", .data = &qcom_smmu_500_impl0_data },
+ 	{ .compatible = "qcom,smmu-500", .data = &qcom_smmu_500_impl0_data },
++	{ .compatible = "qcom,sm7675-usb-smmu", .data = &qcom_uke_smmu_data },
+ 	{ }
+ };
+ 
+diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu.c b/drivers/iommu/arm/arm-smmu/arm-smmu.c
+index 0bd21d206eb3..1e8aedd3460a 100644
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu.c
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu.c
+@@ -1057,7 +1057,7 @@ static int arm_smmu_find_sme(struct arm_smmu_device *smmu, u16 id, u16 mask)
+ 		 */
+ 		if ((mask & smrs[i].mask) == mask &&
+ 		    !((id ^ smrs[i].id) & ~smrs[i].mask))
+-			return i;
++			return smmu->s2crs[i].boot_reserved ? -EBUSY : i;
+ 		/*
+ 		 * If the new entry has any other overlap with an existing one,
+ 		 * though, then there always exists at least one stream ID
+@@ -1676,6 +1676,8 @@ static void arm_smmu_device_reset(struct arm_smmu_device *smmu)
+ 
+ 	/* Make sure all context banks are disabled and clear CB_FSR  */
+ 	for (i = 0; i < smmu->num_context_banks; ++i) {
++		if (test_bit(i, smmu->boot_context_map))
++			continue;
+ 		arm_smmu_write_context_bank(smmu, i);
+ 		arm_smmu_cb_write(smmu, i, ARM_SMMU_CB_FSR, ARM_SMMU_CB_FSR_FAULT);
+ 	}
+@@ -1963,6 +1965,7 @@ static const struct of_device_id arm_smmu_of_match[] = {
+ 	{ .compatible = "cavium,smmu-v2", .data = &cavium_smmuv2 },
+ 	{ .compatible = "nvidia,smmu-500", .data = &arm_mmu500 },
+ 	{ .compatible = "qcom,smmu-v2", .data = &qcom_smmuv2 },
++	{ .compatible = "qcom,sm7675-usb-smmu", .data = &qcom_smmuv2 },
+ 	{ },
+ };
+ MODULE_DEVICE_TABLE(of, arm_smmu_of_match);
+@@ -2077,6 +2080,10 @@ static void arm_smmu_rmr_install_bypass_smr(struct arm_smmu_device *smmu)
+ 	int idx, cnt = 0;
+ 	u32 reg;
+ 
++	/* The Uke DT handoff has live translated display streams. */
++	if (of_device_is_compatible(smmu->dev->of_node, "qcom,sm7675-usb-smmu"))
++		return;
++
+ 	INIT_LIST_HEAD(&rmr_list);
+ 	iort_get_rmr_sids(dev_fwnode(smmu->dev), &rmr_list);
+ 
+diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu.h b/drivers/iommu/arm/arm-smmu/arm-smmu.h
+index 26d2e33cd328..a3fe956074e9 100644
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu.h
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu.h
+@@ -272,6 +272,7 @@ enum arm_smmu_implementation {
+ };
+ 
+ struct arm_smmu_s2cr {
++	bool				boot_reserved;
+ 	struct iommu_group		*group;
+ 	int				count;
+ 	enum arm_smmu_s2cr_type		type;
+@@ -316,6 +317,7 @@ struct arm_smmu_device {
+ 	u32				num_context_banks;
+ 	u32				num_s2_context_banks;
+ 	DECLARE_BITMAP(context_map, ARM_SMMU_MAX_CBS);
++	DECLARE_BITMAP(boot_context_map, ARM_SMMU_MAX_CBS);
+ 	struct arm_smmu_cb		*cbs;
+ 	atomic_t			irptndx;
+ 

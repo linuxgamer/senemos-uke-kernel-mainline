@@ -1,0 +1,5754 @@
+diff --git a/drivers/clk/clk.c b/drivers/clk/clk.c
+index 048adfa86a5d..d4ae8876929b 100644
+--- a/drivers/clk/clk.c
++++ b/drivers/clk/clk.c
+@@ -82,6 +82,8 @@ struct clk_core {
+ 	struct clk_core		*new_child;
+ 	unsigned long		flags;
+ 	bool			orphan;
++	bool			boot_enabled;
++	bool			need_sync;
+ 	bool			rpm_enabled;
+ 	unsigned int		enable_count;
+ 	unsigned int		prepare_count;
+@@ -1442,6 +1444,88 @@ static void clk_core_disable_unprepare(struct clk_core *core)
+ 	clk_core_unprepare_lock(core);
+ }
+ 
++/* Xiaomi clock hold/sync, opted into only by Uke clock providers. */
++static void clk_core_hold_state(struct clk_core *core)
++{
++	int ret;
++
++	if (!(core->flags & CLK_HOLD_STATE) || !core->boot_enabled ||
++	    core->need_sync || core->orphan)
++		return;
++
++	ret = clk_core_prepare_enable(core);
++	if (ret)
++		pr_err("clk: cannot hold boot clock %s: %d\n", core->name, ret);
++	else
++		core->need_sync = true;
++}
++
++static void clk_core_update_orphan_hold_state(struct clk_core *core)
++{
++	struct clk_core *child;
++
++	if (core->orphan)
++		return;
++	clk_core_hold_state(core);
++	hlist_for_each_entry(child, &core->children, child_node)
++		clk_core_update_orphan_hold_state(child);
++}
++
++/* Check the whole provider before releasing any of its startup references. */
++static bool clk_core_hold_pending(struct clk_core *core, struct device *dev)
++{
++	struct clk_core *child;
++
++	if (core->dev == dev && (core->flags & CLK_HOLD_STATE) &&
++	    core->boot_enabled && !core->need_sync)
++		return true;
++	hlist_for_each_entry(child, &core->children, child_node)
++		if (clk_core_hold_pending(child, dev))
++			return true;
++	return false;
++}
++
++static void clk_core_sync_subtree(struct clk_core *core, struct device *dev)
++{
++	struct clk_core *child;
++
++	hlist_for_each_entry(child, &core->children, child_node)
++		clk_core_sync_subtree(child, dev);
++	if (core->dev != dev || !(core->flags & CLK_HOLD_STATE))
++		return;
++
++	/* Clear before dropping the reference: repeat sync must be harmless. */
++	core->boot_enabled = false;
++	if (core->need_sync) {
++		core->need_sync = false;
++		clk_core_disable_unprepare(core);
++	}
++}
++
++int clk_sync_state(struct device *dev)
++{
++	struct clk_core *core;
++	int ret = -EAGAIN;
++
++	clk_prepare_lock();
++	hlist_for_each_entry(core, &clk_root_list, child_node)
++		if (clk_core_hold_pending(core, dev))
++			goto out;
++	hlist_for_each_entry(core, &clk_orphan_list, child_node)
++		if (clk_core_hold_pending(core, dev))
++			goto out;
++
++	hlist_for_each_entry(core, &clk_root_list, child_node)
++		clk_core_sync_subtree(core, dev);
++	hlist_for_each_entry(core, &clk_orphan_list, child_node)
++		clk_core_sync_subtree(core, dev);
++	ret = 0;
++out:
++	clk_prepare_unlock();
++	return ret;
++}
++EXPORT_SYMBOL_GPL(clk_sync_state);
++
+ static void __init clk_unprepare_unused_subtree(struct clk_core *core)
+ {
+ 	struct clk_core *child;
+@@ -1451,6 +1535,9 @@ static void __init clk_unprepare_unused_subtree(struct clk_core *core)
+ 	hlist_for_each_entry(child, &core->children, child_node)
+ 		clk_unprepare_unused_subtree(child);
+ 
++	if (core->flags & CLK_HOLD_STATE)
++		return;
++
+ 	if (core->prepare_count)
+ 		return;
+ 
+@@ -1477,6 +1564,9 @@ static void __init clk_disable_unused_subtree(struct clk_core *core)
+ 	hlist_for_each_entry(child, &core->children, child_node)
+ 		clk_disable_unused_subtree(child);
+ 
++	if (core->flags & CLK_HOLD_STATE)
++		return;
++
+ 	if (core->flags & CLK_OPS_PARENT_ENABLE)
+ 		clk_core_prepare_enable(core->parent);
+ 
+@@ -2360,6 +2450,15 @@ static struct clk_core *clk_propagate_rate_change(struct clk_core *core,
+ 			fail_clk = core;
+ 	}
+ 
++	if (event == PRE_RATE_CHANGE && core->ops->pre_rate_change) {
++		ret = core->ops->pre_rate_change(core->hw, core->rate,
++					       core->new_rate);
++		if (ret)
++			fail_clk = core;
++	} else if (event == ABORT_RATE_CHANGE && core->ops->post_rate_change) {
++		core->ops->post_rate_change(core->hw, core->new_rate, core->rate);
++	}
++
+ 	hlist_for_each_entry(child, &core->children, child_node) {
+ 		/* Skip children who will be reparented to another clock */
+ 		if (child->new_parent && child->new_parent != core)
+@@ -2454,6 +2553,9 @@ static void clk_change_rate(struct clk_core *core)
+ 	if (core->flags & CLK_RECALC_NEW_RATES)
+ 		(void)clk_calc_new_rates(core, core->new_rate);
+ 
++	if (core->ops->post_rate_change)
++		core->ops->post_rate_change(core->hw, old_rate, core->rate);
++
+ 	/*
+ 	 * Use safe iteration, as change_rate can actually swap parents
+ 	 * for certain clock types.
+@@ -3527,6 +3629,7 @@ static const struct {
+ 	ENTRY(CLK_IS_CRITICAL),
+ 	ENTRY(CLK_OPS_PARENT_ENABLE),
+ 	ENTRY(CLK_DUTY_CYCLE_PARENT),
++	ENTRY(CLK_HOLD_STATE),
+ #undef ENTRY
+ };
+ 
+@@ -3850,6 +3953,7 @@ static void clk_core_reparent_orphans_nolock(void)
+ 			__clk_set_parent_after(orphan, parent, NULL);
+ 			__clk_recalc_accuracies(orphan);
+ 			__clk_recalc_rates(orphan, true, 0);
++			clk_core_update_orphan_hold_state(orphan);
+ 
+ 			/*
+ 			 * __clk_init_parent() will set the initial req_rate to
+@@ -4033,6 +4137,8 @@ static int __clk_core_init(struct clk_core *core)
+ 	else
+ 		rate = 0;
+ 	core->rate = core->req_rate = rate;
++	if (core->flags & CLK_HOLD_STATE)
++		core->boot_enabled = clk_core_is_enabled(core);
+ 
+ 	/*
+ 	 * Enable CLK_IS_CRITICAL clocks so newly added critical clocks
+@@ -4056,6 +4162,7 @@ static int __clk_core_init(struct clk_core *core)
+ 		}
+ 	}
+ 
++	clk_core_hold_state(core);
+ 	clk_core_reparent_orphans_nolock();
+ out:
+ 	clk_pm_runtime_put(core);
+@@ -4564,6 +4671,11 @@ void clk_unregister(struct clk *clk)
+ 	 * Assign empty clock ops for consumers that might still hold
+ 	 * a reference to this clock.
+ 	 */
++	if (clk->core->need_sync) {
++		clk->core->need_sync = false;
++		clk_core_disable_unprepare(clk->core);
++	}
++
+ 	flags = clk_enable_lock();
+ 	clk->core->ops = &clk_nodrv_ops;
+ 	clk_enable_unlock(flags);
+diff --git a/drivers/clk/clk_test.c b/drivers/clk/clk_test.c
+index b1961daac5e2..247e83588882 100644
+--- a/drivers/clk/clk_test.c
++++ b/drivers/clk/clk_test.c
+@@ -12,6 +12,7 @@
+ #include "clk.h"
+ 
+ #include <kunit/clk.h>
++#include <kunit/device.h>
+ #include <kunit/of.h>
+ #include <kunit/platform_device.h>
+ #include <kunit/test.h>
+@@ -3542,9 +3543,143 @@ static struct kunit_suite clk_hw_get_dev_of_node_test_suite = {
+ };
+ 
+ 
++/* Boot handoff regressions: consumer refs, orphan reparent and failed hold. */
++struct clk_hold_test_context {
++	struct clk_hw hw;
++	bool enabled;
++	int prepare_error;
++};
++
++static int clk_hold_test_prepare(struct clk_hw *hw)
++{
++	return container_of(hw, struct clk_hold_test_context, hw)->prepare_error;
++}
++
++static int clk_hold_test_enable(struct clk_hw *hw)
++{
++	container_of(hw, struct clk_hold_test_context, hw)->enabled = true;
++	return 0;
++}
++
++static void clk_hold_test_disable(struct clk_hw *hw)
++{
++	container_of(hw, struct clk_hold_test_context, hw)->enabled = false;
++}
++
++static int clk_hold_test_is_enabled(struct clk_hw *hw)
++{
++	return container_of(hw, struct clk_hold_test_context, hw)->enabled;
++}
++
++static const struct clk_ops clk_hold_test_ops = {
++	.prepare = clk_hold_test_prepare,
++	.enable = clk_hold_test_enable,
++	.disable = clk_hold_test_disable,
++	.is_enabled = clk_hold_test_is_enabled,
++};
++
++static void clk_hold_consumer_test(struct kunit *test)
++{
++	struct clk_hold_test_context *ctx;
++	struct clk_init_data init = {
++		.name = "uke-hold-consumer",
++		.ops = &clk_hold_test_ops,
++		.flags = CLK_HOLD_STATE,
++	};
++	struct device *dev;
++	struct clk *clk;
++
++	dev = kunit_device_register(test, "uke-hold-consumer");
++	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, dev);
++	ctx = kunit_kzalloc(test, sizeof(*ctx), GFP_KERNEL);
++	KUNIT_ASSERT_NOT_NULL(test, ctx);
++	ctx->enabled = true;
++	ctx->hw.init = &init;
++	KUNIT_ASSERT_EQ(test, clk_hw_register_kunit(test, dev, &ctx->hw), 0);
++	clk = clk_hw_get_clk_prepared_enabled_kunit(test, &ctx->hw, NULL);
++	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, clk);
++	KUNIT_EXPECT_EQ(test, __clk_get_enable_count(clk), 2U);
++	KUNIT_ASSERT_EQ(test, clk_sync_state(dev), 0);
++	KUNIT_EXPECT_EQ(test, __clk_get_enable_count(clk), 1U);
++	KUNIT_EXPECT_TRUE(test, ctx->enabled);
++	KUNIT_ASSERT_EQ(test, clk_sync_state(dev), 0);
++	KUNIT_EXPECT_EQ(test, __clk_get_enable_count(clk), 1U);
++}
++
++static void clk_hold_orphan_test(struct kunit *test)
++{
++	const char *parent_name = "uke-hold-parent";
++	struct clk_hold_test_context *child, *parent;
++	struct clk_init_data init = {
++		.name = "uke-hold-orphan",
++		.ops = &clk_hold_test_ops,
++		.flags = CLK_HOLD_STATE,
++		.parent_names = &parent_name,
++		.num_parents = 1,
++	};
++	struct device *dev;
++
++	dev = kunit_device_register(test, "uke-hold-orphan");
++	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, dev);
++	child = kunit_kzalloc(test, sizeof(*child), GFP_KERNEL);
++	parent = kunit_kzalloc(test, sizeof(*parent), GFP_KERNEL);
++	KUNIT_ASSERT_NOT_NULL(test, child);
++	KUNIT_ASSERT_NOT_NULL(test, parent);
++	child->enabled = true;
++	child->hw.init = &init;
++	KUNIT_ASSERT_EQ(test, clk_hw_register_kunit(test, dev, &child->hw), 0);
++	KUNIT_EXPECT_EQ(test, clk_sync_state(dev), -EAGAIN);
++	KUNIT_EXPECT_TRUE(test, child->enabled);
++	init.name = parent_name;
++	init.parent_names = NULL;
++	init.num_parents = 0;
++	parent->enabled = true;
++	parent->hw.init = &init;
++	KUNIT_ASSERT_EQ(test, clk_hw_register_kunit(test, dev, &parent->hw), 0);
++	KUNIT_EXPECT_PTR_EQ(test, clk_hw_get_parent(&child->hw), &parent->hw);
++	KUNIT_ASSERT_EQ(test, clk_sync_state(dev), 0);
++	KUNIT_EXPECT_FALSE(test, child->enabled);
++	KUNIT_EXPECT_FALSE(test, parent->enabled);
++}
++
++static void clk_hold_failure_test(struct kunit *test)
++{
++	struct clk_hold_test_context *ctx;
++	struct clk_init_data init = {
++		.name = "uke-hold-failure",
++		.ops = &clk_hold_test_ops,
++		.flags = CLK_HOLD_STATE,
++	};
++	struct device *dev;
++
++	dev = kunit_device_register(test, "uke-hold-failure");
++	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, dev);
++	ctx = kunit_kzalloc(test, sizeof(*ctx), GFP_KERNEL);
++	KUNIT_ASSERT_NOT_NULL(test, ctx);
++	ctx->enabled = true;
++	ctx->prepare_error = -EIO;
++	ctx->hw.init = &init;
++	KUNIT_ASSERT_EQ(test, clk_hw_register_kunit(test, dev, &ctx->hw), 0);
++	KUNIT_EXPECT_EQ(test, clk_sync_state(dev), -EAGAIN);
++	KUNIT_EXPECT_TRUE(test, ctx->enabled);
++}
++
++static struct kunit_case clk_hold_test_cases[] = {
++	KUNIT_CASE(clk_hold_consumer_test),
++	KUNIT_CASE(clk_hold_orphan_test),
++	KUNIT_CASE(clk_hold_failure_test),
++	{}
++};
++
++static struct kunit_suite clk_hold_test_suite = {
++	.name = "clk_uke_handoff",
++	.test_cases = clk_hold_test_cases,
++};
++
+ kunit_test_suites(
+ 	&clk_assigned_rates_suite,
+ 	&clk_hw_get_dev_of_node_test_suite,
++	&clk_hold_test_suite,
+ 	&clk_leaf_mux_set_rate_parent_test_suite,
+ 	&clk_test_suite,
+ 	&clk_multiple_parents_mux_test_suite,
+diff --git a/drivers/clk/qcom/Kconfig b/drivers/clk/qcom/Kconfig
+index 7d84c2f1d911..c3554f8e2ca2 100644
+--- a/drivers/clk/qcom/Kconfig
++++ b/drivers/clk/qcom/Kconfig
+@@ -7,6 +7,14 @@ config QCOM_GDSC
+ 	bool
+ 	select PM_GENERIC_DOMAINS if PM
+ 
++config QCOM_GDSC_REGULATOR_UKE
++	tristate "Uke GDSC regulator"
++	depends on REGULATOR
++	select REGULATOR_PROXY_CONSUMER
++	help
++	  Regulator-framework provider for the Uke USB controller GDSC.
++	  This is the narrow upstream adaptation of Xiaomi's qcom,gdsc driver.
++
+ menuconfig COMMON_CLK_QCOM
+ 	tristate "Support for Qualcomm's clock controllers"
+ 	depends on OF
+@@ -1488,6 +1496,13 @@ config SM_GCC_8750
+ 	  Support for the global clock controller on SM8750 devices.
+ 	  Say Y if you want to use peripheral devices such as UART,
+ 	  SPI, I2C, USB, SD/UFS, PCIe etc.
++config SM_GCC_CLIFFS
++	tristate "Cliffs Global Clock Controller"
++	depends on ARM64 || COMPILE_TEST
++	help
++	  Support the global clock controller used by the Xiaomi Uke platform.
++	  This is a v6.12 adaptation of the Uke-validated Android 6.1 driver.
++	  Say Y or M to enable peripheral clocks and resets, including USB.
+ 
+ config SM_GPUCC_4450
+ 	tristate "SM4450 Graphics Clock Controller"
+diff --git a/drivers/clk/qcom/Makefile b/drivers/clk/qcom/Makefile
+index 58f9a5eb6fd7..270dbd32c310 100644
+--- a/drivers/clk/qcom/Makefile
++++ b/drivers/clk/qcom/Makefile
+@@ -1,5 +1,6 @@
+ # SPDX-License-Identifier: GPL-2.0
+ obj-$(CONFIG_COMMON_CLK_QCOM) += clk-qcom.o
++clk-qcom-y += vdd-class.o
+ 
+ clk-qcom-y += common.o
+ clk-qcom-y += clk-regmap.o
+@@ -16,6 +17,7 @@ clk-qcom-$(CONFIG_KRAIT_CLOCKS) += clk-krait.o
+ clk-qcom-y += clk-hfpll.o
+ clk-qcom-y += reset.o
+ clk-qcom-$(CONFIG_QCOM_GDSC) += gdsc.o
++obj-$(CONFIG_QCOM_GDSC_REGULATOR_UKE) += gdsc-regulator-uke.o
+ 
+ # Keep alphabetically sorted by config
+ obj-$(CONFIG_APQ_GCC_8084) += gcc-apq8084.o
+@@ -182,6 +184,7 @@ obj-$(CONFIG_SM_GCC_8550) += gcc-sm8550.o
+ obj-$(CONFIG_SM_GCC_8650) += gcc-sm8650.o
+ obj-$(CONFIG_SM_GCC_8750) += gcc-sm8750.o
+ obj-$(CONFIG_SM_GCC_MILOS) += gcc-milos.o
++obj-$(CONFIG_SM_GCC_CLIFFS) += gcc-cliffs.o
+ obj-$(CONFIG_SM_GPUCC_4450) += gpucc-sm4450.o
+ obj-$(CONFIG_SM_GPUCC_6115) += gpucc-sm6115.o
+ obj-$(CONFIG_SM_GPUCC_6125) += gpucc-sm6125.o
+@@ -212,3 +215,6 @@ obj-$(CONFIG_SPMI_PMIC_CLKDIV) += clk-spmi-pmic-div.o
+ obj-$(CONFIG_KPSS_XCC) += kpss-xcc.o
+ obj-$(CONFIG_QCOM_HFPLL) += hfpll.o
+ obj-$(CONFIG_KRAITCC) += krait-cc.o
++
++obj-$(CONFIG_QCOM_RPMH_UKE) += clk-rpmh-uke.o
++obj-$(CONFIG_QCOM_RPMH_UKE) += tcsrcc-uke.o
+diff --git a/drivers/clk/qcom/clk-alpha-pll.c b/drivers/clk/qcom/clk-alpha-pll.c
+index f8313f9d0e30..57945c62067f 100644
+--- a/drivers/clk/qcom/clk-alpha-pll.c
++++ b/drivers/clk/qcom/clk-alpha-pll.c
+@@ -2548,6 +2548,10 @@ static int clk_lucid_evo_pll_postdiv_set_rate(struct clk_hw *hw, unsigned long r
+ }
+ 
+ const struct clk_ops clk_alpha_pll_fixed_lucid_evo_ops = {
++	.prepare = clk_prepare_regmap,
++	.unprepare = clk_unprepare_regmap,
++	.pre_rate_change = clk_pre_change_regmap,
++	.post_rate_change = clk_post_change_regmap,
+ 	.enable = alpha_pll_lucid_evo_enable,
+ 	.disable = alpha_pll_lucid_evo_disable,
+ 	.is_enabled = clk_trion_pll_is_enabled,
+diff --git a/drivers/clk/qcom/clk-rcg2.c b/drivers/clk/qcom/clk-rcg2.c
+index 6064a0e17d51..de11d2c9a893 100644
+--- a/drivers/clk/qcom/clk-rcg2.c
++++ b/drivers/clk/qcom/clk-rcg2.c
+@@ -799,6 +799,10 @@ static int clk_rcg2_set_duty_cycle(struct clk_hw *hw, struct clk_duty *duty)
+ }
+ 
+ const struct clk_ops clk_rcg2_ops = {
++	.prepare = clk_prepare_regmap,
++	.unprepare = clk_unprepare_regmap,
++	.pre_rate_change = clk_pre_change_regmap,
++	.post_rate_change = clk_post_change_regmap,
+ 	.is_enabled = clk_rcg2_is_enabled,
+ 	.get_parent = clk_rcg2_get_parent,
+ 	.set_parent = clk_rcg2_set_parent,
+@@ -824,6 +828,10 @@ const struct clk_ops clk_rcg2_gp_ops = {
+ EXPORT_SYMBOL_GPL(clk_rcg2_gp_ops);
+ 
+ const struct clk_ops clk_rcg2_floor_ops = {
++	.prepare = clk_prepare_regmap,
++	.unprepare = clk_unprepare_regmap,
++	.pre_rate_change = clk_pre_change_regmap,
++	.post_rate_change = clk_post_change_regmap,
+ 	.is_enabled = clk_rcg2_is_enabled,
+ 	.get_parent = clk_rcg2_get_parent,
+ 	.set_parent = clk_rcg2_set_parent,
+diff --git a/drivers/clk/qcom/clk-regmap.c b/drivers/clk/qcom/clk-regmap.c
+index 92ac4e0d7dbe..bb4775c3c633 100644
+--- a/drivers/clk/qcom/clk-regmap.c
++++ b/drivers/clk/qcom/clk-regmap.c
+@@ -104,3 +104,157 @@ int devm_clk_register_regmap(struct device *dev, struct clk_regmap *rclk)
+ 	return devm_clk_hw_register(dev, &rclk->hw);
+ }
+ EXPORT_SYMBOL_GPL(devm_clk_register_regmap);
++
++/**
++ * clk_pre_change_regmap() - standard pre_change call back for regmap clks
++ *
++ * @hw: clk to operate on
++ * @cur_rate: current rate of the clk
++ * @new_rate: new rate about to be set for the clk
++ *
++ * Finds new vdd level corresponding to new rate and update vdd_level
++ * cache if new_vdd_level is greater than vdd_level. If clock is prepared
++ * then update existing vdd vote.
++ *
++ * Returns 0 on success, -EERROR otherwise.
++ */
++int clk_pre_change_regmap(struct clk_hw *hw, unsigned long cur_rate,
++			unsigned long new_rate)
++{
++	struct clk_regmap *rclk = to_clk_regmap(hw);
++	int vdd_level = rclk->vdd_data.vdd_level;
++	int new_vdd_level;
++	int ret = 0;
++
++	if (!rclk->vdd_data.rate_max)
++		return 0;
++
++	new_vdd_level = clk_find_vdd_level(hw, &rclk->vdd_data, new_rate);
++	if (new_vdd_level < 0)
++		return new_vdd_level;
++
++	if (new_vdd_level <= vdd_level)
++		return 0;
++
++	if (clk_hw_is_prepared(hw)) {
++		ret = clk_vote_vdd_level(&rclk->vdd_data, new_vdd_level);
++		if (ret)
++			return ret;
++
++		ret = clk_unvote_vdd_level(&rclk->vdd_data, vdd_level);
++		if (ret) {
++			clk_unvote_vdd_level(&rclk->vdd_data, new_vdd_level);
++			return ret;
++		}
++	}
++
++	rclk->vdd_data.vdd_level = new_vdd_level;
++
++	return 0;
++}
++EXPORT_SYMBOL(clk_pre_change_regmap);
++
++/**
++ * clk_post_change_regmap() - standard post_change call back for regmap clks
++ *
++ * @hw: clk to operate on
++ * @old_rate: previous rate of the clk
++ * @cur_rate: current rate of the recently changed clk
++ *
++ * Finds new vdd level corresponding to current rate and update vdd_level
++ * cache if cur_vdd_level is less than vdd_level. If clock is prepared
++ * then update existing vdd vote.
++ *
++ * Returns 0 on success, -EERROR otherwise.
++ */
++int clk_post_change_regmap(struct clk_hw *hw, unsigned long old_rate,
++			unsigned long cur_rate)
++{
++	struct clk_regmap *rclk = to_clk_regmap(hw);
++	int vdd_level = rclk->vdd_data.vdd_level;
++	int cur_vdd_level;
++	int ret = 0;
++
++	if (!rclk->vdd_data.rate_max)
++		return 0;
++
++	cur_vdd_level = clk_find_vdd_level(hw, &rclk->vdd_data, cur_rate);
++	if (cur_vdd_level < 0)
++		return cur_vdd_level;
++
++	if (cur_vdd_level >= vdd_level)
++		return 0;
++
++	if (clk_hw_is_prepared(hw)) {
++		ret = clk_vote_vdd_level(&rclk->vdd_data, cur_vdd_level);
++		if (ret)
++			return ret;
++
++		ret = clk_unvote_vdd_level(&rclk->vdd_data, vdd_level);
++		if (ret) {
++			clk_unvote_vdd_level(&rclk->vdd_data, cur_vdd_level);
++			return ret;
++		}
++	}
++
++	rclk->vdd_data.vdd_level = cur_vdd_level;
++
++	return 0;
++}
++EXPORT_SYMBOL(clk_post_change_regmap);
++
++/**
++ * clk_prepare_regmap() - standard prepare call back for regmap clks
++ *
++ * @hw: clk to operate on
++ *
++ * Prepare the clock by updating the vdd_level to level required by
++ * the current rate of the clock if it hasn't been initialized before.
++ * Vdd_level and level required by current clock rate mismatches can
++ * occur due to error cases and upon initial clock registration
++ * if the clock becomes an orphan and is later reparented.
++ *
++ * Returns 0 on success, -EERROR otherwise.
++ */
++int clk_prepare_regmap(struct clk_hw *hw)
++{
++	struct clk_regmap *rclk = to_clk_regmap(hw);
++	unsigned long rate = clk_hw_get_rate(hw);
++	int vdd_level;
++
++	if (!rclk->vdd_data.rate_max)
++		return 0;
++
++	vdd_level = clk_find_vdd_level(hw, &rclk->vdd_data, rate);
++	if (vdd_level < 0)
++		return vdd_level;
++
++	if (rclk->vdd_data.vdd_level < vdd_level)
++		rclk->vdd_data.vdd_level = vdd_level;
++
++	WARN(vdd_level > rclk->vdd_data.vdd_level,
++	     "%s level:%d > vdd_level:%d\n", clk_hw_get_name(hw),
++	     vdd_level, rclk->vdd_data.vdd_level);
++
++	return clk_vote_vdd_level(&rclk->vdd_data, rclk->vdd_data.vdd_level);
++}
++EXPORT_SYMBOL(clk_prepare_regmap);
++
++/**
++ * clk_prepare_regmap() - standard prepare call back for regmap clks
++ *
++ * @hw: clk to operate on
++ *
++ * Unprepare the clock by removing the outstanding vdd_level vote.
++ *
++ */
++void clk_unprepare_regmap(struct clk_hw *hw)
++{
++	struct clk_regmap *rclk = to_clk_regmap(hw);
++
++	if (!rclk->vdd_data.rate_max)
++		return;
++
++	clk_unvote_vdd_level(&rclk->vdd_data, rclk->vdd_data.vdd_level);
++}
++EXPORT_SYMBOL(clk_unprepare_regmap);
+diff --git a/drivers/clk/qcom/clk-regmap.h b/drivers/clk/qcom/clk-regmap.h
+index 14ec659a3a77..80033661d563 100644
+--- a/drivers/clk/qcom/clk-regmap.h
++++ b/drivers/clk/qcom/clk-regmap.h
+@@ -5,6 +5,7 @@
+ #define __QCOM_CLK_REGMAP_H__
+ 
+ #include <linux/clk-provider.h>
++#include "vdd-class.h"
+ 
+ struct regmap;
+ 
+@@ -19,6 +20,7 @@ struct regmap;
+  */
+ struct clk_regmap {
+ 	struct clk_hw hw;
++	struct clk_vdd_class_data vdd_data;
+ 	struct regmap *regmap;
+ 	unsigned int enable_reg;
+ 	unsigned int enable_mask;
+@@ -30,6 +32,13 @@ static inline struct clk_regmap *to_clk_regmap(struct clk_hw *hw)
+ 	return container_of(hw, struct clk_regmap, hw);
+ }
+ 
++int clk_pre_change_regmap(struct clk_hw *hw, unsigned long cur_rate,
++			 unsigned long new_rate);
++int clk_post_change_regmap(struct clk_hw *hw, unsigned long old_rate,
++			  unsigned long cur_rate);
++int clk_prepare_regmap(struct clk_hw *hw);
++void clk_unprepare_regmap(struct clk_hw *hw);
++
+ int clk_is_enabled_regmap(struct clk_hw *hw);
+ int clk_enable_regmap(struct clk_hw *hw);
+ void clk_disable_regmap(struct clk_hw *hw);
+diff --git a/drivers/clk/qcom/clk-rpmh-uke.c b/drivers/clk/qcom/clk-rpmh-uke.c
+new file mode 100644
+index 000000000000..6952970ecfd4
+--- /dev/null
++++ b/drivers/clk/qcom/clk-rpmh-uke.c
+@@ -0,0 +1,583 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
++ * Copyright (c) 2023-2024, Qualcomm Innovation Center, Inc. All rights reserved.
++ */
++
++#include <linux/clk-provider.h>
++#include <linux/err.h>
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/of_device.h>
++#include <linux/platform_device.h>
++#include <soc/qcom/cmd-db.h>
++#include <soc/qcom/rpmh.h>
++#include <soc/qcom/tcs.h>
++
++#include <dt-bindings/clock/qcom,rpmh.h>
++
++#define CLK_RPMH_ARC_EN_OFFSET		0
++#define CLK_RPMH_VRM_EN_OFFSET		4
++
++/**
++ * struct bcm_db - Auxiliary data pertaining to each Bus Clock Manager(BCM)
++ * @unit: divisor used to convert Hz value to an RPMh msg
++ * @width: multiplier used to convert Hz value to an RPMh msg
++ * @vcd: virtual clock domain that this bcm belongs to
++ * @reserved: reserved to pad the struct
++ */
++struct bcm_db {
++	__le32 unit;
++	__le16 width;
++	u8 vcd;
++	u8 reserved;
++};
++
++/**
++ * struct clk_rpmh - individual rpmh clock data structure
++ * @hw:			handle between common and hardware-specific interfaces
++ * @res_name:		resource name for the rpmh clock
++ * @div:		clock divider to compute the clock rate
++ * @res_addr:		base address of the rpmh resource within the RPMh
++ * @res_on_val:		rpmh clock enable value
++ * @state:		rpmh clock requested state
++ * @aggr_state:		rpmh clock aggregated state
++ * @last_sent_aggr_state: rpmh clock last aggr state sent to RPMh
++ * @valid_state_mask:	mask to determine the state of the rpmh clock
++ * @unit:		divisor to convert rate to rpmh msg in magnitudes of Khz
++ * @dev:		device to which it is attached
++ * @peer:		pointer to the clock rpmh sibling
++ */
++struct clk_rpmh {
++	struct clk_hw hw;
++	const char *res_name;
++	u8 div;
++	bool optional;
++	u32 res_addr;
++	u32 res_on_val;
++	u32 state;
++	u32 aggr_state;
++	u32 last_sent_aggr_state;
++	u32 valid_state_mask;
++	u32 unit;
++	struct device *dev;
++	struct clk_rpmh *peer;
++};
++
++struct clk_rpmh_desc {
++	struct clk_hw **clks;
++	size_t num_clks;
++};
++
++static DEFINE_MUTEX(rpmh_clk_lock);
++
++#define __DEFINE_CLK_RPMH(_platform, _name, _name_active, _res_name,	\
++			  _res_en_offset, _res_on, _div, _optional)	\
++	static struct clk_rpmh _platform##_##_name_active;		\
++	static struct clk_rpmh _platform##_##_name = {			\
++		.res_name = _res_name,					\
++		.res_addr = _res_en_offset,				\
++		.res_on_val = _res_on,					\
++		.div = _div,						\
++		.optional = _optional,					\
++		.peer = &_platform##_##_name_active,			\
++		.valid_state_mask = (BIT(RPMH_WAKE_ONLY_STATE) |	\
++				      BIT(RPMH_ACTIVE_ONLY_STATE) |	\
++				      BIT(RPMH_SLEEP_STATE)),		\
++		.hw.init = &(struct clk_init_data){			\
++			.ops = &clk_rpmh_ops,				\
++			.name = #_name,					\
++			.parent_data =  &(const struct clk_parent_data){ \
++					.fw_name = "xo",		\
++					.name = "xo_board",		\
++			},						\
++			.num_parents = 1,				\
++		},							\
++	};								\
++	static struct clk_rpmh _platform##_##_name_active = {		\
++		.res_name = _res_name,					\
++		.res_addr = _res_en_offset,				\
++		.res_on_val = _res_on,					\
++		.div = _div,						\
++		.optional = _optional,					\
++		.peer = &_platform##_##_name,				\
++		.valid_state_mask = (BIT(RPMH_WAKE_ONLY_STATE) |	\
++					BIT(RPMH_ACTIVE_ONLY_STATE)),	\
++		.hw.init = &(struct clk_init_data){			\
++			.ops = &clk_rpmh_ops,				\
++			.name = #_name_active,				\
++			.parent_data =  &(const struct clk_parent_data){ \
++					.fw_name = "xo",		\
++					.name = "xo_board",		\
++			},						\
++			.num_parents = 1,				\
++		},							\
++	}
++
++#define DEFINE_CLK_RPMH_FIXED(_platform, _name, _name_active,	\
++				  _parent_name, _name_active_parent,	\
++				  _div)					\
++	static struct clk_fixed_factor _platform##_##_name = {		\
++		.mult = 1,						\
++		.div = _div,						\
++		.hw.init = &(struct clk_init_data){			\
++			.ops = &clk_fixed_factor_ops,			\
++			.name = #_name,					\
++			.parent_data =  &(const struct clk_parent_data){ \
++					.fw_name = #_parent_name,	\
++					.name = #_parent_name,		\
++			},						\
++			.num_parents = 1,				\
++		},							\
++	};								\
++	static struct clk_fixed_factor _platform##_##_name_active = {	\
++		.mult = 1,						\
++		.div = _div,						\
++		.hw.init = &(struct clk_init_data){			\
++			.ops = &clk_fixed_factor_ops,			\
++			.name = #_name_active,				\
++			.parent_data =  &(const struct clk_parent_data){ \
++					.fw_name = #_name_active_parent,\
++					.name = #_name_active_parent,	\
++			},						\
++			.num_parents = 1,				\
++		},							\
++	}
++
++#define DEFINE_CLK_RPMH_ARC(_platform, _name, _name_active, _res_name,	\
++			    _res_on, _div)				\
++	__DEFINE_CLK_RPMH(_platform, _name, _name_active, _res_name,	\
++			  CLK_RPMH_ARC_EN_OFFSET, _res_on, _div, false)
++
++#define DEFINE_CLK_RPMH_VRM(_platform, _name, _name_active, _res_name,	\
++				_div)					\
++	__DEFINE_CLK_RPMH(_platform, _name, _name_active, _res_name,	\
++			  CLK_RPMH_VRM_EN_OFFSET, 1, _div, false)
++
++#define DEFINE_CLK_RPMH_VRM_OPT(_platform, _name, _name_active,		\
++			_res_name, _div)				\
++	__DEFINE_CLK_RPMH(_platform, _name, _name_active, _res_name,	\
++			  CLK_RPMH_VRM_EN_OFFSET, 1, _div, true)
++
++
++
++#define DEFINE_CLK_RPMH_BCM(_platform, _name, _res_name)		\
++	static struct clk_rpmh _platform##_##_name = {			\
++		.res_name = _res_name,					\
++		.valid_state_mask = BIT(RPMH_ACTIVE_ONLY_STATE),	\
++		.div = 1,						\
++		.hw.init = &(struct clk_init_data){			\
++			.ops = &clk_rpmh_bcm_ops,			\
++			.name = #_name,					\
++		},							\
++	}
++
++static inline struct clk_rpmh *to_clk_rpmh(struct clk_hw *_hw)
++{
++	return container_of(_hw, struct clk_rpmh, hw);
++}
++
++static inline bool has_state_changed(struct clk_rpmh *c, u32 state)
++{
++	return (c->last_sent_aggr_state & BIT(state))
++		!= (c->aggr_state & BIT(state));
++}
++
++static int clk_rpmh_send(struct clk_rpmh *c, enum rpmh_state state,
++			 struct tcs_cmd *cmd, bool wait)
++{
++	if (wait)
++		return rpmh_write(c->dev, state, cmd, 1);
++
++	return rpmh_write_async(c->dev, state, cmd, 1);
++}
++
++static int clk_rpmh_send_aggregate_command(struct clk_rpmh *c)
++{
++	struct tcs_cmd cmd = { 0 };
++	u32 cmd_state, on_val;
++	enum rpmh_state state = RPMH_SLEEP_STATE;
++	int ret;
++	bool wait;
++
++	cmd.addr = c->res_addr;
++	cmd_state = c->aggr_state;
++	on_val = c->res_on_val;
++
++	for (; state <= RPMH_ACTIVE_ONLY_STATE; state++) {
++		if (has_state_changed(c, state)) {
++			if (cmd_state & BIT(state))
++				cmd.data = on_val;
++
++			wait = cmd_state && state == RPMH_ACTIVE_ONLY_STATE;
++			ret = clk_rpmh_send(c, state, &cmd, wait);
++			if (ret) {
++				dev_err(c->dev, "set %s state of %s failed: (%d)\n",
++					!state ? "sleep" :
++					state == RPMH_WAKE_ONLY_STATE	?
++					"wake" : "active", c->res_name, ret);
++				return ret;
++			}
++		}
++	}
++
++	c->last_sent_aggr_state = c->aggr_state;
++	c->peer->last_sent_aggr_state =  c->last_sent_aggr_state;
++
++	return 0;
++}
++
++/*
++ * Update state and aggregate state values based on enable value.
++ */
++static int clk_rpmh_aggregate_state_send_command(struct clk_rpmh *c,
++						bool enable)
++{
++	int ret;
++
++	c->state = enable ? c->valid_state_mask : 0;
++	c->aggr_state = c->state | c->peer->state;
++	c->peer->aggr_state = c->aggr_state;
++
++	ret = clk_rpmh_send_aggregate_command(c);
++	if (!ret)
++		return 0;
++
++	if (ret && enable)
++		c->state = 0;
++	else if (ret)
++		c->state = c->valid_state_mask;
++
++	WARN(1, "clk: %s failed to %s\n", c->res_name,
++	     enable ? "enable" : "disable");
++	return ret;
++}
++
++static int clk_rpmh_prepare(struct clk_hw *hw)
++{
++	struct clk_rpmh *c = to_clk_rpmh(hw);
++	int ret = 0;
++
++	mutex_lock(&rpmh_clk_lock);
++	ret = clk_rpmh_aggregate_state_send_command(c, true);
++	mutex_unlock(&rpmh_clk_lock);
++
++	return ret;
++}
++
++static void clk_rpmh_unprepare(struct clk_hw *hw)
++{
++	struct clk_rpmh *c = to_clk_rpmh(hw);
++
++	mutex_lock(&rpmh_clk_lock);
++	clk_rpmh_aggregate_state_send_command(c, false);
++	mutex_unlock(&rpmh_clk_lock);
++};
++
++static unsigned long clk_rpmh_recalc_rate(struct clk_hw *hw,
++					unsigned long prate)
++{
++	struct clk_rpmh *r = to_clk_rpmh(hw);
++
++	/*
++	 * RPMh clocks have a fixed rate. Return static rate.
++	 */
++	return prate / r->div;
++}
++
++static const struct clk_ops clk_rpmh_ops = {
++	.prepare	= clk_rpmh_prepare,
++	.unprepare	= clk_rpmh_unprepare,
++	.recalc_rate	= clk_rpmh_recalc_rate,
++};
++
++static int clk_rpmh_bcm_send_cmd(struct clk_rpmh *c, bool enable)
++{
++	struct tcs_cmd cmd = { 0 };
++	u32 cmd_state;
++	int ret = 0;
++
++	mutex_lock(&rpmh_clk_lock);
++	if (enable) {
++		cmd_state = 1;
++		if (c->aggr_state)
++			cmd_state = c->aggr_state;
++	} else {
++		cmd_state = 0;
++	}
++
++	if (cmd_state > BCM_TCS_CMD_VOTE_MASK)
++		cmd_state = BCM_TCS_CMD_VOTE_MASK;
++
++	if (c->last_sent_aggr_state != cmd_state) {
++		cmd.addr = c->res_addr;
++		cmd.data = BCM_TCS_CMD(1, enable, 0, cmd_state);
++
++		/*
++		 * Send only an active only state request. RPMh continues to
++		 * use the active state when we're in sleep/wake state as long
++		 * as the sleep/wake state has never been set.
++		 */
++		ret = clk_rpmh_send(c, RPMH_ACTIVE_ONLY_STATE, &cmd, enable);
++		if (ret) {
++			dev_err(c->dev, "set active state of %s failed: (%d)\n",
++				c->res_name, ret);
++		} else {
++			c->last_sent_aggr_state = cmd_state;
++		}
++	}
++
++	mutex_unlock(&rpmh_clk_lock);
++
++	return ret;
++}
++
++static int clk_rpmh_bcm_prepare(struct clk_hw *hw)
++{
++	struct clk_rpmh *c = to_clk_rpmh(hw);
++
++	return clk_rpmh_bcm_send_cmd(c, true);
++}
++
++static void clk_rpmh_bcm_unprepare(struct clk_hw *hw)
++{
++	struct clk_rpmh *c = to_clk_rpmh(hw);
++
++	clk_rpmh_bcm_send_cmd(c, false);
++}
++
++static int clk_rpmh_bcm_set_rate(struct clk_hw *hw, unsigned long rate,
++				 unsigned long parent_rate)
++{
++	struct clk_rpmh *c = to_clk_rpmh(hw);
++
++	c->aggr_state = rate / c->unit;
++	/*
++	 * Since any non-zero value sent to hw would result in enabling the
++	 * clock, only send the value if the clock has already been prepared.
++	 */
++	if (clk_hw_is_prepared(hw))
++		clk_rpmh_bcm_send_cmd(c, true);
++
++	return 0;
++}
++
++static int clk_rpmh_determine_rate(struct clk_hw *hw,
++				   struct clk_rate_request *req)
++{
++	return 0;
++}
++
++static unsigned long clk_rpmh_bcm_recalc_rate(struct clk_hw *hw,
++					unsigned long prate)
++{
++	struct clk_rpmh *c = to_clk_rpmh(hw);
++
++	return c->aggr_state * c->unit;
++}
++
++static const struct clk_ops clk_rpmh_bcm_ops = {
++	.prepare	= clk_rpmh_bcm_prepare,
++	.unprepare	= clk_rpmh_bcm_unprepare,
++	.set_rate	= clk_rpmh_bcm_set_rate,
++	.determine_rate = clk_rpmh_determine_rate,
++	.recalc_rate	= clk_rpmh_bcm_recalc_rate,
++};
++
++DEFINE_CLK_RPMH_BCM(sdm845, ipa, "IP0");
++DEFINE_CLK_RPMH_ARC(pineapple, xo_pad, xo_pad_ao, "xo.lvl", 0x03, 2);
++DEFINE_CLK_RPMH_FIXED(pineapple, bi_tcxo, bi_tcxo_ao, xo_pad, xo_pad_ao, 2);
++DEFINE_CLK_RPMH_VRM_OPT(pineapple, rf_clk1, rf_clk1_ao, "clka1", 1);
++DEFINE_CLK_RPMH_VRM_OPT(pineapple, rf_clk2, rf_clk2_ao, "clka2", 1);
++DEFINE_CLK_RPMH_VRM_OPT(pineapple, ln_bb_clk2, ln_bb_clk2_ao, "clka7", 2);
++DEFINE_CLK_RPMH_VRM_OPT(pineapple, ln_bb_clk3, ln_bb_clk3_ao, "clka8", 2);
++
++static struct clk_hw *of_clk_rpmh_hw_get(struct of_phandle_args *clkspec,
++					 void *data)
++{
++	struct clk_rpmh_desc *rpmh = data;
++	unsigned int idx = clkspec->args[0];
++
++	if (idx >= rpmh->num_clks) {
++		pr_err("%s: invalid index %u\n", __func__, idx);
++		return ERR_PTR(-EINVAL);
++	}
++
++	if (!rpmh->clks[idx])
++		return ERR_PTR(-ENOENT);
++
++	return rpmh->clks[idx];
++}
++
++static struct clk_hw *cliffs_rpmh_clocks[] = {
++	[RPMH_CXO_PAD_CLK]	= &pineapple_xo_pad.hw,
++	[RPMH_CXO_PAD_CLK_A]	= &pineapple_xo_pad_ao.hw,
++	[RPMH_CXO_CLK]		= &pineapple_bi_tcxo.hw,
++	[RPMH_CXO_CLK_A]	= &pineapple_bi_tcxo_ao.hw,
++	[RPMH_LN_BB_CLK2]	= &pineapple_ln_bb_clk2.hw,
++	[RPMH_LN_BB_CLK2_A]	= &pineapple_ln_bb_clk2_ao.hw,
++	[RPMH_LN_BB_CLK3]	= &pineapple_ln_bb_clk3.hw,
++	[RPMH_LN_BB_CLK3_A]	= &pineapple_ln_bb_clk3_ao.hw,
++	[RPMH_RF_CLK1]		= &pineapple_rf_clk1.hw,
++	[RPMH_RF_CLK1_A]	= &pineapple_rf_clk1_ao.hw,
++	[RPMH_RF_CLK2]		= &pineapple_rf_clk2.hw,
++	[RPMH_RF_CLK2_A]	= &pineapple_rf_clk2_ao.hw,
++	[RPMH_IPA_CLK]		= &sdm845_ipa.hw,
++};
++
++static const struct clk_rpmh_desc clk_rpmh_cliffs = {
++	.clks = cliffs_rpmh_clocks,
++	.num_clks = ARRAY_SIZE(cliffs_rpmh_clocks),
++};
++
++struct clk_rpmh_uke_snapshot {
++	const struct clk_rpmh_desc *desc;
++	struct clk_hw *clks[29];
++	const struct clk_init_data *init[29];
++	u32 addr[29];
++};
++
++static void clk_rpmh_uke_restore(void *data)
++{
++	struct clk_rpmh_uke_snapshot *saved = data;
++	unsigned int i;
++
++	for (i = 0; i < saved->desc->num_clks; i++) {
++		struct clk_hw *hw = saved->clks[i];
++
++		saved->desc->clks[i] = hw;
++		if (!hw)
++			continue;
++		hw->init = saved->init[i];
++		if (hw->init->ops != &clk_fixed_factor_ops)
++			to_clk_rpmh(hw)->res_addr = saved->addr[i];
++	}
++}
++
++static int clk_rpmh_probe(struct platform_device *pdev)
++{
++	struct clk_hw **hw_clks;
++	struct clk_rpmh_uke_snapshot *saved;
++	struct clk_rpmh *rpmh_clk;
++	const struct clk_rpmh_desc *desc;
++	int ret, i;
++
++	desc = of_device_get_match_data(&pdev->dev);
++	if (!desc)
++		return -ENODEV;
++
++	ret = cmd_db_ready();
++	if (ret)
++		return ret;
++	saved = devm_kzalloc(&pdev->dev, sizeof(*saved), GFP_KERNEL);
++	if (!saved)
++		return -ENOMEM;
++	if (desc->num_clks > ARRAY_SIZE(saved->clks))
++		return -EINVAL;
++	saved->desc = desc;
++	for (i = 0; i < desc->num_clks; i++) {
++		struct clk_hw *hw = desc->clks[i];
++
++		saved->clks[i] = hw;
++		if (!hw)
++			continue;
++		saved->init[i] = hw->init;
++		if (hw->init->ops != &clk_fixed_factor_ops)
++			saved->addr[i] = to_clk_rpmh(hw)->res_addr;
++	}
++	ret = devm_add_action_or_reset(&pdev->dev, clk_rpmh_uke_restore, saved);
++	if (ret)
++		return ret;
++
++	hw_clks = desc->clks;
++
++	for (i = 0; i < desc->num_clks; i++) {
++		const char *name;
++		u32 res_addr;
++		size_t aux_data_len;
++		const struct bcm_db *data;
++
++		if (!hw_clks[i])
++			continue;
++
++		name = hw_clks[i]->init->name;
++
++		if (hw_clks[i]->init->ops != &clk_fixed_factor_ops) {
++			rpmh_clk = to_clk_rpmh(hw_clks[i]);
++			res_addr = cmd_db_read_addr(rpmh_clk->res_name);
++			if (!res_addr) {
++				hw_clks[i] = NULL;
++
++				if (rpmh_clk->optional)
++					continue;
++
++				WARN(1, "clk-rpmh: Missing RPMh resource address for %s\n",
++				     rpmh_clk->res_name);
++				return -ENODEV;
++			}
++
++			data = cmd_db_read_aux_data(rpmh_clk->res_name, &aux_data_len);
++			if (IS_ERR(data)) {
++				ret = PTR_ERR(data);
++				WARN(1, "clk-rpmh: error reading RPMh aux data for %s (%d)\n",
++				     rpmh_clk->res_name, ret);
++				return ret;
++			}
++
++			/* Convert unit from Khz to Hz */
++			if (aux_data_len == sizeof(*data))
++				rpmh_clk->unit = le32_to_cpu(data->unit) * 1000ULL;
++
++			rpmh_clk->res_addr += res_addr;
++			rpmh_clk->dev = &pdev->dev;
++		}
++
++		ret = devm_clk_hw_register(&pdev->dev, hw_clks[i]);
++		if (ret) {
++			dev_err(&pdev->dev, "failed to register %s\n", name);
++			return ret;
++		}
++	}
++
++	/* typecast to silence compiler warning */
++	ret = devm_of_clk_add_hw_provider(&pdev->dev, of_clk_rpmh_hw_get,
++					  (void *)desc);
++	if (ret) {
++		dev_err(&pdev->dev, "Failed to add clock provider\n");
++		return ret;
++	}
++
++	dev_dbg(&pdev->dev, "Registered RPMh clocks\n");
++
++	return 0;
++}
++
++static const struct of_device_id clk_rpmh_match_table[] = {
++	{ .compatible = "qcom,cliffs-rpmh-clk", .data = &clk_rpmh_cliffs },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, clk_rpmh_match_table);
++
++static struct platform_driver clk_rpmh_driver = {
++	.probe		= clk_rpmh_probe,
++	.driver		= {
++		.name	= "clk-rpmh-uke",
++		.of_match_table = clk_rpmh_match_table,
++	},
++};
++
++static int __init clk_rpmh_init(void)
++{
++	return platform_driver_register(&clk_rpmh_driver);
++}
++core_initcall(clk_rpmh_init);
++
++static void __exit clk_rpmh_exit(void)
++{
++	platform_driver_unregister(&clk_rpmh_driver);
++}
++module_exit(clk_rpmh_exit);
++
++MODULE_DESCRIPTION("QCOM RPMh Clock Driver");
++MODULE_LICENSE("GPL v2");
+diff --git a/drivers/clk/qcom/common.h b/drivers/clk/qcom/common.h
+index 6f2406f8839e..9e2acfb21399 100644
+--- a/drivers/clk/qcom/common.h
++++ b/drivers/clk/qcom/common.h
+@@ -34,8 +34,11 @@ struct qcom_cc_driver_data {
+ 	size_t num_dfs_rcgs;
+ 	void (*clk_regs_configure)(struct device *dev, struct regmap *regmap);
+ };
++struct clk_vdd_class;
+ 
+ struct qcom_cc_desc {
++	struct clk_vdd_class **clk_regulators;
++	size_t num_clk_regulators;
+ 	const struct regmap_config *config;
+ 	struct clk_regmap **clks;
+ 	size_t num_clks;
+diff --git a/drivers/clk/qcom/gcc-cliffs.c b/drivers/clk/qcom/gcc-cliffs.c
+new file mode 100644
+index 000000000000..3b1269c4e8b3
+--- /dev/null
++++ b/drivers/clk/qcom/gcc-cliffs.c
+@@ -0,0 +1,3222 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
++ */
++
++#include <linux/clk-provider.h>
++#include <linux/clk.h>
++#include <linux/kernel.h>
++#include <linux/platform_device.h>
++#include <linux/module.h>
++#include <linux/of_device.h>
++#include <linux/of.h>
++#include <linux/regmap.h>
++#include <linux/regulator/consumer.h>
++#include <dt-bindings/regulator/qcom,rpmh-regulator-levels.h>
++
++#include <dt-bindings/clock/qcom,gcc-cliffs.h>
++
++#include "clk-alpha-pll.h"
++#include "clk-branch.h"
++#include "clk-rcg.h"
++#include "clk-regmap-divider.h"
++#include "clk-regmap-mux.h"
++#include "common.h"
++#include "reset.h"
++#include "vdd-level.h"
++
++static DEFINE_VDD_REGULATORS(vdd_cx, VDD_HIGH + 1, 1, vdd_corner);
++static DEFINE_VDD_REGULATORS(vdd_mx, VDD_HIGH + 1, 1, vdd_corner);
++
++static struct clk_vdd_class *gcc_cliffs_regulators[] = {
++	&vdd_cx,
++	&vdd_mx,
++};
++
++
++
++enum {
++	P_BI_TCXO,
++	P_GCC_GPLL0_OUT_EVEN,
++	P_GCC_GPLL0_OUT_MAIN,
++	P_GCC_GPLL1_OUT_MAIN,
++	P_GCC_GPLL4_OUT_MAIN,
++	P_GCC_GPLL7_OUT_MAIN,
++	P_GCC_GPLL9_OUT_MAIN,
++	P_PCIE_0_PIPE_CLK,
++	P_SLEEP_CLK,
++	P_UFS_PHY_RX_SYMBOL_0_CLK,
++	P_UFS_PHY_RX_SYMBOL_1_CLK,
++	P_UFS_PHY_TX_SYMBOL_0_CLK,
++	P_USB3_PHY_WRAPPER_GCC_USB30_PIPE_CLK,
++};
++
++static struct clk_alpha_pll gcc_gpll0 = {
++	.offset = 0x0,
++	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID_OLE],
++	.clkr = {
++		.enable_reg = 0x52020,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_gpll0",
++			.parent_data = &(const struct clk_parent_data) {
++				.fw_name = "bi_tcxo",
++			},
++			.num_parents = 1,
++			.ops = &clk_alpha_pll_fixed_lucid_ole_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++		.vdd_data = {
++			.vdd_class = &vdd_cx,
++			.num_rate_max = VDD_NUM,
++			.rate_max = (unsigned long[VDD_NUM]) {
++				[VDD_LOWER_D1] = 615000000,
++				[VDD_LOW] = 1100000000,
++				[VDD_LOW_L1] = 1600000000,
++				[VDD_NOMINAL] = 2000000000,
++				[VDD_HIGH_L1] = 2300000000},
++		},
++	},
++};
++
++static const struct clk_div_table post_div_table_gcc_gpll0_out_even[] = {
++	{ 0x1, 2 },
++	{ }
++};
++
++static struct clk_alpha_pll_postdiv gcc_gpll0_out_even = {
++	.offset = 0x0,
++	.post_div_shift = 10,
++	.post_div_table = post_div_table_gcc_gpll0_out_even,
++	.num_post_div = ARRAY_SIZE(post_div_table_gcc_gpll0_out_even),
++	.width = 4,
++	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID_OLE],
++	.clkr.hw.init = &(const struct clk_init_data) {
++		.name = "gcc_gpll0_out_even",
++		.parent_hws = (const struct clk_hw*[]) {
++			&gcc_gpll0.clkr.hw,
++		},
++		.num_parents = 1,
++		.ops = &clk_alpha_pll_postdiv_lucid_ole_ops,
++		.flags = CLK_HOLD_STATE,
++	},
++};
++
++static struct clk_alpha_pll gcc_gpll1 = {
++	.offset = 0x1000,
++	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID_OLE],
++	.clkr = {
++		.enable_reg = 0x52020,
++		.enable_mask = BIT(1),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_gpll1",
++			.parent_data = &(const struct clk_parent_data) {
++				.fw_name = "bi_tcxo",
++			},
++			.num_parents = 1,
++			.ops = &clk_alpha_pll_fixed_lucid_ole_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++		.vdd_data = {
++			.vdd_class = &vdd_cx,
++			.num_rate_max = VDD_NUM,
++			.rate_max = (unsigned long[VDD_NUM]) {
++				[VDD_LOWER_D1] = 615000000,
++				[VDD_LOW] = 1100000000,
++				[VDD_LOW_L1] = 1600000000,
++				[VDD_NOMINAL] = 2000000000,
++				[VDD_HIGH_L1] = 2300000000},
++		},
++	},
++};
++
++static struct clk_alpha_pll gcc_gpll4 = {
++	.offset = 0x4000,
++	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID_OLE],
++	.clkr = {
++		.enable_reg = 0x52020,
++		.enable_mask = BIT(4),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_gpll4",
++			.parent_data = &(const struct clk_parent_data) {
++				.fw_name = "bi_tcxo",
++			},
++			.num_parents = 1,
++			.ops = &clk_alpha_pll_fixed_lucid_ole_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++		.vdd_data = {
++			.vdd_class = &vdd_cx,
++			.num_rate_max = VDD_NUM,
++			.rate_max = (unsigned long[VDD_NUM]) {
++				[VDD_LOWER_D1] = 615000000,
++				[VDD_LOW] = 1100000000,
++				[VDD_LOW_L1] = 1600000000,
++				[VDD_NOMINAL] = 2000000000,
++				[VDD_HIGH_L1] = 2300000000},
++		},
++	},
++};
++
++static struct clk_alpha_pll gcc_gpll7 = {
++	.offset = 0x7000,
++	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID_OLE],
++	.clkr = {
++		.enable_reg = 0x52020,
++		.enable_mask = BIT(7),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_gpll7",
++			.parent_data = &(const struct clk_parent_data) {
++				.fw_name = "bi_tcxo",
++			},
++			.num_parents = 1,
++			.ops = &clk_alpha_pll_fixed_lucid_ole_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++		.vdd_data = {
++			.vdd_class = &vdd_cx,
++			.num_rate_max = VDD_NUM,
++			.rate_max = (unsigned long[VDD_NUM]) {
++				[VDD_LOWER_D1] = 615000000,
++				[VDD_LOW] = 1100000000,
++				[VDD_LOW_L1] = 1600000000,
++				[VDD_NOMINAL] = 2000000000,
++				[VDD_HIGH_L1] = 2300000000},
++		},
++	},
++};
++
++static struct clk_alpha_pll gcc_gpll9 = {
++	.offset = 0x9000,
++	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID_OLE],
++	.clkr = {
++		.enable_reg = 0x52020,
++		.enable_mask = BIT(9),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_gpll9",
++			.parent_data = &(const struct clk_parent_data) {
++				.fw_name = "bi_tcxo",
++			},
++			.num_parents = 1,
++			.ops = &clk_alpha_pll_fixed_lucid_ole_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++		.vdd_data = {
++			.vdd_class = &vdd_cx,
++			.num_rate_max = VDD_NUM,
++			.rate_max = (unsigned long[VDD_NUM]) {
++				[VDD_LOWER_D1] = 615000000,
++				[VDD_LOW] = 1100000000,
++				[VDD_LOW_L1] = 1600000000,
++				[VDD_NOMINAL] = 2000000000,
++				[VDD_HIGH_L1] = 2300000000},
++		},
++	},
++};
++
++static const struct parent_map gcc_parent_map_0[] = {
++	{ P_BI_TCXO, 0 },
++	{ P_GCC_GPLL0_OUT_MAIN, 1 },
++	{ P_GCC_GPLL0_OUT_EVEN, 6 },
++};
++
++static const struct clk_parent_data gcc_parent_data_0[] = {
++	{ .fw_name = "bi_tcxo" },
++	{ .hw = &gcc_gpll0.clkr.hw },
++	{ .hw = &gcc_gpll0_out_even.clkr.hw },
++};
++
++static const struct parent_map gcc_parent_map_1[] = {
++	{ P_BI_TCXO, 0 },
++	{ P_GCC_GPLL0_OUT_MAIN, 1 },
++	{ P_SLEEP_CLK, 5 },
++	{ P_GCC_GPLL0_OUT_EVEN, 6 },
++};
++
++static const struct clk_parent_data gcc_parent_data_1[] = {
++	{ .fw_name = "bi_tcxo" },
++	{ .hw = &gcc_gpll0.clkr.hw },
++	{ .fw_name = "sleep_clk" },
++	{ .hw = &gcc_gpll0_out_even.clkr.hw },
++};
++
++static const struct parent_map gcc_parent_map_2[] = {
++	{ P_BI_TCXO, 0 },
++	{ P_GCC_GPLL0_OUT_MAIN, 1 },
++	{ P_GCC_GPLL1_OUT_MAIN, 4 },
++	{ P_GCC_GPLL4_OUT_MAIN, 5 },
++	{ P_GCC_GPLL0_OUT_EVEN, 6 },
++};
++
++static const struct clk_parent_data gcc_parent_data_2[] = {
++	{ .fw_name = "bi_tcxo" },
++	{ .hw = &gcc_gpll0.clkr.hw },
++	{ .hw = &gcc_gpll1.clkr.hw },
++	{ .hw = &gcc_gpll4.clkr.hw },
++	{ .hw = &gcc_gpll0_out_even.clkr.hw },
++};
++
++static const struct parent_map gcc_parent_map_3[] = {
++	{ P_BI_TCXO, 0 },
++	{ P_GCC_GPLL0_OUT_MAIN, 1 },
++	{ P_GCC_GPLL4_OUT_MAIN, 5 },
++	{ P_GCC_GPLL0_OUT_EVEN, 6 },
++};
++
++static const struct clk_parent_data gcc_parent_data_3[] = {
++	{ .fw_name = "bi_tcxo" },
++	{ .hw = &gcc_gpll0.clkr.hw },
++	{ .hw = &gcc_gpll4.clkr.hw },
++	{ .hw = &gcc_gpll0_out_even.clkr.hw },
++};
++
++static const struct parent_map gcc_parent_map_4[] = {
++	{ P_BI_TCXO, 0 },
++	{ P_SLEEP_CLK, 5 },
++};
++
++static const struct clk_parent_data gcc_parent_data_4[] = {
++	{ .fw_name = "bi_tcxo" },
++	{ .fw_name = "sleep_clk" },
++};
++
++static const struct parent_map gcc_parent_map_5[] = {
++	{ P_BI_TCXO, 0 },
++};
++
++static const struct clk_parent_data gcc_parent_data_5[] = {
++	{ .fw_name = "bi_tcxo" },
++};
++
++static const struct parent_map gcc_parent_map_6[] = {
++	{ P_PCIE_0_PIPE_CLK, 0 },
++	{ P_BI_TCXO, 2 },
++};
++
++static const struct clk_parent_data gcc_parent_data_6[] = {
++	{ .fw_name = "pcie_0_pipe_clk" },
++	{ .fw_name = "bi_tcxo" },
++};
++
++static const struct parent_map gcc_parent_map_7[] = {
++	{ P_BI_TCXO, 0 },
++	{ P_GCC_GPLL0_OUT_MAIN, 1 },
++	{ P_GCC_GPLL7_OUT_MAIN, 2 },
++	{ P_GCC_GPLL0_OUT_EVEN, 6 },
++};
++
++static const struct clk_parent_data gcc_parent_data_7[] = {
++	{ .fw_name = "bi_tcxo" },
++	{ .hw = &gcc_gpll0.clkr.hw },
++	{ .hw = &gcc_gpll7.clkr.hw },
++	{ .hw = &gcc_gpll0_out_even.clkr.hw },
++};
++
++static const struct parent_map gcc_parent_map_8[] = {
++	{ P_BI_TCXO, 0 },
++	{ P_GCC_GPLL0_OUT_MAIN, 1 },
++	{ P_GCC_GPLL9_OUT_MAIN, 2 },
++	{ P_GCC_GPLL4_OUT_MAIN, 5 },
++	{ P_GCC_GPLL0_OUT_EVEN, 6 },
++};
++
++static const struct clk_parent_data gcc_parent_data_8[] = {
++	{ .fw_name = "bi_tcxo" },
++	{ .hw = &gcc_gpll0.clkr.hw },
++	{ .hw = &gcc_gpll9.clkr.hw },
++	{ .hw = &gcc_gpll4.clkr.hw },
++	{ .hw = &gcc_gpll0_out_even.clkr.hw },
++};
++
++static const struct parent_map gcc_parent_map_9[] = {
++	{ P_UFS_PHY_RX_SYMBOL_0_CLK, 0 },
++	{ P_BI_TCXO, 2 },
++};
++
++static const struct clk_parent_data gcc_parent_data_9[] = {
++	{ .fw_name = "ufs_phy_rx_symbol_0_clk" },
++	{ .fw_name = "bi_tcxo" },
++};
++
++static const struct parent_map gcc_parent_map_10[] = {
++	{ P_UFS_PHY_RX_SYMBOL_1_CLK, 0 },
++	{ P_BI_TCXO, 2 },
++};
++
++static const struct clk_parent_data gcc_parent_data_10[] = {
++	{ .fw_name = "ufs_phy_rx_symbol_1_clk" },
++	{ .fw_name = "bi_tcxo" },
++};
++
++static const struct parent_map gcc_parent_map_11[] = {
++	{ P_UFS_PHY_TX_SYMBOL_0_CLK, 0 },
++	{ P_BI_TCXO, 2 },
++};
++
++static const struct clk_parent_data gcc_parent_data_11[] = {
++	{ .fw_name = "ufs_phy_tx_symbol_0_clk" },
++	{ .fw_name = "bi_tcxo" },
++};
++
++static const struct parent_map gcc_parent_map_12[] = {
++	{ P_USB3_PHY_WRAPPER_GCC_USB30_PIPE_CLK, 0 },
++	{ P_BI_TCXO, 2 },
++};
++
++static const struct clk_parent_data gcc_parent_data_12[] = {
++	{ .fw_name = "usb3_phy_wrapper_gcc_usb30_pipe_clk" },
++	{ .fw_name = "bi_tcxo" },
++};
++
++static struct clk_regmap_mux gcc_pcie_0_pipe_clk_src = {
++	.reg = 0x6b070,
++	.shift = 0,
++	.width = 2,
++	.parent_map = gcc_parent_map_6,
++	.clkr = {
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_pcie_0_pipe_clk_src",
++			.parent_data = gcc_parent_data_6,
++			.num_parents = ARRAY_SIZE(gcc_parent_data_6),
++			.ops = &clk_regmap_mux_closest_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_regmap_mux gcc_ufs_phy_rx_symbol_0_clk_src = {
++	.reg = 0x77064,
++	.shift = 0,
++	.width = 2,
++	.parent_map = gcc_parent_map_9,
++	.clkr = {
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_ufs_phy_rx_symbol_0_clk_src",
++			.parent_data = gcc_parent_data_9,
++			.num_parents = ARRAY_SIZE(gcc_parent_data_9),
++			.ops = &clk_regmap_mux_closest_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_regmap_mux gcc_ufs_phy_rx_symbol_1_clk_src = {
++	.reg = 0x770e0,
++	.shift = 0,
++	.width = 2,
++	.parent_map = gcc_parent_map_10,
++	.clkr = {
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_ufs_phy_rx_symbol_1_clk_src",
++			.parent_data = gcc_parent_data_10,
++			.num_parents = ARRAY_SIZE(gcc_parent_data_10),
++			.ops = &clk_regmap_mux_closest_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_regmap_mux gcc_ufs_phy_tx_symbol_0_clk_src = {
++	.reg = 0x77054,
++	.shift = 0,
++	.width = 2,
++	.parent_map = gcc_parent_map_11,
++	.clkr = {
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_ufs_phy_tx_symbol_0_clk_src",
++			.parent_data = gcc_parent_data_11,
++			.num_parents = ARRAY_SIZE(gcc_parent_data_11),
++			.ops = &clk_regmap_mux_closest_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_regmap_mux gcc_usb3_prim_phy_pipe_clk_src = {
++	.reg = 0x3906c,
++	.shift = 0,
++	.width = 2,
++	.parent_map = gcc_parent_map_12,
++	.clkr = {
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_usb3_prim_phy_pipe_clk_src",
++			.parent_data = gcc_parent_data_12,
++			.num_parents = ARRAY_SIZE(gcc_parent_data_12),
++			.ops = &clk_regmap_mux_closest_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static const struct freq_tbl ftbl_gcc_gp1_clk_src[] = {
++	F(50000000, P_GCC_GPLL0_OUT_EVEN, 6, 0, 0),
++	F(100000000, P_GCC_GPLL0_OUT_MAIN, 6, 0, 0),
++	F(200000000, P_GCC_GPLL0_OUT_MAIN, 3, 0, 0),
++	{ }
++};
++
++static struct clk_rcg2 gcc_gp1_clk_src = {
++	.cmd_rcgr = 0x64004,
++	.mnd_width = 16,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_1,
++	.freq_tbl = ftbl_gcc_gp1_clk_src,
++	.clkr.hw.init = &(const struct clk_init_data) {
++		.name = "gcc_gp1_clk_src",
++		.parent_data = gcc_parent_data_1,
++		.num_parents = ARRAY_SIZE(gcc_parent_data_1),
++		.ops = &clk_rcg2_ops,
++		.flags = CLK_HOLD_STATE,
++	},
++	.clkr.vdd_data = {
++		.vdd_class = &vdd_cx,
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 50000000,
++			[VDD_LOW] = 100000000,
++			[VDD_NOMINAL] = 200000000},
++	},
++};
++
++static struct clk_rcg2 gcc_gp2_clk_src = {
++	.cmd_rcgr = 0x65004,
++	.mnd_width = 16,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_1,
++	.freq_tbl = ftbl_gcc_gp1_clk_src,
++	.clkr.hw.init = &(const struct clk_init_data) {
++		.name = "gcc_gp2_clk_src",
++		.parent_data = gcc_parent_data_1,
++		.num_parents = ARRAY_SIZE(gcc_parent_data_1),
++		.ops = &clk_rcg2_ops,
++		.flags = CLK_HOLD_STATE,
++	},
++	.clkr.vdd_data = {
++		.vdd_class = &vdd_cx,
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 50000000,
++			[VDD_LOW] = 100000000,
++			[VDD_NOMINAL] = 200000000},
++	},
++};
++
++static struct clk_rcg2 gcc_gp3_clk_src = {
++	.cmd_rcgr = 0x66004,
++	.mnd_width = 16,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_1,
++	.freq_tbl = ftbl_gcc_gp1_clk_src,
++	.clkr.hw.init = &(const struct clk_init_data) {
++		.name = "gcc_gp3_clk_src",
++		.parent_data = gcc_parent_data_1,
++		.num_parents = ARRAY_SIZE(gcc_parent_data_1),
++		.ops = &clk_rcg2_ops,
++		.flags = CLK_HOLD_STATE,
++	},
++	.clkr.vdd_data = {
++		.vdd_class = &vdd_cx,
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 50000000,
++			[VDD_LOW] = 100000000,
++			[VDD_NOMINAL] = 200000000},
++	},
++};
++
++static const struct freq_tbl ftbl_gcc_pcie_0_aux_clk_src[] = {
++	F(19200000, P_BI_TCXO, 1, 0, 0),
++	{ }
++};
++
++static struct clk_rcg2 gcc_pcie_0_aux_clk_src = {
++	.cmd_rcgr = 0x6b074,
++	.mnd_width = 16,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_4,
++	.freq_tbl = ftbl_gcc_pcie_0_aux_clk_src,
++	.clkr.hw.init = &(const struct clk_init_data) {
++		.name = "gcc_pcie_0_aux_clk_src",
++		.parent_data = gcc_parent_data_4,
++		.num_parents = ARRAY_SIZE(gcc_parent_data_4),
++		.ops = &clk_rcg2_ops,
++		.flags = CLK_HOLD_STATE,
++	},
++	.clkr.vdd_data = {
++		.vdd_classes = gcc_cliffs_regulators,
++		.num_vdd_classes = ARRAY_SIZE(gcc_cliffs_regulators),
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 19200000},
++	},
++};
++
++static const struct freq_tbl ftbl_gcc_pcie_0_phy_rchng_clk_src[] = {
++	F(19200000, P_BI_TCXO, 1, 0, 0),
++	F(100000000, P_GCC_GPLL0_OUT_EVEN, 3, 0, 0),
++	{ }
++};
++
++static struct clk_rcg2 gcc_pcie_0_phy_rchng_clk_src = {
++	.cmd_rcgr = 0x6b058,
++	.mnd_width = 0,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_0,
++	.freq_tbl = ftbl_gcc_pcie_0_phy_rchng_clk_src,
++	.clkr.hw.init = &(const struct clk_init_data) {
++		.name = "gcc_pcie_0_phy_rchng_clk_src",
++		.parent_data = gcc_parent_data_0,
++		.num_parents = ARRAY_SIZE(gcc_parent_data_0),
++		.ops = &clk_rcg2_ops,
++		.flags = CLK_HOLD_STATE,
++	},
++	.clkr.vdd_data = {
++		.vdd_class = &vdd_cx,
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 100000000},
++	},
++};
++
++static const struct freq_tbl ftbl_gcc_pdm2_clk_src[] = {
++	F(60000000, P_GCC_GPLL0_OUT_MAIN, 10, 0, 0),
++	{ }
++};
++
++static struct clk_rcg2 gcc_pdm2_clk_src = {
++	.cmd_rcgr = 0x33010,
++	.mnd_width = 0,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_0,
++	.freq_tbl = ftbl_gcc_pdm2_clk_src,
++	.clkr.hw.init = &(const struct clk_init_data) {
++		.name = "gcc_pdm2_clk_src",
++		.parent_data = gcc_parent_data_0,
++		.num_parents = ARRAY_SIZE(gcc_parent_data_0),
++		.ops = &clk_rcg2_ops,
++		.flags = CLK_HOLD_STATE,
++	},
++	.clkr.vdd_data = {
++		.vdd_class = &vdd_cx,
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 60000000},
++	},
++};
++
++static const struct freq_tbl ftbl_gcc_qupv3_wrap0_qspi_ref_clk_src[] = {
++	F(7372800, P_GCC_GPLL0_OUT_EVEN, 1, 384, 15625),
++	F(14745600, P_GCC_GPLL0_OUT_EVEN, 1, 768, 15625),
++	F(19200000, P_BI_TCXO, 1, 0, 0),
++	F(29491200, P_GCC_GPLL0_OUT_EVEN, 1, 1536, 15625),
++	F(32000000, P_GCC_GPLL0_OUT_EVEN, 1, 8, 75),
++	F(48000000, P_GCC_GPLL0_OUT_EVEN, 1, 4, 25),
++	F(51200000, P_GCC_GPLL0_OUT_EVEN, 1, 64, 375),
++	F(64000000, P_GCC_GPLL0_OUT_EVEN, 1, 16, 75),
++	F(75000000, P_GCC_GPLL0_OUT_EVEN, 4, 0, 0),
++	F(80000000, P_GCC_GPLL0_OUT_EVEN, 1, 4, 15),
++	F(96000000, P_GCC_GPLL0_OUT_EVEN, 1, 8, 25),
++	F(100000000, P_GCC_GPLL0_OUT_MAIN, 6, 0, 0),
++	F(102400000, P_GCC_GPLL0_OUT_EVEN, 1, 128, 375),
++	F(112000000, P_GCC_GPLL0_OUT_EVEN, 1, 28, 75),
++	F(117964800, P_GCC_GPLL0_OUT_EVEN, 1, 6144, 15625),
++	F(120000000, P_GCC_GPLL0_OUT_MAIN, 5, 0, 0),
++	F(150000000, P_GCC_GPLL0_OUT_EVEN, 2, 0, 0),
++	F(240000000, P_GCC_GPLL0_OUT_MAIN, 2.5, 0, 0),
++	{ }
++};
++
++static struct clk_init_data gcc_qupv3_wrap0_qspi_ref_clk_src_init = {
++	.name = "gcc_qupv3_wrap0_qspi_ref_clk_src",
++	.parent_data = gcc_parent_data_0,
++	.num_parents = ARRAY_SIZE(gcc_parent_data_0),
++	.ops = &clk_rcg2_ops,
++	.flags = CLK_HOLD_STATE,
++};
++
++static struct clk_rcg2 gcc_qupv3_wrap0_qspi_ref_clk_src = {
++	.cmd_rcgr = 0x188a0,
++	.mnd_width = 16,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_0,
++	.freq_tbl = ftbl_gcc_qupv3_wrap0_qspi_ref_clk_src,
++	.clkr.hw.init = &gcc_qupv3_wrap0_qspi_ref_clk_src_init,
++	.clkr.vdd_data = {
++		.vdd_classes = gcc_cliffs_regulators,
++		.num_vdd_classes = ARRAY_SIZE(gcc_cliffs_regulators),
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 150000000,
++			[VDD_LOW] = 240000000},
++	},
++};
++
++static const struct freq_tbl ftbl_gcc_qupv3_wrap0_s0_clk_src[] = {
++	F(7372800, P_GCC_GPLL0_OUT_EVEN, 1, 384, 15625),
++	F(14745600, P_GCC_GPLL0_OUT_EVEN, 1, 768, 15625),
++	F(19200000, P_BI_TCXO, 1, 0, 0),
++	F(29491200, P_GCC_GPLL0_OUT_EVEN, 1, 1536, 15625),
++	F(32000000, P_GCC_GPLL0_OUT_EVEN, 1, 8, 75),
++	F(48000000, P_GCC_GPLL0_OUT_EVEN, 1, 4, 25),
++	F(51200000, P_GCC_GPLL0_OUT_EVEN, 1, 64, 375),
++	F(64000000, P_GCC_GPLL0_OUT_EVEN, 1, 16, 75),
++	F(75000000, P_GCC_GPLL0_OUT_EVEN, 4, 0, 0),
++	F(80000000, P_GCC_GPLL0_OUT_EVEN, 1, 4, 15),
++	F(96000000, P_GCC_GPLL0_OUT_EVEN, 1, 8, 25),
++	F(100000000, P_GCC_GPLL0_OUT_MAIN, 6, 0, 0),
++	F(102400000, P_GCC_GPLL0_OUT_EVEN, 1, 128, 375),
++	F(112000000, P_GCC_GPLL0_OUT_EVEN, 1, 28, 75),
++	F(117964800, P_GCC_GPLL0_OUT_EVEN, 1, 6144, 15625),
++	F(120000000, P_GCC_GPLL0_OUT_MAIN, 5, 0, 0),
++	{ }
++};
++
++static struct clk_init_data gcc_qupv3_wrap0_s0_clk_src_init = {
++	.name = "gcc_qupv3_wrap0_s0_clk_src",
++	.parent_data = gcc_parent_data_0,
++	.num_parents = ARRAY_SIZE(gcc_parent_data_0),
++	.ops = &clk_rcg2_ops,
++	.flags = CLK_HOLD_STATE,
++};
++
++static struct clk_rcg2 gcc_qupv3_wrap0_s0_clk_src = {
++	.cmd_rcgr = 0x18010,
++	.mnd_width = 16,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_0,
++	.freq_tbl = ftbl_gcc_qupv3_wrap0_s0_clk_src,
++	.clkr.hw.init = &gcc_qupv3_wrap0_s0_clk_src_init,
++	.clkr.vdd_data = {
++		.vdd_classes = gcc_cliffs_regulators,
++		.num_vdd_classes = ARRAY_SIZE(gcc_cliffs_regulators),
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 75000000,
++			[VDD_LOW] = 120000000},
++	},
++};
++
++static struct clk_init_data gcc_qupv3_wrap0_s1_clk_src_init = {
++	.name = "gcc_qupv3_wrap0_s1_clk_src",
++	.parent_data = gcc_parent_data_0,
++	.num_parents = ARRAY_SIZE(gcc_parent_data_0),
++	.ops = &clk_rcg2_ops,
++	.flags = CLK_HOLD_STATE,
++};
++
++static struct clk_rcg2 gcc_qupv3_wrap0_s1_clk_src = {
++	.cmd_rcgr = 0x18148,
++	.mnd_width = 16,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_0,
++	.freq_tbl = ftbl_gcc_qupv3_wrap0_s0_clk_src,
++	.clkr.hw.init = &gcc_qupv3_wrap0_s1_clk_src_init,
++	.clkr.vdd_data = {
++		.vdd_classes = gcc_cliffs_regulators,
++		.num_vdd_classes = ARRAY_SIZE(gcc_cliffs_regulators),
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 75000000,
++			[VDD_LOW] = 120000000},
++	},
++};
++
++static const struct freq_tbl ftbl_gcc_qupv3_wrap0_s3_clk_src[] = {
++	F(7372800, P_GCC_GPLL0_OUT_EVEN, 1, 384, 15625),
++	F(14745600, P_GCC_GPLL0_OUT_EVEN, 1, 768, 15625),
++	F(19200000, P_BI_TCXO, 1, 0, 0),
++	F(29491200, P_GCC_GPLL0_OUT_EVEN, 1, 1536, 15625),
++	F(32000000, P_GCC_GPLL0_OUT_EVEN, 1, 8, 75),
++	F(48000000, P_GCC_GPLL0_OUT_EVEN, 1, 4, 25),
++	F(51200000, P_GCC_GPLL0_OUT_EVEN, 1, 64, 375),
++	F(64000000, P_GCC_GPLL0_OUT_EVEN, 1, 16, 75),
++	F(75000000, P_GCC_GPLL0_OUT_EVEN, 4, 0, 0),
++	F(80000000, P_GCC_GPLL0_OUT_EVEN, 1, 4, 15),
++	F(96000000, P_GCC_GPLL0_OUT_EVEN, 1, 8, 25),
++	F(100000000, P_GCC_GPLL0_OUT_MAIN, 6, 0, 0),
++	{ }
++};
++
++static struct clk_init_data gcc_qupv3_wrap0_s3_clk_src_init = {
++	.name = "gcc_qupv3_wrap0_s3_clk_src",
++	.parent_data = gcc_parent_data_0,
++	.num_parents = ARRAY_SIZE(gcc_parent_data_0),
++	.ops = &clk_rcg2_ops,
++	.flags = CLK_HOLD_STATE,
++};
++
++static struct clk_rcg2 gcc_qupv3_wrap0_s3_clk_src = {
++	.cmd_rcgr = 0x18290,
++	.mnd_width = 16,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_0,
++	.freq_tbl = ftbl_gcc_qupv3_wrap0_s3_clk_src,
++	.clkr.hw.init = &gcc_qupv3_wrap0_s3_clk_src_init,
++	.clkr.vdd_data = {
++		.vdd_classes = gcc_cliffs_regulators,
++		.num_vdd_classes = ARRAY_SIZE(gcc_cliffs_regulators),
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 75000000,
++			[VDD_LOW] = 100000000},
++	},
++};
++
++static struct clk_init_data gcc_qupv3_wrap0_s4_clk_src_init = {
++	.name = "gcc_qupv3_wrap0_s4_clk_src",
++	.parent_data = gcc_parent_data_0,
++	.num_parents = ARRAY_SIZE(gcc_parent_data_0),
++	.ops = &clk_rcg2_ops,
++	.flags = CLK_HOLD_STATE,
++};
++
++static struct clk_rcg2 gcc_qupv3_wrap0_s4_clk_src = {
++	.cmd_rcgr = 0x183c8,
++	.mnd_width = 16,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_0,
++	.freq_tbl = ftbl_gcc_qupv3_wrap0_s0_clk_src,
++	.clkr.hw.init = &gcc_qupv3_wrap0_s4_clk_src_init,
++	.clkr.vdd_data = {
++		.vdd_classes = gcc_cliffs_regulators,
++		.num_vdd_classes = ARRAY_SIZE(gcc_cliffs_regulators),
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 75000000,
++			[VDD_LOW] = 120000000},
++	},
++};
++
++static struct clk_init_data gcc_qupv3_wrap0_s5_clk_src_init = {
++	.name = "gcc_qupv3_wrap0_s5_clk_src",
++	.parent_data = gcc_parent_data_0,
++	.num_parents = ARRAY_SIZE(gcc_parent_data_0),
++	.ops = &clk_rcg2_ops,
++	.flags = CLK_HOLD_STATE,
++};
++
++static struct clk_rcg2 gcc_qupv3_wrap0_s5_clk_src = {
++	.cmd_rcgr = 0x18500,
++	.mnd_width = 16,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_0,
++	.freq_tbl = ftbl_gcc_qupv3_wrap0_s3_clk_src,
++	.clkr.hw.init = &gcc_qupv3_wrap0_s5_clk_src_init,
++	.clkr.vdd_data = {
++		.vdd_classes = gcc_cliffs_regulators,
++		.num_vdd_classes = ARRAY_SIZE(gcc_cliffs_regulators),
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 75000000,
++			[VDD_LOW] = 100000000},
++	},
++};
++
++static struct clk_init_data gcc_qupv3_wrap0_s6_clk_src_init = {
++	.name = "gcc_qupv3_wrap0_s6_clk_src",
++	.parent_data = gcc_parent_data_0,
++	.num_parents = ARRAY_SIZE(gcc_parent_data_0),
++	.ops = &clk_rcg2_ops,
++	.flags = CLK_HOLD_STATE,
++};
++
++static struct clk_rcg2 gcc_qupv3_wrap0_s6_clk_src = {
++	.cmd_rcgr = 0x18638,
++	.mnd_width = 16,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_0,
++	.freq_tbl = ftbl_gcc_qupv3_wrap0_s0_clk_src,
++	.clkr.hw.init = &gcc_qupv3_wrap0_s6_clk_src_init,
++	.clkr.vdd_data = {
++		.vdd_classes = gcc_cliffs_regulators,
++		.num_vdd_classes = ARRAY_SIZE(gcc_cliffs_regulators),
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 75000000,
++			[VDD_LOW] = 120000000},
++	},
++};
++
++static struct clk_init_data gcc_qupv3_wrap0_s7_clk_src_init = {
++	.name = "gcc_qupv3_wrap0_s7_clk_src",
++	.parent_data = gcc_parent_data_0,
++	.num_parents = ARRAY_SIZE(gcc_parent_data_0),
++	.ops = &clk_rcg2_ops,
++	.flags = CLK_HOLD_STATE,
++};
++
++static struct clk_rcg2 gcc_qupv3_wrap0_s7_clk_src = {
++	.cmd_rcgr = 0x18770,
++	.mnd_width = 16,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_0,
++	.freq_tbl = ftbl_gcc_qupv3_wrap0_s3_clk_src,
++	.clkr.hw.init = &gcc_qupv3_wrap0_s7_clk_src_init,
++	.clkr.vdd_data = {
++		.vdd_classes = gcc_cliffs_regulators,
++		.num_vdd_classes = ARRAY_SIZE(gcc_cliffs_regulators),
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 75000000,
++			[VDD_LOW] = 100000000},
++	},
++};
++
++static const struct freq_tbl ftbl_gcc_qupv3_wrap1_ibi_ctrl_0_clk_src[] = {
++	F(37500000, P_GCC_GPLL0_OUT_EVEN, 8, 0, 0),
++	{ }
++};
++
++static struct clk_rcg2 gcc_qupv3_wrap1_ibi_ctrl_0_clk_src = {
++	.cmd_rcgr = 0x1e9d4,
++	.mnd_width = 0,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_2,
++	.freq_tbl = ftbl_gcc_qupv3_wrap1_ibi_ctrl_0_clk_src,
++	.clkr.hw.init = &(const struct clk_init_data) {
++		.name = "gcc_qupv3_wrap1_ibi_ctrl_0_clk_src",
++		.parent_data = gcc_parent_data_2,
++		.num_parents = ARRAY_SIZE(gcc_parent_data_2),
++		.ops = &clk_rcg2_ops,
++		.flags = CLK_HOLD_STATE,
++	},
++	.clkr.vdd_data = {
++		.vdd_classes = gcc_cliffs_regulators,
++		.num_vdd_classes = ARRAY_SIZE(gcc_cliffs_regulators),
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 37500000},
++	},
++};
++
++static struct clk_init_data gcc_qupv3_wrap1_s0_clk_src_init = {
++	.name = "gcc_qupv3_wrap1_s0_clk_src",
++	.parent_data = gcc_parent_data_0,
++	.num_parents = ARRAY_SIZE(gcc_parent_data_0),
++	.ops = &clk_rcg2_ops,
++	.flags = CLK_HOLD_STATE,
++};
++
++static struct clk_rcg2 gcc_qupv3_wrap1_s0_clk_src = {
++	.cmd_rcgr = 0x1e010,
++	.mnd_width = 16,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_0,
++	.freq_tbl = ftbl_gcc_qupv3_wrap0_s0_clk_src,
++	.clkr.hw.init = &gcc_qupv3_wrap1_s0_clk_src_init,
++	.clkr.vdd_data = {
++		.vdd_classes = gcc_cliffs_regulators,
++		.num_vdd_classes = ARRAY_SIZE(gcc_cliffs_regulators),
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 75000000,
++			[VDD_LOW] = 120000000},
++	},
++};
++
++static struct clk_init_data gcc_qupv3_wrap1_s1_clk_src_init = {
++	.name = "gcc_qupv3_wrap1_s1_clk_src",
++	.parent_data = gcc_parent_data_0,
++	.num_parents = ARRAY_SIZE(gcc_parent_data_0),
++	.ops = &clk_rcg2_ops,
++	.flags = CLK_HOLD_STATE,
++};
++
++static struct clk_rcg2 gcc_qupv3_wrap1_s1_clk_src = {
++	.cmd_rcgr = 0x1e148,
++	.mnd_width = 16,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_0,
++	.freq_tbl = ftbl_gcc_qupv3_wrap0_s0_clk_src,
++	.clkr.hw.init = &gcc_qupv3_wrap1_s1_clk_src_init,
++	.clkr.vdd_data = {
++		.vdd_classes = gcc_cliffs_regulators,
++		.num_vdd_classes = ARRAY_SIZE(gcc_cliffs_regulators),
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 75000000,
++			[VDD_LOW] = 120000000},
++	},
++};
++
++static struct clk_init_data gcc_qupv3_wrap1_s2_clk_src_init = {
++	.name = "gcc_qupv3_wrap1_s2_clk_src",
++	.parent_data = gcc_parent_data_0,
++	.num_parents = ARRAY_SIZE(gcc_parent_data_0),
++	.ops = &clk_rcg2_ops,
++	.flags = CLK_HOLD_STATE,
++};
++
++static struct clk_rcg2 gcc_qupv3_wrap1_s2_clk_src = {
++	.cmd_rcgr = 0x1e280,
++	.mnd_width = 16,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_0,
++	.freq_tbl = ftbl_gcc_qupv3_wrap0_s0_clk_src,
++	.clkr.hw.init = &gcc_qupv3_wrap1_s2_clk_src_init,
++	.clkr.vdd_data = {
++		.vdd_classes = gcc_cliffs_regulators,
++		.num_vdd_classes = ARRAY_SIZE(gcc_cliffs_regulators),
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 75000000,
++			[VDD_LOW] = 120000000},
++	},
++};
++
++static struct clk_init_data gcc_qupv3_wrap1_s3_clk_src_init = {
++	.name = "gcc_qupv3_wrap1_s3_clk_src",
++	.parent_data = gcc_parent_data_0,
++	.num_parents = ARRAY_SIZE(gcc_parent_data_0),
++	.ops = &clk_rcg2_ops,
++	.flags = CLK_HOLD_STATE,
++};
++
++static struct clk_rcg2 gcc_qupv3_wrap1_s3_clk_src = {
++	.cmd_rcgr = 0x1e3b8,
++	.mnd_width = 16,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_0,
++	.freq_tbl = ftbl_gcc_qupv3_wrap0_s0_clk_src,
++	.clkr.hw.init = &gcc_qupv3_wrap1_s3_clk_src_init,
++	.clkr.vdd_data = {
++		.vdd_classes = gcc_cliffs_regulators,
++		.num_vdd_classes = ARRAY_SIZE(gcc_cliffs_regulators),
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 75000000,
++			[VDD_LOW] = 120000000},
++	},
++};
++
++static struct clk_init_data gcc_qupv3_wrap1_s4_clk_src_init = {
++	.name = "gcc_qupv3_wrap1_s4_clk_src",
++	.parent_data = gcc_parent_data_0,
++	.num_parents = ARRAY_SIZE(gcc_parent_data_0),
++	.ops = &clk_rcg2_ops,
++	.flags = CLK_HOLD_STATE,
++};
++
++static struct clk_rcg2 gcc_qupv3_wrap1_s4_clk_src = {
++	.cmd_rcgr = 0x1e4f0,
++	.mnd_width = 16,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_0,
++	.freq_tbl = ftbl_gcc_qupv3_wrap0_s3_clk_src,
++	.clkr.hw.init = &gcc_qupv3_wrap1_s4_clk_src_init,
++	.clkr.vdd_data = {
++		.vdd_classes = gcc_cliffs_regulators,
++		.num_vdd_classes = ARRAY_SIZE(gcc_cliffs_regulators),
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 75000000,
++			[VDD_LOW] = 100000000},
++	},
++};
++
++static struct clk_init_data gcc_qupv3_wrap1_s5_clk_src_init = {
++	.name = "gcc_qupv3_wrap1_s5_clk_src",
++	.parent_data = gcc_parent_data_0,
++	.num_parents = ARRAY_SIZE(gcc_parent_data_0),
++	.ops = &clk_rcg2_ops,
++	.flags = CLK_HOLD_STATE,
++};
++
++static struct clk_rcg2 gcc_qupv3_wrap1_s5_clk_src = {
++	.cmd_rcgr = 0x1e628,
++	.mnd_width = 16,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_0,
++	.freq_tbl = ftbl_gcc_qupv3_wrap0_s3_clk_src,
++	.clkr.hw.init = &gcc_qupv3_wrap1_s5_clk_src_init,
++	.clkr.vdd_data = {
++		.vdd_classes = gcc_cliffs_regulators,
++		.num_vdd_classes = ARRAY_SIZE(gcc_cliffs_regulators),
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 75000000,
++			[VDD_LOW] = 100000000},
++	},
++};
++
++static const struct freq_tbl ftbl_gcc_qupv3_wrap1_s6_clk_src[] = {
++	F(7372800, P_GCC_GPLL0_OUT_EVEN, 1, 384, 15625),
++	F(14745600, P_GCC_GPLL0_OUT_EVEN, 1, 768, 15625),
++	F(19200000, P_BI_TCXO, 1, 0, 0),
++	F(29491200, P_GCC_GPLL0_OUT_EVEN, 1, 1536, 15625),
++	F(32000000, P_GCC_GPLL0_OUT_EVEN, 1, 8, 75),
++	F(48000000, P_GCC_GPLL0_OUT_EVEN, 1, 4, 25),
++	F(51200000, P_GCC_GPLL0_OUT_EVEN, 1, 64, 375),
++	F(64000000, P_GCC_GPLL0_OUT_EVEN, 1, 16, 75),
++	F(75000000, P_GCC_GPLL0_OUT_EVEN, 4, 0, 0),
++	F(80000000, P_GCC_GPLL0_OUT_EVEN, 1, 4, 15),
++	F(96000000, P_GCC_GPLL0_OUT_EVEN, 1, 8, 25),
++	F(100000000, P_GCC_GPLL0_OUT_MAIN, 6, 0, 0),
++	F(102400000, P_GCC_GPLL0_OUT_EVEN, 1, 128, 375),
++	F(112000000, P_GCC_GPLL0_OUT_EVEN, 1, 28, 75),
++	F(117964800, P_GCC_GPLL0_OUT_EVEN, 1, 6144, 15625),
++	F(120000000, P_GCC_GPLL0_OUT_MAIN, 5, 0, 0),
++	F(128000000, P_GCC_GPLL0_OUT_MAIN, 1, 16, 75),
++	{ }
++};
++
++static struct clk_init_data gcc_qupv3_wrap1_s6_clk_src_init = {
++	.name = "gcc_qupv3_wrap1_s6_clk_src",
++	.parent_data = gcc_parent_data_7,
++	.num_parents = ARRAY_SIZE(gcc_parent_data_7),
++	.ops = &clk_rcg2_ops,
++	.flags = CLK_HOLD_STATE,
++};
++
++static struct clk_rcg2 gcc_qupv3_wrap1_s6_clk_src = {
++	.cmd_rcgr = 0x1e760,
++	.mnd_width = 16,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_7,
++	.freq_tbl = ftbl_gcc_qupv3_wrap1_s6_clk_src,
++	.clkr.hw.init = &gcc_qupv3_wrap1_s6_clk_src_init,
++	.clkr.vdd_data = {
++		.vdd_classes = gcc_cliffs_regulators,
++		.num_vdd_classes = ARRAY_SIZE(gcc_cliffs_regulators),
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 75000000,
++			[VDD_LOW] = 128000000},
++	},
++};
++
++static struct clk_init_data gcc_qupv3_wrap1_s7_clk_src_init = {
++	.name = "gcc_qupv3_wrap1_s7_clk_src",
++	.parent_data = gcc_parent_data_0,
++	.num_parents = ARRAY_SIZE(gcc_parent_data_0),
++	.ops = &clk_rcg2_ops,
++	.flags = CLK_HOLD_STATE,
++};
++
++static struct clk_rcg2 gcc_qupv3_wrap1_s7_clk_src = {
++	.cmd_rcgr = 0x1e898,
++	.mnd_width = 16,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_0,
++	.freq_tbl = ftbl_gcc_qupv3_wrap0_s3_clk_src,
++	.clkr.hw.init = &gcc_qupv3_wrap1_s7_clk_src_init,
++	.clkr.vdd_data = {
++		.vdd_classes = gcc_cliffs_regulators,
++		.num_vdd_classes = ARRAY_SIZE(gcc_cliffs_regulators),
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 75000000,
++			[VDD_LOW] = 100000000},
++	},
++};
++
++static const struct freq_tbl ftbl_gcc_sdcc2_apps_clk_src[] = {
++	F(400000, P_BI_TCXO, 12, 1, 4),
++	F(25000000, P_GCC_GPLL0_OUT_EVEN, 12, 0, 0),
++	F(37500000, P_GCC_GPLL0_OUT_EVEN, 8, 0, 0),
++	F(50000000, P_GCC_GPLL0_OUT_EVEN, 6, 0, 0),
++	F(100000000, P_GCC_GPLL0_OUT_EVEN, 3, 0, 0),
++	F(202000000, P_GCC_GPLL9_OUT_MAIN, 4, 0, 0),
++	{ }
++};
++
++static struct clk_rcg2 gcc_sdcc2_apps_clk_src = {
++	.cmd_rcgr = 0x14018,
++	.mnd_width = 8,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_8,
++	.freq_tbl = ftbl_gcc_sdcc2_apps_clk_src,
++	.clkr.hw.init = &(const struct clk_init_data) {
++		.name = "gcc_sdcc2_apps_clk_src",
++		.parent_data = gcc_parent_data_8,
++		.num_parents = ARRAY_SIZE(gcc_parent_data_8),
++		.ops = &clk_rcg2_floor_ops,
++		.flags = CLK_HOLD_STATE,
++	},
++	.clkr.vdd_data = {
++		.vdd_classes = gcc_cliffs_regulators,
++		.num_vdd_classes = ARRAY_SIZE(gcc_cliffs_regulators),
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 100000000,
++			[VDD_LOW_L1] = 202000000},
++	},
++};
++
++static const struct freq_tbl ftbl_gcc_ufs_phy_axi_clk_src[] = {
++	F(25000000, P_GCC_GPLL0_OUT_EVEN, 12, 0, 0),
++	F(100000000, P_GCC_GPLL0_OUT_EVEN, 3, 0, 0),
++	F(201500000, P_GCC_GPLL4_OUT_MAIN, 4, 0, 0),
++	F(403000000, P_GCC_GPLL4_OUT_MAIN, 2, 0, 0),
++	{ }
++};
++
++static struct clk_rcg2 gcc_ufs_phy_axi_clk_src = {
++	.cmd_rcgr = 0x77030,
++	.mnd_width = 8,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_3,
++	.freq_tbl = ftbl_gcc_ufs_phy_axi_clk_src,
++	.clkr.hw.init = &(const struct clk_init_data) {
++		.name = "gcc_ufs_phy_axi_clk_src",
++		.parent_data = gcc_parent_data_3,
++		.num_parents = ARRAY_SIZE(gcc_parent_data_3),
++		.ops = &clk_rcg2_ops,
++		.flags = CLK_HOLD_STATE,
++	},
++	.clkr.vdd_data = {
++		.vdd_classes = gcc_cliffs_regulators,
++		.num_vdd_classes = ARRAY_SIZE(gcc_cliffs_regulators),
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 100000000,
++			[VDD_LOW] = 201500000,
++			[VDD_NOMINAL] = 403000000},
++	},
++};
++
++static const struct freq_tbl ftbl_gcc_ufs_phy_ice_core_clk_src[] = {
++	F(100000000, P_GCC_GPLL0_OUT_EVEN, 3, 0, 0),
++	F(201500000, P_GCC_GPLL4_OUT_MAIN, 4, 0, 0),
++	F(403000000, P_GCC_GPLL4_OUT_MAIN, 2, 0, 0),
++	{ }
++};
++
++static struct clk_rcg2 gcc_ufs_phy_ice_core_clk_src = {
++	.cmd_rcgr = 0x77080,
++	.mnd_width = 0,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_3,
++	.freq_tbl = ftbl_gcc_ufs_phy_ice_core_clk_src,
++	.clkr.hw.init = &(const struct clk_init_data) {
++		.name = "gcc_ufs_phy_ice_core_clk_src",
++		.parent_data = gcc_parent_data_3,
++		.num_parents = ARRAY_SIZE(gcc_parent_data_3),
++		.ops = &clk_rcg2_ops,
++		.flags = CLK_HOLD_STATE,
++	},
++	.clkr.vdd_data = {
++		.vdd_classes = gcc_cliffs_regulators,
++		.num_vdd_classes = ARRAY_SIZE(gcc_cliffs_regulators),
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 100000000,
++			[VDD_LOW] = 201500000,
++			[VDD_NOMINAL] = 403000000},
++	},
++};
++
++static const struct freq_tbl ftbl_gcc_ufs_phy_phy_aux_clk_src[] = {
++	F(9600000, P_BI_TCXO, 2, 0, 0),
++	F(19200000, P_BI_TCXO, 1, 0, 0),
++	{ }
++};
++
++static struct clk_rcg2 gcc_ufs_phy_phy_aux_clk_src = {
++	.cmd_rcgr = 0x770b4,
++	.mnd_width = 0,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_5,
++	.freq_tbl = ftbl_gcc_ufs_phy_phy_aux_clk_src,
++	.clkr.hw.init = &(const struct clk_init_data) {
++		.name = "gcc_ufs_phy_phy_aux_clk_src",
++		.parent_data = gcc_parent_data_5,
++		.num_parents = ARRAY_SIZE(gcc_parent_data_5),
++		.ops = &clk_rcg2_ops,
++		.flags = CLK_HOLD_STATE,
++	},
++	.clkr.vdd_data = {
++		.vdd_class = &vdd_cx,
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 19200000},
++	},
++};
++
++static struct clk_rcg2 gcc_ufs_phy_unipro_core_clk_src = {
++	.cmd_rcgr = 0x77098,
++	.mnd_width = 0,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_3,
++	.freq_tbl = ftbl_gcc_ufs_phy_ice_core_clk_src,
++	.clkr.hw.init = &(const struct clk_init_data) {
++		.name = "gcc_ufs_phy_unipro_core_clk_src",
++		.parent_data = gcc_parent_data_3,
++		.num_parents = ARRAY_SIZE(gcc_parent_data_3),
++		.ops = &clk_rcg2_ops,
++		.flags = CLK_HOLD_STATE,
++	},
++	.clkr.vdd_data = {
++		.vdd_classes = gcc_cliffs_regulators,
++		.num_vdd_classes = ARRAY_SIZE(gcc_cliffs_regulators),
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 100000000,
++			[VDD_LOW] = 201500000,
++			[VDD_NOMINAL] = 403000000},
++	},
++};
++
++static const struct freq_tbl ftbl_gcc_usb30_prim_master_clk_src[] = {
++	F(66666667, P_GCC_GPLL0_OUT_EVEN, 4.5, 0, 0),
++	F(133333333, P_GCC_GPLL0_OUT_MAIN, 4.5, 0, 0),
++	F(200000000, P_GCC_GPLL0_OUT_MAIN, 3, 0, 0),
++	F(240000000, P_GCC_GPLL0_OUT_MAIN, 2.5, 0, 0),
++	{ }
++};
++
++static struct clk_rcg2 gcc_usb30_prim_master_clk_src = {
++	.cmd_rcgr = 0x3902c,
++	.mnd_width = 8,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_0,
++	.freq_tbl = ftbl_gcc_usb30_prim_master_clk_src,
++	.clkr.hw.init = &(const struct clk_init_data) {
++		.name = "gcc_usb30_prim_master_clk_src",
++		.parent_data = gcc_parent_data_0,
++		.num_parents = ARRAY_SIZE(gcc_parent_data_0),
++		.ops = &clk_rcg2_ops,
++		.flags = CLK_HOLD_STATE,
++	},
++	.clkr.vdd_data = {
++		.vdd_classes = gcc_cliffs_regulators,
++		.num_vdd_classes = ARRAY_SIZE(gcc_cliffs_regulators),
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 66666667,
++			[VDD_LOW] = 133333333,
++			[VDD_NOMINAL] = 200000000,
++			[VDD_HIGH] = 240000000},
++	},
++};
++
++static struct clk_rcg2 gcc_usb30_prim_mock_utmi_clk_src = {
++	.cmd_rcgr = 0x39044,
++	.mnd_width = 0,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_0,
++	.freq_tbl = ftbl_gcc_pcie_0_aux_clk_src,
++	.clkr.hw.init = &(const struct clk_init_data) {
++		.name = "gcc_usb30_prim_mock_utmi_clk_src",
++		.parent_data = gcc_parent_data_0,
++		.num_parents = ARRAY_SIZE(gcc_parent_data_0),
++		.ops = &clk_rcg2_ops,
++		.flags = CLK_HOLD_STATE,
++	},
++	.clkr.vdd_data = {
++		.vdd_class = &vdd_cx,
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 19200000},
++	},
++};
++
++static struct clk_rcg2 gcc_usb3_prim_phy_aux_clk_src = {
++	.cmd_rcgr = 0x39070,
++	.mnd_width = 0,
++	.hid_width = 5,
++	.parent_map = gcc_parent_map_4,
++	.freq_tbl = ftbl_gcc_pcie_0_aux_clk_src,
++	.clkr.hw.init = &(const struct clk_init_data) {
++		.name = "gcc_usb3_prim_phy_aux_clk_src",
++		.parent_data = gcc_parent_data_4,
++		.num_parents = ARRAY_SIZE(gcc_parent_data_4),
++		.ops = &clk_rcg2_ops,
++		.flags = CLK_HOLD_STATE,
++	},
++	.clkr.vdd_data = {
++		.vdd_class = &vdd_cx,
++		.num_rate_max = VDD_NUM,
++		.rate_max = (unsigned long[VDD_NUM]) {
++			[VDD_LOWER] = 19200000},
++	},
++};
++
++static struct clk_regmap_div gcc_pcie_0_pipe_div2_clk_src = {
++	.reg = 0x6b094,
++	.shift = 0,
++	.width = 4,
++	.clkr.hw.init = &(const struct clk_init_data) {
++		.name = "gcc_pcie_0_pipe_div2_clk_src",
++		.parent_hws = (const struct clk_hw*[]) {
++			&gcc_pcie_0_pipe_clk_src.clkr.hw,
++		},
++		.num_parents = 1,
++		.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++		.ops = &clk_regmap_div_ro_ops,
++	},
++};
++
++static struct clk_regmap_div gcc_qupv3_wrap0_s2_clk_src = {
++	.reg = 0x18280,
++	.shift = 0,
++	.width = 4,
++	.clkr.hw.init = &(const struct clk_init_data) {
++		.name = "gcc_qupv3_wrap0_s2_clk_src",
++		.parent_hws = (const struct clk_hw*[]) {
++			&gcc_qupv3_wrap0_qspi_ref_clk_src.clkr.hw,
++		},
++		.num_parents = 1,
++		.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++		.ops = &clk_regmap_div_ro_ops,
++	},
++};
++
++static struct clk_regmap_div gcc_usb30_prim_mock_utmi_postdiv_clk_src = {
++	.reg = 0x3905c,
++	.shift = 0,
++	.width = 4,
++	.clkr.hw.init = &(const struct clk_init_data) {
++		.name = "gcc_usb30_prim_mock_utmi_postdiv_clk_src",
++		.parent_hws = (const struct clk_hw*[]) {
++			&gcc_usb30_prim_mock_utmi_clk_src.clkr.hw,
++		},
++		.num_parents = 1,
++		.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++		.ops = &clk_regmap_div_ro_ops,
++	},
++};
++
++static struct clk_branch gcc_aggre_noc_pcie_axi_clk = {
++	.halt_reg = 0x10064,
++	.halt_check = BRANCH_HALT_SKIP,
++	.hwcg_reg = 0x10064,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x52000,
++		.enable_mask = BIT(12),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_aggre_noc_pcie_axi_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_aggre_ufs_phy_axi_clk = {
++	.halt_reg = 0x770e4,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x770e4,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x770e4,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_aggre_ufs_phy_axi_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_ufs_phy_axi_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_aggre_ufs_phy_axi_hw_ctl_clk = {
++	.halt_reg = 0x770e4,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x770e4,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x770e4,
++		.enable_mask = BIT(1),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_aggre_ufs_phy_axi_hw_ctl_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_ufs_phy_axi_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_aggre_usb3_prim_axi_clk = {
++	.halt_reg = 0x3908c,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x3908c,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x3908c,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_aggre_usb3_prim_axi_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_usb30_prim_master_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_boot_rom_ahb_clk = {
++	.halt_reg = 0x38004,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x38004,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x52000,
++		.enable_mask = BIT(10),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_boot_rom_ahb_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_camera_hf_axi_clk = {
++	.halt_reg = 0x26010,
++	.halt_check = BRANCH_HALT_SKIP,
++	.hwcg_reg = 0x26010,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x26010,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_camera_hf_axi_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_camera_sf_axi_clk = {
++	.halt_reg = 0x2601c,
++	.halt_check = BRANCH_HALT_SKIP,
++	.hwcg_reg = 0x2601c,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x2601c,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_camera_sf_axi_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_cfg_noc_pcie_anoc_ahb_clk = {
++	.halt_reg = 0x10050,
++	.halt_check = BRANCH_HALT_SKIP,
++	.hwcg_reg = 0x10050,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x52000,
++		.enable_mask = BIT(20),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_cfg_noc_pcie_anoc_ahb_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_cfg_noc_usb3_prim_axi_clk = {
++	.halt_reg = 0x39088,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x39088,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x39088,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_cfg_noc_usb3_prim_axi_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_usb30_prim_master_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_cnoc_pcie_sf_axi_clk = {
++	.halt_reg = 0x10058,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x10058,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x52008,
++		.enable_mask = BIT(6),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_cnoc_pcie_sf_axi_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_ddrss_gpu_axi_clk = {
++	.halt_reg = 0x7115c,
++	.halt_check = BRANCH_HALT_SKIP,
++	.hwcg_reg = 0x7115c,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x7115c,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_ddrss_gpu_axi_clk",
++			.ops = &clk_branch2_aon_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_ddrss_pcie_sf_qtb_clk = {
++	.halt_reg = 0x10074,
++	.halt_check = BRANCH_HALT_SKIP,
++	.hwcg_reg = 0x10074,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x52000,
++		.enable_mask = BIT(19),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_ddrss_pcie_sf_qtb_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_disp_hf_axi_clk = {
++	.halt_reg = 0x2700c,
++	.halt_check = BRANCH_HALT_SKIP,
++	.hwcg_reg = 0x2700c,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x2700c,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_disp_hf_axi_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_gp1_clk = {
++	.halt_reg = 0x64000,
++	.halt_check = BRANCH_HALT,
++	.clkr = {
++		.enable_reg = 0x64000,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_gp1_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_gp1_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_gp2_clk = {
++	.halt_reg = 0x65000,
++	.halt_check = BRANCH_HALT,
++	.clkr = {
++		.enable_reg = 0x65000,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_gp2_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_gp2_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_gp3_clk = {
++	.halt_reg = 0x66000,
++	.halt_check = BRANCH_HALT,
++	.clkr = {
++		.enable_reg = 0x66000,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_gp3_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_gp3_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_gpu_gpll0_clk_src = {
++	.halt_check = BRANCH_HALT_DELAY,
++	.clkr = {
++		.enable_reg = 0x52000,
++		.enable_mask = BIT(15),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_gpu_gpll0_clk_src",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_gpll0.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_gpu_gpll0_div_clk_src = {
++	.halt_check = BRANCH_HALT_DELAY,
++	.clkr = {
++		.enable_reg = 0x52000,
++		.enable_mask = BIT(16),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_gpu_gpll0_div_clk_src",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_gpll0_out_even.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_gpu_memnoc_gfx_clk = {
++	.halt_reg = 0x71010,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x71010,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x71010,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_gpu_memnoc_gfx_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_gpu_snoc_dvm_gfx_clk = {
++	.halt_reg = 0x71018,
++	.halt_check = BRANCH_HALT_DELAY,
++	.clkr = {
++		.enable_reg = 0x71018,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_gpu_snoc_dvm_gfx_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_pcie_0_aux_clk = {
++	.halt_reg = 0x6b03c,
++	.halt_check = BRANCH_HALT_VOTED,
++	.clkr = {
++		.enable_reg = 0x52008,
++		.enable_mask = BIT(3),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_pcie_0_aux_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_pcie_0_aux_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_pcie_0_cfg_ahb_clk = {
++	.halt_reg = 0x6b038,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x6b038,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x52008,
++		.enable_mask = BIT(2),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_pcie_0_cfg_ahb_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_pcie_0_mstr_axi_clk = {
++	.halt_reg = 0x6b02c,
++	.halt_check = BRANCH_HALT_SKIP,
++	.hwcg_reg = 0x6b02c,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x52008,
++		.enable_mask = BIT(1),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_pcie_0_mstr_axi_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_pcie_0_phy_rchng_clk = {
++	.halt_reg = 0x6b054,
++	.halt_check = BRANCH_HALT_VOTED,
++	.clkr = {
++		.enable_reg = 0x52000,
++		.enable_mask = BIT(22),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_pcie_0_phy_rchng_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_pcie_0_phy_rchng_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_pcie_0_pipe_clk = {
++	.halt_reg = 0x6b048,
++	.halt_check = BRANCH_HALT_SKIP,
++	.clkr = {
++		.enable_reg = 0x52008,
++		.enable_mask = BIT(4),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_pcie_0_pipe_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_pcie_0_pipe_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_pcie_0_pipe_div2_clk = {
++	.halt_reg = 0x6b098,
++	.halt_check = BRANCH_HALT_SKIP,
++	.clkr = {
++		.enable_reg = 0x52018,
++		.enable_mask = BIT(15),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_pcie_0_pipe_div2_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_pcie_0_pipe_div2_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_pcie_0_slv_axi_clk = {
++	.halt_reg = 0x6b020,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x6b020,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x52008,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_pcie_0_slv_axi_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_pcie_0_slv_q2a_axi_clk = {
++	.halt_reg = 0x6b01c,
++	.halt_check = BRANCH_HALT_VOTED,
++	.clkr = {
++		.enable_reg = 0x52008,
++		.enable_mask = BIT(5),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_pcie_0_slv_q2a_axi_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_pdm2_clk = {
++	.halt_reg = 0x3300c,
++	.halt_check = BRANCH_HALT,
++	.clkr = {
++		.enable_reg = 0x3300c,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_pdm2_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_pdm2_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_pdm_ahb_clk = {
++	.halt_reg = 0x33004,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x33004,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x33004,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_pdm_ahb_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_pdm_xo4_clk = {
++	.halt_reg = 0x33008,
++	.halt_check = BRANCH_HALT,
++	.clkr = {
++		.enable_reg = 0x33008,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_pdm_xo4_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_qmip_camera_nrt_ahb_clk = {
++	.halt_reg = 0x26008,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x26008,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x26008,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qmip_camera_nrt_ahb_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_qmip_camera_rt_ahb_clk = {
++	.halt_reg = 0x2600c,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x2600c,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x2600c,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qmip_camera_rt_ahb_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_qmip_disp_ahb_clk = {
++	.halt_reg = 0x27008,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x27008,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x27008,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qmip_disp_ahb_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_qmip_gpu_ahb_clk = {
++	.halt_reg = 0x71008,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x71008,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x71008,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qmip_gpu_ahb_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_qmip_pcie_ahb_clk = {
++	.halt_reg = 0x6b018,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x6b018,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x52000,
++		.enable_mask = BIT(11),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qmip_pcie_ahb_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_qmip_video_cv_cpu_ahb_clk = {
++	.halt_reg = 0x32014,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x32014,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x32014,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qmip_video_cv_cpu_ahb_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_qmip_video_cvp_ahb_clk = {
++	.halt_reg = 0x32008,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x32008,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x32008,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qmip_video_cvp_ahb_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_qmip_video_v_cpu_ahb_clk = {
++	.halt_reg = 0x32010,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x32010,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x32010,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qmip_video_v_cpu_ahb_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_qmip_video_vcodec_ahb_clk = {
++	.halt_reg = 0x3200c,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x3200c,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x3200c,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qmip_video_vcodec_ahb_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap0_core_2x_clk = {
++	.halt_reg = 0x23018,
++	.halt_check = BRANCH_HALT_VOTED,
++	.clkr = {
++		.enable_reg = 0x52008,
++		.enable_mask = BIT(18),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap0_core_2x_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap0_core_clk = {
++	.halt_reg = 0x23008,
++	.halt_check = BRANCH_HALT_VOTED,
++	.clkr = {
++		.enable_reg = 0x52008,
++		.enable_mask = BIT(19),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap0_core_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap0_qspi_ref_clk = {
++	.halt_reg = 0x1889c,
++	.halt_check = BRANCH_HALT_VOTED,
++	.clkr = {
++		.enable_reg = 0x52010,
++		.enable_mask = BIT(29),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap0_qspi_ref_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_qupv3_wrap0_qspi_ref_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap0_s0_clk = {
++	.halt_reg = 0x18004,
++	.halt_check = BRANCH_HALT_VOTED,
++	.clkr = {
++		.enable_reg = 0x52008,
++		.enable_mask = BIT(22),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap0_s0_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_qupv3_wrap0_s0_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap0_s1_clk = {
++	.halt_reg = 0x1813c,
++	.halt_check = BRANCH_HALT_VOTED,
++	.clkr = {
++		.enable_reg = 0x52008,
++		.enable_mask = BIT(23),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap0_s1_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_qupv3_wrap0_s1_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap0_s2_clk = {
++	.halt_reg = 0x18274,
++	.halt_check = BRANCH_HALT_VOTED,
++	.clkr = {
++		.enable_reg = 0x52008,
++		.enable_mask = BIT(24),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap0_s2_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_qupv3_wrap0_s2_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap0_s3_clk = {
++	.halt_reg = 0x18284,
++	.halt_check = BRANCH_HALT_VOTED,
++	.clkr = {
++		.enable_reg = 0x52008,
++		.enable_mask = BIT(25),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap0_s3_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_qupv3_wrap0_s3_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap0_s4_clk = {
++	.halt_reg = 0x183bc,
++	.halt_check = BRANCH_HALT_VOTED,
++	.clkr = {
++		.enable_reg = 0x52008,
++		.enable_mask = BIT(26),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap0_s4_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_qupv3_wrap0_s4_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap0_s5_clk = {
++	.halt_reg = 0x184f4,
++	.halt_check = BRANCH_HALT_VOTED,
++	.clkr = {
++		.enable_reg = 0x52008,
++		.enable_mask = BIT(27),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap0_s5_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_qupv3_wrap0_s5_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap0_s6_clk = {
++	.halt_reg = 0x1862c,
++	.halt_check = BRANCH_HALT_VOTED,
++	.clkr = {
++		.enable_reg = 0x52008,
++		.enable_mask = BIT(28),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap0_s6_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_qupv3_wrap0_s6_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap0_s7_clk = {
++	.halt_reg = 0x18764,
++	.halt_check = BRANCH_HALT_VOTED,
++	.clkr = {
++		.enable_reg = 0x52010,
++		.enable_mask = BIT(16),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap0_s7_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_qupv3_wrap0_s7_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap1_core_2x_clk = {
++	.halt_reg = 0x23168,
++	.halt_check = BRANCH_HALT_VOTED,
++	.clkr = {
++		.enable_reg = 0x52010,
++		.enable_mask = BIT(3),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap1_core_2x_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap1_core_clk = {
++	.halt_reg = 0x23158,
++	.halt_check = BRANCH_HALT_VOTED,
++	.clkr = {
++		.enable_reg = 0x52010,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap1_core_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap1_ibi_ctrl_2_clk = {
++	.halt_reg = 0x1e9cc,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x1e9cc,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x52010,
++		.enable_mask = BIT(27),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap1_ibi_ctrl_2_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_qupv3_wrap1_ibi_ctrl_0_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap1_ibi_ctrl_3_clk = {
++	.halt_reg = 0x1e9d0,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x1e9d0,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x52010,
++		.enable_mask = BIT(28),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap1_ibi_ctrl_3_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_qupv3_wrap1_ibi_ctrl_0_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap1_s0_clk = {
++	.halt_reg = 0x1e004,
++	.halt_check = BRANCH_HALT_VOTED,
++	.clkr = {
++		.enable_reg = 0x52010,
++		.enable_mask = BIT(4),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap1_s0_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_qupv3_wrap1_s0_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap1_s1_clk = {
++	.halt_reg = 0x1e13c,
++	.halt_check = BRANCH_HALT_VOTED,
++	.clkr = {
++		.enable_reg = 0x52010,
++		.enable_mask = BIT(5),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap1_s1_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_qupv3_wrap1_s1_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap1_s2_clk = {
++	.halt_reg = 0x1e274,
++	.halt_check = BRANCH_HALT_VOTED,
++	.clkr = {
++		.enable_reg = 0x52010,
++		.enable_mask = BIT(6),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap1_s2_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_qupv3_wrap1_s2_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap1_s3_clk = {
++	.halt_reg = 0x1e3ac,
++	.halt_check = BRANCH_HALT_VOTED,
++	.clkr = {
++		.enable_reg = 0x52010,
++		.enable_mask = BIT(7),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap1_s3_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_qupv3_wrap1_s3_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap1_s4_clk = {
++	.halt_reg = 0x1e4e4,
++	.halt_check = BRANCH_HALT_VOTED,
++	.clkr = {
++		.enable_reg = 0x52010,
++		.enable_mask = BIT(8),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap1_s4_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_qupv3_wrap1_s4_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap1_s5_clk = {
++	.halt_reg = 0x1e61c,
++	.halt_check = BRANCH_HALT_VOTED,
++	.clkr = {
++		.enable_reg = 0x52010,
++		.enable_mask = BIT(9),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap1_s5_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_qupv3_wrap1_s5_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap1_s6_clk = {
++	.halt_reg = 0x1e754,
++	.halt_check = BRANCH_HALT_VOTED,
++	.clkr = {
++		.enable_reg = 0x52010,
++		.enable_mask = BIT(10),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap1_s6_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_qupv3_wrap1_s6_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap1_s7_clk = {
++	.halt_reg = 0x1e88c,
++	.halt_check = BRANCH_HALT_VOTED,
++	.clkr = {
++		.enable_reg = 0x52010,
++		.enable_mask = BIT(17),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap1_s7_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_qupv3_wrap1_s7_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap_0_m_ahb_clk = {
++	.halt_reg = 0x23000,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x23000,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x52008,
++		.enable_mask = BIT(20),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap_0_m_ahb_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap_0_s_ahb_clk = {
++	.halt_reg = 0x23004,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x23004,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x52008,
++		.enable_mask = BIT(21),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap_0_s_ahb_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap_1_ibi_2_ahb_clk = {
++	.halt_reg = 0x1e9c4,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x1e9c4,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x52010,
++		.enable_mask = BIT(25),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap_1_ibi_2_ahb_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap_1_ibi_3_ahb_clk = {
++	.halt_reg = 0x1e9c8,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x1e9c8,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x52010,
++		.enable_mask = BIT(26),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap_1_ibi_3_ahb_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap_1_m_ahb_clk = {
++	.halt_reg = 0x23150,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x23150,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x52010,
++		.enable_mask = BIT(2),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap_1_m_ahb_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_qupv3_wrap_1_s_ahb_clk = {
++	.halt_reg = 0x23154,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x23154,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x52010,
++		.enable_mask = BIT(1),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_qupv3_wrap_1_s_ahb_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_sdcc2_ahb_clk = {
++	.halt_reg = 0x14010,
++	.halt_check = BRANCH_HALT,
++	.clkr = {
++		.enable_reg = 0x14010,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_sdcc2_ahb_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_sdcc2_apps_clk = {
++	.halt_reg = 0x14004,
++	.halt_check = BRANCH_HALT,
++	.clkr = {
++		.enable_reg = 0x14004,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_sdcc2_apps_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_sdcc2_apps_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_ufs_phy_ahb_clk = {
++	.halt_reg = 0x77024,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x77024,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x77024,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_ufs_phy_ahb_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_ufs_phy_axi_clk = {
++	.halt_reg = 0x77018,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x77018,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x77018,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_ufs_phy_axi_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_ufs_phy_axi_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_ufs_phy_axi_hw_ctl_clk = {
++	.halt_reg = 0x77018,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x77018,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x77018,
++		.enable_mask = BIT(1),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_ufs_phy_axi_hw_ctl_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_ufs_phy_axi_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_ufs_phy_ice_core_clk = {
++	.halt_reg = 0x77074,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x77074,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x77074,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_ufs_phy_ice_core_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_ufs_phy_ice_core_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_ufs_phy_ice_core_hw_ctl_clk = {
++	.halt_reg = 0x77074,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x77074,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x77074,
++		.enable_mask = BIT(1),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_ufs_phy_ice_core_hw_ctl_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_ufs_phy_ice_core_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_ufs_phy_phy_aux_clk = {
++	.halt_reg = 0x770b0,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x770b0,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x770b0,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_ufs_phy_phy_aux_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_ufs_phy_phy_aux_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_ufs_phy_phy_aux_hw_ctl_clk = {
++	.halt_reg = 0x770b0,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x770b0,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x770b0,
++		.enable_mask = BIT(1),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_ufs_phy_phy_aux_hw_ctl_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_ufs_phy_phy_aux_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_ufs_phy_rx_symbol_0_clk = {
++	.halt_reg = 0x7702c,
++	.halt_check = BRANCH_HALT_DELAY,
++	.clkr = {
++		.enable_reg = 0x7702c,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_ufs_phy_rx_symbol_0_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_ufs_phy_rx_symbol_0_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_ufs_phy_rx_symbol_1_clk = {
++	.halt_reg = 0x770cc,
++	.halt_check = BRANCH_HALT_DELAY,
++	.clkr = {
++		.enable_reg = 0x770cc,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_ufs_phy_rx_symbol_1_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_ufs_phy_rx_symbol_1_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_ufs_phy_tx_symbol_0_clk = {
++	.halt_reg = 0x77028,
++	.halt_check = BRANCH_HALT_DELAY,
++	.clkr = {
++		.enable_reg = 0x77028,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_ufs_phy_tx_symbol_0_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_ufs_phy_tx_symbol_0_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_ufs_phy_unipro_core_clk = {
++	.halt_reg = 0x77068,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x77068,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x77068,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_ufs_phy_unipro_core_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_ufs_phy_unipro_core_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_ufs_phy_unipro_core_hw_ctl_clk = {
++	.halt_reg = 0x77068,
++	.halt_check = BRANCH_HALT_VOTED,
++	.hwcg_reg = 0x77068,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x77068,
++		.enable_mask = BIT(1),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_ufs_phy_unipro_core_hw_ctl_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_ufs_phy_unipro_core_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_usb30_prim_master_clk = {
++	.halt_reg = 0x39018,
++	.halt_check = BRANCH_HALT,
++	.clkr = {
++		.enable_reg = 0x39018,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_usb30_prim_master_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_usb30_prim_master_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_usb30_prim_mock_utmi_clk = {
++	.halt_reg = 0x39028,
++	.halt_check = BRANCH_HALT,
++	.clkr = {
++		.enable_reg = 0x39028,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_usb30_prim_mock_utmi_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_usb30_prim_mock_utmi_postdiv_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_usb30_prim_sleep_clk = {
++	.halt_reg = 0x39024,
++	.halt_check = BRANCH_HALT,
++	.clkr = {
++		.enable_reg = 0x39024,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_usb30_prim_sleep_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_usb3_prim_phy_aux_clk = {
++	.halt_reg = 0x39060,
++	.halt_check = BRANCH_HALT,
++	.clkr = {
++		.enable_reg = 0x39060,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_usb3_prim_phy_aux_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_usb3_prim_phy_aux_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_usb3_prim_phy_com_aux_clk = {
++	.halt_reg = 0x39064,
++	.halt_check = BRANCH_HALT,
++	.clkr = {
++		.enable_reg = 0x39064,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_usb3_prim_phy_com_aux_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_usb3_prim_phy_aux_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_usb3_prim_phy_pipe_clk = {
++	.halt_reg = 0x39068,
++	.halt_check = BRANCH_HALT_DELAY,
++	.hwcg_reg = 0x39068,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x39068,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_usb3_prim_phy_pipe_clk",
++			.parent_hws = (const struct clk_hw*[]) {
++				&gcc_usb3_prim_phy_pipe_clk_src.clkr.hw,
++			},
++			.num_parents = 1,
++			.flags = CLK_SET_RATE_PARENT | CLK_HOLD_STATE,
++			.ops = &clk_branch2_ops,
++		},
++	},
++};
++
++static struct clk_branch gcc_video_axi0_clk = {
++	.halt_reg = 0x32018,
++	.halt_check = BRANCH_HALT_SKIP,
++	.hwcg_reg = 0x32018,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x32018,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_video_axi0_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch gcc_video_axi1_clk = {
++	.halt_reg = 0x32024,
++	.halt_check = BRANCH_HALT_SKIP,
++	.hwcg_reg = 0x32024,
++	.hwcg_bit = 1,
++	.clkr = {
++		.enable_reg = 0x32024,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data) {
++			.name = "gcc_video_axi1_clk",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_regmap *gcc_cliffs_clocks[] = {
++	[GCC_AGGRE_NOC_PCIE_AXI_CLK] = &gcc_aggre_noc_pcie_axi_clk.clkr,
++	[GCC_AGGRE_UFS_PHY_AXI_CLK] = &gcc_aggre_ufs_phy_axi_clk.clkr,
++	[GCC_AGGRE_UFS_PHY_AXI_HW_CTL_CLK] = &gcc_aggre_ufs_phy_axi_hw_ctl_clk.clkr,
++	[GCC_AGGRE_USB3_PRIM_AXI_CLK] = &gcc_aggre_usb3_prim_axi_clk.clkr,
++	[GCC_BOOT_ROM_AHB_CLK] = &gcc_boot_rom_ahb_clk.clkr,
++	[GCC_CAMERA_HF_AXI_CLK] = &gcc_camera_hf_axi_clk.clkr,
++	[GCC_CAMERA_SF_AXI_CLK] = &gcc_camera_sf_axi_clk.clkr,
++	[GCC_CFG_NOC_PCIE_ANOC_AHB_CLK] = &gcc_cfg_noc_pcie_anoc_ahb_clk.clkr,
++	[GCC_CFG_NOC_USB3_PRIM_AXI_CLK] = &gcc_cfg_noc_usb3_prim_axi_clk.clkr,
++	[GCC_CNOC_PCIE_SF_AXI_CLK] = &gcc_cnoc_pcie_sf_axi_clk.clkr,
++	[GCC_DDRSS_GPU_AXI_CLK] = &gcc_ddrss_gpu_axi_clk.clkr,
++	[GCC_DDRSS_PCIE_SF_QTB_CLK] = &gcc_ddrss_pcie_sf_qtb_clk.clkr,
++	[GCC_DISP_HF_AXI_CLK] = &gcc_disp_hf_axi_clk.clkr,
++	[GCC_GP1_CLK] = &gcc_gp1_clk.clkr,
++	[GCC_GP1_CLK_SRC] = &gcc_gp1_clk_src.clkr,
++	[GCC_GP2_CLK] = &gcc_gp2_clk.clkr,
++	[GCC_GP2_CLK_SRC] = &gcc_gp2_clk_src.clkr,
++	[GCC_GP3_CLK] = &gcc_gp3_clk.clkr,
++	[GCC_GP3_CLK_SRC] = &gcc_gp3_clk_src.clkr,
++	[GCC_GPLL0] = &gcc_gpll0.clkr,
++	[GCC_GPLL0_OUT_EVEN] = &gcc_gpll0_out_even.clkr,
++	[GCC_GPLL1] = &gcc_gpll1.clkr,
++	[GCC_GPLL4] = &gcc_gpll4.clkr,
++	[GCC_GPLL7] = &gcc_gpll7.clkr,
++	[GCC_GPLL9] = &gcc_gpll9.clkr,
++	[GCC_GPU_GPLL0_CLK_SRC] = &gcc_gpu_gpll0_clk_src.clkr,
++	[GCC_GPU_GPLL0_DIV_CLK_SRC] = &gcc_gpu_gpll0_div_clk_src.clkr,
++	[GCC_GPU_MEMNOC_GFX_CLK] = &gcc_gpu_memnoc_gfx_clk.clkr,
++	[GCC_GPU_SNOC_DVM_GFX_CLK] = &gcc_gpu_snoc_dvm_gfx_clk.clkr,
++	[GCC_PCIE_0_AUX_CLK] = &gcc_pcie_0_aux_clk.clkr,
++	[GCC_PCIE_0_AUX_CLK_SRC] = &gcc_pcie_0_aux_clk_src.clkr,
++	[GCC_PCIE_0_CFG_AHB_CLK] = &gcc_pcie_0_cfg_ahb_clk.clkr,
++	[GCC_PCIE_0_MSTR_AXI_CLK] = &gcc_pcie_0_mstr_axi_clk.clkr,
++	[GCC_PCIE_0_PHY_RCHNG_CLK] = &gcc_pcie_0_phy_rchng_clk.clkr,
++	[GCC_PCIE_0_PHY_RCHNG_CLK_SRC] = &gcc_pcie_0_phy_rchng_clk_src.clkr,
++	[GCC_PCIE_0_PIPE_CLK] = &gcc_pcie_0_pipe_clk.clkr,
++	[GCC_PCIE_0_PIPE_CLK_SRC] = &gcc_pcie_0_pipe_clk_src.clkr,
++	[GCC_PCIE_0_PIPE_DIV2_CLK] = &gcc_pcie_0_pipe_div2_clk.clkr,
++	[GCC_PCIE_0_PIPE_DIV2_CLK_SRC] = &gcc_pcie_0_pipe_div2_clk_src.clkr,
++	[GCC_PCIE_0_SLV_AXI_CLK] = &gcc_pcie_0_slv_axi_clk.clkr,
++	[GCC_PCIE_0_SLV_Q2A_AXI_CLK] = &gcc_pcie_0_slv_q2a_axi_clk.clkr,
++	[GCC_PDM2_CLK] = &gcc_pdm2_clk.clkr,
++	[GCC_PDM2_CLK_SRC] = &gcc_pdm2_clk_src.clkr,
++	[GCC_PDM_AHB_CLK] = &gcc_pdm_ahb_clk.clkr,
++	[GCC_PDM_XO4_CLK] = &gcc_pdm_xo4_clk.clkr,
++	[GCC_QMIP_CAMERA_NRT_AHB_CLK] = &gcc_qmip_camera_nrt_ahb_clk.clkr,
++	[GCC_QMIP_CAMERA_RT_AHB_CLK] = &gcc_qmip_camera_rt_ahb_clk.clkr,
++	[GCC_QMIP_DISP_AHB_CLK] = &gcc_qmip_disp_ahb_clk.clkr,
++	[GCC_QMIP_GPU_AHB_CLK] = &gcc_qmip_gpu_ahb_clk.clkr,
++	[GCC_QMIP_PCIE_AHB_CLK] = &gcc_qmip_pcie_ahb_clk.clkr,
++	[GCC_QMIP_VIDEO_CV_CPU_AHB_CLK] = &gcc_qmip_video_cv_cpu_ahb_clk.clkr,
++	[GCC_QMIP_VIDEO_CVP_AHB_CLK] = &gcc_qmip_video_cvp_ahb_clk.clkr,
++	[GCC_QMIP_VIDEO_V_CPU_AHB_CLK] = &gcc_qmip_video_v_cpu_ahb_clk.clkr,
++	[GCC_QMIP_VIDEO_VCODEC_AHB_CLK] = &gcc_qmip_video_vcodec_ahb_clk.clkr,
++	[GCC_QUPV3_WRAP0_CORE_2X_CLK] = &gcc_qupv3_wrap0_core_2x_clk.clkr,
++	[GCC_QUPV3_WRAP0_CORE_CLK] = &gcc_qupv3_wrap0_core_clk.clkr,
++	[GCC_QUPV3_WRAP0_QSPI_REF_CLK] = &gcc_qupv3_wrap0_qspi_ref_clk.clkr,
++	[GCC_QUPV3_WRAP0_QSPI_REF_CLK_SRC] = &gcc_qupv3_wrap0_qspi_ref_clk_src.clkr,
++	[GCC_QUPV3_WRAP0_S0_CLK] = &gcc_qupv3_wrap0_s0_clk.clkr,
++	[GCC_QUPV3_WRAP0_S0_CLK_SRC] = &gcc_qupv3_wrap0_s0_clk_src.clkr,
++	[GCC_QUPV3_WRAP0_S1_CLK] = &gcc_qupv3_wrap0_s1_clk.clkr,
++	[GCC_QUPV3_WRAP0_S1_CLK_SRC] = &gcc_qupv3_wrap0_s1_clk_src.clkr,
++	[GCC_QUPV3_WRAP0_S2_CLK] = &gcc_qupv3_wrap0_s2_clk.clkr,
++	[GCC_QUPV3_WRAP0_S2_CLK_SRC] = &gcc_qupv3_wrap0_s2_clk_src.clkr,
++	[GCC_QUPV3_WRAP0_S3_CLK] = &gcc_qupv3_wrap0_s3_clk.clkr,
++	[GCC_QUPV3_WRAP0_S3_CLK_SRC] = &gcc_qupv3_wrap0_s3_clk_src.clkr,
++	[GCC_QUPV3_WRAP0_S4_CLK] = &gcc_qupv3_wrap0_s4_clk.clkr,
++	[GCC_QUPV3_WRAP0_S4_CLK_SRC] = &gcc_qupv3_wrap0_s4_clk_src.clkr,
++	[GCC_QUPV3_WRAP0_S5_CLK] = &gcc_qupv3_wrap0_s5_clk.clkr,
++	[GCC_QUPV3_WRAP0_S5_CLK_SRC] = &gcc_qupv3_wrap0_s5_clk_src.clkr,
++	[GCC_QUPV3_WRAP0_S6_CLK] = &gcc_qupv3_wrap0_s6_clk.clkr,
++	[GCC_QUPV3_WRAP0_S6_CLK_SRC] = &gcc_qupv3_wrap0_s6_clk_src.clkr,
++	[GCC_QUPV3_WRAP0_S7_CLK] = &gcc_qupv3_wrap0_s7_clk.clkr,
++	[GCC_QUPV3_WRAP0_S7_CLK_SRC] = &gcc_qupv3_wrap0_s7_clk_src.clkr,
++	[GCC_QUPV3_WRAP1_CORE_2X_CLK] = &gcc_qupv3_wrap1_core_2x_clk.clkr,
++	[GCC_QUPV3_WRAP1_CORE_CLK] = &gcc_qupv3_wrap1_core_clk.clkr,
++	[GCC_QUPV3_WRAP1_IBI_CTRL_0_CLK_SRC] = &gcc_qupv3_wrap1_ibi_ctrl_0_clk_src.clkr,
++	[GCC_QUPV3_WRAP1_IBI_CTRL_2_CLK] = &gcc_qupv3_wrap1_ibi_ctrl_2_clk.clkr,
++	[GCC_QUPV3_WRAP1_IBI_CTRL_3_CLK] = &gcc_qupv3_wrap1_ibi_ctrl_3_clk.clkr,
++	[GCC_QUPV3_WRAP1_S0_CLK] = &gcc_qupv3_wrap1_s0_clk.clkr,
++	[GCC_QUPV3_WRAP1_S0_CLK_SRC] = &gcc_qupv3_wrap1_s0_clk_src.clkr,
++	[GCC_QUPV3_WRAP1_S1_CLK] = &gcc_qupv3_wrap1_s1_clk.clkr,
++	[GCC_QUPV3_WRAP1_S1_CLK_SRC] = &gcc_qupv3_wrap1_s1_clk_src.clkr,
++	[GCC_QUPV3_WRAP1_S2_CLK] = &gcc_qupv3_wrap1_s2_clk.clkr,
++	[GCC_QUPV3_WRAP1_S2_CLK_SRC] = &gcc_qupv3_wrap1_s2_clk_src.clkr,
++	[GCC_QUPV3_WRAP1_S3_CLK] = &gcc_qupv3_wrap1_s3_clk.clkr,
++	[GCC_QUPV3_WRAP1_S3_CLK_SRC] = &gcc_qupv3_wrap1_s3_clk_src.clkr,
++	[GCC_QUPV3_WRAP1_S4_CLK] = &gcc_qupv3_wrap1_s4_clk.clkr,
++	[GCC_QUPV3_WRAP1_S4_CLK_SRC] = &gcc_qupv3_wrap1_s4_clk_src.clkr,
++	[GCC_QUPV3_WRAP1_S5_CLK] = &gcc_qupv3_wrap1_s5_clk.clkr,
++	[GCC_QUPV3_WRAP1_S5_CLK_SRC] = &gcc_qupv3_wrap1_s5_clk_src.clkr,
++	[GCC_QUPV3_WRAP1_S6_CLK] = &gcc_qupv3_wrap1_s6_clk.clkr,
++	[GCC_QUPV3_WRAP1_S6_CLK_SRC] = &gcc_qupv3_wrap1_s6_clk_src.clkr,
++	[GCC_QUPV3_WRAP1_S7_CLK] = &gcc_qupv3_wrap1_s7_clk.clkr,
++	[GCC_QUPV3_WRAP1_S7_CLK_SRC] = &gcc_qupv3_wrap1_s7_clk_src.clkr,
++	[GCC_QUPV3_WRAP_0_M_AHB_CLK] = &gcc_qupv3_wrap_0_m_ahb_clk.clkr,
++	[GCC_QUPV3_WRAP_0_S_AHB_CLK] = &gcc_qupv3_wrap_0_s_ahb_clk.clkr,
++	[GCC_QUPV3_WRAP_1_IBI_2_AHB_CLK] = &gcc_qupv3_wrap_1_ibi_2_ahb_clk.clkr,
++	[GCC_QUPV3_WRAP_1_IBI_3_AHB_CLK] = &gcc_qupv3_wrap_1_ibi_3_ahb_clk.clkr,
++	[GCC_QUPV3_WRAP_1_M_AHB_CLK] = &gcc_qupv3_wrap_1_m_ahb_clk.clkr,
++	[GCC_QUPV3_WRAP_1_S_AHB_CLK] = &gcc_qupv3_wrap_1_s_ahb_clk.clkr,
++	[GCC_SDCC2_AHB_CLK] = &gcc_sdcc2_ahb_clk.clkr,
++	[GCC_SDCC2_APPS_CLK] = &gcc_sdcc2_apps_clk.clkr,
++	[GCC_SDCC2_APPS_CLK_SRC] = &gcc_sdcc2_apps_clk_src.clkr,
++	[GCC_UFS_PHY_AHB_CLK] = &gcc_ufs_phy_ahb_clk.clkr,
++	[GCC_UFS_PHY_AXI_CLK] = &gcc_ufs_phy_axi_clk.clkr,
++	[GCC_UFS_PHY_AXI_CLK_SRC] = &gcc_ufs_phy_axi_clk_src.clkr,
++	[GCC_UFS_PHY_AXI_HW_CTL_CLK] = &gcc_ufs_phy_axi_hw_ctl_clk.clkr,
++	[GCC_UFS_PHY_ICE_CORE_CLK] = &gcc_ufs_phy_ice_core_clk.clkr,
++	[GCC_UFS_PHY_ICE_CORE_CLK_SRC] = &gcc_ufs_phy_ice_core_clk_src.clkr,
++	[GCC_UFS_PHY_ICE_CORE_HW_CTL_CLK] = &gcc_ufs_phy_ice_core_hw_ctl_clk.clkr,
++	[GCC_UFS_PHY_PHY_AUX_CLK] = &gcc_ufs_phy_phy_aux_clk.clkr,
++	[GCC_UFS_PHY_PHY_AUX_CLK_SRC] = &gcc_ufs_phy_phy_aux_clk_src.clkr,
++	[GCC_UFS_PHY_PHY_AUX_HW_CTL_CLK] = &gcc_ufs_phy_phy_aux_hw_ctl_clk.clkr,
++	[GCC_UFS_PHY_RX_SYMBOL_0_CLK] = &gcc_ufs_phy_rx_symbol_0_clk.clkr,
++	[GCC_UFS_PHY_RX_SYMBOL_0_CLK_SRC] = &gcc_ufs_phy_rx_symbol_0_clk_src.clkr,
++	[GCC_UFS_PHY_RX_SYMBOL_1_CLK] = &gcc_ufs_phy_rx_symbol_1_clk.clkr,
++	[GCC_UFS_PHY_RX_SYMBOL_1_CLK_SRC] = &gcc_ufs_phy_rx_symbol_1_clk_src.clkr,
++	[GCC_UFS_PHY_TX_SYMBOL_0_CLK] = &gcc_ufs_phy_tx_symbol_0_clk.clkr,
++	[GCC_UFS_PHY_TX_SYMBOL_0_CLK_SRC] = &gcc_ufs_phy_tx_symbol_0_clk_src.clkr,
++	[GCC_UFS_PHY_UNIPRO_CORE_CLK] = &gcc_ufs_phy_unipro_core_clk.clkr,
++	[GCC_UFS_PHY_UNIPRO_CORE_CLK_SRC] = &gcc_ufs_phy_unipro_core_clk_src.clkr,
++	[GCC_UFS_PHY_UNIPRO_CORE_HW_CTL_CLK] = &gcc_ufs_phy_unipro_core_hw_ctl_clk.clkr,
++	[GCC_USB30_PRIM_MASTER_CLK] = &gcc_usb30_prim_master_clk.clkr,
++	[GCC_USB30_PRIM_MASTER_CLK_SRC] = &gcc_usb30_prim_master_clk_src.clkr,
++	[GCC_USB30_PRIM_MOCK_UTMI_CLK] = &gcc_usb30_prim_mock_utmi_clk.clkr,
++	[GCC_USB30_PRIM_MOCK_UTMI_CLK_SRC] = &gcc_usb30_prim_mock_utmi_clk_src.clkr,
++	[GCC_USB30_PRIM_MOCK_UTMI_POSTDIV_CLK_SRC] = &gcc_usb30_prim_mock_utmi_postdiv_clk_src.clkr,
++	[GCC_USB30_PRIM_SLEEP_CLK] = &gcc_usb30_prim_sleep_clk.clkr,
++	[GCC_USB3_PRIM_PHY_AUX_CLK] = &gcc_usb3_prim_phy_aux_clk.clkr,
++	[GCC_USB3_PRIM_PHY_AUX_CLK_SRC] = &gcc_usb3_prim_phy_aux_clk_src.clkr,
++	[GCC_USB3_PRIM_PHY_COM_AUX_CLK] = &gcc_usb3_prim_phy_com_aux_clk.clkr,
++	[GCC_USB3_PRIM_PHY_PIPE_CLK] = &gcc_usb3_prim_phy_pipe_clk.clkr,
++	[GCC_USB3_PRIM_PHY_PIPE_CLK_SRC] = &gcc_usb3_prim_phy_pipe_clk_src.clkr,
++	[GCC_VIDEO_AXI0_CLK] = &gcc_video_axi0_clk.clkr,
++	[GCC_VIDEO_AXI1_CLK] = &gcc_video_axi1_clk.clkr,
++};
++
++static const struct qcom_reset_map gcc_cliffs_resets[] = {
++	[GCC_CAMERA_BCR] = { 0x26000 },
++	[GCC_DISPLAY_BCR] = { 0x27000 },
++	[GCC_GPU_BCR] = { 0x71000 },
++	[GCC_PCIE_0_BCR] = { 0x6b000 },
++	[GCC_PCIE_0_LINK_DOWN_BCR] = { 0x6c014 },
++	[GCC_PCIE_0_NOCSR_COM_PHY_BCR] = { 0x6c020 },
++	[GCC_PCIE_0_PHY_BCR] = { 0x6c01c },
++	[GCC_PCIE_0_PHY_NOCSR_COM_PHY_BCR] = { 0x6c028 },
++	[GCC_PCIE_PHY_BCR] = { 0x6f000 },
++	[GCC_PCIE_PHY_CFG_AHB_BCR] = { 0x6f00c },
++	[GCC_PCIE_PHY_COM_BCR] = { 0x6f010 },
++	[GCC_PDM_BCR] = { 0x33000 },
++	[GCC_QUPV3_WRAPPER_0_BCR] = { 0x18000 },
++	[GCC_QUPV3_WRAPPER_1_BCR] = { 0x1e000 },
++	[GCC_QUSB2PHY_PRIM_BCR] = { 0x12000 },
++	[GCC_QUSB2PHY_SEC_BCR] = { 0x12004 },
++	[GCC_SDCC2_BCR] = { 0x14000 },
++	[GCC_UFS_PHY_BCR] = { 0x77000 },
++	[GCC_USB30_PRIM_BCR] = { 0x39000 },
++	[GCC_USB3_DP_PHY_PRIM_BCR] = { 0x50008 },
++	[GCC_USB3_DP_PHY_SEC_BCR] = { 0x50014 },
++	[GCC_USB3_PHY_PRIM_BCR] = { 0x50000 },
++	[GCC_USB3_PHY_SEC_BCR] = { 0x5000c },
++	[GCC_USB3PHY_PHY_PRIM_BCR] = { 0x50004 },
++	[GCC_USB3PHY_PHY_SEC_BCR] = { 0x50010 },
++	[GCC_VIDEO_AXI0_CLK_ARES] = { 0x32018, 2 },
++	[GCC_VIDEO_AXI1_CLK_ARES] = { 0x32024, 2 },
++	[GCC_VIDEO_BCR] = { 0x32000 },
++};
++
++
++static const struct regmap_config gcc_cliffs_regmap_config = {
++	.reg_bits = 32,
++	.reg_stride = 4,
++	.val_bits = 32,
++	.max_register = 0x1f41f0,
++	.fast_io = true,
++};
++
++static const struct qcom_cc_desc gcc_cliffs_desc = {
++	.config = &gcc_cliffs_regmap_config,
++	.clk_regulators = gcc_cliffs_regulators,
++	.num_clk_regulators = ARRAY_SIZE(gcc_cliffs_regulators),
++	.clks = gcc_cliffs_clocks,
++	.num_clks = ARRAY_SIZE(gcc_cliffs_clocks),
++	.resets = gcc_cliffs_resets,
++	.num_resets = ARRAY_SIZE(gcc_cliffs_resets),
++};
++
++static const struct of_device_id gcc_cliffs_match_table[] = {
++	{ .compatible = "qcom,cliffs-gcc" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, gcc_cliffs_match_table);
++
++static bool gcc_cliffs_proxy_active;
++module_param_named(proxy_active, gcc_cliffs_proxy_active, bool, 0444);
++MODULE_PARM_DESC(proxy_active, "Vendor startup voltage vote awaits supplier sync_state");
++
++static void gcc_cliffs_vdd_release(void *data)
++{
++	struct device *dev = data;
++
++	if (gcc_cliffs_proxy_active) {
++		if (clk_vdd_proxy_unvote(dev, &gcc_cliffs_desc))
++			return;
++		gcc_cliffs_proxy_active = false;
++	}
++	clk_regulator_deinit(&gcc_cliffs_desc);
++}
++
++static int gcc_cliffs_probe(struct platform_device *pdev)
++{
++	struct regmap *regmap;
++	int ret;
++
++	ret = clk_regulator_init(&pdev->dev, &gcc_cliffs_desc);
++	if (ret)
++		return ret;
++
++	ret = devm_add_action_or_reset(&pdev->dev, gcc_cliffs_vdd_release, &pdev->dev);
++	if (ret)
++		return ret;
++
++	regmap = qcom_cc_map(pdev, &gcc_cliffs_desc);
++	if (IS_ERR(regmap))
++		return PTR_ERR(regmap);
++
++	/* USB data bring-up does not force camera/display/GPU/video gates. */
++	ret = clk_vdd_proxy_vote(&pdev->dev, &gcc_cliffs_desc);
++	if (ret)
++		return ret;
++
++	gcc_cliffs_proxy_active = true;
++	ret = qcom_cc_really_probe(&pdev->dev, &gcc_cliffs_desc, regmap);
++	if (ret) {
++		dev_err(&pdev->dev, "Failed to register GCC clocks\n");
++		return ret;
++	}
++
++	return ret;
++}
++
++static void gcc_cliffs_sync_state(struct device *dev)
++{
++	if (clk_sync_state(dev)) {
++		dev_warn(dev, "boot clocks still await handoff; retaining voltage vote\n");
++		return;
++	}
++	if (gcc_cliffs_proxy_active && !clk_vdd_proxy_unvote(dev, &gcc_cliffs_desc))
++		gcc_cliffs_proxy_active = false;
++}
++
++static struct platform_driver gcc_cliffs_driver = {
++	.probe = gcc_cliffs_probe,
++	.driver = {
++		.name = "gcc-cliffs",
++		.sync_state = gcc_cliffs_sync_state,
++		.suppress_bind_attrs = true,
++		.of_match_table = gcc_cliffs_match_table,
++	},
++};
++
++static int __init gcc_cliffs_init(void)
++{
++	return platform_driver_register(&gcc_cliffs_driver);
++}
++subsys_initcall(gcc_cliffs_init);
++
++static void __exit gcc_cliffs_exit(void)
++{
++	platform_driver_unregister(&gcc_cliffs_driver);
++}
++module_exit(gcc_cliffs_exit);
++
++MODULE_DESCRIPTION("QTI GCC CLIFFS Driver");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/clk/qcom/gdsc-regulator-uke.c b/drivers/clk/qcom/gdsc-regulator-uke.c
+new file mode 100644
+index 000000000000..037c8f9d8ef7
+--- /dev/null
++++ b/drivers/clk/qcom/gdsc-regulator-uke.c
+@@ -0,0 +1,298 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
++ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
++ *
++ * Minimal regulator-facing GDSC driver for Xiaomi Uke.
++ *
++ * Derived from Xiaomi's public gdsc-regulator.c.  The Uke USB controller
++ * only uses the GDSCR/CFG_GDSCR state machine and its CX parent supply;
++ * downstream mailbox, reset, clock, interconnect and debug extensions are
++ * deliberately not registered here.
++ */
++
++#include <linux/delay.h>
++#include <linux/io.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/regmap.h>
++#include <linux/regulator/consumer.h>
++#include <linux/regulator/driver.h>
++#include <linux/regulator/machine.h>
++#include <linux/regulator/of_regulator.h>
++#include <linux/regulator/proxy-consumer.h>
++
++#define GDSCR_SW_COLLAPSE	BIT(0)
++#define GDSCR_HW_CONTROL	BIT(1)
++#define GDSCR_SW_OVERRIDE	BIT(2)
++#define GDSCR_RETAIN_FF		BIT(11)
++#define CFG_GDSCR			0x4
++#define CFG_GDSCR_POWER_DOWN	BIT(15)
++#define CFG_GDSCR_POWER_UP	BIT(16)
++#define GDSC_TIMEOUT_US		1500
++
++struct uke_gdsc {
++	struct regulator_desc desc;
++	struct regulator_dev *rdev;
++	struct regmap *regmap;
++	struct regulator *parent;
++	bool retain_regs;
++	bool parent_on;
++	int power_error;
++};
++
++static const struct regmap_config uke_gdsc_regmap_config = {
++	.reg_bits = 32,
++	.reg_stride = 4,
++	.val_bits = 32,
++	.max_register = CFG_GDSCR,
++};
++
++static int uke_gdsc_poll(struct uke_gdsc *gdsc, bool on)
++{
++	u32 val;
++	int ret;
++
++	ret = regmap_read_poll_timeout(gdsc->regmap, CFG_GDSCR, val,
++				on ? val & CFG_GDSCR_POWER_UP :
++				     val & CFG_GDSCR_POWER_DOWN,
++				     1, GDSC_TIMEOUT_US);
++	return ret;
++}
++
++static int uke_gdsc_parent_enable(struct uke_gdsc *gdsc)
++{
++	int ret;
++
++	if (gdsc->parent_on)
++		return 0;
++	ret = regulator_enable(gdsc->parent);
++	if (!ret)
++		gdsc->parent_on = true;
++	return ret;
++}
++
++static int uke_gdsc_parent_disable(struct uke_gdsc *gdsc)
++{
++	int ret;
++
++	if (!gdsc->parent_on)
++		return 0;
++	ret = regulator_disable(gdsc->parent);
++	if (!ret)
++		gdsc->parent_on = false;
++	return ret;
++}
++
++static int uke_gdsc_enable(struct regulator_dev *rdev)
++{
++	struct uke_gdsc *gdsc = rdev_get_drvdata(rdev);
++	u32 val;
++	int ret;
++
++	if (gdsc->power_error)
++		return gdsc->power_error;
++	ret = uke_gdsc_parent_enable(gdsc);
++	if (ret)
++		return ret;
++	ret = regmap_read(gdsc->regmap, 0, &val);
++	if (ret)
++		goto uncertain;
++	if (val & GDSCR_HW_CONTROL)
++		return -EBUSY;
++
++	ret = regmap_clear_bits(gdsc->regmap, 0, GDSCR_SW_COLLAPSE);
++	if (ret)
++		goto uncertain;
++	/* Xiaomi: allow eight XO cycles before reading completion. */
++	mb();
++	udelay(1);
++	ret = uke_gdsc_poll(gdsc, true);
++	if (ret)
++		goto uncertain;
++
++	if (gdsc->retain_regs) {
++		ret = regmap_set_bits(gdsc->regmap, 0, GDSCR_RETAIN_FF);
++		if (ret)
++			goto uncertain;
++	}
++	/* Clock re-enable / memory power-up, then staggered memory power-up. */
++	udelay(1);
++	udelay(1);
++	return 0;
++
++uncertain:
++	/* Do not drop CX or retry transitions after an ambiguous hardware error. */
++	gdsc->power_error = ret;
++	return ret;
++}
++
++static int uke_gdsc_disable(struct regulator_dev *rdev)
++{
++	struct uke_gdsc *gdsc = rdev_get_drvdata(rdev);
++	int ret;
++
++	if (gdsc->power_error)
++		return gdsc->power_error;
++	/* Xiaomi: staggered memory power-down before asserting collapse. */
++	udelay(1);
++	ret = regmap_set_bits(gdsc->regmap, 0, GDSCR_SW_COLLAPSE);
++	if (ret)
++		goto uncertain;
++	/* Complete the collapse write before waiting eight XO cycles. */
++	mb();
++	udelay(1);
++	ret = uke_gdsc_poll(gdsc, false);
++	if (ret)
++		goto uncertain;
++	return uke_gdsc_parent_disable(gdsc);
++
++uncertain:
++	gdsc->power_error = ret;
++	return ret;
++}
++
++static int uke_gdsc_is_enabled(struct regulator_dev *rdev)
++{
++	struct uke_gdsc *gdsc = rdev_get_drvdata(rdev);
++	u32 val;
++	int ret;
++
++	ret = regmap_read(gdsc->regmap, CFG_GDSCR, &val);
++	if (ret)
++		return ret;
++	return !!(val & CFG_GDSCR_POWER_UP);
++}
++
++static const struct regulator_ops uke_gdsc_ops = {
++	.enable = uke_gdsc_enable,
++	.disable = uke_gdsc_disable,
++	.is_enabled = uke_gdsc_is_enabled,
++};
++
++/* A failed probe must not power down a live or indeterminate domain. */
++static void uke_gdsc_put_parent(void *data)
++{
++	struct uke_gdsc *gdsc = data;
++
++	if (gdsc->parent_on) {
++		pr_err("Uke GDSC: retaining CX handle/vote for live or uncertain domain\n");
++		return;
++	}
++	regulator_put(gdsc->parent);
++}
++
++static int uke_gdsc_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct regulator_config config = {};
++	struct regulator_init_data *init_data;
++	struct uke_gdsc *gdsc;
++	struct resource *res;
++	void __iomem *base;
++	u32 val;
++	int ret;
++
++	gdsc = devm_kzalloc(dev, sizeof(*gdsc), GFP_KERNEL);
++	if (!gdsc)
++		return -ENOMEM;
++
++	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	if (!res || resource_size(res) < CFG_GDSCR + sizeof(u32))
++		return -EINVAL;
++	base = devm_ioremap_resource(dev, res);
++	if (IS_ERR(base))
++		return PTR_ERR(base);
++	gdsc->regmap = devm_regmap_init_mmio(dev, base, &uke_gdsc_regmap_config);
++	if (IS_ERR(gdsc->regmap))
++		return PTR_ERR(gdsc->regmap);
++
++	gdsc->parent = regulator_get(dev, "parent");
++	if (IS_ERR(gdsc->parent))
++		return dev_err_probe(dev, PTR_ERR(gdsc->parent),
++					 "failed to get GDSC parent supply\n");
++	ret = devm_add_action_or_reset(dev, uke_gdsc_put_parent, gdsc);
++	if (ret)
++		return ret;
++	gdsc->retain_regs = device_property_read_bool(dev, "qcom,retain-regs");
++
++	init_data = of_get_regulator_init_data(dev, dev->of_node, &gdsc->desc);
++	if (!init_data)
++		return -EINVAL;
++	gdsc->desc.name = init_data->constraints.name;
++	gdsc->desc.ops = &uke_gdsc_ops;
++	gdsc->desc.type = REGULATOR_VOLTAGE;
++	gdsc->desc.owner = THIS_MODULE;
++
++	/* Preserve the firmware collapse state while selecting the SW sequencer. */
++	ret = uke_gdsc_parent_enable(gdsc);
++	if (ret)
++		return ret;
++	ret = regmap_clear_bits(gdsc->regmap, 0,
++				GDSCR_HW_CONTROL | GDSCR_SW_OVERRIDE);
++	if (ret)
++		goto release_parent;
++	/* Finish selecting the hardware sequencer before checking boot state. */
++	mb();
++	ret = regmap_read(gdsc->regmap, 0, &val);
++	if (ret)
++		goto release_parent;
++	ret = uke_gdsc_poll(gdsc, !(val & GDSCR_SW_COLLAPSE));
++	if (ret)
++		goto release_parent;
++	/* A firmware-enabled domain needs a parent vote even before first use. */
++	if (val & GDSCR_SW_COLLAPSE) {
++		ret = uke_gdsc_parent_disable(gdsc);
++		if (ret)
++			goto release_parent;
++	} else if (gdsc->retain_regs) {
++		ret = regmap_set_bits(gdsc->regmap, 0, GDSCR_RETAIN_FF);
++		if (ret)
++			goto release_parent;
++	}
++
++	config.dev = dev;
++	config.init_data = init_data;
++	config.driver_data = gdsc;
++	config.of_node = dev->of_node;
++	gdsc->rdev = devm_regulator_register(dev, &gdsc->desc, &config);
++	if (IS_ERR(gdsc->rdev)) {
++		ret = PTR_ERR(gdsc->rdev);
++		goto release_parent;
++	}
++
++	ret = devm_regulator_proxy_consumer_register(dev, dev->of_node);
++	if (ret)
++		goto release_parent;
++	platform_set_drvdata(pdev, gdsc);
++	return 0;
++
++release_parent:
++	/* Release only after positively observing a collapsed domain. */
++	if (!gdsc->power_error &&
++	    !regmap_read(gdsc->regmap, 0, &val) &&
++	    (val & GDSCR_SW_COLLAPSE) && !uke_gdsc_poll(gdsc, false))
++		uke_gdsc_parent_disable(gdsc);
++	return ret;
++}
++
++static const struct of_device_id uke_gdsc_of_match[] = {
++	{ .compatible = "qcom,sm7675-usb-gdsc" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, uke_gdsc_of_match);
++
++static struct platform_driver uke_gdsc_driver = {
++	.probe = uke_gdsc_probe,
++	.driver = {
++		.name = "qcom-uke-usb-gdsc",
++		.suppress_bind_attrs = true,
++		.of_match_table = uke_gdsc_of_match,
++		.sync_state = regulator_proxy_consumer_sync_state,
++	},
++};
++module_platform_driver(uke_gdsc_driver);
++
++MODULE_DESCRIPTION("Xiaomi Uke USB GDSC regulator");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/clk/qcom/tcsrcc-uke.c b/drivers/clk/qcom/tcsrcc-uke.c
+new file mode 100644
+index 000000000000..4fa52784f5b1
+--- /dev/null
++++ b/drivers/clk/qcom/tcsrcc-uke.c
+@@ -0,0 +1,189 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Copyright (c) 2022, 2024, Qualcomm Innovation Center, Inc. All rights reserved.
++ */
++
++#include <linux/clk.h>
++#include <linux/clk-provider.h>
++#include <linux/err.h>
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/of_device.h>
++#include <linux/of.h>
++#include <linux/regmap.h>
++
++#include <dt-bindings/clock/qcom,tcsrcc-pineapple.h>
++
++#include "clk-alpha-pll.h"
++#include "clk-branch.h"
++#include "clk-pll.h"
++#include "clk-rcg.h"
++#include "clk-regmap.h"
++#include "clk-regmap-divider.h"
++#include "clk-regmap-mux.h"
++#include "common.h"
++#include "reset.h"
++
++static struct clk_branch tcsr_pcie_0_clkref_en = {
++	.halt_reg = 0xb1100,
++	.halt_check = BRANCH_HALT_DELAY,
++	.clkr = {
++		.enable_reg = 0xb1100,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data){
++			.name = "tcsr_pcie_0_clkref_en",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch tcsr_pcie_1_clkref_en = {
++	.halt_reg = 0xb1114,
++	.halt_check = BRANCH_HALT_DELAY,
++	.clkr = {
++		.enable_reg = 0xb1114,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data){
++			.name = "tcsr_pcie_1_clkref_en",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch tcsr_ufs_clkref_en = {
++	.halt_reg = 0xb1110,
++	.halt_check = BRANCH_HALT_DELAY,
++	.clkr = {
++		.enable_reg = 0xb1110,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data){
++			.name = "tcsr_ufs_clkref_en",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch tcsr_ufs_pad_clkref_en = {
++	.halt_reg = 0xb1104,
++	.halt_check = BRANCH_HALT_DELAY,
++	.clkr = {
++		.enable_reg = 0xb1104,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data){
++			.name = "tcsr_ufs_pad_clkref_en",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch tcsr_usb2_clkref_en = {
++	.halt_reg = 0xb1118,
++	.halt_check = BRANCH_HALT_DELAY,
++	.clkr = {
++		.enable_reg = 0xb1118,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data){
++			.name = "tcsr_usb2_clkref_en",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_branch tcsr_usb3_clkref_en = {
++	.halt_reg = 0xb1108,
++	.halt_check = BRANCH_HALT_DELAY,
++	.clkr = {
++		.enable_reg = 0xb1108,
++		.enable_mask = BIT(0),
++		.hw.init = &(const struct clk_init_data){
++			.name = "tcsr_usb3_clkref_en",
++			.ops = &clk_branch2_ops,
++			.flags = CLK_HOLD_STATE,
++		},
++	},
++};
++
++static struct clk_regmap *tcsr_cc_pineapple_clocks[] = {
++	[TCSR_PCIE_0_CLKREF_EN] = &tcsr_pcie_0_clkref_en.clkr,
++	[TCSR_PCIE_1_CLKREF_EN] = &tcsr_pcie_1_clkref_en.clkr,
++	[TCSR_UFS_CLKREF_EN] = &tcsr_ufs_clkref_en.clkr,
++	[TCSR_UFS_PAD_CLKREF_EN] = &tcsr_ufs_pad_clkref_en.clkr,
++	[TCSR_USB2_CLKREF_EN] = &tcsr_usb2_clkref_en.clkr,
++	[TCSR_USB3_CLKREF_EN] = &tcsr_usb3_clkref_en.clkr,
++};
++
++static const struct regmap_config tcsr_cc_pineapple_regmap_config = {
++	.reg_bits = 32,
++	.reg_stride = 4,
++	.val_bits = 32,
++	.max_register = 0xbb000,
++	.fast_io = true,
++};
++
++static const struct qcom_cc_desc tcsr_cc_pineapple_desc = {
++	.config = &tcsr_cc_pineapple_regmap_config,
++	.clks = tcsr_cc_pineapple_clocks,
++	.num_clks = ARRAY_SIZE(tcsr_cc_pineapple_clocks),
++};
++
++static const struct of_device_id tcsr_cc_pineapple_match_table[] = {
++	{ .compatible = "qcom,pineapple-tcsrcc" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, tcsr_cc_pineapple_match_table);
++
++static int tcsr_cc_pineapple_probe(struct platform_device *pdev)
++{
++	struct regmap *regmap;
++	int ret;
++
++	regmap = qcom_cc_map(pdev, &tcsr_cc_pineapple_desc);
++	if (IS_ERR(regmap))
++		return PTR_ERR(regmap);
++
++	ret = qcom_cc_really_probe(&pdev->dev, &tcsr_cc_pineapple_desc, regmap);
++	if (ret) {
++		dev_err(&pdev->dev, "Failed to register TCSR CC clocks\n");
++		return ret;
++	}
++
++	dev_info(&pdev->dev, "Registered TCSR CC clocks\n");
++
++	return ret;
++}
++
++static void tcsr_cc_pineapple_sync_state(struct device *dev)
++{
++	if (clk_sync_state(dev))
++		dev_warn(dev, "boot clocks still await handoff\n");
++}
++
++static struct platform_driver tcsr_cc_pineapple_driver = {
++	.probe = tcsr_cc_pineapple_probe,
++	.driver = {
++		.name = "tcsr_cc-pineapple",
++		.of_match_table = tcsr_cc_pineapple_match_table,
++		.sync_state = tcsr_cc_pineapple_sync_state,
++	},
++};
++
++static int __init tcsr_cc_pineapple_init(void)
++{
++	return platform_driver_register(&tcsr_cc_pineapple_driver);
++}
++subsys_initcall(tcsr_cc_pineapple_init);
++
++static void __exit tcsr_cc_pineapple_exit(void)
++{
++	platform_driver_unregister(&tcsr_cc_pineapple_driver);
++}
++module_exit(tcsr_cc_pineapple_exit);
++
++MODULE_DESCRIPTION("QTI TCSR_CC PINEAPPLE Driver");
++MODULE_LICENSE("GPL v2");
+diff --git a/drivers/clk/qcom/vdd-class.c b/drivers/clk/qcom/vdd-class.c
+new file mode 100644
+index 000000000000..ef03cbedda14
+--- /dev/null
++++ b/drivers/clk/qcom/vdd-class.c
+@@ -0,0 +1,364 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* Copyright (c) 2019-2021, The Linux Foundation. All rights reserved. */
++
++#include <linux/clk-provider.h>
++#include <linux/kernel.h>
++#include <linux/regulator/consumer.h>
++#include <linux/device.h>
++
++#include "vdd-class.h"
++#include "common.h"
++
++static DEFINE_MUTEX(vdd_lock);
++
++/*
++ * Aggregate the vdd_class level votes and call regulator framework functions
++ * to enforce the highest vote.
++ */
++static int clk_aggregate_vdd(struct clk_vdd_class *vdd_class)
++{
++	struct regulator **r = vdd_class->regulator;
++	int level, ret, i, ignore;
++	int *uv = vdd_class->vdd_uv;
++	int n_reg = vdd_class->num_regulators;
++	int cur_lvl = vdd_class->cur_level;
++	int max_lvl = vdd_class->num_levels - 1;
++	int cur_base = (cur_lvl == vdd_class->num_levels ? 0 : cur_lvl) * n_reg;
++	int new_base;
++
++	/* aggregate votes */
++	for (level = max_lvl; level > 0; level--)
++		if (vdd_class->level_votes[level])
++			break;
++
++	if (level == cur_lvl)
++		return 0;
++
++	new_base = level * n_reg;
++
++	for (i = 0; i < vdd_class->num_regulators; i++) {
++		pr_debug("Set voltage level %d\n", uv[new_base + i]);
++		ret = regulator_set_voltage(r[i], uv[new_base + i], INT_MAX);
++		if (ret)
++			goto set_voltage_fail;
++
++		if (cur_lvl == 0 || cur_lvl == vdd_class->num_levels)
++			ret = regulator_enable(r[i]);
++		else if (level == 0)
++			ret = regulator_disable(r[i]);
++		if (ret)
++			goto enable_disable_fail;
++	}
++
++	vdd_class->cur_level = level;
++
++	return 0;
++
++enable_disable_fail:
++	regulator_set_voltage(r[i], uv[cur_base + i], INT_MAX);
++
++set_voltage_fail:
++	for (i--; i >= 0; i--) {
++		regulator_set_voltage(r[i], uv[cur_base + i], INT_MAX);
++		if (cur_lvl == 0 || cur_lvl == vdd_class->num_levels)
++			regulator_disable(r[i]);
++		else if (level == 0)
++			ignore = regulator_enable(r[i]);
++	}
++
++	return ret;
++}
++
++static int clk_vote_vdd_class_level(struct clk_vdd_class *vdd_class, int level)
++{
++	int ret;
++
++	if (level < 0 || level >= vdd_class->num_levels)
++		return -EINVAL;
++
++	mutex_lock(&vdd_lock);
++	vdd_class->level_votes[level]++;
++
++	ret = clk_aggregate_vdd(vdd_class);
++	if (ret)
++		vdd_class->level_votes[level]--;
++
++	mutex_unlock(&vdd_lock);
++
++	return ret;
++}
++
++static int clk_unvote_vdd_class_level(struct clk_vdd_class *vdd_class, int level)
++{
++	int ret;
++
++	if (level < 0 || level >= vdd_class->num_levels)
++		return -EINVAL;
++
++	mutex_lock(&vdd_lock);
++	if (WARN(!vdd_class->level_votes[level],
++		 "Reference counts are incorrect for %s level %d\n",
++		 vdd_class->class_name, level)) {
++		mutex_unlock(&vdd_lock);
++		return -EINVAL;
++	}
++
++	vdd_class->level_votes[level]--;
++
++	ret = clk_aggregate_vdd(vdd_class);
++	if (ret)
++		vdd_class->level_votes[level]++;
++
++	mutex_unlock(&vdd_lock);
++
++	return ret;
++}
++
++/**
++ * clk_get_vdd_voltage - Return corner voltage for a vdd class
++ * @vdd_data:	vdd_class data for the clock
++ * @level:	voltage level
++ *
++ * Returns corner voltage on success, -EERROR otherwise.
++ */
++int clk_get_vdd_voltage(struct clk_vdd_class_data *vdd_data, int vdd_level)
++{
++	int i, corner = -EINVAL;
++
++	for (i = 0; i < vdd_data->num_vdd_classes; i++)
++		corner = max(corner, vdd_data->vdd_classes[i]->vdd_uv[vdd_level]);
++
++	if (vdd_data->vdd_class)
++		corner = max(corner, vdd_data->vdd_class->vdd_uv[vdd_level]);
++
++	return corner;
++
++}
++EXPORT_SYMBOL(clk_get_vdd_voltage);
++
++/**
++ * clk_vote_vdd_level - Add a vote for a given voltage level
++ * @vdd_data:	vdd_class data for the clock
++ * @level:	voltage level to add a vote for
++ *
++ * Add a regulator framework voltage request for the vdd_class regulator(s)
++ * by decrementing the reference count for a given voltage level. This ensures
++ * that the supply regulator is allowed to potentially lower its voltage after
++ * re-aggregating overall voltage requests.
++ *
++ * Returns 0 on success, -EERROR otherwise.
++ */
++int clk_vote_vdd_level(struct clk_vdd_class_data *vdd_data, int level)
++{
++	int ret, i;
++
++	for (i = 0; i < vdd_data->num_vdd_classes; i++) {
++		ret = clk_vote_vdd_class_level(vdd_data->vdd_classes[i], level);
++		if (ret)
++			goto vote_fail;
++	}
++
++	if (vdd_data->vdd_class) {
++		ret = clk_vote_vdd_class_level(vdd_data->vdd_class, level);
++		if (ret)
++			goto vote_fail;
++	}
++
++	return 0;
++
++vote_fail:
++	for (i--; i >= 0; i--)
++		clk_unvote_vdd_class_level(vdd_data->vdd_classes[i], level);
++
++	return ret;
++
++}
++EXPORT_SYMBOL(clk_vote_vdd_level);
++
++/**
++ * clk_unvote_vdd_level - Remove a vote for a given voltage level
++ * @vdd_data:	vdd_class data for the clock
++ * @level:	voltage level to remove a vote for
++ *
++ * Removes a regulator framework voltage request for the vdd_class regulator(s)
++ * by incrementing the reference count for a given voltage level. This ensures
++ * that the supply regulator is outputting at least at the requested level.
++ *
++ * Returns 0 on success, -EERROR otherwise.
++ */
++int clk_unvote_vdd_level(struct clk_vdd_class_data *vdd_data, int level)
++{
++	int ret, i;
++
++	for (i = 0; i < vdd_data->num_vdd_classes; i++) {
++		ret = clk_unvote_vdd_class_level(vdd_data->vdd_classes[i], level);
++		if (ret)
++			goto unvote_fail;
++	}
++
++	if (vdd_data->vdd_class) {
++		ret = clk_unvote_vdd_class_level(vdd_data->vdd_class, level);
++		if (ret)
++			goto unvote_fail;
++	}
++
++	return 0;
++
++unvote_fail:
++	for (i--; i >= 0; i--)
++		clk_vote_vdd_class_level(vdd_data->vdd_classes[i], level);
++
++	return ret;
++}
++EXPORT_SYMBOL(clk_unvote_vdd_level);
++
++/**
++ * clk_find_vdd_level - Find the voltage level required for a given clock rate.
++ * @hw:		clk_hw pointer of clock being voted on
++ * @vdd_data:	vdd_class data for the clock
++ * @rate:	Clock rate in Hz to vote for
++ *
++ * Finds the matching required voltage level for a rate from a list
++ * of well characterized frequency to voltage points for a given clock.
++ *
++ * Returns 0 on success, -EERROR otherwise.
++ */
++int clk_find_vdd_level(struct clk_hw *hw,
++				struct clk_vdd_class_data *vdd_data,
++				unsigned long rate)
++{
++	int level;
++
++	if (!rate)
++		return -EINVAL;
++	if (!vdd_data->num_rate_max)
++		return -ENODATA;
++
++	/*
++	 * For certain PLLs, due to the limitation in the bits allocated for
++	 * programming the fractional divider, the actual rate of the PLL will
++	 * be slightly higher than the requested rate (in the order of several
++	 * Hz). To accommodate this difference, convert the FMAX rate and the
++	 * clock frequency to KHz and use that for deriving the voltage level.
++	 */
++	for (level = 0; level < vdd_data->num_rate_max; level++)
++		if (DIV_ROUND_CLOSEST(rate, 1000) <=
++		    DIV_ROUND_CLOSEST(vdd_data->rate_max[level], 1000) &&
++		     vdd_data->rate_max[level] > 0)
++			break;
++
++	if (level == vdd_data->num_rate_max) {
++		pr_err("Rate %lu for %s is greater than highest Fmax\n",
++			rate, clk_hw_get_name(hw));
++		return -EINVAL;
++	}
++
++	return level;
++}
++EXPORT_SYMBOL(clk_find_vdd_level);
++
++int clk_regulator_init(struct device *dev, const struct qcom_cc_desc *desc)
++{
++	struct clk_vdd_class *vdd_class;
++	struct regulator *regulator;
++	const char *name;
++	int i, cnt, ret;
++	size_t array_size;
++
++	for (i = 0; i < desc->num_clk_regulators; i++) {
++		vdd_class = desc->clk_regulators[i];
++
++		for (cnt = 0; cnt < vdd_class->num_regulators; cnt++) {
++			if (vdd_class->regulator[cnt])
++				continue;
++
++			name = vdd_class->regulator_names[cnt];
++			regulator = devm_regulator_get(dev, name);
++			if (IS_ERR(regulator)) {
++				if (PTR_ERR(regulator) != -EPROBE_DEFER)
++					dev_err(dev, "%s error %s regulator\n",
++						__func__, name);
++				ret = PTR_ERR(regulator);
++				goto err_regulator_get;
++			}
++			vdd_class->regulator[cnt] = regulator;
++		}
++	}
++
++	return 0;
++
++err_regulator_get:
++	while (i >= 0) {
++		vdd_class = desc->clk_regulators[i];
++		array_size = vdd_class->num_regulators * sizeof(*vdd_class->regulator);
++		memset(vdd_class->regulator, 0, array_size);
++		i--;
++	}
++
++	return ret;
++}
++EXPORT_SYMBOL_GPL(clk_regulator_init);
++
++void clk_regulator_deinit(const struct qcom_cc_desc *desc)
++{
++	struct clk_vdd_class *vdd_class;
++	size_t array_size;
++	int i;
++
++	for (i = 0; i < desc->num_clk_regulators; i++) {
++		vdd_class = desc->clk_regulators[i];
++		array_size = vdd_class->num_regulators * sizeof(*vdd_class->regulator);
++		memset(vdd_class->regulator, 0, array_size);
++	}
++}
++EXPORT_SYMBOL_GPL(clk_regulator_deinit);
++
++int clk_vdd_proxy_vote(struct device *dev, const struct qcom_cc_desc *desc)
++{
++	struct clk_vdd_class *vdd_class;
++	u32 i;
++	int ret = 0;
++
++	for (i = 0; i < desc->num_clk_regulators; i++) {
++		vdd_class = desc->clk_regulators[i];
++
++		ret = clk_vote_vdd_class_level(vdd_class,
++					       vdd_class->num_levels - 1);
++		if (ret) {
++			while (i--) {
++				vdd_class = desc->clk_regulators[i];
++				clk_unvote_vdd_class_level(vdd_class,
++							  vdd_class->num_levels - 1);
++			}
++			return ret;
++		}
++	}
++
++	return ret;
++}
++EXPORT_SYMBOL_GPL(clk_vdd_proxy_vote);
++
++int clk_vdd_proxy_unvote(struct device *dev, const struct qcom_cc_desc *desc)
++{
++	struct clk_vdd_class *vdd_class;
++	u32 i;
++	int ret = 0;
++
++	for (i = 0; i < desc->num_clk_regulators; i++) {
++		vdd_class = desc->clk_regulators[i];
++
++		ret = clk_unvote_vdd_class_level(vdd_class,
++						 vdd_class->num_levels - 1);
++		if (ret) {
++			while (i--) {
++				vdd_class = desc->clk_regulators[i];
++				clk_vote_vdd_class_level(vdd_class,
++							vdd_class->num_levels - 1);
++			}
++			return ret;
++		}
++	}
++
++	return ret;
++}
++EXPORT_SYMBOL_GPL(clk_vdd_proxy_unvote);
+diff --git a/drivers/clk/qcom/vdd-class.h b/drivers/clk/qcom/vdd-class.h
+new file mode 100644
+index 000000000000..e145e35bae6a
+--- /dev/null
++++ b/drivers/clk/qcom/vdd-class.h
+@@ -0,0 +1,83 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/* Copyright (c) 2019-2021, The Linux Foundation. All rights reserved. */
++
++#ifndef __QCOM_CLK_VDD_CLASS_H__
++#define __QCOM_CLK_VDD_CLASS_H__
++
++#include <linux/regulator/consumer.h>
++#include <linux/device.h>
++struct qcom_cc_desc;
++struct clk_hw;
++/**
++ * struct clk_vdd_class - Voltage scaling class
++ *
++ * @class_name:		name of the class
++ * @regulator:		array of regulators
++ * @regulator_names:	regulator names
++ * @num_regulators:	size of regulator array
++ * @vdd_uv:		sorted 2D array of legal voltage settings. Indexed by
++ *			level, then regulator
++ * @level_votes:	array of votes for each level
++ * @num_levels:		size of level_votes array
++ * @cur_level:		the currently set voltage level
++ */
++struct clk_vdd_class {
++	const char		*class_name;
++	struct regulator	**regulator;
++	const char		**regulator_names;
++	int			num_regulators;
++	int			*vdd_uv;
++	int			*level_votes;
++	int			num_levels;
++	int			cur_level;
++};
++
++/**
++ * struct clk_vdd_class_data - per-clock vdd_class rate data
++ *
++ * @vdd_class:		voltage scaling requirement class
++ * @vdd_classes:	array of voltage scaling requirement class
++ * @rate_max:		array of maximum clock rate in Hz supported at each
++ *			voltage level, indexed by voltage level
++ * @num_rate_max:	size of rate_max array
++ * @vdd_rate:		cached rate of current vdd vote
++ * @num_vdd_classes:	size of vdd_classes array
++ */
++struct clk_vdd_class_data {
++	struct clk_vdd_class	*vdd_class;
++	struct clk_vdd_class	**vdd_classes;
++	unsigned long		*rate_max;
++	int			num_rate_max;
++	int			vdd_level;
++	int			num_vdd_classes;
++};
++
++#define DEFINE_VDD_REGULATORS(_name, _num_levels, _num_regulators, _vdd_uv) \
++	struct clk_vdd_class _name = { \
++		.class_name = #_name, \
++		.vdd_uv = _vdd_uv, \
++		.regulator_names = (const char * [_num_regulators]) { #_name}, \
++		.regulator = (struct regulator * [_num_regulators]) {}, \
++		.num_regulators = _num_regulators, \
++		.level_votes = (int [_num_levels]) {}, \
++		.num_levels = _num_levels, \
++		.cur_level = _num_levels, \
++	}
++
++#define DEFINE_VDD_REGS_INIT(_name, _num_regulators) \
++	struct clk_vdd_class _name = { \
++		.class_name = #_name, \
++		.regulator = (struct regulator * [_num_regulators]) {}, \
++		.num_regulators = _num_regulators, \
++	}
++
++int clk_find_vdd_level(struct clk_hw *hw, struct clk_vdd_class_data *vdd_data,
++				unsigned long rate);
++int clk_vote_vdd_level(struct clk_vdd_class_data *vdd_class, int level);
++int clk_unvote_vdd_level(struct clk_vdd_class_data *vdd_class, int level);
++int clk_get_vdd_voltage(struct clk_vdd_class_data *vdd_data, int vdd_level);
++int clk_regulator_init(struct device *dev, const struct qcom_cc_desc *desc);
++void clk_regulator_deinit(const struct qcom_cc_desc *desc);
++int clk_vdd_proxy_vote(struct device *dev, const struct qcom_cc_desc *desc);
++int clk_vdd_proxy_unvote(struct device *dev, const struct qcom_cc_desc *desc);
++#endif
+diff --git a/drivers/clk/qcom/vdd-level.h b/drivers/clk/qcom/vdd-level.h
+new file mode 100644
+index 000000000000..b91bfa257b0c
+--- /dev/null
++++ b/drivers/clk/qcom/vdd-level.h
+@@ -0,0 +1,40 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/* Copyright (c) 2019-2021, The Linux Foundation. All rights reserved. */
++/* Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved. */
++
++#ifndef __DRIVERS_CLK_QCOM_VDD_LEVEL_H
++#define __DRIVERS_CLK_QCOM_VDD_LEVEL_H
++
++#include <linux/regulator/consumer.h>
++#include <dt-bindings/regulator/qcom,rpmh-regulator-levels.h>
++
++enum vdd_levels {
++	VDD_NONE,
++	VDD_MIN,		/* MIN_SVS */
++	VDD_LOWER_D1,		/* LOW_SVS_D1 */
++	VDD_LOWER,		/* LOW_SVS / SVS2 */
++	VDD_LOW,		/* SVS */
++	VDD_LOW_L0,		/* SVS_L0 */
++	VDD_LOW_L1,		/* SVS_L1 */
++	VDD_NOMINAL,		/* NOM */
++	VDD_NOMINAL_L1,		/* NOM_L1 */
++	VDD_HIGH,		/* TURBO */
++	VDD_HIGH_L1,		/* TURBO_L1 */
++	VDD_NUM,
++};
++
++static int vdd_corner[] = {
++	[VDD_NONE]	= 0,
++	[VDD_MIN]	= RPMH_REGULATOR_LEVEL_MIN_SVS,
++	[VDD_LOWER_D1]	= RPMH_REGULATOR_LEVEL_LOW_SVS_D1,
++	[VDD_LOWER]	= RPMH_REGULATOR_LEVEL_LOW_SVS,
++	[VDD_LOW]	= RPMH_REGULATOR_LEVEL_SVS,
++	[VDD_LOW_L0]	= RPMH_REGULATOR_LEVEL_SVS_L0,
++	[VDD_LOW_L1]	= RPMH_REGULATOR_LEVEL_SVS_L1,
++	[VDD_NOMINAL]	= RPMH_REGULATOR_LEVEL_NOM,
++	[VDD_NOMINAL_L1] = RPMH_REGULATOR_LEVEL_NOM_L1,
++	[VDD_HIGH]	= RPMH_REGULATOR_LEVEL_TURBO,
++	[VDD_HIGH_L1]	= RPMH_REGULATOR_LEVEL_TURBO_L1,
++};
++
++#endif
+diff --git a/include/dt-bindings/clock/qcom,gcc-cliffs.h b/include/dt-bindings/clock/qcom,gcc-cliffs.h
+new file mode 100644
+index 000000000000..0a7149c3a366
+--- /dev/null
++++ b/include/dt-bindings/clock/qcom,gcc-cliffs.h
+@@ -0,0 +1,188 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
++ */
++
++#ifndef _DT_BINDINGS_CLK_QCOM_GCC_CLIFFS_H
++#define _DT_BINDINGS_CLK_QCOM_GCC_CLIFFS_H
++
++/* GCC clocks */
++#define GCC_GPLL0						0
++#define GCC_GPLL0_OUT_EVEN					1
++#define GCC_GPLL1						2
++#define GCC_GPLL4						3
++#define GCC_GPLL7						4
++#define GCC_GPLL9						5
++#define GCC_AGGRE_NOC_PCIE_AXI_CLK				6
++#define GCC_AGGRE_UFS_PHY_AXI_CLK				7
++#define GCC_AGGRE_USB3_PRIM_AXI_CLK				8
++#define GCC_BOOT_ROM_AHB_CLK					9
++#define GCC_CAMERA_AHB_CLK					10
++#define GCC_CAMERA_HF_AXI_CLK					11
++#define GCC_CAMERA_HF_XO_CLK					12
++#define GCC_CAMERA_SF_AXI_CLK					13
++#define GCC_CAMERA_SF_XO_CLK					14
++#define GCC_CFG_NOC_PCIE_ANOC_AHB_CLK				15
++#define GCC_CFG_NOC_USB3_PRIM_AXI_CLK				16
++#define GCC_CNOC_PCIE_SF_AXI_CLK				17
++#define GCC_DDRSS_GPU_AXI_CLK					18
++#define GCC_DDRSS_PCIE_SF_QTB_CLK				19
++#define GCC_DISP_AHB_CLK					20
++#define GCC_DISP_HF_AXI_CLK					21
++#define GCC_DISP_XO_CLK						22
++#define GCC_GP1_CLK						23
++#define GCC_GP1_CLK_SRC						24
++#define GCC_GP2_CLK						25
++#define GCC_GP2_CLK_SRC						26
++#define GCC_GP3_CLK						27
++#define GCC_GP3_CLK_SRC						28
++#define GCC_GPU_CFG_AHB_CLK					29
++#define GCC_GPU_GPLL0_CLK_SRC					30
++#define GCC_GPU_GPLL0_DIV_CLK_SRC				31
++#define GCC_GPU_MEMNOC_GFX_CLK					32
++#define GCC_GPU_SNOC_DVM_GFX_CLK				33
++#define GCC_PCIE_0_AUX_CLK					34
++#define GCC_PCIE_0_AUX_CLK_SRC					35
++#define GCC_PCIE_0_CFG_AHB_CLK					36
++#define GCC_PCIE_0_MSTR_AXI_CLK					37
++#define GCC_PCIE_0_PHY_RCHNG_CLK				38
++#define GCC_PCIE_0_PHY_RCHNG_CLK_SRC				39
++#define GCC_PCIE_0_PIPE_CLK					40
++#define GCC_PCIE_0_PIPE_CLK_SRC					41
++#define GCC_PCIE_0_PIPE_DIV2_CLK				42
++#define GCC_PCIE_0_PIPE_DIV2_CLK_SRC				43
++#define GCC_PCIE_0_SLV_AXI_CLK					44
++#define GCC_PCIE_0_SLV_Q2A_AXI_CLK				45
++#define GCC_PCIE_RSCC_CFG_AHB_CLK				46
++#define GCC_PCIE_RSCC_XO_CLK					47
++#define GCC_PDM2_CLK						48
++#define GCC_PDM2_CLK_SRC					49
++#define GCC_PDM_AHB_CLK						50
++#define GCC_PDM_XO4_CLK						51
++#define GCC_QMIP_CAMERA_NRT_AHB_CLK				52
++#define GCC_QMIP_CAMERA_RT_AHB_CLK				53
++#define GCC_QMIP_DISP_AHB_CLK					54
++#define GCC_QMIP_GPU_AHB_CLK					55
++#define GCC_QMIP_PCIE_AHB_CLK					56
++#define GCC_QMIP_VIDEO_CV_CPU_AHB_CLK				57
++#define GCC_QMIP_VIDEO_CVP_AHB_CLK				58
++#define GCC_QMIP_VIDEO_V_CPU_AHB_CLK				59
++#define GCC_QMIP_VIDEO_VCODEC_AHB_CLK				60
++#define GCC_QUPV3_WRAP0_CORE_2X_CLK				61
++#define GCC_QUPV3_WRAP0_CORE_CLK				62
++#define GCC_QUPV3_WRAP0_QSPI_REF_CLK				63
++#define GCC_QUPV3_WRAP0_QSPI_REF_CLK_SRC			64
++#define GCC_QUPV3_WRAP0_S0_CLK					65
++#define GCC_QUPV3_WRAP0_S0_CLK_SRC				66
++#define GCC_QUPV3_WRAP0_S1_CLK					67
++#define GCC_QUPV3_WRAP0_S1_CLK_SRC				68
++#define GCC_QUPV3_WRAP0_S2_CLK					69
++#define GCC_QUPV3_WRAP0_S2_CLK_SRC				70
++#define GCC_QUPV3_WRAP0_S3_CLK					71
++#define GCC_QUPV3_WRAP0_S3_CLK_SRC				72
++#define GCC_QUPV3_WRAP0_S4_CLK					73
++#define GCC_QUPV3_WRAP0_S4_CLK_SRC				74
++#define GCC_QUPV3_WRAP0_S5_CLK					75
++#define GCC_QUPV3_WRAP0_S5_CLK_SRC				76
++#define GCC_QUPV3_WRAP0_S6_CLK					77
++#define GCC_QUPV3_WRAP0_S6_CLK_SRC				78
++#define GCC_QUPV3_WRAP0_S7_CLK					79
++#define GCC_QUPV3_WRAP0_S7_CLK_SRC				80
++#define GCC_QUPV3_WRAP1_CORE_2X_CLK				81
++#define GCC_QUPV3_WRAP1_CORE_CLK				82
++#define GCC_QUPV3_WRAP1_IBI_CTRL_0_CLK_SRC			83
++#define GCC_QUPV3_WRAP1_IBI_CTRL_2_CLK				84
++#define GCC_QUPV3_WRAP1_IBI_CTRL_3_CLK				85
++#define GCC_QUPV3_WRAP1_S0_CLK					86
++#define GCC_QUPV3_WRAP1_S0_CLK_SRC				87
++#define GCC_QUPV3_WRAP1_S1_CLK					88
++#define GCC_QUPV3_WRAP1_S1_CLK_SRC				89
++#define GCC_QUPV3_WRAP1_S2_CLK					90
++#define GCC_QUPV3_WRAP1_S2_CLK_SRC				91
++#define GCC_QUPV3_WRAP1_S3_CLK					92
++#define GCC_QUPV3_WRAP1_S3_CLK_SRC				93
++#define GCC_QUPV3_WRAP1_S4_CLK					94
++#define GCC_QUPV3_WRAP1_S4_CLK_SRC				95
++#define GCC_QUPV3_WRAP1_S5_CLK					96
++#define GCC_QUPV3_WRAP1_S5_CLK_SRC				97
++#define GCC_QUPV3_WRAP1_S6_CLK					98
++#define GCC_QUPV3_WRAP1_S6_CLK_SRC				99
++#define GCC_QUPV3_WRAP1_S7_CLK					100
++#define GCC_QUPV3_WRAP1_S7_CLK_SRC				101
++#define GCC_QUPV3_WRAP_0_M_AHB_CLK				102
++#define GCC_QUPV3_WRAP_0_S_AHB_CLK				103
++#define GCC_QUPV3_WRAP_1_IBI_2_AHB_CLK				104
++#define GCC_QUPV3_WRAP_1_IBI_3_AHB_CLK				105
++#define GCC_QUPV3_WRAP_1_M_AHB_CLK				106
++#define GCC_QUPV3_WRAP_1_S_AHB_CLK				107
++#define GCC_SDCC2_AHB_CLK					108
++#define GCC_SDCC2_APPS_CLK					109
++#define GCC_SDCC2_APPS_CLK_SRC					110
++#define GCC_UFS_PHY_AHB_CLK					111
++#define GCC_UFS_PHY_AXI_CLK					112
++#define GCC_UFS_PHY_AXI_CLK_SRC					113
++#define GCC_UFS_PHY_ICE_CORE_CLK				114
++#define GCC_UFS_PHY_ICE_CORE_CLK_SRC				115
++#define GCC_UFS_PHY_PHY_AUX_CLK					116
++#define GCC_UFS_PHY_PHY_AUX_CLK_SRC				117
++#define GCC_UFS_PHY_RX_SYMBOL_0_CLK				118
++#define GCC_UFS_PHY_RX_SYMBOL_0_CLK_SRC				119
++#define GCC_UFS_PHY_RX_SYMBOL_1_CLK				120
++#define GCC_UFS_PHY_RX_SYMBOL_1_CLK_SRC				121
++#define GCC_UFS_PHY_TX_SYMBOL_0_CLK				122
++#define GCC_UFS_PHY_TX_SYMBOL_0_CLK_SRC				123
++#define GCC_UFS_PHY_UNIPRO_CORE_CLK				124
++#define GCC_UFS_PHY_UNIPRO_CORE_CLK_SRC				125
++#define GCC_USB30_PRIM_MASTER_CLK				126
++#define GCC_USB30_PRIM_MASTER_CLK_SRC				127
++#define GCC_USB30_PRIM_MOCK_UTMI_CLK				128
++#define GCC_USB30_PRIM_MOCK_UTMI_CLK_SRC			129
++#define GCC_USB30_PRIM_MOCK_UTMI_POSTDIV_CLK_SRC		130
++#define GCC_USB30_PRIM_SLEEP_CLK				131
++#define GCC_USB3_PRIM_PHY_AUX_CLK				132
++#define GCC_USB3_PRIM_PHY_AUX_CLK_SRC				133
++#define GCC_USB3_PRIM_PHY_COM_AUX_CLK				134
++#define GCC_USB3_PRIM_PHY_PIPE_CLK				135
++#define GCC_USB3_PRIM_PHY_PIPE_CLK_SRC				136
++#define GCC_VIDEO_AHB_CLK					137
++#define GCC_VIDEO_AXI0_CLK					138
++#define GCC_VIDEO_AXI1_CLK					139
++#define GCC_VIDEO_XO_CLK					140
++#define GCC_AGGRE_UFS_PHY_AXI_HW_CTL_CLK			141
++#define GCC_UFS_PHY_AXI_HW_CTL_CLK				142
++#define GCC_UFS_PHY_ICE_CORE_HW_CTL_CLK				143
++#define GCC_UFS_PHY_PHY_AUX_HW_CTL_CLK				144
++#define GCC_UFS_PHY_UNIPRO_CORE_HW_CTL_CLK			145
++
++/* GCC resets */
++#define GCC_CAMERA_BCR						0
++#define GCC_DISPLAY_BCR						1
++#define GCC_GPU_BCR						2
++#define GCC_PCIE_0_BCR						3
++#define GCC_PCIE_0_LINK_DOWN_BCR				4
++#define GCC_PCIE_0_NOCSR_COM_PHY_BCR				5
++#define GCC_PCIE_0_PHY_BCR					6
++#define GCC_PCIE_0_PHY_NOCSR_COM_PHY_BCR			7
++#define GCC_PCIE_PHY_BCR					8
++#define GCC_PCIE_PHY_CFG_AHB_BCR				9
++#define GCC_PCIE_PHY_COM_BCR					10
++#define GCC_PCIE_RSCC_BCR					11
++#define GCC_PDM_BCR						12
++#define GCC_QUPV3_WRAPPER_0_BCR					13
++#define GCC_QUPV3_WRAPPER_1_BCR					14
++#define GCC_QUSB2PHY_PRIM_BCR					15
++#define GCC_QUSB2PHY_SEC_BCR					16
++#define GCC_SDCC2_BCR						17
++#define GCC_UFS_PHY_BCR						18
++#define GCC_USB30_PRIM_BCR					19
++#define GCC_USB3_DP_PHY_PRIM_BCR				20
++#define GCC_USB3_DP_PHY_SEC_BCR					21
++#define GCC_USB3_PHY_PRIM_BCR					22
++#define GCC_USB3_PHY_SEC_BCR					23
++#define GCC_USB3PHY_PHY_PRIM_BCR				24
++#define GCC_USB3PHY_PHY_SEC_BCR					25
++#define GCC_VIDEO_AXI0_CLK_ARES					26
++#define GCC_VIDEO_AXI1_CLK_ARES					27
++#define GCC_VIDEO_BCR						28
++
++#endif
+diff --git a/include/dt-bindings/clock/qcom,rpmh.h b/include/dt-bindings/clock/qcom,rpmh.h
+index 2d62d5d0b08d..ef5747cd2d5a 100644
+--- a/include/dt-bindings/clock/qcom,rpmh.h
++++ b/include/dt-bindings/clock/qcom,rpmh.h
+@@ -36,4 +36,14 @@
+ #define RPMH_LN_BB_CLK4				27
+ #define RPMH_LN_BB_CLK4_A			28
+ 
++
++#define RPMH_CXO_PAD_CLK			29
++#define RPMH_CXO_PAD_CLK_A			30
++#define RPMH_LN_BB_CLK7				31
++#define RPMH_LN_BB_CLK7_A			32
++#define RPMH_LN_BB_CLK8				33
++#define RPMH_LN_BB_CLK8_A			34
++#define RPMH_LN_BB_CLK9				35
++#define RPMH_LN_BB_CLK9_A			36
++
+ #endif
+diff --git a/include/dt-bindings/clock/qcom,tcsrcc-pineapple.h b/include/dt-bindings/clock/qcom,tcsrcc-pineapple.h
+new file mode 100644
+index 000000000000..7682cc41e0ec
+--- /dev/null
++++ b/include/dt-bindings/clock/qcom,tcsrcc-pineapple.h
+@@ -0,0 +1,18 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
++ */
++
++#ifndef _DT_BINDINGS_CLK_QCOM_TCSR_CC_PINEAPPLE_H
++#define _DT_BINDINGS_CLK_QCOM_TCSR_CC_PINEAPPLE_H
++
++/* TCSR_CC clocks */
++#define TCSR_PCIE_0_CLKREF_EN					0
++#define TCSR_PCIE_1_CLKREF_EN					1
++#define TCSR_UFS_CLKREF_EN					2
++#define TCSR_UFS_PAD_CLKREF_EN					3
++#define TCSR_USB2_CLKREF_EN					4
++#define TCSR_USB3_CLKREF_EN					5
++#define TCSR_PCIE_2L_CLKREF_EN					0
++
++#endif
+diff --git a/include/linux/clk-provider.h b/include/linux/clk-provider.h
+index b01a38fef8cf..1992a4618c1e 100644
+--- a/include/linux/clk-provider.h
++++ b/include/linux/clk-provider.h
+@@ -33,6 +33,11 @@
+ /* duty cycle call may be forwarded to the parent clock */
+ #define CLK_DUTY_CYCLE_PARENT	BIT(13)
+ 
++/* Opt-in Xiaomi boot-clock reference, released by provider sync_state. */
++#define CLK_HOLD_STATE		BIT(14)
++
++int clk_sync_state(struct device *dev);
++
+ struct clk;
+ struct clk_hw;
+ struct clk_core;
+@@ -228,6 +233,10 @@ struct clk_duty {
+  * called before clk_enable.
+  */
+ struct clk_ops {
++	int (*pre_rate_change)(struct clk_hw *hw, unsigned long old_rate,
++			       unsigned long new_rate);
++	int (*post_rate_change)(struct clk_hw *hw, unsigned long old_rate,
++				unsigned long new_rate);
+ 	int		(*prepare)(struct clk_hw *hw);
+ 	void		(*unprepare)(struct clk_hw *hw);
+ 	int		(*is_prepared)(struct clk_hw *hw);

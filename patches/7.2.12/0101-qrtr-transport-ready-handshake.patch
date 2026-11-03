@@ -1,0 +1,290 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] net: qrtr: initiate discovery after transport receive publication
+
+Adapt core HELLO ownership from upstream 544d85de4dc2 by Chris Lew,
+Deepak Kumar Singh and Pranav Mahesh Phansalkar, and MHI resume from
+6a5719cc3ef2 by Daniel J Blueman. Remove the name-server broadcast and
+reply senders so each transport requests the handshake once its receive
+context is ready. MHI must queue download buffers before requesting it.
+
+Retain the accepted 7.2.12 ungated enqueue path: the control-packet loss
+reported in Igor Opaniuk's 19 October follow-up is not fixed by silently
+dropping a failed backlog flush. Include his independent name-server
+announcement/lookup continuation fix with attribution. Retry GLINK intent
+timeouts as well as allocation/backpressure failures; endpoint teardown
+cancels work before releasing its node.
+
+References:
+https://github.com/torvalds/linux/commit/544d85de4dc22c01badfd8cefa59829ce35c4858
+https://github.com/torvalds/linux/commit/6a5719cc3ef2e4d9857cc4ae18e6db09d59a8cc9
+https://lists.openwall.net/netdev/2026/10/19/240
+https://lists.openwall.net/netdev/2026/10/19/242
+
+Actual-source fault fixtures and AArch64 objects pass. Repeated tablet
+startup, remote discovery and suspend/resume remain unqualified.
+
+diff --git a/net/qrtr/af_qrtr.c b/net/qrtr/af_qrtr.c
+index a30fa56..52bf048 100644
+--- a/net/qrtr/af_qrtr.c
++++ b/net/qrtr/af_qrtr.c
+@@ -9,6 +9,7 @@
+ #include <linux/termios.h>	/* For TIOCINQ/OUTQ */
+ #include <linux/spinlock.h>
+ #include <linux/wait.h>
++#include <linux/workqueue.h>
+ 
+ #include <net/sock.h>
+ 
+@@ -122,6 +123,7 @@ static DEFINE_XARRAY_ALLOC(qrtr_ports);
+  * @qrtr_tx_lock: lock for qrtr_tx_flow inserts
+  * @rx_queue: receive queue
+  * @item: list item for broadcast list
++ * @say_hello: delayed work for a transport's explicit HELLO request
+  */
+ struct qrtr_node {
+ 	struct mutex ep_lock;
+@@ -134,6 +136,7 @@ struct qrtr_node {
+ 
+ 	struct sk_buff_head rx_queue;
+ 	struct list_head item;
++	struct delayed_work say_hello;
+ };
+ 
+ /**
+@@ -187,6 +190,8 @@ static void __qrtr_node_release(struct kref *kref)
+ 	list_del(&node->item);
+ 	mutex_unlock(&qrtr_node_lock);
+ 
++	cancel_delayed_work_sync(&node->say_hello);
++
+ 	skb_queue_purge(&node->rx_queue);
+ 
+ 	/* Free tx flow counters */
+@@ -416,7 +421,7 @@ static void qrtr_node_assign(struct qrtr_node *node, unsigned int nid)
+ 	spin_lock_irqsave(&qrtr_nodes_lock, flags);
+ 	radix_tree_insert(&qrtr_nodes, nid, node);
+ 	if (node->nid == QRTR_EP_NID_AUTO)
+-		node->nid = nid;
++		WRITE_ONCE(node->nid, nid);
+ 	spin_unlock_irqrestore(&qrtr_nodes_lock, flags);
+ }
+ 
+@@ -570,6 +575,49 @@ static struct sk_buff *qrtr_alloc_ctrl_packet(struct qrtr_ctrl_pkt **pkt,
+ 	return skb;
+ }
+ 
++static void qrtr_hello_work(struct work_struct *work)
++{
++	struct sockaddr_qrtr from = {AF_QIPCRTR, 0, QRTR_PORT_CTRL};
++	struct sockaddr_qrtr to = {AF_QIPCRTR, 0, QRTR_PORT_CTRL};
++	struct qrtr_node *node;
++	struct qrtr_ctrl_pkt *pkt;
++	struct qrtr_sock *ctrl;
++	struct sk_buff *skb;
++	int ret;
++
++	node = container_of(to_delayed_work(work), struct qrtr_node, say_hello);
++	mutex_lock(&node->ep_lock);
++	if (!node->ep) {
++		mutex_unlock(&node->ep_lock);
++		return;
++	}
++	mutex_unlock(&node->ep_lock);
++	ctrl = qrtr_port_lookup(QRTR_PORT_CTRL);
++	if (!ctrl)
++		goto retry;
++	skb = qrtr_alloc_ctrl_packet(&pkt, GFP_KERNEL);
++	if (!skb) {
++		qrtr_port_put(ctrl);
++		goto retry;
++	}
++	pkt->cmd = cpu_to_le32(QRTR_TYPE_HELLO);
++	from.sq_node = qrtr_local_nid;
++	to.sq_node = READ_ONCE(node->nid);
++	ret = qrtr_node_enqueue(node, skb, QRTR_TYPE_HELLO, &from, &to);
++	qrtr_port_put(ctrl);
++	if (ret != -EAGAIN && ret != -ENOMEM && ret != -ETIMEDOUT)
++		return;
++retry:
++	schedule_delayed_work(&node->say_hello, msecs_to_jiffies(100));
++}
++
++/* The transport must publish its receive context before requesting HELLO. */
++void qrtr_endpoint_hello(struct qrtr_endpoint *ep)
++{
++	schedule_delayed_work(&ep->node->say_hello, 0);
++}
++EXPORT_SYMBOL_GPL(qrtr_endpoint_hello);
++
+ /**
+  * qrtr_endpoint_register() - register a new endpoint
+  * @ep: endpoint to register
+@@ -591,6 +639,7 @@ int qrtr_endpoint_register(struct qrtr_endpoint *ep, unsigned int nid)
+ 
+ 	kref_init(&node->ref);
+ 	mutex_init(&node->ep_lock);
++	INIT_DELAYED_WORK(&node->say_hello, qrtr_hello_work);
+ 	skb_queue_head_init(&node->rx_queue);
+ 	node->nid = QRTR_EP_NID_AUTO;
+ 	node->ep = ep;
+@@ -629,6 +678,7 @@ void qrtr_endpoint_unregister(struct qrtr_endpoint *ep)
+ 	mutex_lock(&node->ep_lock);
+ 	node->ep = NULL;
+ 	mutex_unlock(&node->ep_lock);
++	cancel_delayed_work_sync(&node->say_hello);
+ 
+ 	/* Notify the local controller about the event */
+ 	spin_lock_irqsave(&qrtr_nodes_lock, flags);
+diff --git a/net/qrtr/mhi.c b/net/qrtr/mhi.c
+index 3990da1..15c524f 100644
+--- a/net/qrtr/mhi.c
++++ b/net/qrtr/mhi.c
+@@ -135,6 +135,8 @@ static int qcom_mhi_qrtr_probe(struct mhi_device *mhi_dev,
+ 	if (rc)
+ 		goto err_unregister;
+ 
++	qrtr_endpoint_hello(&qdev->ep);
++
+ 	dev_dbg(qdev->dev, "Qualcomm MHI QRTR driver probed\n");
+ 
+ 	return 0;
+@@ -183,6 +185,7 @@ static int __maybe_unused qcom_mhi_qrtr_pm_suspend_late(struct device *dev)
+ static int __maybe_unused qcom_mhi_qrtr_pm_resume_early(struct device *dev)
+ {
+ 	struct mhi_device *mhi_dev = container_of(dev, struct mhi_device, dev);
++	struct qrtr_mhi_dev *qdev = dev_get_drvdata(dev);
+ 	enum mhi_state state;
+ 	int rc;
+ 
+@@ -201,7 +204,13 @@ static int __maybe_unused qcom_mhi_qrtr_pm_resume_early(struct device *dev)
+ 		return rc;
+ 	}
+ 
+-	return qcom_mhi_qrtr_queue_dl_buffers(mhi_dev);
++	rc = qcom_mhi_qrtr_queue_dl_buffers(mhi_dev);
++	if (rc)
++		return rc;
++
++	qrtr_endpoint_hello(&qdev->ep);
++
++	return 0;
+ }
+ 
+ static const struct dev_pm_ops qcom_mhi_qrtr_pm_ops = {
+diff --git a/net/qrtr/ns.c b/net/qrtr/ns.c
+index c5e7e01..f916c69 100644
+--- a/net/qrtr/ns.c
++++ b/net/qrtr/ns.c
+@@ -231,7 +231,7 @@ static int announce_servers(struct sockaddr_qrtr *sq)
+ 				continue;
+ 
+ 			pr_err("failed to announce new service\n");
+-			return ret;
++			/* the remote needs the other servers no less */
+ 		}
+ 	}
+ 	return 0;
+@@ -326,38 +326,9 @@ static int server_del(struct qrtr_node *node, unsigned int port, bool bcast)
+ 	return 0;
+ }
+ 
+-static int say_hello(struct sockaddr_qrtr *dest)
+-{
+-	struct qrtr_ctrl_pkt pkt;
+-	struct msghdr msg = { };
+-	struct kvec iv;
+-	int ret;
+-
+-	iv.iov_base = &pkt;
+-	iv.iov_len = sizeof(pkt);
+-
+-	memset(&pkt, 0, sizeof(pkt));
+-	pkt.cmd = cpu_to_le32(QRTR_TYPE_HELLO);
+-
+-	msg.msg_name = (struct sockaddr *)dest;
+-	msg.msg_namelen = sizeof(*dest);
+-
+-	ret = kernel_sendmsg(qrtr_ns.sock, &msg, &iv, 1, sizeof(pkt));
+-	if (ret < 0)
+-		pr_err("failed to send hello msg\n");
+-
+-	return ret;
+-}
+-
+ /* Announce the list of servers registered on the local node */
+ static int ctrl_cmd_hello(struct sockaddr_qrtr *sq)
+ {
+-	int ret;
+-
+-	ret = say_hello(sq);
+-	if (ret < 0)
+-		return ret;
+-
+ 	return announce_servers(sq);
+ }
+ 
+@@ -517,10 +488,12 @@ static int ctrl_cmd_new_server(struct sockaddr_qrtr *from,
+ 
+ 	if (srv->node == qrtr_ns.local_node) {
+ 		ret = service_announce_new(&qrtr_ns.bcast_sq, srv);
+-		if (ret < 0) {
++		/*
++		 * A failed broadcast must not hide the server from the
++		 * lookups already registered for it.
++		 */
++		if (ret < 0)
+ 			pr_err("failed to announce new service\n");
+-			return ret;
+-		}
+ 	}
+ 
+ 	/* Notify any potential lookups about the new server */
+@@ -774,10 +747,6 @@ int qrtr_ns_init(void)
+ 	qrtr_ns.bcast_sq.sq_node = QRTR_NODE_BCAST;
+ 	qrtr_ns.bcast_sq.sq_port = QRTR_PORT_CTRL;
+ 
+-	ret = say_hello(&qrtr_ns.bcast_sq);
+-	if (ret < 0)
+-		goto err_wq;
+-
+ 	/* As the qrtr ns socket owner and creator is the same module, we have
+ 	 * to decrease the qrtr module reference count to guarantee that it
+ 	 * remains zero after the ns socket is created, otherwise, executing
+diff --git a/net/qrtr/qrtr.h b/net/qrtr/qrtr.h
+index 3f2d286..c234b3c 100644
+--- a/net/qrtr/qrtr.h
++++ b/net/qrtr/qrtr.h
+@@ -25,6 +25,8 @@ struct qrtr_endpoint {
+ 
+ int qrtr_endpoint_register(struct qrtr_endpoint *ep, unsigned int nid);
+ 
++void qrtr_endpoint_hello(struct qrtr_endpoint *ep);
++
+ void qrtr_endpoint_unregister(struct qrtr_endpoint *ep);
+ 
+ int qrtr_endpoint_post(struct qrtr_endpoint *ep, const void *data, size_t len);
+diff --git a/net/qrtr/smd.c b/net/qrtr/smd.c
+index c91bf03..72f8d11 100644
+--- a/net/qrtr/smd.c
++++ b/net/qrtr/smd.c
+@@ -74,6 +74,7 @@ static int qcom_smd_qrtr_probe(struct rpmsg_device *rpdev)
+ 		return rc;
+ 
+ 	dev_set_drvdata(&rpdev->dev, qdev);
++	qrtr_endpoint_hello(&qdev->ep);
+ 
+ 	dev_dbg(&rpdev->dev, "Qualcomm SMD QRTR driver probed\n");
+ 
+diff --git a/net/qrtr/tun.c b/net/qrtr/tun.c
+index 9726db3..04b87bb 100644
+--- a/net/qrtr/tun.c
++++ b/net/qrtr/tun.c
+@@ -48,6 +48,8 @@ static int qrtr_tun_open(struct inode *inode, struct file *filp)
+ 	if (ret)
+ 		goto out;
+ 
++	qrtr_endpoint_hello(&tun->ep);
++
+ 	return 0;
+ 
+ out:

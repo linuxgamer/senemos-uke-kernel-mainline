@@ -1,0 +1,198 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] usb: dwc3: retain the 7.3 notifier outside the Uke supplier contract
+
+Linux 7.3 defers power-supply discovery through a notifier. Uke retains its
+existing probe deferral and supplier link; other boards retain the upstream
+notifier and gadget path. Use the shared delayed worker and its lock in both
+paths. The following readiness/generation patches supply that worker and lock.
+No board values or charging limits change. Physical charging remains unqualified.
+
+diff --git a/drivers/usb/dwc3/core.c b/drivers/usb/dwc3/core.c
+index ae87a07..ff824c6 100644
+--- a/drivers/usb/dwc3/core.c
++++ b/drivers/usb/dwc3/core.c
+@@ -2195,6 +2195,24 @@ static void dwc3_vbus_draw_work(struct work_struct *work)
+ 			ret, dwc->current_limit);
+ }
+ 
++static struct power_supply *dwc3_get_usb_power_supply(struct dwc3 *dwc)
++{
++	struct power_supply *usb_psy;
++	const char *usb_psy_name;
++	int ret;
++
++	ret = device_property_read_string(dwc->dev, "usb-psy-name", &usb_psy_name);
++	if (ret < 0)
++		return NULL;
++
++	usb_psy = power_supply_get_by_name(usb_psy_name);
++	if (!usb_psy)
++		return ERR_PTR(-EPROBE_DEFER);
++
++	INIT_WORK(&dwc->vbus_draw_work, dwc3_vbus_draw_work);
++	return usb_psy;
++}
++
+ static int dwc3_psy_notifier(struct notifier_block *nb,
+ 			     unsigned long event, void *data)
+ {
+@@ -2213,7 +2231,7 @@ static int dwc3_psy_notifier(struct notifier_block *nb,
+ 	if (!psy)
+ 		return NOTIFY_DONE;
+ 
+-	spin_lock_irqsave(&dwc->lock, flags);
++	spin_lock_irqsave(&dwc->vbus_draw_lock, flags);
+ 	/*
+ 	 * The USB power_supply may already be set. This can happen if notifier
+ 	 * callbacks for the USB power_supply race, or if a previous notifier
+@@ -2222,20 +2240,20 @@ static int dwc3_psy_notifier(struct notifier_block *nb,
+ 	 * subsequent notifications until the notifier is unregistered.
+ 	 */
+ 	if (dwc->usb_psy) {
+-		spin_unlock_irqrestore(&dwc->lock, flags);
++		spin_unlock_irqrestore(&dwc->vbus_draw_lock, flags);
+ 		power_supply_put(psy);
+ 		return NOTIFY_DONE;
+ 	}
+ 
+ 	dwc->usb_psy = psy;
+ 	if (dwc->current_limit != DWC3_CURRENT_UNSPECIFIED)
+-		schedule_work(&dwc->vbus_draw_work);
+-	spin_unlock_irqrestore(&dwc->lock, flags);
++		mod_delayed_work(system_percpu_wq, &dwc->vbus_draw_work, 0);
++	spin_unlock_irqrestore(&dwc->vbus_draw_lock, flags);
+ 
+ 	return NOTIFY_OK;
+ }
+ 
+-static void dwc3_get_usb_power_supply(struct dwc3 *dwc)
++static void dwc3_get_usb_power_supply_async(struct dwc3 *dwc)
+ {
+ 	struct power_supply *psy;
+ 	unsigned long flags;
+@@ -2245,7 +2263,8 @@ static void dwc3_get_usb_power_supply(struct dwc3 *dwc)
+ 	if (ret < 0)
+ 		return;
+ 
+-	INIT_WORK(&dwc->vbus_draw_work, dwc3_vbus_draw_work);
++	spin_lock_init(&dwc->vbus_draw_lock);
++	INIT_DELAYED_WORK(&dwc->vbus_draw_work, dwc3_vbus_draw_work);
+ 
+ 	dwc->current_limit = DWC3_CURRENT_UNSPECIFIED;
+ 	dwc->psy_nb.notifier_call = dwc3_psy_notifier;
+@@ -2264,20 +2283,20 @@ static void dwc3_get_usb_power_supply(struct dwc3 *dwc)
+ 	power_supply_unreg_notifier(&dwc->psy_nb);
+ 	dwc->psy_nb.notifier_call = NULL;
+ 
+-	spin_lock_irqsave(&dwc->lock, flags);
++	spin_lock_irqsave(&dwc->vbus_draw_lock, flags);
+ 	/*
+ 	 * It is possible that the notifier callback ran before we reached here
+ 	 * and successfully fetched the power supply. In that case we need to
+ 	 * release the above reference.
+ 	 */
+ 	if (dwc->usb_psy) {
+-		spin_unlock_irqrestore(&dwc->lock, flags);
++		spin_unlock_irqrestore(&dwc->vbus_draw_lock, flags);
+ 		power_supply_put(psy);
+ 		return;
+ 	}
+ 
+ 	dwc->usb_psy = psy;
+-	spin_unlock_irqrestore(&dwc->lock, flags);
++	spin_unlock_irqrestore(&dwc->vbus_draw_lock, flags);
+ }
+ 
+ int dwc3_core_probe(const struct dwc3_probe_data *data)
+@@ -2327,7 +2346,13 @@ int dwc3_core_probe(const struct dwc3_probe_data *data)
+ 
+ 	spin_lock_init(&dwc->lock);
+ 
+-	dwc3_get_usb_power_supply(dwc);
++	if (of_machine_is_compatible("xiaomi,uke")) {
++		dwc->usb_psy = dwc3_get_usb_power_supply(dwc);
++		if (IS_ERR(dwc->usb_psy))
++			return dev_err_probe(dev, PTR_ERR(dwc->usb_psy), "Uke USB power supply unavailable\n");
++	} else {
++		dwc3_get_usb_power_supply_async(dwc);
++	}
+ 
+ 	if (!data->ignore_clocks_and_resets) {
+ 		dwc->reset = devm_reset_control_array_get_optional_shared(dev);
+diff --git a/drivers/usb/dwc3/gadget.c b/drivers/usb/dwc3/gadget.c
+index bf82002..63c9062 100644
+--- a/drivers/usb/dwc3/gadget.c
++++ b/drivers/usb/dwc3/gadget.c
+@@ -3176,7 +3176,7 @@ static void dwc3_gadget_set_ssp_rate(struct usb_gadget *g,
+ 	spin_unlock_irqrestore(&dwc->lock, flags);
+ }
+ 
+-static int dwc3_gadget_vbus_draw(struct usb_gadget *g, unsigned int mA)
++static int dwc3_gadget_vbus_draw_async(struct usb_gadget *g, unsigned int mA)
+ {
+ 	struct dwc3		*dwc = gadget_to_dwc(g);
+ 	unsigned long		flags;
+@@ -3186,25 +3186,50 @@ static int dwc3_gadget_vbus_draw(struct usb_gadget *g, unsigned int mA)
+ 				     "qcom,usb-snps-eusb2-phy")))
+ 		return usb_phy_set_power(dwc->usb2_phy, mA);
+ 
+-	spin_lock_irqsave(&dwc->lock, flags);
++	spin_lock_irqsave(&dwc->vbus_draw_lock, flags);
+ 	if (!dwc->usb_psy) {
+ 		if (!dwc->psy_nb.notifier_call) {
+-			spin_unlock_irqrestore(&dwc->lock, flags);
++			spin_unlock_irqrestore(&dwc->vbus_draw_lock, flags);
+ 			return -EOPNOTSUPP;
+ 		}
+ 		dwc->current_limit = mA;
+-		spin_unlock_irqrestore(&dwc->lock, flags);
++		spin_unlock_irqrestore(&dwc->vbus_draw_lock, flags);
+ 		dev_dbg(dwc->dev, "Stored VBUS draw: %u mA (power supply not ready)\n", mA);
+ 		return 0;
+ 	}
+ 
++	dwc->current_limit = mA;
++	mod_delayed_work(system_percpu_wq, &dwc->vbus_draw_work, 0);
++	spin_unlock_irqrestore(&dwc->vbus_draw_lock, flags);
++
++	return 0;
++}
++
++static int dwc3_gadget_vbus_draw(struct usb_gadget *g, unsigned int mA)
++{
++	struct dwc3		*dwc = gadget_to_dwc(g);
++
++	if (dwc->usb2_phy && (dwc->usb2_phy->set_power ||
++	    !of_device_is_compatible(dwc->usb2_phy->dev->of_node,
++				     "qcom,usb-snps-eusb2-phy")))
++		return usb_phy_set_power(dwc->usb2_phy, mA);
++
++	if (!dwc->usb_psy)
++		return -EOPNOTSUPP;
++
+ 	dwc->current_limit = mA;
+ 	schedule_work(&dwc->vbus_draw_work);
+-	spin_unlock_irqrestore(&dwc->lock, flags);
+ 
+ 	return 0;
+ }
+ 
++static int dwc3_gadget_vbus_draw_select(struct usb_gadget *g, unsigned int mA)
++{
++	if (!of_machine_is_compatible("xiaomi,uke"))
++		return dwc3_gadget_vbus_draw_async(g, mA);
++	return dwc3_gadget_vbus_draw(g, mA);
++}
++
+ /**
+  * dwc3_gadget_check_config - ensure dwc3 can support the USB configuration
+  * @g: pointer to the USB gadget
+@@ -3272,7 +3297,7 @@ static const struct usb_gadget_ops dwc3_gadget_ops = {
+ 	.udc_set_speed		= dwc3_gadget_set_speed,
+ 	.udc_set_ssp_rate	= dwc3_gadget_set_ssp_rate,
+ 	.get_config_params	= dwc3_gadget_config_params,
+-	.vbus_draw		= dwc3_gadget_vbus_draw,
++	.vbus_draw		= dwc3_gadget_vbus_draw_select,
+ 	.check_config		= dwc3_gadget_check_config,
+ 	.udc_async_callbacks	= dwc3_gadget_async_callbacks,
+ };

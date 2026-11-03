@@ -20,6 +20,7 @@ static int uke_mdss_handoff(struct msm_mdss *mdss)
 	u32 value, saved_halt;
 	int ret;
 
+	dev_info(dev, "Uke display boot: MDSS handoff begins\n");
 	if (of_find_property(dev->of_node, "iommus", NULL))
 		return dev_err_probe(dev, -EINVAL, "put display iommus on DPU child\n");
 	node = of_parse_phandle(dev->of_node, "qcom,display-smmu", 0);
@@ -106,6 +107,7 @@ static int uke_mdss_handoff(struct msm_mdss *mdss)
 	 */
 	writel(saved_halt & ~UKE_DISPLAY_XINS, vbif + 0x200);
 	mdss->uke_handoff_complete = true;
+	dev_info(dev, "Uke display boot: MDSS handoff complete\n");
 	goto put_pm;
 restore_halt:
 	writel(saved_halt, vbif + 0x200);

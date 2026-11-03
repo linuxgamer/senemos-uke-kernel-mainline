@@ -230,7 +230,7 @@ No optical output or arbitrary teardown recovery claim is made.
  	 * It is safe to call dsi_mgr_phy_disable() here because a single PHY
 @@ -427,7 +437,8 @@
  		if (dsi_bridge->powered) {
- 			dsi_mgr_bridge_disable(bridge);
+ 			dsi_mgr_bridge_disable(bridge, commit);
  			msm_dsi_phy_pll_save_state(msm_dsi->phy);
 -			dsi_mgr_bridge_power_off(bridge);
 +			if (dsi_mgr_bridge_power_off(bridge))

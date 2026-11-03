@@ -1,0 +1,37 @@
+From: Uke Linux maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] mfd: qcom-spmi-pmic: check the optional Uke PM8010 population
+
+The selected Uke firmware can retain the generic PM8010 N node without
+advertising a PM8010 in SMEM or any of its N regulator resources in the
+command DB. Admit that exact optional node before a transport read. Other
+boards, nodes and populated variants keep their ordinary probe path.
+Missing or malformed firmware evidence is an error, never an absence result.
+
+The project-owned helper is installed alongside this source by preparation.
+No generic transport error, revision value or PMIC power state is changed.
+
+--- a/drivers/mfd/qcom-spmi-pmic.c
++++ b/drivers/mfd/qcom-spmi-pmic.c
+@@ -17,6 +17,8 @@
+ #include <linux/regmap.h>
+ #include <soc/qcom/qcom-spmi-pmic.h>
+ 
++#include "uke-pm8010.h"
++
+ #define PMIC_REV2		0x101
+ #define PMIC_REV3		0x102
+ #define PMIC_REV4		0x103
+@@ -252,6 +254,13 @@ static int pmic_spmi_probe(struct spmi_device *sdev)
+ 	struct qcom_spmi_dev *ctx;
+ 	int ret;
+ 
++	ret = uke_pm8010_should_probe(sdev);
++	if (ret < 0)
++		return dev_err_probe(&sdev->dev, ret,
++				     "Cannot verify optional Uke PM8010 population\n");
++	if (!ret)
++		return -ENODEV;
++
+ 	regmap = devm_regmap_init_spmi_ext(sdev, &spmi_regmap_config);
+ 	if (IS_ERR(regmap))
+ 		return PTR_ERR(regmap);

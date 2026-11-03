@@ -1,0 +1,45 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] usb: typec: expose opt-in route decisions through dynamic debug
+
+Record each mux provider's mode/result, QMP request/current PHY users and
+acknowledged PAN pin/HPD events using dev_dbg. This makes optional-provider
+EOPNOTSUPP and firmware-to-PHY routing visible without installing kprobes.
+
+The existing dynamic-debug configuration keeps these call sites quiet until
+enabled. Do not dump USB payloads or change error, routing or power behavior.
+
+--- a/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
++++ b/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
+@@ -4871,6 +4871,10 @@
+ 	else
+ 		svid = 0;
+ 
++	dev_dbg(qmp->dev, "Type-C request: svid=%#x mode=%lu phy=%u usb=%u dp=%u powered=%d\n",
++		svid, state->mode, qmp->qmpphy_mode, qmp->usb_init_count,
++		qmp->dp_init_count, qmp->dp_powered_on);
++
+ 	if (qmp->uke_gdsc && state->mode < TYPEC_STATE_MODAL) {
+ 		new_mode = QMPPHY_MODE_USB3_ONLY;
+ 	} else if (svid == USB_TYPEC_DP_SID) {
+--- a/drivers/soc/qcom/pmic_glink_altmode.c
++++ b/drivers/soc/qcom/pmic_glink_altmode.c
+@@ -443,6 +443,9 @@
+ 		port->hpd_irq = event.hpd_irq;
+ 		port->mux_ctrl = event.mux_ctrl;
+ 		port->tbt_data = event.tbt_data;
++		dev_dbg(am->dev, "port %u event gen=%llu svid=%#x pin=%u mux=%u hpd=%u irq=%u\n",
++			port->index, (unsigned long long)event.generation, event.svid,
++			event.mode, event.mux_ctrl, event.hpd_state, event.hpd_irq);
+ 		ret = typec_switch_set(port->typec_switch, event.orientation);
+ 		if (!ret) {
+ 			if (event.mux_ctrl == MUX_CTRL_STATE_NO_CONN)
+--- a/drivers/usb/typec/mux.c
++++ b/drivers/usb/typec/mux.c
+@@ -403,6 +403,7 @@
+ 		mux_dev = mux->mux_devs[i];
+ 
+ 		ret = mux_dev->set(mux_dev, state);
++		dev_dbg(&mux_dev->dev, "mode=%lu result=%d\n", state->mode, ret);
+ 		if (ret && ret != -EOPNOTSUPP)
+ 			return ret;
+ 	}

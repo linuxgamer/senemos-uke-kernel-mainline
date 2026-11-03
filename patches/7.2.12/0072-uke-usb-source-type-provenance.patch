@@ -1,0 +1,126 @@
+From: Uke Linux maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] power: supply: bound Uke USB type and preserve cached raw provenance
+
+Keep the existing wire6 request and bounded SDP control contract. Do not
+reinterpret OEM adapter wire7 or XM REAL_TYPE as wire6. Bound ambiguous values
+to standard Unknown, retain raw/epoch/time metadata without adding firmware
+queries, and reject malformed boolean online replies. No negotiated protocol
+revision, voltage request or hardware acceptance is implied.
+
+OEM comparison: MiCode5712080a4b0c, usb_prop_map maps the standard getter to
+USB_ADAP_TYPE7; vendor real_type uses XM separately. Prepared only, not tested.
+
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -309,6 +309,9 @@
+ 	unsigned int current_max;
+ 	unsigned int current_limit;
+ 	unsigned int usb_type;
++	/* Raw legacy USB wire6 observation; not OEM adapter wire7/XM real_type. */
++	u32 type_raw, type_generation, type_firmware, type_source;
++	u64 type_received_ns;
+ };
+ 
+ struct qcom_battmgr_wireless {
+@@ -1748,6 +1751,15 @@
+ 	complete(&battmgr->ack);
+ }
+ 
++static int qcom_battmgr_uke_usb_type(u32 raw)
++{
++	/* Only the stable legacy standard range is shared. OEM BrickID=9 and
++	 * vendor 0x80..0x84 cannot be reinterpreted as modern enum/revision data.
++	 * Keep the legacy request unchanged until wire6/wire7 ABI is qualified.
++	 */
++	return raw <= POWER_SUPPLY_USB_TYPE_PD_PPS ? raw : POWER_SUPPLY_USB_TYPE_UNKNOWN;
++}
++
+ static int qcom_battmgr_uke_validate(unsigned int property, u32 value)
+ {
+ 	switch (property) {
+@@ -1962,6 +1974,10 @@
+ 
+ 		switch (property) {
+ 		case USB_ONLINE:
++			if (battmgr->variant == QCOM_BATTMGR_UKE && le32_to_cpu(resp->intval.value) > 1) {
++				battmgr->error = -ENODATA;
++				goto out_complete;
++			}
+ 			battmgr->usb.online = le32_to_cpu(resp->intval.value);
+ 			break;
+ 		case USB_VOLT_NOW:
+@@ -1980,7 +1996,16 @@
+ 			battmgr->usb.current_limit = le32_to_cpu(resp->intval.value);
+ 			break;
+ 		case USB_TYPE:
+-			battmgr->usb.usb_type = le32_to_cpu(resp->intval.value);
++			if (battmgr->variant == QCOM_BATTMGR_UKE) {
++				battmgr->usb.type_raw = le32_to_cpu(resp->intval.value);
++				battmgr->usb.usb_type = qcom_battmgr_uke_usb_type(battmgr->usb.type_raw);
++				battmgr->usb.type_received_ns = battmgr->transaction.receipt_ns;
++				battmgr->usb.type_generation = battmgr->transaction.generation;
++				battmgr->usb.type_firmware = battmgr->transaction.firmware_generation;
++				battmgr->usb.type_source = battmgr->transaction.source_generation;
++			} else {
++				battmgr->usb.usb_type = le32_to_cpu(resp->intval.value);
++			}
+ 			break;
+ 		default:
+ 			dev_warn(battmgr->dev, "unknown property %#x\n", property);
+@@ -2242,8 +2267,33 @@
+ }
+ static DEVICE_ATTR_RO(uke_battmgr_state);
+ 
++static ssize_t uke_usb_source_state_show(struct device *dev,
++					struct device_attribute *attr, char *buf)
++{
++	struct qcom_battmgr *battmgr = dev_get_drvdata(dev);
++	struct qcom_battmgr_uke_transaction *tx = &battmgr->transaction;
++	unsigned long flags;
++	bool valid;
++	ssize_t len;
++
++	spin_lock_irqsave(&tx->lock, flags);
++	valid = battmgr->usb.type_received_ns && battmgr->service_up &&
++		!tx->desynced && !tx->suspended && !tx->removing &&
++		battmgr->usb.type_generation == tx->generation &&
++		battmgr->usb.type_firmware == tx->firmware_generation &&
++		battmgr->usb.type_source == tx->source_generation;
++	len = sysfs_emit(buf, "1 %llu %u %u %u %u %u %u %llu %u %u %u\n",
++		tx->instance_ns, tx->generation, tx->firmware_generation, tx->source_generation,
++		valid, battmgr->usb.type_raw, battmgr->usb.usb_type, battmgr->usb.type_received_ns,
++		battmgr->usb.type_generation, battmgr->usb.type_firmware, battmgr->usb.type_source);
++	spin_unlock_irqrestore(&tx->lock, flags);
++	return len;
++}
++static DEVICE_ATTR_RO(uke_usb_source_state);
++
+ static struct attribute *qcom_battmgr_uke_attrs[] = {
+ 	&dev_attr_uke_battmgr_state.attr,
++	&dev_attr_uke_usb_source_state.attr,
+ 	&dev_attr_uke_charge_state.attr,
+ 	&dev_attr_uke_charge_lease.attr,
+ 	&dev_attr_uke_charge_thresholds.attr,
+--- /dev/null
++++ b/Documentation/ABI/testing/sysfs-driver-qcom-battmgr-uke-source
+@@ -0,0 +1,20 @@
++What:           /sys/bus/auxiliary/devices/*/uke_usb_source_state
++Date:           October 2026
++Contact:        Uke Linux maintainers
++Description:
++                Read only, no firmware request or service activation. Version1
++                has12 space-separated decimal tokens:
++                version driver_instance_ns current_generation current_firmware
++                current_source cache_matches_epochs raw_usb_wire6
++                normalized_standard_type received_boottime_ns sample_generation
++                sample_firmware sample_source
++
++                The cache is populated only by already requested successful
++                USB wire6 replies. No wire7 or XM property is queried. Epoch
++                validity is not freshness: consumers must check sample age.
++                Raw6 is not authenticated or established as the OEM adapter
++                type. Exact protocol/version, PD contract and power are unknown.
++                Only legacy standard0..8 values pass through; ambiguous9+
++                (including OEM BrickID9 and vendor128..132) become standard
++                Unknown while the raw value is preserved. No QC or MI version
++                is synthesized. Non-Uke behavior is unchanged. No writable ABI.

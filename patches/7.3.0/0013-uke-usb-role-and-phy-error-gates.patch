@@ -1,0 +1,57 @@
+From: Senemos Uke contributors
+Subject: [PATCH] usb: dwc3: enforce the admitted Uke role and propagate PHY errors
+
+The Uke eUSB2/repeater/WCD slice implements the OEM peripheral sequence.
+The mainline legacy PHY interface does not set Qualcomm's host-mode flags,
+so their existing flag check cannot reliably reject an unreviewed host DT.
+Reject other Uke roles in glue probe before acquiring clocks or power.
+Keep host/VBUS admission explicit while the ESP32 host graph is developed.
+
+DWC3 normally ignores legacy usb_phy_init errors. For the Uke compatible,
+propagate either error and shut down the successful USB2 initialization if
+USB3 initialization fails. An unsuccessful PHY must not become a reported
+working UDC. Preserve existing behavior for all other glue compatibles.
+
+Source: Linux v7.2.9, drivers/usb/dwc3/core.c and dwc3-qcom.c
+Source: MiCode/Xiaomi_Kernel_OpenSource
+Commit: 5712080a4b0c0b1a879e6d145c601c649ddaddfd
+Files: drivers/usb/phy/phy-msm-snps-eusb2.c,
+       drivers/usb/repeater/repeater-qti-pmic-eusb2.c
+License: GPL-2.0-only
+
+--- a/drivers/usb/dwc3/core.c
++++ b/drivers/usb/dwc3/core.c
+@@ -826,12 +826,19 @@
+ 
+ static int dwc3_phy_init(struct dwc3 *dwc)
+ {
++	bool uke = of_device_is_compatible(dwc->dev->of_node, "qcom,sm7675-dwc3");
+ 	int ret;
+ 	int i;
+ 	int j;
+ 
+-	usb_phy_init(dwc->usb2_phy);
+-	usb_phy_init(dwc->usb3_phy);
++	ret = usb_phy_init(dwc->usb2_phy);
++	if (ret && uke)
++		return ret;
++	ret = usb_phy_init(dwc->usb3_phy);
++	if (ret && uke) {
++		usb_phy_shutdown(dwc->usb2_phy);
++		return ret;
++	}
+ 
+ 	for (i = 0; i < dwc->num_usb2_ports; i++) {
+ 		ret = phy_init(dwc->usb2_generic_phy[i]);
+--- a/drivers/usb/dwc3/dwc3-qcom.c
++++ b/drivers/usb/dwc3/dwc3-qcom.c
+@@ -670,6 +670,9 @@
+ 
+ 	qcom->dev = &pdev->dev;
+ 	qcom->uke = of_device_is_compatible(dev->of_node, "qcom,sm7675-dwc3");
++	if (qcom->uke && usb_get_dr_mode(dev) != USB_DR_MODE_PERIPHERAL)
++		return dev_err_probe(dev, -EOPNOTSUPP,
++				     "Uke host PHY/repeater/VBUS profile is not admitted\n");
+ 
+ 	qcom->resets = devm_reset_control_array_get_optional_exclusive(dev);
+ 	if (IS_ERR(qcom->resets)) {

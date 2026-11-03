@@ -1,0 +1,41 @@
+From: Uke Linux maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] power: supply: avoid Linux current macro in Uke charge guard
+
+The AArch64 full translation unit exposes Linux current=get_current(), unlike
+the earlier extracted fixtures. Rename the signed absolute-current temporary.
+Keep all guards and runtime admission behavior. This fixes a reported compiler
+failure; no build/test was executed by the charging source task.
+
+--- a/drivers/power/supply/qcom_battmgr_uke_control.h
++++ b/drivers/power/supply/qcom_battmgr_uke_control.h
+@@ -57,7 +57,7 @@
+ 	const unsigned int props[] = {
+ 		BATT_HEALTH, BATT_PRESENT, BATT_TEMP, BATT_VOLT_NOW, BATT_CURR_NOW,
+ 	};
+-	s64 current;
++	s64 absolute_battery_current;
+ 	u64 began = ktime_get_boottime_ns();
+ 	u32 generation = qcom_battmgr_uke_generation(battmgr);
+ 	unsigned long flags;
+@@ -80,9 +80,9 @@
+ 	ret = qcom_battmgr_request_property(battmgr, BATTMGR_USB_PROPERTY_GET, USB_TYPE, 0);
+ 	if (ret)
+ 		return ret;
+-	current = battmgr->status.current_now;
+-	if (current < 0)
+-		current = -current;
++	absolute_battery_current = battmgr->status.current_now;
++	if (absolute_battery_current < 0)
++		absolute_battery_current = -absolute_battery_current;
+ 	if (generation != qcom_battmgr_uke_generation(battmgr))
+ 		return -ESTALE;
+ 	if (battmgr->status.health != POWER_SUPPLY_HEALTH_GOOD || !battmgr->info.present ||
+@@ -91,7 +91,7 @@
+ 	    (s32)battmgr->status.temperature >= battmgr->control.temperature_max ||
+ 	    battmgr->status.voltage_now < battmgr->control.voltage_min_uv ||
+ 	    battmgr->status.voltage_now > battmgr->control.voltage_max_uv ||
+-	    current > battmgr->control.current_abs_max_ua)
++	    absolute_battery_current > battmgr->control.current_abs_max_ua)
+ 		return -ERANGE;
+ 	ret = qcom_battmgr_uke_control_check(battmgr);
+ 	if (ret)

@@ -1,0 +1,33 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] soc: qcom: apr: read the exact Uke OEM GPR domain
+
+The physical Uke adsp_apps GPR node stores domain 2 in one reg cell.
+The pinned Xiaomi Uke gpr-lite driver reads that field, whereas mainline
+expects qcom,domain. Preserve explicit mainline properties and reject
+malformed cells, foreign machines and any unreviewed OEM domain.
+No FastRPC DMA, audio service, PDM or automatic DSP startup is admitted.
+
+--- a/drivers/soc/qcom/apr.c
++++ b/drivers/soc/qcom/apr.c
+@@ -15,2 +15,4 @@
+ #include <linux/rpmsg.h>
++#include <dt-bindings/soc/qcom,gpr.h>
++
+ #include <linux/of.h>
+@@ -601,6 +603,16 @@
+ 	ret = of_property_read_u32(dev->of_node, "qcom,domain", &apr->dest_domain_id);
+ 
+ 	if (of_device_is_compatible(dev->of_node, "qcom,gpr")) {
++		/* Uke's OEM GPR driver uses one reg cell for the ADSP domain. */
++		if (ret && of_machine_is_compatible("xiaomi,uke") &&
++		    !of_property_present(dev->of_node, "qcom,domain") &&
++		    of_property_count_u32_elems(dev->of_node, "reg") == 1) {
++			ret = of_property_read_u32(dev->of_node, "reg",
++						   &apr->dest_domain_id);
++			if (!ret && apr->dest_domain_id != GPR_DOMAIN_ID_ADSP)
++				ret = -EINVAL;
++		}
++
+ 		apr->type = PR_TYPE_GPR;
+ 	} else {
+ 		if (ret) /* try deprecated apr-domain property */

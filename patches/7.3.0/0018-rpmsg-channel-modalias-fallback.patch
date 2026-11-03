@@ -1,0 +1,40 @@
+From: Uke platform maintainers
+Subject: [PATCH] rpmsg: retain channel aliases for nodes without compatible
+
+A channel node may supply GLINK intents without an OF compatible. An OF
+alias for that node hides the RPMSG service alias from module autoloading.
+Use the channel alias in both sysfs and uevents in that case, retaining OF
+aliases and their error handling when a compatible is actually present.
+
+--- a/drivers/rpmsg/rpmsg_core.c
++++ b/drivers/rpmsg/rpmsg_core.c
+@@ -364,9 +364,11 @@
+ 	struct rpmsg_device *rpdev = to_rpmsg_device(dev);
+ 	ssize_t len;
+ 
+-	len = of_device_modalias(dev, buf, PAGE_SIZE);
+-	if (len != -ENODEV)
+-		return len;
++	if (of_property_present(dev->of_node, "compatible")) {
++		len = of_device_modalias(dev, buf, PAGE_SIZE);
++		if (len != -ENODEV)
++			return len;
++	}
+ 
+ 	return sysfs_emit(buf, RPMSG_DEVICE_MODALIAS_FMT "\n", rpdev->id.name);
+ }
+@@ -417,9 +419,11 @@
+ 	const struct rpmsg_device *rpdev = to_rpmsg_device(dev);
+ 	int ret;
+ 
+-	ret = of_device_uevent_modalias(dev, env);
+-	if (ret != -ENODEV)
+-		return ret;
++	if (of_property_present(dev->of_node, "compatible")) {
++		ret = of_device_uevent_modalias(dev, env);
++		if (ret != -ENODEV)
++			return ret;
++	}
+ 
+ 	return add_uevent_var(env, "MODALIAS=" RPMSG_DEVICE_MODALIAS_FMT,
+ 					rpdev->id.name);

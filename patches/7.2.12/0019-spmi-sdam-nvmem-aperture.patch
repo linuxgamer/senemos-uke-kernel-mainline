@@ -1,0 +1,19 @@
+From: Uke platform maintainers
+Subject: [PATCH] nvmem: qcom-spmi-sdam: include the data start in provider size
+
+SDAM_SIZE counts data bytes beginning at offset 0x40. Cell offsets and the
+read/write callbacks use register offsets, so the provider's aperture must
+include that start. Otherwise the NVMEM core truncates the final 64 data
+bytes before the existing hardware bounds checks can validate them.
+
+--- a/drivers/nvmem/qcom-spmi-sdam.c
++++ b/drivers/nvmem/qcom-spmi-sdam.c
+@@ -144,7 +144,7 @@
+ 	sdam->sdam_config.owner = THIS_MODULE;
+ 	sdam->sdam_config.add_legacy_fixed_of_cells = true;
+ 	sdam->sdam_config.stride = 1;
+-	sdam->sdam_config.size = sdam->size;
++	sdam->sdam_config.size = SDAM_MEM_START + sdam->size;
+ 	sdam->sdam_config.word_size = 1;
+ 	sdam->sdam_config.reg_read = sdam_read;
+ 	sdam->sdam_config.reg_write = sdam_write;

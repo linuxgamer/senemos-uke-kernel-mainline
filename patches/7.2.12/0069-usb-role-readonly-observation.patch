@@ -1,0 +1,115 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] usb: roles: allow explicit read-only role observation
+
+The full Uke firmware-owned role switch must be observable without granting
+sysfs control. Keep both hidden-default and control-enabled behavior, add
+explicit read-only observation, and reject writes independently of VFS mode.
+Kernel callers including UCSI retain their existing role-control API.
+
+License: GPL-2.0
+
+diff --git a/drivers/usb/dwc3/drd.c b/drivers/usb/dwc3/drd.c
+index c435663..c4b48c3 100644
+--- a/drivers/usb/dwc3/drd.c
++++ b/drivers/usb/dwc3/drd.c
+@@ -523,8 +523,10 @@ static int dwc3_setup_role_switch(struct dwc3 *dwc)
+ 	dwc3_role_switch.driver_data = dwc;
+ 	dwc3_role_switch.allow_userspace_control = true;
+ 	/* Firmware/UCSI is the sole role producer in the Uke full profile. */
+-	if (of_device_is_compatible(dwc->dev->of_node, "qcom,sm7675-dwc3-typec"))
++	if (of_device_is_compatible(dwc->dev->of_node, "qcom,sm7675-dwc3-typec")) {
+ 		dwc3_role_switch.allow_userspace_control = false;
++		dwc3_role_switch.allow_userspace_observation = true;
++	}
+ 	dwc->role_sw = usb_role_switch_register(dwc->dev, &dwc3_role_switch);
+ 	if (IS_ERR(dwc->role_sw))
+ 		return PTR_ERR(dwc->role_sw);
+diff --git a/drivers/usb/roles/class.c b/drivers/usb/roles/class.c
+index edec139..dccc124 100644
+--- a/drivers/usb/roles/class.c
++++ b/drivers/usb/roles/class.c
+@@ -35,6 +35,7 @@ struct usb_role_switch {
+ 	usb_role_switch_set_t set;
+ 	usb_role_switch_get_t get;
+ 	bool allow_userspace_control;
++	bool allow_userspace_observation;
+ };
+ 
+ #define to_role_switch(d)	container_of(d, struct usb_role_switch, dev)
+@@ -243,18 +244,6 @@ usb_role_switch_find_by_fwnode(const struct fwnode_handle *fwnode)
+ }
+ EXPORT_SYMBOL_GPL(usb_role_switch_find_by_fwnode);
+ 
+-static umode_t
+-usb_role_switch_is_visible(struct kobject *kobj, struct attribute *attr, int n)
+-{
+-	struct device *dev = kobj_to_dev(kobj);
+-	struct usb_role_switch *sw = to_role_switch(dev);
+-
+-	if (sw->allow_userspace_control)
+-		return attr->mode;
+-
+-	return 0;
+-}
+-
+ static const char * const usb_roles[] = {
+ 	[USB_ROLE_NONE]		= "none",
+ 	[USB_ROLE_HOST]		= "host",
+@@ -284,6 +273,9 @@ static ssize_t role_store(struct device *dev, struct device_attribute *attr,
+ {
+ 	struct usb_role_switch *sw = to_role_switch(dev);
+ 	int ret;
++	/* Enforce the boundary even if a privileged process changes sysfs mode. */
++	if (!sw->allow_userspace_control)
++		return -EACCES;
+ 
+ 	ret = sysfs_match_string(usb_roles, buf);
+ 	if (ret < 0) {
+@@ -303,6 +295,19 @@ static ssize_t role_store(struct device *dev, struct device_attribute *attr,
+ }
+ static DEVICE_ATTR_RW(role);
+ 
++static umode_t
++usb_role_switch_is_visible(struct kobject *kobj, struct attribute *attr, int n)
++{
++	struct device *dev = kobj_to_dev(kobj);
++	struct usb_role_switch *sw = to_role_switch(dev);
++
++	if (sw->allow_userspace_control)
++		return attr->mode;
++	if (sw->allow_userspace_observation && attr == &dev_attr_role.attr)
++		return attr->mode & 0444;
++	return 0;
++}
++
+ static struct attribute *usb_role_switch_attrs[] = {
+ 	&dev_attr_role.attr,
+ 	NULL,
+@@ -377,6 +382,7 @@ usb_role_switch_register(struct device *parent,
+ 	mutex_init_with_key(&sw->lock, &sw->key);
+ 
+ 	sw->allow_userspace_control = desc->allow_userspace_control;
++	sw->allow_userspace_observation = desc->allow_userspace_observation;
+ 	sw->usb2_port = desc->usb2_port;
+ 	sw->usb3_port = desc->usb3_port;
+ 	sw->udc = desc->udc;
+diff --git a/include/linux/usb/role.h b/include/linux/usb/role.h
+index b5deafd..50a8272 100644
+--- a/include/linux/usb/role.h
++++ b/include/linux/usb/role.h
+@@ -26,6 +26,7 @@ typedef enum usb_role (*usb_role_switch_get_t)(struct usb_role_switch *sw);
+  * @set: Callback for setting the role
+  * @get: Callback for getting the role (optional)
+  * @allow_userspace_control: If true userspace may change the role through sysfs
++ * @allow_userspace_observation: Expose role read-only when control is disabled
+  * @driver_data: Private data pointer
+  * @name: Name for the switch (optional)
+  *
+@@ -45,6 +46,7 @@ struct usb_role_switch_desc {
+ 	bool allow_userspace_control;
+ 	void *driver_data;
+ 	const char *name;
++	bool allow_userspace_observation;
+ };
+ 
+ 

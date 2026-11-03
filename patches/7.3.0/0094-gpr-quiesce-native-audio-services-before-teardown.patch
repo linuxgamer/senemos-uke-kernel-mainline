@@ -1,0 +1,167 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] soc: qcom: quiesce native audio services before teardown
+
+Serialize GPR callback publication and final service-map removal with
+receive dispatch. Add a process-context service quiesce boundary so a
+driver can drain callbacks before releasing their dependent state.
+
+APM rejects new graph opens, removes its DAI children, quiesces the service
+and only then unregisters and frees its topology metadata. PRM explicitly
+releases its devm children while replies remain available, drains its
+serialized transaction, rejects later requests and quiesces its service.
+The bus performs a final callback drain and service-map removal before
+the device core releases driver data. Legacy APR dispatch is unchanged.
+
+Transport/PDR shutdown, concurrent external users after supplier unbind,
+remote ownership after timeout and full DMA recovery retain separate
+requirements. No firmware selector, profile or physical route is enabled.
+
+---
+--- a/drivers/soc/qcom/apr.c
++++ b/drivers/soc/qcom/apr.c
+@@ -93,6 +93,16 @@
+ }
+ EXPORT_SYMBOL_GPL(gpr_free_port);
+ 
++void gpr_quiesce_service(gpr_device_t *gdev)
++{
++	struct packet_router *gpr = dev_get_drvdata(gdev->dev.parent);
++
++	mutex_lock(&gpr->callback_lock);
++	WRITE_ONCE(gdev->svc.callback, NULL);
++	mutex_unlock(&gpr->callback_lock);
++}
++EXPORT_SYMBOL_GPL(gpr_quiesce_service);
++
+ gpr_port_t *gpr_alloc_port(struct apr_device *gdev, struct device *dev,
+ 				gpr_port_cb cb,	void *priv)
+ {
+@@ -378,11 +388,17 @@
+ {
+ 	struct apr_device *adev = to_apr_device(dev);
+ 	struct apr_driver *adrv = to_apr_driver(dev->driver);
++	struct packet_router *apr = dev_get_drvdata(adev->dev.parent);
+ 	int ret;
+ 
+ 	ret = adrv->probe(adev);
+-	if (!ret)
+-		adev->svc.callback = adrv->gpr_callback;
++	if (!ret) {
++		if (apr->type == PR_TYPE_GPR)
++			mutex_lock(&apr->callback_lock);
++		WRITE_ONCE(adev->svc.callback, adrv->gpr_callback);
++		if (apr->type == PR_TYPE_GPR)
++			mutex_unlock(&apr->callback_lock);
++	}
+ 
+ 	return ret;
+ }
+@@ -395,9 +411,15 @@
+ 
+ 	if (adrv->remove)
+ 		adrv->remove(adev);
++	if (apr->type == PR_TYPE_GPR) {
++		mutex_lock(&apr->callback_lock);
++		WRITE_ONCE(adev->svc.callback, NULL);
++	}
+ 	spin_lock(&apr->svcs_lock);
+ 	idr_remove(&apr->svcs_idr, adev->svc.id);
+ 	spin_unlock(&apr->svcs_lock);
++	if (apr->type == PR_TYPE_GPR)
++		mutex_unlock(&apr->callback_lock);
+ }
+ 
+ static int apr_uevent(const struct device *dev, struct kobj_uevent_env *env)
+--- a/include/linux/soc/qcom/apr.h
++++ b/include/linux/soc/qcom/apr.h
+@@ -190,8 +190,9 @@
+ 
+ gpr_port_t *gpr_alloc_port(gpr_device_t *gdev, struct device *dev,
+ 				gpr_port_cb cb, void *priv);
+-/* Drains receive callbacks; call from process context outside a callback. */
++/* Both calls drain callbacks; use process context outside a callback. */
+ void gpr_free_port(gpr_port_t *port);
++void gpr_quiesce_service(gpr_device_t *gdev);
+ int gpr_send_port_pkt(gpr_port_t *port, const struct gpr_pkt *pkt);
+ int gpr_send_pkt(gpr_device_t *gdev, const struct gpr_pkt *pkt);
+ 
+--- a/sound/soc/qcom/qdsp6/q6apm.c
++++ b/sound/soc/qcom/qdsp6/q6apm.c
+@@ -52,6 +52,8 @@
+ 		return ERR_PTR(-EINVAL);
+ 
+ 	guard(mutex)(&apm->cmd_lock);
++	if (apm->removing)
++		return ERR_PTR(-ENODEV);
+ 
+ 	mutex_lock(&apm->lock);
+ 	graph = idr_find(&apm->graph_idr, graph_id);
+@@ -1019,7 +1021,11 @@
+ 		g_apm = NULL;
+ 	mutex_unlock(&g_apm_lock);
+ 
++	mutex_lock(&apm->cmd_lock);
++	apm->removing = true;
++	mutex_unlock(&apm->cmd_lock);
+ 	of_platform_depopulate(&gdev->dev);
++	gpr_quiesce_service(gdev);
+ 	snd_soc_unregister_component(&gdev->dev);
+ 	q6apm_purge_failed_graphs(apm);
+ }
+--- a/sound/soc/qcom/qdsp6/q6apm.h
++++ b/sound/soc/qcom/qdsp6/q6apm.h
+@@ -60,6 +60,7 @@
+ 
+ 	/* Serialize graph publication with final release. */
+ 	struct mutex cmd_lock;
++	bool removing;
+ 	struct mutex lock;
+ 	uint32_t state;
+ 	u32 state_token;
+--- a/sound/soc/qcom/qdsp6/q6prm.c
++++ b/sound/soc/qcom/qdsp6/q6prm.c
+@@ -29,6 +29,7 @@
+ 	u32 response_opcode;
+ 	u32 param_id;
+ 	u32 status;
++	bool removing;
+ };
+ 
+ static atomic_t prm_next_token = ATOMIC_INIT(0);
+@@ -66,6 +67,10 @@
+ 	int ret;
+ 
+ 	mutex_lock(&prm->lock);
++	if (prm->removing) {
++		mutex_unlock(&prm->lock);
++		return -ENODEV;
++	}
+ 	token = atomic_inc_return(&prm_next_token);
+ 	if (!token)
+ 		token = atomic_inc_return(&prm_next_token);
+@@ -285,6 +290,17 @@
+ 	return devm_of_platform_populate(dev);
+ }
+ 
++static void prm_remove(gpr_device_t *gdev)
++{
++	struct q6prm *prm = dev_get_drvdata(&gdev->dev);
++
++	devm_of_platform_depopulate(&gdev->dev);
++	mutex_lock(&prm->lock);
++	prm->removing = true;
++	mutex_unlock(&prm->lock);
++	gpr_quiesce_service(gdev);
++}
++
+ #ifdef CONFIG_OF
+ static const struct of_device_id prm_device_id[]  = {
+ 	{ .compatible = "qcom,q6prm" },
+@@ -295,6 +311,7 @@
+ 
+ static gpr_driver_t prm_driver = {
+ 	.probe = prm_probe,
++	.remove = prm_remove,
+ 	.gpr_callback = prm_callback,
+ 	.driver = {
+ 		.name = "qcom-prm",

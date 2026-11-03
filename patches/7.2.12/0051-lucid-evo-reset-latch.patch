@@ -1,0 +1,63 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] clk: qcom: skip the EVO/OLE latch handshake while in reset
+
+The EVO/OLE latch interface is disabled in reset. L and ALPHA become
+effective when RESET_N is asserted. Retain the latch ACK and lock checks
+for active PLLs and the existing handshake for all other PLL types.
+
+Based on the reset semantics documented in the Uke OEM kernel
+5712080a4b0c0b1a879e6d145c601c649ddaddfd and same-SoC Nord 4 kernel
+fc892483f1d61f245924681eb5abd563564d9cba, drivers/clk/qcom/clk-alpha-pll.c.
+The implementation uses upstream register layouts and retains its rate
+margin, output-settle and lock handling. Tablet qualification is separate.
+
+Signed-off-by: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+---
+diff --git a/drivers/clk/qcom/clk-alpha-pll.c b/drivers/clk/qcom/clk-alpha-pll.c
+--- a/drivers/clk/qcom/clk-alpha-pll.c
++++ b/drivers/clk/qcom/clk-alpha-pll.c
+@@ -1808,8 +1808,23 @@
+ 	if (ret < 0)
+ 		return ret;
+ 
+-	regmap_update_bits(pll->clkr.regmap, PLL_L_VAL(pll), LUCID_EVO_PLL_L_VAL_MASK,  l);
+-	regmap_write(pll->clkr.regmap, PLL_ALPHA_VAL(pll), a);
++	ret = regmap_update_bits(pll->clkr.regmap, PLL_L_VAL(pll),
++				 LUCID_EVO_PLL_L_VAL_MASK, l);
++	if (ret)
++		return ret;
++	ret = regmap_write(pll->clkr.regmap, PLL_ALPHA_VAL(pll), a);
++	if (ret)
++		return ret;
++
++	if (pll->regs == clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID_EVO] ||
++	    pll->regs == clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID_OLE]) {
++		ret = regmap_read(pll->clkr.regmap, PLL_MODE(pll), &val);
++		if (ret)
++			return ret;
++		/* EVO/OLE latch values on reset exit; ACK is unavailable in reset. */
++		if (!(val & PLL_RESET_N))
++			goto check_lock;
++	}
+ 
+ 	/* Latch the PLL input */
+ 	ret = regmap_update_bits(pll->clkr.regmap, PLL_MODE(pll), latch_bit, latch_bit);
+@@ -1818,7 +1833,9 @@
+ 
+ 	/* Wait for 2 reference cycles before checking the ACK bit. */
+ 	udelay(1);
+-	regmap_read(pll->clkr.regmap, PLL_MODE(pll), &val);
++	ret = regmap_read(pll->clkr.regmap, PLL_MODE(pll), &val);
++	if (ret)
++		return ret;
+ 	if (!(val & latch_ack)) {
+ 		pr_err("Lucid PLL latch failed. Output may be unstable!\n");
+ 		return -EINVAL;
+@@ -1829,6 +1846,7 @@
+ 	if (ret)
+ 		return ret;
+ 
++check_lock:
+ 	if (clk_hw_is_enabled(hw)) {
+ 		ret = wait_for_pll_enable_lock(pll);
+ 		if (ret)

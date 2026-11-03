@@ -1,0 +1,125 @@
+From: Senemos Contributors <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: fs19xx: route stereo by OEM speaker position and display rotation
+
+Expose quarter-turn rotation through per-amplifier ALSA enums. Preserve the
+OEM position masks and I2S channel field, cache while idle and restore before
+unmute. A live routing error stops/resets the affected amplifier.
+
+Register and position semantics follow MiCode Uke audio commit 8eb0eccb,
+fsm_core.c::fsm_swap_channel and fsm-dev.h. Desktop policy supplies the
+actual internal display transform; the driver does not read accelerometers.
+
+--- a/sound/soc/codecs/fs19xx.c
++++ b/sound/soc/codecs/fs19xx.c
+@@ -50,6 +50,7 @@
+ #define FS19XX_REG_I2SCTRL		0x17
+ #define FS19XX_I2SCTRL_SR		GENMASK(15, 12)
+ #define FS19XX_I2SCTRL_DOE		BIT(11)
++#define FS19XX_I2SCTRL_CHS12		GENMASK(4, 3)
+ #define FS19XX_I2SSR_48000		0x9
+ #define FS19XX_REG_DACCTRL		0x30
+ #define FS19XX_DACCTRL_MUTE		0x0310
+@@ -165,6 +166,7 @@
+ 	u16 position;
+ 
+ 	unsigned int volume;
++	unsigned int rotation;
+ 	unsigned int pll_polls;
+ 	bool powered;
+ 	bool speaker_enabled;
+@@ -332,6 +334,31 @@
+ 			    (volume << 8) | 0x00c0);
+ }
+ 
++/* MiCode fsm_swap_channel: position bits LT/LB/RT/RB = 3/2/1/0. */
++static int fs19xx_set_rotation_reg(struct fs19xx_priv *fs19xx, unsigned int rotation)
++{
++	static const u8 left_mask[] = { 0xc, 0x5, 0x3, 0xa };
++	unsigned int value, channel;
++	int ret;
++
++	if (rotation >= ARRAY_SIZE(left_mask) ||
++	    !is_power_of_2(fs19xx->position) || fs19xx->position > BIT(3))
++		return -EINVAL;
++	channel = fs19xx->position & left_mask[rotation] ? 1 : 2;
++	ret = fs19xx_read_stable(fs19xx, FS19XX_REG_I2SCTRL, &value);
++	if (ret)
++		return ret;
++	value = (value & ~FS19XX_I2SCTRL_CHS12) |
++		FIELD_PREP(FS19XX_I2SCTRL_CHS12, channel);
++	ret = regmap_write(fs19xx->regmap, FS19XX_REG_I2SCTRL, value);
++	if (ret)
++		return ret;
++	ret = fs19xx_read_stable(fs19xx, FS19XX_REG_I2SCTRL, &value);
++	if (ret)
++		return ret;
++	return FIELD_GET(FS19XX_I2SCTRL_CHS12, value) == channel ? 0 : -EIO;
++}
++
+ /* Everything except the DAC unmute and thermal sensing; DAC stays muted. */
+ static int fs19xx_chip_start(struct fs19xx_priv *fs19xx)
+ {
+@@ -347,6 +374,9 @@
+ 	ret = regmap_write(fs19xx->regmap, FS19XX_REG_I2SCTRL, i2sctrl);
+ 	if (ret)
+ 		return ret;
++	ret = fs19xx_set_rotation_reg(fs19xx, fs19xx->rotation);
++	if (ret)
++		return ret;
+ 
+ 	/* The PLL registers sit behind the OTP access key. */
+ 	ret = regmap_write(fs19xx->regmap, FS19XX_REG_OTPACC, FS19XX_OTPACC_KEY);
+@@ -635,6 +665,44 @@
+  * The amplifier output stays disabled until user space enables it. This
+  * keeps an unqualified preset from driving the speakers on its own.
+  */
++static const char * const fs19xx_rotation_text[] = { "0", "90", "180", "270" };
++static SOC_ENUM_SINGLE_EXT_DECL(fs19xx_rotation_enum, fs19xx_rotation_text);
++
++static int fs19xx_rotation_get(struct snd_kcontrol *kcontrol,
++			       struct snd_ctl_elem_value *ucontrol)
++{
++	struct fs19xx_priv *fs19xx = snd_soc_component_get_drvdata(snd_kcontrol_chip(kcontrol));
++
++	guard(mutex)(&fs19xx->lock);
++	ucontrol->value.enumerated.item[0] = fs19xx->rotation;
++	return 0;
++}
++
++static int fs19xx_rotation_put(struct snd_kcontrol *kcontrol,
++			       struct snd_ctl_elem_value *ucontrol)
++{
++	struct fs19xx_priv *fs19xx = snd_soc_component_get_drvdata(snd_kcontrol_chip(kcontrol));
++	unsigned int rotation = ucontrol->value.enumerated.item[0];
++	int ret;
++
++	if (rotation >= ARRAY_SIZE(fs19xx_rotation_text))
++		return -EINVAL;
++	guard(mutex)(&fs19xx->lock);
++	if (fs19xx->removing || !fs19xx->preset)
++		return -ENODEV;
++	if (rotation == fs19xx->rotation)
++		return 0;
++	if (fs19xx->powered) {
++		ret = fs19xx_set_rotation_reg(fs19xx, rotation);
++		if (ret) {
++			fs19xx_power_off(fs19xx);
++			return ret;
++		}
++	}
++	fs19xx->rotation = rotation;
++	return 1;
++}
++
+ static const struct snd_kcontrol_new fs19xx_controls[] = {
+ 	{
+ 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+@@ -644,6 +712,8 @@
+ 		.put = fs19xx_volume_put,
+ 	},
+ 	SOC_SINGLE_BOOL_EXT("Speaker Switch", 0, fs19xx_enable_get, fs19xx_enable_put),
++	SOC_ENUM_EXT("Speaker Rotation", fs19xx_rotation_enum,
++		     fs19xx_rotation_get, fs19xx_rotation_put),
+ };
+ 
+ static const struct snd_soc_dapm_widget fs19xx_dapm_widgets[] = {

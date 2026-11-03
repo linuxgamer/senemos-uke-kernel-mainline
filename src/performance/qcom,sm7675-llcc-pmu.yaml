@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/perf/qcom,sm7675-llcc-pmu.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Qualcomm SM7675 LLCC-v2 per-CPU read counters
+
+maintainers:
+  - MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+
+description: |
+  The aggregation block exposes eight 24-bit counters, selected by MPIDR
+  affinity level 1. It is separate from the LLCC cache controller and ACPI
+  QCOM8081 L3 PMU. No firmware MEMLAT policy is configured by this interface.
+
+properties:
+  compatible:
+    const: qcom,sm7675-llcc-pmu
+  reg:
+    maxItems: 1
+  reg-names:
+    const: lagg-base
+
+required:
+  - compatible
+  - reg
+  - reg-names
+
+additionalProperties: false
+
+examples:
+  - |
+    pmu@24095000 {
+        compatible = "qcom,sm7675-llcc-pmu";
+        reg = <0x24095000 0x300>;
+        reg-names = "lagg-base";
+    };

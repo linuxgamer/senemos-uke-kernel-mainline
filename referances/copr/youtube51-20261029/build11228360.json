@@ -1,0 +1,28 @@
+{
+  "build_id": 11228360,
+  "project": "mcc45tr/uke-linux-unstable",
+  "chroots": [
+    "fedora-rawhide-aarch64"
+  ],
+  "build_status": "succeeded",
+  "completed_utc": "2026-10-29T21:04:51Z",
+  "source_commit": "1024dc8aa5cddc73c5bb8f6f7949f62f1bda941f",
+  "source_overlay_commit": "b81f2cc666ffc3fcae9cf87c37bbe573d369dc83",
+  "source_overlay_sha256": "93876a3d8c047e396c9cf35a472eab3047ece61cbb61e9d7cc68427232e15530",
+  "source_rpm_sha256": "93b1a04660b5bc208031900985649a10c433ef5302f98e10cc883732fd001d28",
+  "selected_video_patches": 21,
+  "video_contracts": "passed in COPR source preparation",
+  "binary_packages": 6,
+  "binary_signatures": "all passed in isolated unstable-only key database",
+  "signing_fingerprint": "2204A661EA630A5303500085538797E72A3E4ECA",
+  "iris_module_sha256": "02a34434601b130f61c23e3bd9870d1af9d9b02fbe245242816ee78cdaf4a9b1",
+  "kernel_sha256": "c99ff9b545c8ce7a9a77300bcc7f5e61462f9a0e17e85107475e699d3c1221bb",
+  "boot_payload_identity": "kernel and Iris match both-profile bundle manifests",
+  "package_default_source": "unchanged",
+  "automatic_kernel_activation": false,
+  "local_compilation": false,
+  "installation": false,
+  "reboot": false,
+  "hdr_acceptance": false,
+  "chrome_4k60_acceptance": false
+}

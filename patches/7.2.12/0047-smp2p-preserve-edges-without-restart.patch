@@ -1,0 +1,19 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] soc: qcom: smp2p: reset input history only on remote restart
+
+Ordinary notifications must retain the last observed entry values. Otherwise
+an unrelated entry update replays every asserted rising-edge interrupt,
+including ADSP ready and handover. Preserve the v2 restart reset when the
+remote restart flag actually differs from the acknowledged flag.
+
+--- a/drivers/soc/qcom/smp2p.c
++++ b/drivers/soc/qcom/smp2p.c
+@@ -199,5 +199,8 @@
+ 	restart_done = in->flags & BIT(SMP2P_FLAGS_RESTART_DONE_BIT);
+ 	restart = restart_done != smp2p->ssr_ack;
++	if (!restart)
++		return false;
++
+ 	list_for_each_entry(entry, &smp2p->inbound, node) {
+ 		if (!entry->value)
+ 			continue;

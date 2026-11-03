@@ -5,15 +5,24 @@ dpu=${1:?Pass prepared dpu_encoder_phys_vid.c}
 dsi=${2:?Pass prepared dsi_host.c}
 modes=${3:?Pass generated o82-data.h}
 panel=${4:?Pass panel-xiaomi-o82.c}
+intf_source=${5:?Pass prepared dpu_hw_intf.c}
+msm_source=${intf_source%/disp/dpu1/dpu_hw_intf.c}
+bpc8=$(sed -n '/<enum name="mdp_bpc">/,/<\/enum>/p' "$msm_source/registers/display/mdp_common.xml" |
+    sed -n 's/.*<value name="BPC8" value="\([0-9]*\)".*/\1/p')
+[[ $bpc8 =~ ^[0-9]+$ ]]
 work=$(mktemp -d)
 trap 'rm -r -- "$work"' EXIT
-cat > "$work/check.cpp" <<'CPP'
+printf '#define BPC8 %s\n' "$bpc8" > "$work/check.cpp"
+cat >> "$work/check.cpp" <<'CPP'
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 #define DIV_ROUND_UP(n,d) (((n)+(d)-1)/(d))
 #define mult_frac(n,m,d) ((static_cast<uint64_t>(n)*(m))/(d))
 #define DPU_ERROR(...) ((void)0)
+#define BIT(n) (1U<<(n))
+#define MSM_FORMAT_IS_YUV(fmt) false
 #define DRM_MODE_FLAG_NHSYNC 1
 #define DRM_MODE_FLAG_NVSYNC 2
 using u32=uint32_t;
@@ -35,7 +44,12 @@ struct drm_dsc_config {
 };
 struct drm_encoder { bool dsc,wide; drm_dsc_config config; };
 struct dpu_intf_caps { int type; };
-struct dpu_hw_intf { dpu_intf_caps *cap; };
+struct dpu_hw_blk_reg_map { u32 regs[0x300/4]; };
+struct mdss_version { unsigned core_major_ver; };
+struct dpu_hw_intf { dpu_intf_caps *cap; dpu_hw_blk_reg_map hw; mdss_version *mdss_ver; };
+struct msm_format { unsigned bpc_g_y,bpc_b_cb,bpc_r_cr; };
+#define DPU_REG_READ(c,off) ((c)->regs[(off)/4])
+#define DPU_REG_WRITE(c,off,value) ((c)->regs[(off)/4]=(value))
 struct dpu_encoder_phys { drm_encoder *parent; dpu_hw_intf *hw_intf; };
 struct dpu_hw_intf_timing_params {
     unsigned int width,height,xres,yres,h_back_porch,h_front_porch,v_back_porch,
@@ -59,6 +73,8 @@ sed -n '/^dsi_get_vid_fmt(/,/^static inline enum dsi_cmd_dst_format/p' "$dsi" | 
 sed -n 's/^[[:space:]]*ctx->dsi\[i\]->format = /static const auto panel_format = /p' "$panel"
 sed -n '/^static void drm_mode_to_intf_timing_params(/,/^static u32 get_horizontal_total(/p' "$dpu" |
     sed '$d'
+sed -n '/^#define INTF_/p' "$intf_source"
+sed -n '/^static void dpu_hw_intf_setup_timing_engine(/,/^static void dpu_hw_intf_enable_timing_engine(/p' "$intf_source" | sed '$d'
 printf 'static unsigned long\n'
 sed -n '/^dsi_adjust_pclk_for_compression(/,/^unsigned long dsi_byte_clk_get_rate(/p' "$dsi" |
     sed '$d'
@@ -103,14 +119,45 @@ int main() {
         assert(timing.width==1600 && !timing.compression_en);
         encoder.dsc=true;
     }
-    caps.type=INTF_DP; encoder.wide=false;
+    mdss_version version{10}; intf.mdss_ver=&version;
+    msm_format format{BPC8,BPC8,BPC8};
+    const drm_display_mode dp_modes[] = {
+        {241500,2560,2608,2640,2720,1440,1443,1448,1481},
+        {148500,1920,2008,2052,2200,1080,1084,1089,1125},
+        {594000,3840,4016,4104,4400,2160,2168,2178,2250}
+    };
+    caps.type=INTF_DP;
+    for(const auto &mode:dp_modes) for(unsigned depth:{8u,10u}) {
+        encoder.config={8<<4,depth,mode.hdisplay>2560?2u:1u,
+                        static_cast<unsigned>(mode.hdisplay)/(mode.hdisplay>2560?2u:1u)};
+        encoder.wide=true;
+        for(bool compressed:{true,false}) {
+            encoder.dsc=compressed;
+            dpu_hw_intf_timing_params timing{};
+            drm_mode_to_intf_timing_params(&physical,&mode,&timing);
+            assert(timing.width==static_cast<unsigned>(mode.hdisplay)/2);
+            intf.hw={};
+            dpu_hw_intf_setup_timing_engine(&intf,&timing,&format);
+            assert(intf.hw.regs[INTF_PANEL_FORMAT/4]==0x213f);
+            const unsigned start=(mode.htotal-mode.hdisplay)/2;
+            const unsigned data_width=compressed?DIV_ROUND_UP(mode.hdisplay,6):mode.hdisplay/2;
+            const auto window=((start+data_width-1)<<16)|start;
+            assert(intf.hw.regs[INTF_DISPLAY_DATA_HCTL/4]==window);
+            assert(intf.hw.regs[INTF_ACTIVE_DATA_HCTL/4]==(compressed?window:0));
+            assert(intf.hw.regs[INTF_CONFIG2/4]==(compressed?0x1011u:0x11u));
+            assert((intf.hw.regs[INTF_HSYNC_CTL/4]>>16)==static_cast<unsigned>(mode.htotal)/2);
+        }
+    }
+    caps.type=INTF_DSI; encoder.dsc=true;
     dpu_hw_intf_timing_params timing{};
     drm_mode_to_intf_timing_params(&physical,&o82_modes[3].mode,&timing);
-    assert(timing.width==3200);
+    intf.hw={}; dpu_hw_intf_setup_timing_engine(&intf,&timing,&format);
+    assert(!intf.hw.regs[INTF_ACTIVE_DATA_HCTL/4]);
+    assert(intf.hw.regs[INTF_PANEL_FORMAT/4]==0x213f);
 }
 CPP
 } >> "$work/check.cpp"
 "${CXX:-c++}" -std=c++20 -O2 -Wall -Wextra -Werror -Wno-missing-field-initializers \
     -fsanitize=undefined -fsanitize-undefined-trap-on-error "$work/check.cpp" -o "$work/check"
 "$work/check"
-printf 'Real DPU/DSI functions: O82 RGB101010 format and seven matched line periods; 8-bpc, uncompressed and DP paths checked\n'
+printf 'Real DPU/DSI functions: seven O82 line periods and DP compressed/uncompressed data windows at FHD/QHD/UHD, 8/10 bpc checked\n'

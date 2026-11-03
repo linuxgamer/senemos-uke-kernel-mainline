@@ -1,0 +1,41 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] usb: qcom: require full-profile Uke wake IRQ providers
+
+Uke full Type-C uses the exact OEM DP/DM and SuperSpeed PDC wake lines.
+Do not silently accept missing/deferred IRQs and then suspend without them.
+The separate peripheral profile retains its existing optional IRQ behavior.
+
+Source: MiCode/kernel_devicetree 94c84aeb9e517dbde546fc732033c184094c8e57
+License: GPL-2.0-only
+
+diff --git a/drivers/usb/dwc3/dwc3-qcom.c b/drivers/usb/dwc3/dwc3-qcom.c
+index 678830a..07ba14b 100644
+--- a/drivers/usb/dwc3/dwc3-qcom.c
++++ b/drivers/usb/dwc3/dwc3-qcom.c
+@@ -478,6 +478,8 @@ static int dwc3_qcom_setup_port_irq(struct dwc3_qcom *qcom,
+ 		return -ENOMEM;
+ 
+ 	irq = platform_get_irq_byname_optional(pdev, irq_name);
++	if (qcom->uke_typec && irq <= 0)
++		return irq < 0 ? irq : -EINVAL;
+ 	if (irq > 0) {
+ 		ret = dwc3_qcom_request_irq(qcom, irq, irq_name);
+ 		if (ret)
+@@ -493,6 +495,8 @@ static int dwc3_qcom_setup_port_irq(struct dwc3_qcom *qcom,
+ 		return -ENOMEM;
+ 
+ 	irq = platform_get_irq_byname_optional(pdev, irq_name);
++	if (qcom->uke_typec && irq <= 0)
++		return irq < 0 ? irq : -EINVAL;
+ 	if (irq > 0) {
+ 		ret = dwc3_qcom_request_irq(qcom, irq, irq_name);
+ 		if (ret)
+@@ -508,6 +512,8 @@ static int dwc3_qcom_setup_port_irq(struct dwc3_qcom *qcom,
+ 		return -ENOMEM;
+ 
+ 	irq = platform_get_irq_byname_optional(pdev, irq_name);
++	if (qcom->uke_typec && irq <= 0)
++		return irq < 0 ? irq : -EINVAL;
+ 	if (irq > 0) {
+ 		ret = dwc3_qcom_request_irq(qcom, irq, irq_name);
+ 		if (ret)

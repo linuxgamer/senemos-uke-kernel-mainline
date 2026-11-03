@@ -1,0 +1,43 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] usb: gadget: serial: advertise the Uke USB2 sink budget
+
+The Uke tablet uses g_serial both in the initramfs and the Fedora root.
+Its battery legitimately makes the gadget self-powered, but serial's default
+MaxPower of zero then overrides CONFIG_USB_GADGET_VBUS_DRAW. The host sees a
+zero-mA configuration and DWC3 never receives the configured 500-mA request.
+
+Keep the self-powered capability and advertise the configured external draw
+on Uke only, capped at the USB2 500-mA limit. Composite's SET_CONFIGURATION
+path remains responsible for requesting this budget; pre-configuration,
+suspend and disconnect behavior remain upstream. The battery driver's
+online/SDP/source-ceiling gates and firmware safety controls are unchanged.
+
+Compared with Xiaomi uke-v-oss kernel 5712080a4b0c0b1a879e6d145c601c649ddaddfd,
+drivers/power/supply/qti_battery_charger.c, and upstream Linux serial/composite.
+No voltage, charging profile, Type-C role or board power limit is imported.
+This corrects the descriptor contract; net battery charging still needs a
+separate measured Uke test and can remain negative under desktop load.
+
+--- a/drivers/usb/gadget/legacy/serial.c
++++ b/drivers/usb/gadget/legacy/serial.c
+@@ -11,6 +11,7 @@
+ #include <linux/device.h>
+ #include <linux/kstrtox.h>
+ #include <linux/module.h>
++#include <linux/of.h>
+ #include <linux/tty.h>
+ #include <linux/tty_flip.h>
+ 
+@@ -200,6 +201,12 @@ static int gs_bind(struct usb_composite_dev *cdev)
+ {
+ 	int			status;
+ 
++	/* A battery-backed Uke can also draw its enumerated USB2 sink budget. */
++	if (of_machine_is_compatible("xiaomi,uke")) {
++		serial_config_driver.MaxPower =
++			min_t(unsigned int, CONFIG_USB_GADGET_VBUS_DRAW, 500);
++	}
++
+ 	/* Allocate string descriptor numbers ... note that string
+ 	 * contents can be overridden by the composite_dev glue.
+ 	 */

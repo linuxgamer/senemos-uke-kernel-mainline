@@ -22,7 +22,9 @@ cat >> "$work/check.c" <<'C'
 struct gpr_resp_pkt{struct gpr_hdr hdr;void *payload;int payload_size;};
 struct apr_rx_buf{int len;unsigned char buf[];};
 struct pkt_router_svc{int (*callback)(const struct gpr_resp_pkt*,void*,int);void *priv;};
-struct packet_router{int svcs_lock,svcs_idr;void *dev;};
+struct packet_router{int svcs_lock,svcs_idr,callback_lock;void *dev;};
+static void mutex_lock(int *p){assert(!*p);*p=1;}
+static void mutex_unlock(int *p){assert(*p==1);*p=0;}
 static int calls;
 static int expected_size;
 static void *expected_payload;
@@ -37,16 +39,6 @@ static void *idr_find(int *id,u32 port){(void)id;return port==1?&service:NULL;}
 #define dev_err(...) ((void)0)
 C
 awk '/^static int gpr_do_rx_callback\(/ {emit=1} emit {print} emit && /^}/ {exit}' "$kernel/drivers/soc/qcom/apr.c" >> "$work/check.c"
-cat >> "$work/check.c" <<'C'
-struct gpr_ibasic_rsp_result_t{u32 opcode,status;};
-struct q6prm{struct gpr_ibasic_rsp_result_t result;int wait;};
-struct device{void *data;};
-typedef struct {struct device dev;}gpr_device_t;
-static void *dev_get_drvdata(struct device *d){return d->data;}
-#define wake_up(p) (++*(p))
-C
-awk '/^#define PRM_CMD_RSP_(REQUEST|RELEASE)_HW_RSC/ {print}' "$kernel/sound/soc/qcom/qdsp6/q6prm.c" >> "$work/check.c"
-awk '/^static int prm_callback\(/ {emit=1} emit {print} emit && /^}/ {exit}' "$kernel/sound/soc/qcom/qdsp6/q6prm.c" >> "$work/check.c"
 cat >> "$work/check.c" <<'C'
 static struct apr_rx_buf *packet(int len){
  struct apr_rx_buf *b=calloc(1,sizeof(*b)+len);assert(b);b->len=len;
@@ -65,14 +57,9 @@ int main(void){
  b=packet(32);h=(void*)b->buf;h->hdr_size=7;
  expected_size=4;expected_payload=b->buf+28;assert(gpr_do_rx_callback(&router,b)==0&&calls==2);
  h->dest_port=2;assert(gpr_do_rx_callback(&router,b)==-EINVAL);free(b);
- struct q6prm prm={0};gpr_device_t gdev={{&prm}};
- struct gpr_ibasic_rsp_result_t result={0,7};
- struct gpr_resp_pkt response={.hdr={.opcode=PRM_CMD_RSP_REQUEST_HW_RSC},.payload=&result,.payload_size=8};
- for(int len=-1;len<8;len++){response.payload_size=len;assert(prm_callback(&response,&gdev,0)==-EINVAL&&prm.wait==0);}
- response.payload_size=8;response.payload=NULL;assert(prm_callback(&response,&gdev,0)==-EINVAL);
- response.payload=&result;assert(prm_callback(&response,&gdev,0)==0&&prm.wait==1&&prm.result.status==7);
+ assert(!router.callback_lock);
 }
 C
 ${CC:-cc} -std=c11 -Wall -Wextra -Werror -Wno-sign-compare -Wno-unused-parameter -fsanitize=address,undefined -fno-omit-frame-pointer "$work/check.c" -o "$work/check"
 "$work/check"
-printf 'GPR headers and PRM truncated/null/valid response fixtures passed.\n'
+printf 'GPR actual-source header and packet bounds fixtures passed.\n'

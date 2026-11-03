@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Exact O82-42 OEM timing groups; retain 120 Hz as the preferred mode. */
-#if O82_PANEL_VARIANT != 42
-#error OEM refresh modes require the observed O82-42 panel
-#endif
+/* Both O82 suppliers share these OEM timings; ON packets remain supplier-specific. */
 #include "sm7675-uke-native-display.dtso"
+#include "../input/sm7675-uke-thp.dtsi"
 
 &uke_panel {
 	/delete-property/ xiaomi,initial-60hz-only;
@@ -17,4 +15,16 @@
 
 #ifdef UKE_AUDIO_SERVICES
 #include "../audio/sm7675-uke-audio-services.dtsi"
+#endif
+#ifdef UKE_AUDIO_CARD
+#include "../audio/sm7675-uke-audio-card.dtsi"
+#endif
+#ifdef UKE_AUDIO_HDMI
+#include "../audio/sm7675-uke-hdmi-audio.dtsi"
+#endif
+#ifdef UKE_AUDIO_SPEAKERS
+#include "../audio/sm7675-uke-speaker-audio.dtsi"
+#endif
+#ifdef UKE_AUDIO_MICROPHONES
+#include "../audio/sm7675-uke-microphone-audio.dtsi"
 #endif

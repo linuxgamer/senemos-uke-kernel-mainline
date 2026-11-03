@@ -1,0 +1,25 @@
+From: Uke platform maintainers
+Subject: [PATCH] regulator: admit exact Uke ADSP and GPU ARC resources
+
+The live OEM Uke graph routes ADSP CX/MX to lcx.lvl/lmx.lvl and GPUCC
+MXC to mxc.lvl. Admit these exact command-database resources through the
+existing ARC implementation without substituting voltages or rail names.
+
+diff --git a/drivers/regulator/qcom-rpmh-regulator-uke.c b/drivers/regulator/qcom-rpmh-regulator-uke.c
+index d4a91c2..ec803ee 100644
+--- a/drivers/regulator/qcom-rpmh-regulator-uke.c
++++ b/drivers/regulator/qcom-rpmh-regulator-uke.c
+@@ -1991,9 +1991,12 @@ static int rpmh_regulator_probe(struct platform_device *pdev)
+ 		return rc;
+ 	}
+ 
+-	/* OEM Uke supplies required by CPU, USB, UFS and WCN6750. */
++	/* OEM Uke supplies required by CPU, USB, UFS, WLAN, ADSP and GPU clocks. */
+ 	if (strcmp(aggr_vreg->resource_name, "cx.lvl") &&
+ 	    strcmp(aggr_vreg->resource_name, "mx.lvl") &&
++	    strcmp(aggr_vreg->resource_name, "lcx.lvl") &&
++	    strcmp(aggr_vreg->resource_name, "lmx.lvl") &&
++	    strcmp(aggr_vreg->resource_name, "mxc.lvl") &&
+ 	    strcmp(aggr_vreg->resource_name, "ldob2") &&
+ 	    strcmp(aggr_vreg->resource_name, "ldob4") &&
+ 	    strcmp(aggr_vreg->resource_name, "ldob7") &&

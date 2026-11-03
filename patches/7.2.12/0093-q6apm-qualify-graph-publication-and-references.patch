@@ -1,0 +1,141 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: qcom: qualify graph publication and references
+
+Do not return a live graph when firmware OPEN failed. Keep the failed ID
+quarantined in this provider instance because remote ownership may be
+ambiguous; refuse repeated OPEN and free its local metadata at removal.
+No DMA buffer has been admitted by this failed graph-open path.
+
+Initialize the graph reference before publication and acquire existing
+references with kref_get_unless_zero while holding the lookup lock. Use
+the previously unused provider cmd_lock to serialize first publication
+with final release, so concurrent open cannot observe an unfinished OPEN.
+Initialize that mutex at probe and reject overflowing signed ID ranges.
+
+This does not qualify remote graph cleanup after timeout, static service
+teardown, DMA lifetime or a new firmware epoch after manual driver rebind.
+No firmware, topology, audio profile or physical route is enabled.
+
+---
+--- a/sound/soc/qcom/qdsp6/q6apm.c
++++ b/sound/soc/qcom/qdsp6/q6apm.c
+@@ -46,16 +46,23 @@
+ {
+ 	struct audioreach_graph_info *info;
+ 	struct audioreach_graph *graph;
+-	int id;
++	int id, ret;
++
++	if (graph_id >= INT_MAX)
++		return ERR_PTR(-EINVAL);
++
++	guard(mutex)(&apm->cmd_lock);
+ 
+ 	mutex_lock(&apm->lock);
+ 	graph = idr_find(&apm->graph_idr, graph_id);
+-	mutex_unlock(&apm->lock);
+-
+ 	if (graph) {
+-		kref_get(&graph->refcount);
+-		return graph;
++		ret = graph->state;
++		if (ret >= 0 && !kref_get_unless_zero(&graph->refcount))
++			ret = -EBUSY;
++		mutex_unlock(&apm->lock);
++		return ret < 0 ? ERR_PTR(ret) : graph;
+ 	}
++	mutex_unlock(&apm->lock);
+ 
+ 	info = idr_find(&apm->graph_info_idr, graph_id);
+ 
+@@ -78,6 +85,7 @@
+ 		return ERR_CAST(err);
+ 	}
+ 
++	kref_init(&graph->refcount);
+ 	mutex_lock(&apm->lock);
+ 	id = idr_alloc(&apm->graph_idr, graph, graph_id, graph_id + 1, GFP_KERNEL);
+ 	if (id < 0) {
+@@ -89,9 +97,12 @@
+ 	}
+ 	mutex_unlock(&apm->lock);
+ 
+-	kref_init(&graph->refcount);
+-
+-	q6apm_send_cmd_sync(apm, graph->graph, 0);
++	ret = q6apm_send_cmd_sync(apm, graph->graph, 0);
++	if (ret < 0) {
++		/* Retain the ID until removal; remote ownership may be ambiguous. */
++		graph->state = ret;
++		return ERR_PTR(ret);
++	}
+ 
+ 	return graph;
+ }
+@@ -132,6 +143,7 @@
+ 
+ 	graph = container_of(ref, struct audioreach_graph, refcount);
+ 	apm = graph->apm;
++	guard(mutex)(&apm->cmd_lock);
+ 
+ 	audioreach_graph_mgmt_cmd(graph, APM_CMD_GRAPH_CLOSE);
+ 
+@@ -143,6 +155,22 @@
+ 	kfree(graph);
+ }
+ 
++static void q6apm_purge_failed_graphs(struct q6apm *apm)
++{
++	struct audioreach_graph *graph;
++	int id;
++
++	guard(mutex)(&apm->cmd_lock);
++	guard(mutex)(&apm->lock);
++	idr_for_each_entry(&apm->graph_idr, graph, id) {
++		if (graph->state >= 0)
++			continue;
++		idr_remove(&apm->graph_idr, id);
++		kfree(graph->graph);
++		kfree(graph);
++	}
++}
++
+ 
+ static int q6apm_get_apm_state(struct q6apm *apm)
+ {
+@@ -939,6 +967,7 @@
+ 	dev_set_drvdata(dev, apm);
+ 
+ 	mutex_init(&apm->lock);
++	mutex_init(&apm->cmd_lock);
+ 	spin_lock_init(&apm->state_lock);
+ 	apm->dev = dev;
+ 	apm->gdev = gdev;
+@@ -983,13 +1012,16 @@
+ 
+ static void apm_remove(gpr_device_t *gdev)
+ {
++	struct q6apm *apm = dev_get_drvdata(&gdev->dev);
++
+ 	mutex_lock(&g_apm_lock);
+-	if (g_apm == dev_get_drvdata(&gdev->dev))
++	if (g_apm == apm)
+ 		g_apm = NULL;
+ 	mutex_unlock(&g_apm_lock);
+ 
+ 	of_platform_depopulate(&gdev->dev);
+ 	snd_soc_unregister_component(&gdev->dev);
++	q6apm_purge_failed_graphs(apm);
+ }
+ 
+ struct audioreach_module *q6apm_find_module_by_mid(struct q6apm_graph *graph, uint32_t mid)
+--- a/sound/soc/qcom/qdsp6/q6apm.h
++++ b/sound/soc/qcom/qdsp6/q6apm.h
+@@ -58,6 +58,7 @@
+ 	wait_queue_head_t wait;
+ 	struct gpr_ibasic_rsp_result_t result;
+ 
++	/* Serialize graph publication with final release. */
+ 	struct mutex cmd_lock;
+ 	struct mutex lock;
+ 	uint32_t state;

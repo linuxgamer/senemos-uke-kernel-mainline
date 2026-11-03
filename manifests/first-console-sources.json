@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-06",
+  "device": "uke",
+  "soc": "SM7675",
+  "kernel_profile": "linux-7.2.9",
+  "scope": "Pinned source and static firmware research; no own-device acceptance",
+  "sources": [
+    {
+      "repository": "https://github.com/MiCode/Xiaomi_Kernel_OpenSource",
+      "commit": "5712080a4b0c0b1a879e6d145c601c649ddaddfd",
+      "class": "OEM source",
+      "role": "Cliffs clocks, regulators, PHY tuning, interconnect topology and USB sequencing"
+    },
+    {
+      "repository": "https://github.com/MiCode/vendor_qcom_opensource_devicetree",
+      "commit": "94c84aeb9e517dbde546fc732033c184094c8e57",
+      "class": "OEM DT source",
+      "role": "Uke include chain, MMIO, interrupts, reset GPIO and supply/provider connections"
+    },
+    {
+      "repository": "https://github.com/ztsubaki/uke-linux",
+      "commit": "32cad9ccd383ff4b37d8a5e7f88a8bfdcc07307e",
+      "class": "Community source",
+      "role": "Original 6.12 Uke port and third-party CN live-DT evidence"
+    },
+    {
+      "repository": "https://github.com/linuxgamer/uke-fedora",
+      "commit": "fb447ef8b8f9987a6183a04839a5c2dae7944934",
+      "class": "Community implementation and author-reported hardware result",
+      "role": "Stock ABL boot, Fedora 44 UFS root and USB peripheral ttyGS0 process reference",
+      "accepted_kernel_version": "6.12 only in author report",
+      "own_device_tested": false,
+      "donor_scripts_executed": false
+    },
+    {
+      "repository": "https://codeberg.org/palawan-mainline/linux",
+      "commit": "0d9f7fdf720ae9f4ecfbee4fadaf1e3b5c442e95",
+      "branch": "palawan/v7.2-rc2",
+      "class": "Community SoC source",
+      "role": "Palawan/Lamma provider review; not an admitted Uke board",
+      "own_device_tested": false
+    }
+  ],
+  "stock_inspection": {
+    "profile": "Global OS3.0.303.0.WOZMIXM",
+    "archive_sha256": "f811ae6255b7535d32f80548d800487a6494a87ddb4cca592799337fab24cd0d",
+    "vendor_boot_sha256": "c2811677d6aa07753b615747c4f2dba110dd4519cf52ff3a89e41e00a5b02bcc",
+    "dtbo_sha256": "044aae9d9a144e9a05b91d2785a2ff4504c78caa11f8c22781839ba2f6c76490",
+    "base_dtb_count": 4,
+    "selected_dtb_index": null,
+    "bootloader_memory_fixups_present": false,
+    "own_device_profile_matched": false
+  },
+  "firmware_contract": {
+    "stock_early_firmware": "Preserve matching OEM XBL/ABL/AOP/TZ and their original recovery route",
+    "replacement_security_firmware_admitted": false,
+    "additional_blob_dependency_for_current_usb2_ufs_source_slice": "No downloadable DSP/WLAN firmware requested by these scoped drivers; stock platform firmware remains required",
+    "wifi_audio_gpu_dsp_firmware_admitted": false,
+    "redistribution_license_review_complete": false,
+    "public_stock_binary_payload": false
+  },
+  "open_gates": [
+    "Current owner firmware hashes and selected live DTB/DTBO",
+    "Live RAM and reserved-memory ownership",
+    "Standalone Uke UEFI firmware entry, FDT/GOP handoff and Android return",
+    "ESP32 USB host PHY/repeater/WCD role and VBUS control",
+    "Full independent board provider graph and physical first TTY"
+  ],
+  "hardware_tested": false,
+  "flash_performed": false
+}

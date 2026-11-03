@@ -1,0 +1,36 @@
+Subject: [PATCH] media: iris: use one stage for SM7675 decode-order VP9
+
+SM7675 VA clients explicitly request zero display delay and submit each exported
+picture synchronously. Two firmware stages cannot overlap that serial workload.
+Use the existing single-stage HFI mode only for VP9 decoder sessions on SM7675
+with client-set zero-delay decode-order output. Keep ordinary display-order
+sessions, other codecs, encoders and other platforms unchanged.
+
+This follows the Iris33 low-latency work-mode policy in Qualcomm's GPL-2.0-only
+Android implementation, as retained in OnePlus SM7675 commit
+1138e00fee63582a0cc6a53af3286621786827b7 and Xiaomi shared modules commit
+ed4ad0d1ad00b755af2fe61387dcc5397ad20b8f, variant/iris33/src/msm_vidc_iris33.c.
+No board resource, clock limit, firmware or buffer value is imported.
+
+Cache the selected work mode before sending it, as in Sachin Kumar Garg's
+upstream "media: iris: cache work mode after computing it in iris_set_stage"
+fix (2026-07-24, Fixes 3a19d7b9e08b). Frequency calculation reads that cache.
+--- a/drivers/media/platform/qcom/iris/iris_ctrls.c
++++ b/drivers/media/platform/qcom/iris/iris_ctrls.c
+@@ -593,8 +593,16 @@
+ 	if (inst->domain == DECODER) {
+ 		if (iris_res_is_less_than(width, height, 1280, 720))
+ 			work_mode = STAGE_1;
++		if (inst->core->iris_platform_data == &sm7675_data &&
++		    inst->codec == V4L2_PIX_FMT_VP9 &&
++		    (inst->fw_caps[DISPLAY_DELAY_ENABLE].flags & CAP_FLAG_CLIENT_SET) &&
++		    inst->fw_caps[DISPLAY_DELAY_ENABLE].value &&
++		    !inst->fw_caps[DISPLAY_DELAY].value)
++			work_mode = STAGE_1;
+ 	}
+ 
++	inst->fw_caps[cap_id].value = work_mode;
++
+ 	return hfi_ops->session_set_property(inst, hfi_id,
+ 					     HFI_HOST_FLAGS_NONE,
+ 					     iris_get_port_info(inst, cap_id),

@@ -1,0 +1,221 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-29",
+  "base_commit": "470d18160dac9f9adf65ee8ff6f86472573504c1",
+  "upstream_version": "7.3.0",
+  "prior_candidate": "67c9ee7a02ad27f76beecd7d2590dffa11575acf",
+  "status": "native-preparation-integration-candidate",
+  "active_series": false,
+  "dt_enabled": true,
+  "iris_match_added": true,
+  "firmware_packaged": false,
+  "tablet_codec_tested": false,
+  "patches": [
+    {
+      "path": "patches/video/0001-sm7675-video-linux73-candidate.patch",
+      "sha256": "e44a33a1af1f77b4b0a573e3d85d2d45d67bd07cb34130ef86ce9e1bf5b4a3e2"
+    },
+    {
+      "path": "patches/video/0002-iris-va-decode-order.patch",
+      "sha256": "800331dc6e8a14c7b4865a6b611aaf28b89d5cd751bcdbff3a78f99ca3cd4d60"
+    },
+    {
+      "path": "patches/video/0003-iris-va-capture-pool.patch",
+      "sha256": "43ac6c6c7d7561ce7154de30a2d5e041cbf597267e2aa208bcbfea7a45337ec5"
+    },
+    {
+      "path": "patches/video/0004-iris-va-encoder-deblocking.patch",
+      "sha256": "7836233d5ab86686058d0f9608ea7407636ae8dec2259e05e69a991bf9ad467f"
+    },
+    {
+      "path": "patches/video/0005-iris-va-error-timestamp.patch",
+      "sha256": "75321dfa1731fcebcc171129e6f290ff6dd97b244ff087b25357673f9696ca52"
+    },
+    {
+      "path": "patches/video/0006-sm7675-controller-domain-supply.patch",
+      "sha256": "daae4c389d4de9861ce3f5eb289e749c4f96be076d83677dd96ce79e723926e1"
+    },
+    {
+      "path": "patches/video/0007-cliffs-video-interconnect.patch",
+      "sha256": "745f42205a8739225185004c6dcaf335c597396357976ac45911c5fac6ff139f"
+    },
+    {
+      "path": "patches/video/0008-sm7675-firmware-memory-lifetime.patch",
+      "sha256": "443f337099ef1e296272cb6b9f19d7f95bd4c0f065a721edffcd3ad2743374c7"
+    },
+    {
+      "path": "patches/video/0009-sm7675-video-smmu-context.patch",
+      "sha256": "87963ee55af14833a023a4c6141d8b11a7cbc58db441c10e4d9cd350f1c10a50"
+    },
+    {
+      "path": "patches/video/0010-sm7675-required-domain-supply.patch",
+      "sha256": "cc588a025270f926c3de9db010f0a3f6f875a6cedf58b7a4fb2b3fcbfed1ed03"
+    },
+    {
+      "path": "patches/video/0011-qcom-reset-error-propagation.patch",
+      "sha256": "5849929786893dc56b217d5aff2ade545fdc5b352d3a6d48e0af8205bb4c7cde"
+    },
+    {
+      "path": "patches/video/0012-sm7675-checked-power-and-oneshot-irq.patch",
+      "sha256": "83060fc53740f8e8abc18eb655e6c446eb535ce5a0015b72cb82062d898a5261"
+    },
+    {
+      "path": "patches/video/0013-sm7675-codec-caps-and-q16-rates.patch",
+      "sha256": "8e3acbccbcd1ecdbfb23615de58914c85a18c61290736c306134c365ddcf6127"
+    },
+    {
+      "path": "patches/video/0014-sm7675-native-iris-binding.patch",
+      "sha256": "32fa81a621aeac84cd9879b0a45c083d4cf7c5bdfe415f7e5e316075fea9c846"
+    },
+    {
+      "path": "patches/video/0015-sm7675-native-match-and-firmware-availability.patch",
+      "sha256": "317591794cb333505f79f7dcb2477206ee0a2d2597f8fddea6eb7b824408e5ab"
+    },
+    {
+      "path": "patches/video/0017-cliffs-video-config-clocks.patch",
+      "sha256": "c5796ac0342b7a7cb2cae95a130ccd1e0880e28a1cc5aa68f2426a820d6121ca"
+    },
+    {
+      "path": "patches/video/0018-iris-vp9-nonshow-recycle.patch",
+      "sha256": "b94e1c8259b08d245613e3dd9c6d2619298cb0c55af9f87e57293c9a5da21893"
+    },
+    {
+      "path": "patches/video/0019-sm7675-decoder-operating-budget.patch",
+      "sha256": "f810bc0efd23f1dbf9df60e2d8fc63dc661de110f001cc7908128e476052fa7f"
+    },
+    {
+      "path": "patches/video/0020-sm7675-cached-capture.patch",
+      "sha256": "983d80d8a0d7369abb6edbfe59cecabf3aefbc280d1091641883b4deafa71e35"
+    },
+    {
+      "path": "patches/video/0021-sm7675-serial-uhd-budget.patch",
+      "sha256": "332c351cbfd257320a9638e702ff047ad4cd4e098b35785680f2fc92b3f36442"
+    },
+    {
+      "path": "patches/video/0022-sm7675-decode-order-stage.patch",
+      "sha256": "57d73611286561d1ca568d630fb1985becbb3393da09e43aa4ba0e3d4023997f"
+    }
+  ],
+  "checks": {
+    "aarch64_iris_composite": true,
+    "aarch64_videocc_object": true,
+    "aarch64_interconnect_object": true,
+    "kcflags": "-Werror",
+    "lifecycle_fault_fixtures": true,
+    "decode_order_opt_in_fixture": true,
+    "video_display_topology_fixture": true,
+    "regulator_binding_six_refusals": true,
+    "live_fdt_offline_overlay": true,
+    "full_kernel": false,
+    "kernel_rpm": false,
+    "physical_codec": false,
+    "aarch64_smmu_object": true,
+    "aarch64_reset_object": true,
+    "firmware_memory_fault_fixture": true,
+    "core_pas_lifetime_fault_fixture": true,
+    "hfi_queue_memory_hooks_fixture": true,
+    "video_smmu_actlr_aperture_fixture": true,
+    "required_domain_supply_fault_fixture": true,
+    "reset_error_propagation_fixture": true,
+    "actual_source_fixture_count": 16,
+    "controller_retention_fault_fixture": true,
+    "controller_reset_retry_fixture": true,
+    "oneshot_irq_pm_fixture": true,
+    "videocc_enabled_during_compile": true,
+    "patch_reapplication_zero_fuzz": true,
+    "offline_legacy_gdsc_ownership": true,
+    "codec_caps_q16_fixture": true,
+    "full_native_preparation": false,
+    "iris_binding_four_refusals": true,
+    "iris_legacy_binding_accepted": true,
+    "firmware_availability_fault_fixture": true,
+    "video_config_gate_fault_fixture": true,
+    "aarch64_gcc_video_gate_object": true
+  },
+  "sources": [
+    {
+      "id": "uke-oem-kernel",
+      "commit": "5712080a4b0c0b1a879e6d145c601c649ddaddfd",
+      "files": [
+        "drivers/clk/qcom/videocc-pineapple.c",
+        "drivers/clk/qcom/clk-branch.c",
+        "drivers/interconnect/qcom/cliffs.c",
+        "include/dt-bindings/interconnect/qcom,cliffs.h",
+        "drivers/clk/qcom/reset.c"
+      ]
+    },
+    {
+      "id": "uke-oem-dt",
+      "commit": "94c84aeb9e517dbde546fc732033c184094c8e57",
+      "files": [
+        "qcom/cliffs.dtsi",
+        "qcom/cliffs-regulators.dtsi",
+        "qcom/cliffs-reserved-memory.dtsi",
+        "qcom/msm-arm-smmu-cliffs.dtsi"
+      ]
+    },
+    {
+      "id": "same-soc-video",
+      "commit": "1138e00fee63582a0cc6a53af3286621786827b7",
+      "files": [
+        "vendor/qcom/proprietary/video-devicetree/cliffs-vidc.dtsi",
+        "vendor/qcom/opensource/video-driver/driver/variant/iris33/src/msm_vidc_iris33.c",
+        "vendor/qcom/opensource/video-driver/driver/platform/cliffs/src/msm_vidc_cliffs.c",
+        "vendor/qcom/opensource/video-driver/driver/vidc/src/venus_hfi_queue.c"
+      ]
+    },
+    {
+      "id": "radxa-va-kernel-deltas",
+      "commit": "6d03c3f8fb19b86f84b2b6c60ff20d1402f0ac41"
+    },
+    {
+      "id": "current-upstream-comparison",
+      "commit": "21a7f44fd0765fcc5194130b28767786eba1d1e7"
+    },
+    {
+      "id": "exact-uke-video-module",
+      "source_release": "OS3.0.304.0.WOZMIXM",
+      "file": "vendor_dlkm/lib/modules/msm_video.ko",
+      "sha256": "2976535e5523521d953bdc762fc446e02bd5b564b28db34789d066b6070406df",
+      "device_region_symbol_offset": ".rodata+0x17660",
+      "executed": false
+    },
+    {
+      "id": "uke-oem-cliffs-codec-xml",
+      "source_release": "OS3.0.304.0.WOZMIXM",
+      "files": [
+        "vendor/etc/media_codecs_cliffs_v0.xml",
+        "vendor/etc/media_codecs_cliffs_v1.xml"
+      ],
+      "sha256": "748f378bb70638e464023767ec2bb5f9c113b38bb586f46f5ecda3dc2894160f",
+      "variants_identical": true
+    }
+  ],
+  "firmware": {
+    "filename": "vpu30_2v.mbn",
+    "source_release": "OS3.0.304.0.WOZMIXM",
+    "sha256": "2ad782a1eace4556f13178c82480e672bb2063818f438864f45067347ccdeb2a",
+    "local_bytes_rehashed": true,
+    "pas_authentication_tested": false
+  },
+  "host_tools": {
+    "clang": "23.1.4",
+    "dt_schema": "2026.09-1.fc46",
+    "python_scope": "unmodified pinned upstream host-only schema tool"
+  },
+  "remaining": [
+    "Physical controller retention, ordered reset and PM/error recovery qualification",
+    "Physical native VIDEOCC domain/supply ownership validation",
+    "PAS/HFI target boot and firmware UC/mmap/device-region runtime validation",
+    "Validate shared nonsecure IOMMU behavior and error teardown on target",
+    "Qualify remaining HFI controls, SKU/fuse admission, coded-height conflicts and aggregate scheduling against firmware",
+    "Complete native graph preparation and gated source activation",
+    "Full kernel/RPM and recoverable native V4L2 validation",
+    "Main10 encode, extended controls, lifecycle, performance and application matrix",
+    "Failed PAS/power teardown during administrative removal remains unqualified",
+    "Assign a fresh signed package release after original-profile sustained 4K60, error/lifecycle and HDR acceptance; matched release49 modules are runtime diagnostics only"
+  ],
+  "native_prepare_active": true,
+  "integration_base_commit": "9b56bd4894fb72680d87c56cf500ccb1b54c3b11",
+  "candidate_kernel_release": "7.3.0-49"
+}

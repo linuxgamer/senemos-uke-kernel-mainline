@@ -26,6 +26,9 @@ cat > "$work/check.cpp" <<'CPP'
 using u32=uint32_t; using u8=uint8_t;
 enum role {ENC_ROLE_SOLO,ENC_ROLE_MASTER,ENC_ROLE_SLAVE};
 CPP
+if grep -Fq 'retire_disable_error' "$file";then
+    printf '#define UKE_RETIRE_PROOF 1\n' >> "$work/check.cpp"
+fi
 {
 sed -n '/^enum dpu_enc_enable_state {/,/^};/p' \
     "$kernel/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys.h"
@@ -47,6 +50,7 @@ struct dpu_hw_intf;
 struct intf_ops {
     void (*enable_timing)(dpu_hw_intf *,u8);
     void (*get_status)(dpu_hw_intf *,dpu_hw_intf_status *);
+    void (*avr_trigger)(dpu_hw_intf *){};
 };
 struct dpu_hw_intf {dpu_intf idx;intf_ops ops;bool enabled;
     bool stick_on{};int status_reads{};std::vector<bool> status_sequence{};};
@@ -82,16 +86,19 @@ struct dpu_encoder_phys {
     int pending_kickoff_cnt,pending_kickoff_wq,vblank_ctl_lock,vblank_refcount;
     unsigned int irq[2];int underrun_cnt;
     dpu_hw_mdp *hw_mdptop{};dpu_intf_mode intf_mode{INTF_MODE_NONE};
+    int retire_disable_error{};
 };
 struct dpu_encoder_virt {
     drm_encoder base;dpu_encoder_phys *phys_encs[2];unsigned int num_phys_encs;
     int enc_spinlock;unsigned long frame_busy_mask[1];dpu_encoder_phys *cur_master;
     dpu_encoder_phys *cur_slave{};msm_display_info disp_info{};
+    bool avr_enabled{};
 };
 struct dpu_encoder_wait_info {int *wq,*atomic_cnt;unsigned int timeout_ms;};
 struct msm_format {};
 static int setup[INTF_MAX],cleanup[INTF_MAX],wait_calls,irq_registers,irq_unregisters;
 static bool irq_timeout;
+static int cleanup_error;
 static bool root_uke=true,root_sm7675=true;
 static int error_count;
 static std::vector<int> irq_results;
@@ -171,7 +178,7 @@ static int dpu_core_irq_register_callback(dpu_kms *,unsigned int,void (*)(void *
     ++irq_registers;return 0;
 }
 static int dpu_core_irq_unregister_callback(dpu_kms *,unsigned int) {++irq_unregisters;return 0;}
-static void dpu_encoder_helper_phys_cleanup(dpu_encoder_phys *p) {++cleanup[p->hw_intf->idx];}
+static void dpu_encoder_helper_phys_cleanup(dpu_encoder_phys *p) {++cleanup[p->hw_intf->idx];p->retire_disable_error=cleanup_error;}
 static void set_bit(unsigned int n,unsigned long *mask) {*mask|=1UL<<n;}
 static void _dpu_encoder_trigger_flush(drm_encoder *,dpu_encoder_phys *p,u32 extra) {
     p->hw_ctl->pending|=extra;
@@ -292,6 +299,19 @@ static void split_contract_tests() {
     disable({0,0},{true,true},false);
     disable({0},{false,true},false);
     intfs[1].enabled=true;disable({0},{false,false},false);intfs[1].enabled=false;
+#ifdef UKE_RETIRE_PROOF
+    for(int error:{0,-EIO}) {
+        cleanup_error=error;disable({0},{false,false},true);
+        assert(p[0].enable_state==DPU_ENC_DISABLED && p[0].retire_disable_error==error);
+    }
+    cleanup_error=0;intfs[0].ops.get_status=nullptr;
+    p[0].enable_state=DPU_ENC_ENABLED;intfs[0].enabled=true;
+    dpu_encoder_phys_vid_disable(&p[0]);assert(p[0].retire_disable_error==-EOPNOTSUPP);
+    intfs[0].ops.get_status=status;intfs[0].stick_on=true;
+    p[0].enable_state=DPU_ENC_ENABLED;intfs[0].enabled=true;
+    dpu_encoder_phys_vid_disable(&p[0]);assert(p[0].retire_disable_error==-EBUSY);
+    intfs[0].stick_on=false;
+#endif
 }
 int main() {
     for(const auto *catalog : {&dpu_sm7675_cfg,&other_catalog})

@@ -1,0 +1,152 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: wcd939x: stop codec setup on register errors
+
+Check all existing I/O initialization writes and interrupt-level writes.
+Keep the exact register values and sequence. On failure, release the PM
+reference and class-H state before any interrupt or MBHC setup.
+
+---
+diff --git a/sound/soc/codecs/wcd939x.c b/sound/soc/codecs/wcd939x.c
+--- a/sound/soc/codecs/wcd939x.c
++++ b/sound/soc/codecs/wcd939x.c
+@@ -364,55 +364,95 @@
+ 
+ static int wcd939x_io_init(struct snd_soc_component *component)
+ {
+-	snd_soc_component_write_field(component, WCD939X_ANA_BIAS,
++	int ret;
++
++	ret = snd_soc_component_write_field(component, WCD939X_ANA_BIAS,
+ 				      WCD939X_BIAS_ANALOG_BIAS_EN, true);
+-	snd_soc_component_write_field(component, WCD939X_ANA_BIAS,
++	if (ret < 0)
++		return ret;
++	ret = snd_soc_component_write_field(component, WCD939X_ANA_BIAS,
+ 				      WCD939X_BIAS_PRECHRG_EN, true);
++	if (ret < 0)
++		return ret;
+ 
+ 	/* 10 msec delay as per HW requirement */
+ 	usleep_range(10000, 10010);
+-	snd_soc_component_write_field(component, WCD939X_ANA_BIAS,
++	ret = snd_soc_component_write_field(component, WCD939X_ANA_BIAS,
+ 				      WCD939X_BIAS_PRECHRG_EN, false);
++	if (ret < 0)
++		return ret;
+ 
+-	snd_soc_component_write_field(component, WCD939X_HPH_NEW_INT_RDAC_HD2_CTL_L,
++	ret = snd_soc_component_write_field(component, WCD939X_HPH_NEW_INT_RDAC_HD2_CTL_L,
+ 				      WCD939X_RDAC_HD2_CTL_L_HD2_RES_DIV_CTL_L, 0x15);
+-	snd_soc_component_write_field(component, WCD939X_HPH_NEW_INT_RDAC_HD2_CTL_R,
++	if (ret < 0)
++		return ret;
++	ret = snd_soc_component_write_field(component, WCD939X_HPH_NEW_INT_RDAC_HD2_CTL_R,
+ 				      WCD939X_RDAC_HD2_CTL_R_HD2_RES_DIV_CTL_R, 0x15);
+-	snd_soc_component_write_field(component, WCD939X_DIGITAL_CDC_DMIC_CTL,
++	if (ret < 0)
++		return ret;
++	ret = snd_soc_component_write_field(component, WCD939X_DIGITAL_CDC_DMIC_CTL,
+ 				      WCD939X_CDC_DMIC_CTL_CLK_SCALE_EN, true);
++	if (ret < 0)
++		return ret;
+ 
+-	snd_soc_component_write_field(component, WCD939X_TX_COM_NEW_INT_FE_ICTRL_STG2CASC_ULP,
++	ret = snd_soc_component_write_field(component, WCD939X_TX_COM_NEW_INT_FE_ICTRL_STG2CASC_ULP,
+ 				      WCD939X_FE_ICTRL_STG2CASC_ULP_ICTRL_SCBIAS_ULP0P6M, 1);
+-	snd_soc_component_write_field(component, WCD939X_TX_COM_NEW_INT_FE_ICTRL_STG2CASC_ULP,
++	if (ret < 0)
++		return ret;
++	ret = snd_soc_component_write_field(component, WCD939X_TX_COM_NEW_INT_FE_ICTRL_STG2CASC_ULP,
+ 				      WCD939X_FE_ICTRL_STG2CASC_ULP_VALUE, 4);
++	if (ret < 0)
++		return ret;
+ 
+-	snd_soc_component_write_field(component, WCD939X_TX_COM_NEW_INT_FE_ICTRL_STG2MAIN_ULP,
++	ret = snd_soc_component_write_field(component, WCD939X_TX_COM_NEW_INT_FE_ICTRL_STG2MAIN_ULP,
+ 				      WCD939X_FE_ICTRL_STG2MAIN_ULP_VALUE, 8);
++	if (ret < 0)
++		return ret;
+ 
+-	snd_soc_component_write_field(component, WCD939X_MICB1_TEST_CTL_1,
++	ret = snd_soc_component_write_field(component, WCD939X_MICB1_TEST_CTL_1,
+ 				      WCD939X_TEST_CTL_1_NOISE_FILT_RES_VAL, 7);
+-	snd_soc_component_write_field(component, WCD939X_MICB2_TEST_CTL_1,
++	if (ret < 0)
++		return ret;
++	ret = snd_soc_component_write_field(component, WCD939X_MICB2_TEST_CTL_1,
+ 				      WCD939X_TEST_CTL_1_NOISE_FILT_RES_VAL, 7);
+-	snd_soc_component_write_field(component, WCD939X_MICB3_TEST_CTL_1,
++	if (ret < 0)
++		return ret;
++	ret = snd_soc_component_write_field(component, WCD939X_MICB3_TEST_CTL_1,
+ 				      WCD939X_TEST_CTL_1_NOISE_FILT_RES_VAL, 7);
+-	snd_soc_component_write_field(component, WCD939X_MICB4_TEST_CTL_1,
++	if (ret < 0)
++		return ret;
++	ret = snd_soc_component_write_field(component, WCD939X_MICB4_TEST_CTL_1,
+ 				      WCD939X_TEST_CTL_1_NOISE_FILT_RES_VAL, 7);
+-	snd_soc_component_write_field(component, WCD939X_TX_3_4_TEST_BLK_EN2,
++	if (ret < 0)
++		return ret;
++	ret = snd_soc_component_write_field(component, WCD939X_TX_3_4_TEST_BLK_EN2,
+ 				      WCD939X_TEST_BLK_EN2_TXFE2_MBHC_CLKRST_EN, false);
++	if (ret < 0)
++		return ret;
+ 
+-	snd_soc_component_write_field(component, WCD939X_HPH_SURGE_EN,
++	ret = snd_soc_component_write_field(component, WCD939X_HPH_SURGE_EN,
+ 				      WCD939X_EN_EN_SURGE_PROTECTION_HPHL, false);
+-	snd_soc_component_write_field(component, WCD939X_HPH_SURGE_EN,
++	if (ret < 0)
++		return ret;
++	ret = snd_soc_component_write_field(component, WCD939X_HPH_SURGE_EN,
+ 				      WCD939X_EN_EN_SURGE_PROTECTION_HPHR, false);
++	if (ret < 0)
++		return ret;
+ 
+-	snd_soc_component_write_field(component, WCD939X_HPH_OCP_CTL,
++	ret = snd_soc_component_write_field(component, WCD939X_HPH_OCP_CTL,
+ 				      WCD939X_OCP_CTL_OCP_FSM_EN, true);
+-	snd_soc_component_write_field(component, WCD939X_HPH_OCP_CTL,
++	if (ret < 0)
++		return ret;
++	ret = snd_soc_component_write_field(component, WCD939X_HPH_OCP_CTL,
+ 				      WCD939X_OCP_CTL_SCD_OP_EN, true);
++	if (ret < 0)
++		return ret;
+ 
+-	snd_soc_component_write(component, WCD939X_E_CFG0,
++	ret = snd_soc_component_write(component, WCD939X_E_CFG0,
+ 				WCD939X_CFG0_IDLE_STEREO |
+ 				WCD939X_CFG0_AUTO_DISABLE_ANC);
++	if (ret < 0)
++		return ret;
+ 
+ 	return 0;
+ }
+@@ -3043,12 +3083,21 @@
+ 		return PTR_ERR(wcd939x->clsh_info);
+ 	}
+ 
+-	wcd939x_io_init(component);
++	ret = wcd939x_io_init(component);
++	if (ret) {
++		pm_runtime_put(dev);
++		goto err_free_clsh_ctrl;
++	}
+ 
+ 	/* Set all interrupts as edge triggered */
+-	for (i = 0; i < wcd939x_regmap_irq_chip.num_regs; i++)
+-		regmap_write(wcd939x->regmap,
+-			     (WCD939X_DIGITAL_INTR_LEVEL_0 + i), 0);
++	for (i = 0; i < wcd939x_regmap_irq_chip.num_regs; i++) {
++		ret = regmap_write(wcd939x->regmap,
++				   WCD939X_DIGITAL_INTR_LEVEL_0 + i, 0);
++		if (ret) {
++			pm_runtime_put(dev);
++			goto err_free_clsh_ctrl;
++		}
++	}
+ 
+ 	pm_runtime_put(dev);
+ 

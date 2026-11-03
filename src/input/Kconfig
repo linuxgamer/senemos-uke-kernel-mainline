@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+config TOUCHSCREEN_NT36532_UKE
+	tristate "Uke NT36532 native touchscreen"
+	depends on SPI && OF && GPIOLIB && INPUT_TOUCHSCREEN && POWER_SUPPLY && DRM_PANEL_XIAOMI_O82
+	select VIDEOBUF2_VMALLOC
+	select CRYPTO_LIB_SHA256
+	help
+	  Load the selected CSOT or Tianma OEM firmware and report multitouch directly
+	  through Linux input. No userspace contact processor or private baseline
+	  is required. Firmware gestures report KEY_WAKEUP.

@@ -1,0 +1,129 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: hdmi-codec: notify Uke DP ELD changes after startup
+
+The Uke frontend can be probed before the DP ELD is ready. A later PCM
+startup fills the cache, but ALSA receives no ELD value event. ACP therefore
+retains the empty monitor metadata until its card is recreated. Notify the
+actual registered PCM control when this cache changes, including hotplug.
+
+Limit the notification to the reviewed SM7675 DP parent. Keep a copy of the
+registered control ID and resolve its stable numid before each notification.
+The machine driver can map the ELD control from a backend to frontend PCM0;
+notifications must use the current registered ID under the control read lock.
+No PCM routing, hardware actuation or other board behavior changes.
+
+--- a/sound/soc/codecs/hdmi-codec.c
++++ b/sound/soc/codecs/hdmi-codec.c
+@@ -6,6 +6,7 @@
+  */
+ #include <linux/cleanup.h>
+ #include <linux/module.h>
++#include <linux/of.h>
+ #include <linux/string.h>
+ #include <sound/core.h>
+ #include <sound/jack.h>
+@@ -281,6 +282,8 @@
+ 
+ struct hdmi_codec_priv {
+ 	struct hdmi_codec_pdata hcd;
++	struct snd_soc_component *component;
++	struct snd_ctl_elem_id eld_ctl_id;
+ 	uint8_t eld[MAX_ELD_BYTES];
+ 	struct snd_parsed_hdmi_eld eld_parsed;
+ 	struct snd_pcm_chmap *chmap_info;
+@@ -303,6 +306,26 @@
+ 	DAI_ID_SPDIF,
+ };
+ 
++static void hdmi_codec_notify_eld(struct hdmi_codec_priv *hcp, const u8 *previous)
++{
++	struct snd_soc_component *component = hcp->component;
++	struct snd_card *card;
++	struct snd_kcontrol *kctl;
++
++	if (!component || !component->card || !component->card->snd_card ||
++	    !hcp->eld_ctl_id.numid ||
++	    !of_device_is_compatible(component->dev->parent->of_node, "qcom,sm7675-dp") ||
++	    !memcmp(previous, hcp->eld, sizeof(hcp->eld)))
++		return;
++
++	card = component->card->snd_card;
++	down_read(&card->controls_rwsem);
++	kctl = snd_ctl_find_id(card, &hcp->eld_ctl_id);
++	if (kctl)
++		snd_ctl_notify(card, SNDRV_CTL_EVENT_MASK_VALUE, &kctl->id);
++	up_read(&card->controls_rwsem);
++}
++
+ static int hdmi_eld_ctl_info(struct snd_kcontrol *kcontrol,
+ 			     struct snd_ctl_elem_info *uinfo)
+ {
+@@ -452,6 +475,7 @@
+ 	bool tx = substream->stream == SNDRV_PCM_STREAM_PLAYBACK;
+ 	bool has_capture = !hcp->hcd.no_i2s_capture;
+ 	bool has_playback = !hcp->hcd.no_i2s_playback;
++	u8 previous_eld[MAX_ELD_BYTES];
+ 	int ret = 0;
+ 
+ 	if (!((has_playback && tx) || (has_capture && !tx)))
+@@ -470,6 +494,7 @@
+ 	}
+ 
+ 	if (tx && hcp->hcd.ops->get_eld) {
++		memcpy(previous_eld, hcp->eld, sizeof(previous_eld));
+ 		ret = hcp->hcd.ops->get_eld(dai->dev->parent, hcp->hcd.data,
+ 					    hcp->eld, sizeof(hcp->eld));
+ 		if (ret)
+@@ -477,6 +502,7 @@
+ 
+ 		snd_parse_eld(dai->dev, &hcp->eld_parsed,
+ 			      hcp->eld, sizeof(hcp->eld));
++		hdmi_codec_notify_eld(hcp, previous_eld);
+ 
+ 		ret = snd_pcm_hw_constraint_eld(substream->runtime, hcp->eld);
+ 		if (ret)
+@@ -826,6 +852,8 @@
+ 		ret = snd_ctl_add(rtd->card->snd_card, kctl);
+ 		if (ret < 0)
+ 			return ret;
++		if (!strcmp(kctl->id.name, "ELD"))
++			hcp->eld_ctl_id = kctl->id;
+ 	}
+ 
+ 	return 0;
+@@ -952,8 +980,10 @@
+ static void plugged_cb(struct device *dev, bool plugged)
+ {
+ 	struct hdmi_codec_priv *hcp = dev_get_drvdata(dev);
++	u8 previous_eld[MAX_ELD_BYTES];
+ 	int ret;
+ 
++	memcpy(previous_eld, hcp->eld, sizeof(previous_eld));
+ 	if (plugged) {
+ 		if (hcp->hcd.ops->get_eld) {
+ 			hcp->hcd.ops->get_eld(dev->parent, hcp->hcd.data,
+@@ -970,6 +1000,7 @@
+ 		hdmi_codec_jack_report(hcp, 0);
+ 		memset(hcp->eld, 0, sizeof(hcp->eld));
+ 	}
++	hdmi_codec_notify_eld(hcp, previous_eld);
+ }
+ 
+ static int hdmi_codec_set_jack(struct snd_soc_component *component,
+@@ -1091,6 +1122,8 @@
+ 	struct hdmi_codec_priv *hcp = snd_soc_component_get_drvdata(component);
+ 	int ret = 0;
+ 
++	hcp->component = component;
++	memset(&hcp->eld_ctl_id, 0, sizeof(hcp->eld_ctl_id));
+ 	if (hcp->hcd.ops->hook_plugged_cb) {
+ 		ret = hcp->hcd.ops->hook_plugged_cb(component->dev->parent,
+ 						    hcp->hcd.data,
+@@ -1108,6 +1141,7 @@
+ 	if (hcp->hcd.ops->hook_plugged_cb)
+ 		hcp->hcd.ops->hook_plugged_cb(component->dev->parent,
+ 					      hcp->hcd.data, NULL, NULL);
++	hcp->component = NULL;
+ }
+ 
+ static const struct snd_soc_component_driver hdmi_driver = {

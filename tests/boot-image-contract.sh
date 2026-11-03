@@ -19,7 +19,16 @@ cmp Image unpacked
 "$codec" inspect canonical | jq -e '.image_bytes==100663296 and .os_version_encoded==570425768 and .kernel_bytes==64 and .ramdisk_bytes==0 and .signature_bytes==0 and .avb_footer_present==false' >/dev/null
 "$codec" extract canonical canonical-Image
 cmp Image canonical-Image
+"$codec" create Image userdata userdata
+"$codec" extract userdata userdata-Image
+cmp canonical-Image userdata-Image
+[[ $(dd if=userdata bs=1 skip=44 count=21 status=none | tr -d '\000') == senemos.root=userdata ]]
+# Both containers differ only in the bounded header selector, not the Image.
+cmp <(dd if=canonical bs=4096 skip=1 status=none) <(dd if=userdata bs=4096 skip=1 status=none)
 reject() { if "$codec" "$@" >/dev/null 2>&1; then echo 'Malformed image accepted' >&2; exit 1; fi; }
+reject create Image bad-profile system
+reject create Image injected-profile 'userdata root=/dev/unsafe'
+reject create Image empty-profile ''
 reject pack stock Image boot 65536
 reject pack stock Image undersized 4096
 reject pack stock Image mismatch 131072

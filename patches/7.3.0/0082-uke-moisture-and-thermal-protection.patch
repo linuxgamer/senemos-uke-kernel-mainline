@@ -1,0 +1,693 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] power: gate Uke charging on moisture and qualified faults
+
+Add fixed moisture diagnostics, an enable-only detector path, qualified board
+and battery guards, and an owned input-inhibit latch. The retained exact
+OS3.0.304.0 module identifies XM input_suspend property 53; admit only this
+fixed contract behind reviewed per-boot evidence. No raw XM API or pack limits.
+Version-2 leases refuse older clients without external-temperature bounds.
+Firmware readback does not establish electrical or wet-port acceptance.
+
+--- a/drivers/power/supply/Kconfig
++++ b/drivers/power/supply/Kconfig
+@@ -211,6 +211,7 @@
+ config BATTERY_QCOM_BATTMGR
+ 	tristate "Qualcomm PMIC GLINK battery manager support"
+ 	depends on QCOM_PMIC_GLINK
++	depends on IIO || !IIO
+ 	select AUXILIARY_BUS
+ 	help
+ 	  Say Y here to enable the Qualcomm PMIC GLINK power supply driver,
+@@ -230,7 +231,9 @@
+ 	  operation without reviewed per-boot runtime admission. Exact active
+ 	  firmware, reply envelope, threshold semantics, measurement units and
+ 	  autonomous protection evidence must be reviewed before operations.
+-	  No PD, current, voltage, factory or gauge control is enabled here.
++	  Version-2 leases also require fixed charger/connector IIO temperature
++	  ranges and moisture/input-suspend contracts. No raw vendor properties,
++	  PD, voltage, factory or gauge control is enabled here.
+ 
+ config BATTERY_QCOM_BATTMGR_UKE_CURRENT
+ 	bool "Reviewed Uke constant-charge-current transport"
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -10,6 +10,8 @@
+ #include <linux/kstrtox.h>
+ #include <linux/devm-helpers.h>
+ #include <linux/module.h>
++#include <linux/iio/consumer.h>
++#include <linux/iio/types.h>
+ #include <linux/mutex.h>
+ #include <linux/nvmem-consumer.h>
+ #include <linux/of.h>
+@@ -92,6 +94,12 @@
+ #define USB_VOLT_NOW			1
+ #define USB_VOLT_MAX			2
+ #define USB_CURR_NOW			3
++#define USB_MOISTURE_EN			8
++#define USB_MOISTURE_STATUS		9
++/* Exact OS3.0.304.0 stock module: fixed XM input_suspend, not a raw API. */
++#define UKE_INPUT_SUSPEND_GET		0x50
++#define UKE_INPUT_SUSPEND_SET		0x51
++#define UKE_INPUT_SUSPEND_PROPERTY	53
+ #define USB_CURR_MAX			4
+ #define USB_INPUT_CURR_LIMIT		5
+ #define USB_TYPE			6
+@@ -308,6 +316,7 @@
+ 	unsigned int current_now;
+ 	unsigned int current_max;
+ 	unsigned int current_limit;
++	u32 moisture_enabled, moisture_status;
+ 	unsigned int usb_type;
+ 	/* Raw legacy USB wire6 observation; not OEM adapter wire7/XM real_type. */
+ 	u32 type_raw, type_generation, type_firmware, type_source;
+@@ -376,6 +385,11 @@
+ 		u32 voltage_min_uv, voltage_max_uv, current_abs_max_ua;
+ 		u32 fallback_start;
+ 		int temperature_min, temperature_max, last_error;
++		int external_min[3], external_max[3];
++		bool moisture_enabling, moisture_uncertain;
++		bool safety_request;
++		u32 input_suspended;
++		u32 moisture_generation;
+ 		bool may_enable, standard_clients, enabled, verified;
+ 		char evidence[65];
+ 		/* One synchronous, fixed enable-only operation; never a general lease. */
+@@ -390,6 +404,11 @@
+ 		s32 measured_temperature, measured_current;
+ 		struct qcom_battmgr_uke_current_band bands[8];
+ 	} control;
++	struct {
++		u64 received_ns, dry_since_ns, dry_last_ns, inhibit_readback_ns;
++		u32 generation, firmware, source, enabled, moisture, dry_samples, faults;
++		bool wet_latched, inhibit_owned, inhibit_verified, inhibit_uncertain;
++	} protection;
+ 
+ 	struct qcom_battmgr_info info;
+ 	struct qcom_battmgr_status status;
+@@ -464,6 +483,36 @@
+ 		ret = 0;
+ 	if (ret)
+ 		goto out_unlock;
++	if (opcode == BATTMGR_USB_PROPERTY_SET && len == sizeof(*request) &&
++	    le32_to_cpu(request->property) == USB_INPUT_CURR_LIMIT &&
++	    le32_to_cpu(request->value) &&
++	    (battmgr->protection.wet_latched || battmgr->protection.faults)) {
++		ret = -EACCES;
++		goto out_unlock;
++	}
++	if (opcode == UKE_INPUT_SUSPEND_GET || opcode == UKE_INPUT_SUSPEND_SET) {
++		if (len != sizeof(*request) ||
++		    le32_to_cpu(hdr->owner) != PMIC_GLINK_OWNER_BATTMGR ||
++		    le32_to_cpu(hdr->type) != PMIC_GLINK_REQ_RESP ||
++		    le32_to_cpu(request->property) != UKE_INPUT_SUSPEND_PROPERTY ||
++		    (opcode == UKE_INPUT_SUSPEND_SET && le32_to_cpu(request->value) > 1) ||
++		    !battmgr->control.safety_request || !qcom_battmgr_uke_control_live(battmgr, true)) {
++			ret = -EACCES;
++			goto out_unlock;
++		}
++	}
++	/* Only the reviewed enable-only protection operation may use USB wire 8. */
++	if (opcode == BATTMGR_USB_PROPERTY_SET && len == sizeof(*request) &&
++	    le32_to_cpu(request->property) != USB_INPUT_CURR_LIMIT &&
++	    !(le32_to_cpu(request->property) == USB_MOISTURE_EN &&
++	      le32_to_cpu(hdr->owner) == PMIC_GLINK_OWNER_BATTMGR &&
++	      le32_to_cpu(hdr->type) == PMIC_GLINK_REQ_RESP &&
++	      le32_to_cpu(request->value) == 1 && battmgr->control.moisture_enabling &&
++	      battmgr->control.moisture_generation == tx->generation &&
++	      qcom_battmgr_uke_control_live(battmgr, true))) {
++		ret = -EACCES;
++		goto out_unlock;
++	}
+ 	if (opcode == BATTMGR_CHG_CTRL_LIMIT_EN || opcode == BATTMGR_BAT_PROPERTY_SET) {
+ 		if (!IS_ENABLED(CONFIG_BATTERY_QCOM_BATTMGR_UKE_THRESHOLDS)) {
+ 			ret = -EOPNOTSUPP;
+@@ -530,7 +579,8 @@
+ 	    (len != sizeof(*request) ||
+ 	     (opcode != BATTMGR_BAT_PROPERTY_GET && opcode != BATTMGR_USB_PROPERTY_GET &&
+ 	      opcode != BATTMGR_USB_PROPERTY_SET && opcode != BATTMGR_WLS_PROPERTY_GET &&
+-	      opcode != BATTMGR_BAT_PROPERTY_SET))) {
++	      opcode != BATTMGR_BAT_PROPERTY_SET && opcode != UKE_INPUT_SUSPEND_GET &&
++	      opcode != UKE_INPUT_SUSPEND_SET))) {
+ 		ret = -EOPNOTSUPP;
+ 		goto out_unlock;
+ 	}
+@@ -568,14 +618,21 @@
+ 		ret = battmgr->error;
+ 	} else if (!battmgr->service_up || tx->generation != generation) {
+ 		ret = opcode == BATTMGR_USB_PROPERTY_SET || opcode == BATTMGR_BAT_PROPERTY_SET ||
+-		      opcode == BATTMGR_CHG_CTRL_LIMIT_EN ? -ESTALE : -EAGAIN;
++		      opcode == BATTMGR_CHG_CTRL_LIMIT_EN || opcode == UKE_INPUT_SUSPEND_SET ? -ESTALE : -EAGAIN;
+ 	} else if (!tx->response_len) {
+ 		ret = -EPROTO;
+ 		tx->desynced = true;
+ 	} else {
+ 		/* Receive copied the matching response; only this caller commits it. */
+ 		/* Enable payload semantics are unknown; only its envelope was observed. */
+-		if (opcode == BATTMGR_BAT_PROPERTY_GET && tx->property == 12) {
++		if (opcode == UKE_INPUT_SUSPEND_GET) {
++			u32 value = le32_to_cpu(tx->response.intval.value);
++
++			if (value > 1)
++				battmgr->error = -ENODATA;
++			else
++				battmgr->control.input_suspended = value;
++		} else if (opcode == BATTMGR_BAT_PROPERTY_GET && tx->property == 12) {
+ 			u32 current_ua = le32_to_cpu(tx->response.intval.value);
+ 
+ 			if (!current_ua || current_ua > INT_MAX)
+@@ -583,7 +640,7 @@
+ 			else
+ 				battmgr->control.current_ua = current_ua;
+ 		} else if (opcode != BATTMGR_REQUEST_NOTIFICATION && opcode != BATTMGR_CHG_CTRL_LIMIT_EN &&
+-		    opcode != BATTMGR_BAT_PROPERTY_SET)
++		    opcode != BATTMGR_BAT_PROPERTY_SET && opcode != UKE_INPUT_SUSPEND_SET)
+ 			qcom_battmgr_sm8350_callback(battmgr, &tx->response, tx->response_len);
+ 		ret = battmgr->error;
+ 	}
+@@ -2012,6 +2069,18 @@
+ 		case USB_CURR_NOW:
+ 			battmgr->usb.current_now = le32_to_cpu(resp->intval.value);
+ 			break;
++		case USB_MOISTURE_EN:
++		case USB_MOISTURE_STATUS:
++			if (battmgr->variant != QCOM_BATTMGR_UKE ||
++			    le32_to_cpu(resp->intval.value) > 1) {
++				battmgr->error = -ENODATA;
++				break;
++			}
++			if (property == USB_MOISTURE_EN)
++				battmgr->usb.moisture_enabled = le32_to_cpu(resp->intval.value);
++			else
++				battmgr->usb.moisture_status = le32_to_cpu(resp->intval.value);
++			break;
+ 		case USB_CURR_MAX:
+ 			battmgr->usb.current_max = le32_to_cpu(resp->intval.value);
+ 			break;
+@@ -2322,6 +2391,10 @@
+ static DEVICE_ATTR_RO(uke_usb_source_state);
+ 
+ static struct attribute *qcom_battmgr_uke_attrs[] = {
++	&dev_attr_uke_charge_protection_state.attr,
++	&dev_attr_uke_charge_wet_guard.attr,
++	&dev_attr_uke_charge_protection.attr,
++	&dev_attr_uke_charge_moisture_enable.attr,
+ 	&dev_attr_uke_battmgr_state.attr,
+ 	&dev_attr_uke_usb_source_state.attr,
+ 	&dev_attr_uke_charge_state.attr,
+@@ -2559,2 +2632,3 @@
+ MODULE_DESCRIPTION("Qualcomm PMIC GLINK battery manager driver");
+ MODULE_LICENSE("GPL");
++MODULE_IMPORT_NS("IIO_CONSUMER");
+--- a/drivers/power/supply/qcom_battmgr_uke_control.h
++++ b/drivers/power/supply/qcom_battmgr_uke_control.h
+@@ -52,6 +52,425 @@
+ 	return valid ? 0 : -EACCES;
+ }
+ 
++struct qcom_battmgr_uke_protection {
++	u64 instance, received_ns;
++	u32 generation, firmware, source, enabled, moisture;
++};
++
++/* Fixed OEM USB properties only; a reported clear state is not a wet-test result. */
++static int qcom_battmgr_uke_protection_read(struct qcom_battmgr *battmgr,
++					 struct qcom_battmgr_uke_protection *result)
++{
++	struct qcom_battmgr_uke_transaction *tx = &battmgr->transaction;
++	u32 generation = qcom_battmgr_uke_generation(battmgr);
++	u64 began = ktime_get_boottime_ns();
++	unsigned long flags;
++	int ret;
++
++	ret = qcom_battmgr_request_property(battmgr, BATTMGR_USB_PROPERTY_GET, USB_MOISTURE_EN, 0);
++	if (ret)
++		return ret;
++	ret = qcom_battmgr_request_property(battmgr, BATTMGR_USB_PROPERTY_GET, USB_MOISTURE_STATUS, 0);
++	if (ret)
++		return ret;
++	spin_lock_irqsave(&tx->lock, flags);
++	if (!battmgr->service_up || tx->desynced || tx->suspended || tx->removing ||
++	    generation != tx->generation || ktime_get_boottime_ns() < began ||
++	    ktime_get_boottime_ns() - began > 5ULL * NSEC_PER_SEC ||
++	    battmgr->usb.moisture_enabled > 1 || battmgr->usb.moisture_status > 1) {
++		ret = -ESTALE;
++	} else {
++		*result = (struct qcom_battmgr_uke_protection) {
++			.instance = tx->instance_ns, .received_ns = ktime_get_boottime_ns(),
++			.generation = generation, .firmware = tx->firmware_generation,
++			.source = tx->source_generation, .enabled = battmgr->usb.moisture_enabled,
++			.moisture = battmgr->usb.moisture_status,
++		};
++		if (battmgr->protection.firmware != result->firmware ||
++		    battmgr->protection.source != result->source) {
++			battmgr->protection.inhibit_verified = false;
++			battmgr->protection.inhibit_owned = false;
++			battmgr->protection.dry_since_ns = 0;
++			battmgr->protection.dry_samples = 0;
++		}
++		battmgr->protection.received_ns = result->received_ns;
++		battmgr->protection.generation = result->generation;
++		battmgr->protection.firmware = result->firmware;
++		battmgr->protection.source = result->source;
++		battmgr->protection.enabled = result->enabled;
++		battmgr->protection.moisture = result->moisture;
++		if (result->moisture) {
++			battmgr->protection.wet_latched = true;
++			battmgr->protection.dry_since_ns = 0;
++			battmgr->protection.dry_samples = 0;
++		}
++	}
++	spin_unlock_irqrestore(&tx->lock, flags);
++	return ret;
++}
++
++static int qcom_battmgr_uke_external_guard(struct qcom_battmgr *battmgr)
++{
++	static const char * const names[] = { "charger", "connector", "connector2" };
++	struct iio_channel *channel;
++	enum iio_chan_type type;
++	unsigned int i;
++	int temperature, ret;
++
++	for (i = 0; i < ARRAY_SIZE(names); i++) {
++		if (battmgr->control.external_min[i] >= battmgr->control.external_max[i])
++			return -EACCES;
++		channel = iio_channel_get(battmgr->dev->parent, names[i]);
++		if (IS_ERR(channel))
++			return PTR_ERR(channel);
++		ret = iio_get_channel_type(channel, &type);
++		if (!ret && type != IIO_TEMP)
++			ret = -ENODATA;
++		if (!ret)
++			ret = iio_read_channel_processed(channel, &temperature);
++		iio_channel_release(channel);
++		if (ret)
++			return ret;
++		/* These processed channels are milli-Celsius, not battery deci-Celsius. */
++		if (temperature < battmgr->control.external_min[i] ||
++		    temperature >= battmgr->control.external_max[i])
++			return -ERANGE;
++	}
++	return 0;
++}
++
++static int qcom_battmgr_uke_protection_guard(struct qcom_battmgr *battmgr)
++{
++	struct qcom_battmgr_uke_protection state;
++	int ret = qcom_battmgr_uke_protection_read(battmgr, &state);
++
++	if (ret)
++		return ret;
++	if (!state.enabled || state.moisture || battmgr->protection.wet_latched || battmgr->protection.faults)
++		return -EACCES;
++	return qcom_battmgr_uke_external_guard(battmgr);
++}
++
++static ssize_t uke_charge_protection_show(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	struct qcom_battmgr *battmgr = dev_get_drvdata(dev);
++	struct qcom_battmgr_uke_protection state;
++	int ret;
++
++	if (!capable(CAP_SYS_ADMIN))
++		return -EPERM;
++	if (!mutex_trylock(&battmgr->lock))
++		return -EBUSY;
++	ret = qcom_battmgr_uke_protection_read(battmgr, &state);
++	mutex_unlock(&battmgr->lock);
++	if (ret)
++		return ret;
++	return sysfs_emit(buf, "1 %llu %u %u %u %llu %u %u\n",
++		state.instance, state.generation, state.firmware, state.source,
++		state.received_ns, state.enabled, state.moisture);
++}
++static struct device_attribute dev_attr_uke_charge_protection =
++	__ATTR(uke_charge_protection, 0400, uke_charge_protection_show, NULL);
++
++static int qcom_battmgr_uke_moisture_enable(struct qcom_battmgr *battmgr)
++{
++	struct qcom_battmgr_uke_protection before, after;
++	struct qcom_battmgr_property_request request = {
++		.hdr.owner = cpu_to_le32(PMIC_GLINK_OWNER_BATTMGR),
++		.hdr.type = cpu_to_le32(PMIC_GLINK_REQ_RESP),
++		.hdr.opcode = cpu_to_le32(BATTMGR_USB_PROPERTY_SET),
++		.property = cpu_to_le32(USB_MOISTURE_EN), .value = cpu_to_le32(1),
++	};
++	u32 generation = qcom_battmgr_uke_generation(battmgr);
++	int ret = qcom_battmgr_uke_control_check(battmgr);
++
++	if (ret)
++		return ret;
++	if (battmgr->control.moisture_uncertain)
++		return -EUCLEAN;
++	ret = qcom_battmgr_uke_external_guard(battmgr);
++	if (ret)
++		return ret;
++	ret = qcom_battmgr_request_property(battmgr, BATTMGR_USB_PROPERTY_GET, USB_ONLINE, 0);
++	if (ret)
++		return ret;
++	if (battmgr->usb.online)
++		return -EBUSY;
++	ret = qcom_battmgr_uke_protection_read(battmgr, &before);
++	if (ret)
++		return ret;
++	if (before.generation != generation)
++		return -ESTALE;
++	if (before.enabled)
++		return 0;
++	battmgr->control.moisture_generation = generation;
++	battmgr->control.moisture_enabling = true;
++	battmgr->control.moisture_uncertain = true;
++	ret = qcom_battmgr_request(battmgr, &request, sizeof(request));
++	battmgr->control.moisture_enabling = false;
++	if (ret)
++		return ret;
++	ret = qcom_battmgr_uke_protection_read(battmgr, &after);
++	if (ret)
++		return ret;
++	if (!after.enabled || after.generation != generation ||
++	    after.instance != before.instance || after.firmware != before.firmware ||
++	    after.source != before.source)
++		return -EREMOTEIO;
++	battmgr->control.moisture_uncertain = false;
++	return 0;
++}
++
++static ssize_t uke_charge_moisture_enable_store(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t count)
++{
++	struct qcom_battmgr *battmgr = dev_get_drvdata(dev);
++	int ret;
++
++	if (!capable(CAP_SYS_ADMIN))
++		return -EPERM;
++	if (!sysfs_streq(buf, "1"))
++		return -EINVAL;
++	if (!mutex_trylock(&battmgr->lock))
++		return -EBUSY;
++	ret = qcom_battmgr_uke_moisture_enable(battmgr);
++	mutex_unlock(&battmgr->lock);
++	return ret ? ret : (ssize_t)count;
++}
++static struct device_attribute dev_attr_uke_charge_moisture_enable =
++	__ATTR(uke_charge_moisture_enable, 0200, NULL, uke_charge_moisture_enable_store);
++
++static int qcom_battmgr_uke_input_suspend(struct qcom_battmgr *battmgr, bool write, bool suspend)
++{
++	struct qcom_battmgr_property_request request = {
++		.hdr.owner = cpu_to_le32(PMIC_GLINK_OWNER_BATTMGR),
++		.hdr.type = cpu_to_le32(PMIC_GLINK_REQ_RESP),
++		.hdr.opcode = cpu_to_le32(write ? UKE_INPUT_SUSPEND_SET : UKE_INPUT_SUSPEND_GET),
++		.property = cpu_to_le32(UKE_INPUT_SUSPEND_PROPERTY),
++		.value = cpu_to_le32(write && suspend),
++	};
++	int ret = qcom_battmgr_uke_control_check(battmgr);
++
++	if (ret)
++		return ret;
++	battmgr->protection.inhibit_verified = false;
++	if (write) {
++		battmgr->protection.inhibit_uncertain = true;
++		battmgr->protection.inhibit_verified = false;
++	}
++	battmgr->control.safety_request = true;
++	ret = qcom_battmgr_request(battmgr, &request, sizeof(request));
++	battmgr->control.safety_request = false;
++	if (!ret && !write) {
++		battmgr->protection.inhibit_readback_ns = ktime_get_boottime_ns();
++		battmgr->protection.inhibit_verified = battmgr->control.input_suspended &&
++			(battmgr->protection.wet_latched || battmgr->protection.faults);
++	}
++	return ret;
++}
++
++/* Bit 0: board thermal, bit 1: battery health/thermal, bit 2: voltage/current,
++ * bit 3: failed/missing/old measurements. Limits require periodic-guard evidence.
++ */
++static u32 qcom_battmgr_uke_charge_faults(struct qcom_battmgr *battmgr)
++{
++	const unsigned int properties[] = { BATT_HEALTH, BATT_PRESENT, BATT_TEMP, BATT_VOLT_NOW, BATT_CURR_NOW };
++	u64 began = ktime_get_boottime_ns();
++	s64 absolute_current;
++	u32 faults = 0;
++	unsigned int i;
++	int ret = qcom_battmgr_uke_external_guard(battmgr);
++
++	if (ret)
++		faults |= ret == -ERANGE ? 1 : 8;
++	for (i = 0; i < ARRAY_SIZE(properties); i++) {
++		ret = qcom_battmgr_request_property(battmgr, BATTMGR_BAT_PROPERTY_GET, properties[i], 0);
++		if (ret)
++			return faults | 8;
++	}
++	if (!battmgr->info.present || battmgr->status.health != POWER_SUPPLY_HEALTH_GOOD ||
++	    (s32)battmgr->status.temperature < battmgr->control.temperature_min ||
++	    (s32)battmgr->status.temperature >= battmgr->control.temperature_max)
++		faults |= 2;
++	absolute_current = battmgr->status.current_now;
++	if (absolute_current < 0)
++		absolute_current = -absolute_current;
++	if (battmgr->status.voltage_now < battmgr->control.voltage_min_uv ||
++	    battmgr->status.voltage_now > battmgr->control.voltage_max_uv ||
++	    absolute_current > battmgr->control.current_abs_max_ua)
++		faults |= 4;
++	if (ktime_get_boottime_ns() < began || ktime_get_boottime_ns() - began > 5ULL * NSEC_PER_SEC)
++		faults |= 8;
++	return faults;
++}
++
++/* Never release another controller's inhibit or restore after an uncertain SET. */
++static int qcom_battmgr_uke_wet_guard_step(struct qcom_battmgr *battmgr)
++{
++	struct qcom_battmgr_uke_protection state;
++	u64 now = ktime_get_boottime_ns();
++	u32 faults;
++	int ret = qcom_battmgr_uke_control_check(battmgr);
++
++	if (ret)
++		return ret;
++	if (battmgr->protection.inhibit_uncertain)
++		return -EUCLEAN;
++	ret = qcom_battmgr_uke_protection_read(battmgr, &state);
++	if (ret)
++		return ret;
++	faults = qcom_battmgr_uke_charge_faults(battmgr);
++	if (!state.enabled)
++		faults |= 8;
++	battmgr->protection.faults |= faults;
++	if (!state.moisture && !battmgr->protection.wet_latched && !battmgr->protection.faults)
++		return 0;
++	ret = qcom_battmgr_uke_input_suspend(battmgr, false, false);
++	if (ret)
++		return ret;
++	if (state.moisture || faults) {
++		battmgr->protection.dry_since_ns = 0;
++		battmgr->protection.dry_samples = 0;
++		battmgr->protection.inhibit_verified = false;
++		if (!battmgr->control.input_suspended) {
++			ret = qcom_battmgr_uke_input_suspend(battmgr, true, true);
++			if (ret)
++				return ret;
++			ret = qcom_battmgr_uke_input_suspend(battmgr, false, false);
++			if (ret)
++				return ret;
++			if (!battmgr->control.input_suspended)
++				return -EREMOTEIO;
++			battmgr->protection.inhibit_owned = true;
++		}
++		battmgr->protection.inhibit_verified = true;
++		battmgr->protection.inhibit_uncertain = false;
++		return 0;
++	}
++	/* Repeated clear reports are required; this delay is not a drying guarantee. */
++	if (!battmgr->protection.dry_since_ns || now < battmgr->protection.dry_last_ns ||
++	    now - battmgr->protection.dry_last_ns > 5ULL * NSEC_PER_SEC) {
++		battmgr->protection.dry_since_ns = now;
++		battmgr->protection.dry_samples = 0;
++	}
++	battmgr->protection.dry_last_ns = now;
++	if (battmgr->protection.dry_samples < 3)
++		battmgr->protection.dry_samples++;
++	if (now < battmgr->protection.dry_since_ns ||
++	    now - battmgr->protection.dry_since_ns < 30ULL * NSEC_PER_SEC ||
++	    battmgr->protection.dry_samples < 3)
++		return 0;
++	ret = qcom_battmgr_uke_external_guard(battmgr);
++	if (ret)
++		return ret;
++	ret = qcom_battmgr_request_property(battmgr, BATTMGR_BAT_PROPERTY_GET, BATT_HEALTH, 0);
++	if (ret)
++		return ret;
++	ret = qcom_battmgr_request_property(battmgr, BATTMGR_BAT_PROPERTY_GET, BATT_PRESENT, 0);
++	if (ret)
++		return ret;
++	ret = qcom_battmgr_request_property(battmgr, BATTMGR_BAT_PROPERTY_GET, BATT_TEMP, 0);
++	if (ret)
++		return ret;
++	ret = qcom_battmgr_request_property(battmgr, BATTMGR_BAT_PROPERTY_GET, BATT_VOLT_NOW, 0);
++	if (ret)
++		return ret;
++	if (!battmgr->info.present || battmgr->status.health != POWER_SUPPLY_HEALTH_GOOD ||
++	    (s32)battmgr->status.temperature < battmgr->control.temperature_min ||
++	    (s32)battmgr->status.temperature >= battmgr->control.temperature_max ||
++	    battmgr->status.voltage_now < battmgr->control.voltage_min_uv ||
++	    battmgr->status.voltage_now > battmgr->control.voltage_max_uv)
++		return -ERANGE;
++	ret = qcom_battmgr_uke_protection_read(battmgr, &state);
++	if (ret)
++		return ret;
++	if (!state.enabled || state.moisture)
++		return -EACCES;
++	if (battmgr->protection.inhibit_owned) {
++		if (!battmgr->control.input_suspended)
++			return -EUCLEAN;
++		ret = qcom_battmgr_uke_input_suspend(battmgr, true, false);
++		if (ret)
++			return ret;
++		ret = qcom_battmgr_uke_input_suspend(battmgr, false, false);
++		if (ret)
++			return ret;
++		if (battmgr->control.input_suspended)
++			return -EREMOTEIO;
++	}
++	battmgr->protection.inhibit_owned = false;
++	battmgr->protection.inhibit_uncertain = false;
++	battmgr->protection.wet_latched = false;
++	battmgr->protection.faults = 0;
++	battmgr->protection.inhibit_verified = false;
++	battmgr->protection.dry_since_ns = 0;
++	battmgr->protection.dry_samples = 0;
++	return 0;
++}
++
++static int qcom_battmgr_uke_wet_guard(struct qcom_battmgr *battmgr)
++{
++	int ret = qcom_battmgr_uke_wet_guard_step(battmgr);
++
++	if (ret) {
++		battmgr->protection.dry_since_ns = 0;
++		battmgr->protection.dry_samples = 0;
++	}
++	return ret;
++}
++
++static ssize_t uke_charge_wet_guard_store(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t count)
++{
++	struct qcom_battmgr *battmgr = dev_get_drvdata(dev);
++	int ret;
++
++	if (!capable(CAP_SYS_ADMIN))
++		return -EPERM;
++	if (!sysfs_streq(buf, "1"))
++		return -EINVAL;
++	if (!mutex_trylock(&battmgr->lock))
++		return -EBUSY;
++	ret = qcom_battmgr_uke_wet_guard(battmgr);
++	mutex_unlock(&battmgr->lock);
++	return ret ? ret : (ssize_t)count;
++}
++static struct device_attribute dev_attr_uke_charge_wet_guard =
++	__ATTR(uke_charge_wet_guard, 0200, NULL, uke_charge_wet_guard_store);
++
++static ssize_t uke_charge_protection_state_show(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	struct qcom_battmgr *battmgr = dev_get_drvdata(dev);
++	struct qcom_battmgr_uke_transaction *tx = &battmgr->transaction;
++	u64 now = ktime_get_boottime_ns();
++	bool valid;
++	unsigned long flags;
++	ssize_t len;
++
++	mutex_lock(&battmgr->lock);
++	spin_lock_irqsave(&tx->lock, flags);
++	valid = battmgr->protection.received_ns && now >= battmgr->protection.received_ns &&
++		now - battmgr->protection.received_ns <= 5ULL * NSEC_PER_SEC &&
++		battmgr->protection.generation == tx->generation &&
++		battmgr->protection.firmware == tx->firmware_generation &&
++		battmgr->protection.source == tx->source_generation && battmgr->service_up &&
++		!tx->desynced && !tx->suspended && !tx->removing;
++	len = sysfs_emit(buf, "1 %llu %u %u %u %llu %u %u %u %u %u %llu %u\n",
++		tx->instance_ns, tx->generation, tx->firmware_generation, tx->source_generation,
++		battmgr->protection.received_ns, battmgr->protection.enabled,
++		battmgr->protection.moisture, valid, battmgr->protection.wet_latched,
++		battmgr->protection.inhibit_verified && valid &&
++		battmgr->protection.inhibit_readback_ns && now >= battmgr->protection.inhibit_readback_ns &&
++		now - battmgr->protection.inhibit_readback_ns <= 5ULL * NSEC_PER_SEC,
++		battmgr->protection.dry_since_ns, battmgr->protection.faults);
++	spin_unlock_irqrestore(&tx->lock, flags);
++	mutex_unlock(&battmgr->lock);
++	return len;
++}
++static DEVICE_ATTR_RO(uke_charge_protection_state);
++
+ static int qcom_battmgr_uke_control_guard(struct qcom_battmgr *battmgr)
+ {
+ 	const unsigned int props[] = {
+@@ -80,6 +499,9 @@
+ 	ret = qcom_battmgr_request_property(battmgr, BATTMGR_USB_PROPERTY_GET, USB_TYPE, 0);
+ 	if (ret)
+ 		return ret;
++	ret = qcom_battmgr_uke_protection_guard(battmgr);
++	if (ret)
++		return ret;
+ 	absolute_battery_current = battmgr->status.current_now;
+ 	if (absolute_battery_current < 0)
+ 		absolute_battery_current = -absolute_battery_current;
+@@ -425,7 +847,7 @@
+ 
+ 	mutex_lock(&battmgr->lock);
+ 	spin_lock_irqsave(&tx->lock, flags);
+-	len = sysfs_emit(buf, "1 %u %u %u %u %u %llu %llu %u %u %u %u %llu %d %u %s "
++	len = sysfs_emit(buf, "2 %u %u %u %u %u %llu %llu %u %u %u %u %llu %d %u %s "
+ 		"%u %u %u %u %llu %d %u %d %llu %u %llu\n",
+ 		IS_ENABLED(CONFIG_BATTERY_QCOM_BATTMGR_UKE_THRESHOLDS),
+ 		qcom_battmgr_uke_control_live(battmgr, false), tx->generation,
+@@ -780,8 +1202,9 @@
+ 	unsigned long flags;
+ 	unsigned long long instance, expires, reviewed;
+ 	u32 generation, firmware, source, ack, usb, enable, standard, vmin, vmax, imax, resume;
+-	char data[512], *word[18];
+-	int tmin, tmax, ret = 0;
++	char data[640], *word[24];
++	int tmin, tmax, external_min[3], external_max[3], ret = 0;
++	unsigned int i;
+ 	u64 now;
+ 
+ 	if (!capable(CAP_SYS_ADMIN))
+@@ -799,7 +1222,7 @@
+ 		goto out;
+ 	}
+ 	if (qcom_battmgr_uke_control_words(buf, count, data, sizeof(data), word, ARRAY_SIZE(word)) ||
+-	    strcmp(word[0], "1") || kstrtoull(word[1], 10, &instance) ||
++	    strcmp(word[0], "2") || kstrtoull(word[1], 10, &instance) ||
+ 	    kstrtou32(word[2], 10, &generation) || kstrtou32(word[3], 10, &firmware) ||
+ 	    kstrtou32(word[4], 10, &source) || kstrtoull(word[5], 10, &expires) ||
+ 	    kstrtou32(word[6], 10, &ack) || kstrtou32(word[7], 10, &usb) ||
+@@ -817,6 +1240,14 @@
+ 		ret = -EINVAL;
+ 		goto out;
+ 	}
++	for (i = 0; i < ARRAY_SIZE(external_min); i++) {
++		if (kstrtoint(word[18 + 2 * i], 10, &external_min[i]) ||
++		    kstrtoint(word[19 + 2 * i], 10, &external_max[i]) ||
++		    external_min[i] >= external_max[i]) {
++			ret = -EINVAL;
++			goto out;
++		}
++	}
+ 	spin_lock_irqsave(&tx->lock, flags);
+ 	if (!IS_ENABLED(CONFIG_BATTERY_QCOM_BATTMGR_UKE_THRESHOLDS) ||
+ 	    battmgr->variant != QCOM_BATTMGR_UKE)
+@@ -856,6 +1287,8 @@
+ 		battmgr->control.voltage_max_uv = vmax;
+ 		battmgr->control.current_abs_max_ua = imax;
+ 		battmgr->control.fallback_start = resume;
++		memcpy(battmgr->control.external_min, external_min, sizeof(external_min));
++		memcpy(battmgr->control.external_max, external_max, sizeof(external_max));
+ 		strscpy(battmgr->control.evidence, word[16], sizeof(battmgr->control.evidence));
+ 	}
+ 	spin_unlock_irqrestore(&tx->lock, flags);

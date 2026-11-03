@@ -1,0 +1,19 @@
+From: Uke platform maintainers
+Subject: [PATCH] pinctrl: qcom: mark Cliffs GPIO as a GPIO function
+
+The generic pinmux GPIO predicate now reads PINFUNCTION_FLAG_GPIO.
+Use the standard Qualcomm GPIO initializer so a GPIO pinctrl state and
+the owning GPIO consumer can coexist under strict mux ownership.
+This fixes the observed Uke WCD939x GPIO 119 double-claim failure.
+
+--- a/drivers/pinctrl/qcom/pinctrl-cliffs.c
++++ b/drivers/pinctrl/qcom/pinctrl-cliffs.c
+@@ -1563,7 +1563,7 @@
+ };
+ 
+ static const struct pinfunction cliffs_functions[] = {
+-	FUNCTION(gpio),
++	MSM_GPIO_PIN_FUNCTION(gpio),
+ 	FUNCTION(HOST2WLAN_SOL),
+ 	FUNCTION(RESOUT_GPIO_N),
+ 	FUNCTION(aoss_cti),

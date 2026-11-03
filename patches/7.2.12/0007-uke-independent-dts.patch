@@ -1,0 +1,175 @@
+diff --git a/arch/arm64/boot/dts/qcom/Makefile b/arch/arm64/boot/dts/qcom/Makefile
+index 6f33c4e2f09c..a62c8f182e14 100644
+--- a/arch/arm64/boot/dts/qcom/Makefile
++++ b/arch/arm64/boot/dts/qcom/Makefile
+@@ -457,3 +457,5 @@ x1p42100-lenovo-thinkbook-16-el2-dtbs	:= x1p42100-lenovo-thinkbook-16.dtb x1-el2
+ dtb-$(CONFIG_ARCH_QCOM)	+= x1p42100-lenovo-thinkbook-16.dtb x1p42100-lenovo-thinkbook-16-el2.dtb
+ x1p64100-microsoft-denali-el2-dtbs	:= x1p64100-microsoft-denali.dtb x1-el2.dtbo
+ dtb-$(CONFIG_ARCH_QCOM)	+= x1p64100-microsoft-denali.dtb x1p64100-microsoft-denali-el2.dtb
++
++dtb-$(CONFIG_ARCH_QCOM) += sm7675-xiaomi-uke.dtb
+diff --git a/arch/arm64/boot/dts/qcom/sm7675-xiaomi-uke.dts b/arch/arm64/boot/dts/qcom/sm7675-xiaomi-uke.dts
+new file mode 100644
+index 000000000000..22927e5a5379
+--- /dev/null
++++ b/arch/arm64/boot/dts/qcom/sm7675-xiaomi-uke.dts
+@@ -0,0 +1,159 @@
++// SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
++/*
++ * Senemos Uke compile-stage device tree.
++ * SoC addresses and MPIDRs: Xiaomi uke-v-oss and ztsubaki/uke-linux
++ * 32cad9ccd383ff4b37d8a5e7f88a8bfdcc07307e, China OS3.0.302.0 evidence.
++ * The future UEFI loader must supply the exact installed-profile RAM map,
++ * dynamic reservations, initrd and framebuffer; this DTB is not boot accepted.
++ * Unreviewed peripherals intentionally have no enabled node.
++ */
++/dts-v1/;
++#include <dt-bindings/interrupt-controller/arm-gic.h>
++
++/ {
++	model = "Senemos Xiaomi Pad 7 / POCO Pad X1 Uke build candidate";
++	compatible = "xiaomi,uke", "qcom,sm7675";
++	#address-cells = <2>;
++	#size-cells = <2>;
++	interrupt-parent = <&intc>;
++
++	/* Populated by the accepted firmware handoff, never guessed from RAM SKU. */
++	chosen { };
++
++	psci { compatible = "arm,psci-1.0"; method = "smc"; };
++	timer {
++		compatible = "arm,armv8-timer";
++		interrupts = <GIC_PPI 13 IRQ_TYPE_LEVEL_LOW>,
++			     <GIC_PPI 14 IRQ_TYPE_LEVEL_LOW>,
++			     <GIC_PPI 11 IRQ_TYPE_LEVEL_LOW>,
++			     <GIC_PPI 12 IRQ_TYPE_LEVEL_LOW>;
++	};
++
++	cpus {
++		#address-cells = <2>;
++		#size-cells = <0>;
++		cpu@0 {
++			device_type = "cpu";
++			compatible = "qcom,kryo";
++			reg = <0 0x0>;
++			enable-method = "psci";
++		};
++		cpu@100 {
++			device_type = "cpu";
++			compatible = "qcom,kryo";
++			reg = <0 0x100>;
++			enable-method = "psci";
++		};
++		cpu@200 {
++			device_type = "cpu";
++			compatible = "qcom,kryo";
++			reg = <0 0x200>;
++			enable-method = "psci";
++		};
++		cpu@300 {
++			device_type = "cpu";
++			compatible = "qcom,kryo";
++			reg = <0 0x300>;
++			enable-method = "psci";
++		};
++		cpu@400 {
++			device_type = "cpu";
++			compatible = "qcom,kryo";
++			reg = <0 0x400>;
++			enable-method = "psci";
++		};
++		cpu@500 {
++			device_type = "cpu";
++			compatible = "qcom,kryo";
++			reg = <0 0x500>;
++			enable-method = "psci";
++		};
++		cpu@600 {
++			device_type = "cpu";
++			compatible = "qcom,kryo";
++			reg = <0 0x600>;
++			enable-method = "psci";
++		};
++		cpu@700 {
++			device_type = "cpu";
++			compatible = "qcom,kryo";
++			reg = <0 0x700>;
++			enable-method = "psci";
++		};
++	};
++
++	reserved-memory {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++		gunyah_hyp_region@80000000 { reg = <0x00 0x80000000 0x00 0xe00000>; no-map; };
++		cpusys_vm_region@80e00000 { reg = <0x00 0x80e00000 0x00 0x400000>; no-map; };
++		tags_region@81200000 { reg = <0x00 0x81200000 0x00 0x4e0000>; no-map; };
++		dump_display_region@816e0000 { reg = <0x00 0x816e0000 0x00 0x800>; no-map; };
++		xbl_dtlog_region@81a00000 { reg = <0x00 0x81a00000 0x00 0x40000>; no-map; };
++		xbl_ramdump_region@84a00000 { reg = <0x00 0x84a00000 0x00 0x200000>; no-map; };
++		aop_image_region@81c00000 { reg = <0x00 0x81c00000 0x00 0x60000>; no-map; };
++		aop_cmd_db_region@81c60000 { reg = <0x00 0x81c60000 0x00 0x20000>; no-map; };
++		aop_config_region@81c80000 { reg = <0x00 0x81c80000 0x00 0x20000>; no-map; };
++		tme_crash_dump_region@81ca0000 { reg = <0x00 0x81ca0000 0x00 0x40000>; no-map; };
++		tme_log_region@81ce0000 { reg = <0x00 0x81ce0000 0x00 0x4000>; no-map; };
++		uefi_log_region@81ce4000 { reg = <0x00 0x81ce4000 0x00 0x10000>; no-map; };
++		chipinfo_region@81cf4000 { reg = <0x00 0x81cf4000 0x00 0x1000>; no-map; };
++		secdata_apss_region@81cff000 { reg = <0x00 0x81cff000 0x00 0x1000>; no-map; };
++		smem_region@81d00000 { reg = <0x00 0x81d00000 0x00 0x200000>; no-map; };
++		adsp_mhi_region@81f00000 { reg = <0x00 0x81f00000 0x00 0x20000>; no-map; };
++		pvm_fw_region@824a0000 { reg = <0x00 0x824a0000 0x00 0x100000>; no-map; };
++		hyp_mem_database_region@825a0000 { reg = <0x00 0x825a0000 0x00 0x60000>; no-map; };
++		global_sync_region@82600000 { reg = <0x00 0x82600000 0x00 0x100000>; no-map; };
++		tz_stat_region@82700000 { reg = <0x00 0x82700000 0x00 0x100000>; no-map; };
++		dsm_partition_1_region@86b00000 { reg = <0x00 0x86b00000 0x00 0x3700000>; no-map; };
++		mpss_region@8bc00000 { reg = <0x00 0x8bc00000 0x00 0xcd00000>; no-map; };
++		q6_mpss_dtb_region@98900000 { reg = <0x00 0x98900000 0x00 0x80000>; no-map; };
++		ipa_fw_region@98980000 { reg = <0x00 0x98980000 0x00 0x10000>; no-map; };
++		ipa_gsi_region@98990000 { reg = <0x00 0x98990000 0x00 0xa000>; no-map; };
++		gpu_microcode_region@9899a000 { reg = <0x00 0x9899a000 0x00 0x2000>; no-map; };
++		video_region@9899c000 { reg = <0x00 0x9899c000 0x00 0x800000>; no-map; };
++		cvp_region@9919c000 { reg = <0x00 0x9919c000 0x00 0x700000>; no-map; };
++		cdsp_region@99900000 { reg = <0x00 0x99900000 0x00 0x1400000>; no-map; };
++		q6_cdsp_dtb_region@9ad00000 { reg = <0x00 0x9ad00000 0x00 0x80000>; no-map; };
++		camera_region@9b300000 { reg = <0x00 0x9b300000 0x00 0x800000>; no-map; };
++		wpss_region@9bb00000 { reg = <0x00 0x9bb00000 0x00 0x1900000>; no-map; };
++		adspslpi_region@9d400000 { reg = <0x00 0x9d400000 0x00 0x4500000>; no-map; };
++		q6_adsp_dtb_region@a1900000 { reg = <0x00 0xa1900000 0x00 0x80000>; no-map; };
++		wlan_msa_region@a6400000 { reg = <0x00 0xa6400000 0x00 0xc00000>; no-map; };
++		xbl_sc_region@d8000000 { reg = <0x00 0xd8000000 0x00 0x40000>; no-map; };
++		cpucp_fw_region@d8040000 { reg = <0x00 0xd8040000 0x00 0x1c0000>; no-map; };
++		reserved_region@d8200000 { reg = <0x00 0xd8200000 0x00 0xe0000>; no-map; };
++		qtee_region@d82e0000 { reg = <0x00 0xd82e0000 0x00 0x520000>; no-map; };
++		tatags_region@d8800000 { reg = <0x00 0xd8800000 0x00 0x93b0000>; no-map; };
++		reserved_region@e1bb0000 { reg = <0x00 0xe1bb0000 0x00 0x190000>; no-map; };
++		llcc_lpi_region@ff800000 { reg = <0x00 0xff800000 0x00 0x380000>; no-map; };
++	};
++
++	soc {
++		compatible = "simple-bus";
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++		intc: interrupt-controller@17100000 {
++			compatible = "arm,gic-v3";
++			reg = <0 0x17100000 0 0x10000>, <0 0x17180000 0 0x200000>;
++			#interrupt-cells = <3>;
++			interrupt-controller;
++			#redistributor-regions = <1>;
++			redistributor-stride = <0 0x40000>;
++			interrupts = <GIC_PPI 9 IRQ_TYPE_LEVEL_HIGH>;
++		};
++		tlmm: pinctrl@f000000 {
++			compatible = "qcom,cliffs-pinctrl";
++			reg = <0 0x0f000000 0 0x01000000>;
++			interrupts = <GIC_SPI 208 IRQ_TYPE_LEVEL_HIGH>;
++			gpio-controller;
++			#gpio-cells = <2>;
++			interrupt-controller;
++			#interrupt-cells = <2>;
++			gpio-reserved-ranges = <8 4>, <56 5>;
++			status = "disabled";
++		};
++	};
++};

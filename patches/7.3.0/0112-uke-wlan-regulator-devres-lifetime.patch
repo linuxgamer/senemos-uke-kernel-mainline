@@ -1,0 +1,34 @@
+From: Senemos Maintainers
+Subject: [PATCH] wifi: ath11k: retain Uke regulator devres beyond core teardown
+
+The Uke consumer array is embedded in manually freed ath11k core memory.
+On deferred/failed probe, driver-core devres cleanup runs after core free.
+Use the existing independently managed copy and retain borrowed handles for
+the unchanged RF power sequence. No rail, voltage, delay or DT change.
+
+diff --git a/drivers/net/wireless/ath/ath11k/ahb.c b/drivers/net/wireless/ath/ath11k/ahb.c
+index 84c7b07..780b89f 100644
+--- a/drivers/net/wireless/ath/ath11k/ahb.c
++++ b/drivers/net/wireless/ath/ath11k/ahb.c
+@@ -405,6 +405,7 @@ static int ath11k_ahb_uke_regulators(struct ath11k_base *ab)
+ {
+ 	static const char * const names[] = { "vdd-cx-mx", "vdd-1.8-xo", "vdd-1.3-rfa" };
+ 	struct ath11k_ahb *ab_ahb = ath11k_ahb_priv(ab);
++	struct regulator_bulk_data *managed_regs;
+ 	int i, ret;
+ 
+ 	if (!of_device_is_compatible(ab->dev->of_node, "xiaomi,uke-wcn6750-wifi"))
+@@ -417,9 +418,12 @@ static int ath11k_ahb_uke_regulators(struct ath11k_base *ab)
+ 			return dev_err_probe(ab->dev, -EINVAL, "Uke WLAN requires all three RF supplies\n");
+ 		ab_ahb->uke_regs[i].supply = names[i];
+ 	}
+-	ret = devm_regulator_bulk_get(ab->dev, ARRAY_SIZE(ab_ahb->uke_regs), ab_ahb->uke_regs);
++	/* Devres cleanup runs after core-private memory is freed on probe failure. */
++	ret = devm_regulator_bulk_get_const(ab->dev, ARRAY_SIZE(ab_ahb->uke_regs),
++					    ab_ahb->uke_regs, &managed_regs);
+ 	if (ret)
+ 		return dev_err_probe(ab->dev, ret, "Uke WLAN RF supplies unavailable\n");
++	memcpy(ab_ahb->uke_regs, managed_regs, sizeof(ab_ahb->uke_regs));
+ 	/* The admitted OEM providers retain their exact initial voltage constraints. */
+ 	ab_ahb->uke_supplies = true;
+ 	return 0;

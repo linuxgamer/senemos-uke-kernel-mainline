@@ -1,0 +1,4436 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] drm/msm/dp: integrate MST streams and negotiated lane bounds
+
+Adapt Qualcomm's DisplayPort MST v7 series (1-35) and IRQ_HPD v8 bridge
+contract to the Uke 7.3 native display profile. Preserve the SST DSC/FEC,
+color, runtime-PM and failed-enable guards. Bound training by the actual
+Type-C route, retain unchanged retimer routing on IRQ_HPD, and unwind
+failed MST payload transactions without taking another stream down.
+
+MST currently admits RGB 8-bpc SDR only; compressed/HDR MST is refused.
+Four-lane training requires firmware-negotiated C/E; no pin force is added.
+
+Sources and original authors:
+MST v7: Yongxing Mou and Abhinav Kumar.
+IRQ_HPD v8: Dmitry Baryshkov.
+https://lore.kernel.org/all/20260929-msm-dp-mst-v7-0-4b81473185e7@oss.qualcomm.com/
+https://lore.kernel.org/all/20261024-hpd-irq-events-v8-0-6ee949e7a384@oss.qualcomm.com/
+Original Qualcomm copyright and SPDX notices are retained in new files.
+---
+diff --git a/drivers/gpu/drm/bridge/aux-hpd-bridge.c b/drivers/gpu/drm/bridge/aux-hpd-bridge.c
+index a2e525a..930a034 100644
+--- a/drivers/gpu/drm/bridge/aux-hpd-bridge.c
++++ b/drivers/gpu/drm/bridge/aux-hpd-bridge.c
+@@ -137,16 +137,19 @@ struct device *drm_dp_hpd_bridge_register(struct device *parent, struct device_n
+ EXPORT_SYMBOL_GPL(drm_dp_hpd_bridge_register);
+ 
+ /**
+- * drm_aux_hpd_bridge_notify - notify hot plug detection events
++ * drm_aux_hpd_bridge_notify_extra - notify hot plug detection events
+  * @dev: device created for the HPD bridge
+  * @status: output connection status
++ * @event: extra status bits like DRM_CONNECTOR_DP_IRQ_HPD
+  *
+  * A wrapper around drm_bridge_hpd_notify() that is used to report hot plug
+  * detection events for bridges created via drm_dp_hpd_bridge_register().
+  *
+  * This function shall be called in a context that can sleep.
+  */
+-void drm_aux_hpd_bridge_notify(struct device *dev, enum drm_connector_status status)
++void drm_aux_hpd_bridge_notify_extra(struct device *dev,
++				     enum drm_connector_status status,
++				     enum drm_connector_dp_event event)
+ {
+ 	struct auxiliary_device *adev = to_auxiliary_dev(dev);
+ 	struct drm_aux_hpd_bridge_data *data = auxiliary_get_drvdata(adev);
+@@ -154,9 +157,9 @@ void drm_aux_hpd_bridge_notify(struct device *dev, enum drm_connector_status sta
+ 	if (!data)
+ 		return;
+ 
+-	drm_bridge_hpd_notify(&data->bridge, status);
++	drm_bridge_hpd_notify_extra(&data->bridge, status, event);
+ }
+-EXPORT_SYMBOL_GPL(drm_aux_hpd_bridge_notify);
++EXPORT_SYMBOL_GPL(drm_aux_hpd_bridge_notify_extra);
+ 
+ static int drm_aux_hpd_bridge_attach(struct drm_bridge *bridge,
+ 				     struct drm_encoder *encoder,
+diff --git a/drivers/gpu/drm/bridge/chrontel-ch7033.c b/drivers/gpu/drm/bridge/chrontel-ch7033.c
+index 4bc64b2..deb5d51 100644
+--- a/drivers/gpu/drm/bridge/chrontel-ch7033.c
++++ b/drivers/gpu/drm/bridge/chrontel-ch7033.c
+@@ -258,7 +258,8 @@ static const struct drm_connector_helper_funcs ch7033_connector_helper_funcs = {
+ 	.best_encoder = ch7033_connector_best_encoder,
+ };
+ 
+-static void ch7033_hpd_event(void *arg, enum drm_connector_status status)
++static void ch7033_hpd_event(void *arg, enum drm_connector_status status,
++			     enum drm_connector_dp_event event)
+ {
+ 	struct ch7033_priv *priv = arg;
+ 
+diff --git a/drivers/gpu/drm/bridge/lontium-lt8912b.c b/drivers/gpu/drm/bridge/lontium-lt8912b.c
+index e347d04..82f5232 100644
+--- a/drivers/gpu/drm/bridge/lontium-lt8912b.c
++++ b/drivers/gpu/drm/bridge/lontium-lt8912b.c
+@@ -506,7 +506,8 @@ static int lt8912_attach_dsi(struct lt8912 *lt)
+ 	return 0;
+ }
+ 
+-static void lt8912_bridge_hpd_cb(void *data, enum drm_connector_status status)
++static void lt8912_bridge_hpd_cb(void *data, enum drm_connector_status status,
++				 enum drm_connector_dp_event event)
+ {
+ 	struct lt8912 *lt = data;
+ 
+diff --git a/drivers/gpu/drm/bridge/lontium-lt9611uxc.c b/drivers/gpu/drm/bridge/lontium-lt9611uxc.c
+index 42a6503..c380a1b 100644
+--- a/drivers/gpu/drm/bridge/lontium-lt9611uxc.c
++++ b/drivers/gpu/drm/bridge/lontium-lt9611uxc.c
+@@ -429,7 +429,8 @@ static const struct drm_edid *lt9611uxc_bridge_edid_read(struct drm_bridge *brid
+ 
+ static void lt9611uxc_bridge_hpd_notify(struct drm_bridge *bridge,
+ 					struct drm_connector *connector,
+-					enum drm_connector_status status)
++					enum drm_connector_status status,
++					enum drm_connector_dp_event event)
+ {
+ 	const struct drm_edid *drm_edid;
+ 
+diff --git a/drivers/gpu/drm/bridge/ti-tfp410.c b/drivers/gpu/drm/bridge/ti-tfp410.c
+index 629ff70..03dbb44 100644
+--- a/drivers/gpu/drm/bridge/ti-tfp410.c
++++ b/drivers/gpu/drm/bridge/ti-tfp410.c
+@@ -110,7 +110,8 @@ static void tfp410_hpd_work_func(struct work_struct *work)
+ 		drm_helper_hpd_irq_event(dvi->bridge.dev);
+ }
+ 
+-static void tfp410_hpd_callback(void *arg, enum drm_connector_status status)
++static void tfp410_hpd_callback(void *arg, enum drm_connector_status status,
++				enum drm_connector_dp_event event)
+ {
+ 	struct tfp410 *dvi = arg;
+ 
+diff --git a/drivers/gpu/drm/display/drm_bridge_connector.c b/drivers/gpu/drm/display/drm_bridge_connector.c
+index 8b54069..6f0c446 100644
+--- a/drivers/gpu/drm/display/drm_bridge_connector.c
++++ b/drivers/gpu/drm/display/drm_bridge_connector.c
+@@ -141,7 +141,8 @@ struct drm_bridge_connector {
+  */
+ 
+ static void drm_bridge_connector_hpd_notify(struct drm_connector *connector,
+-					    enum drm_connector_status status)
++					    enum drm_connector_status status,
++					    enum drm_connector_dp_event event)
+ {
+ 	struct drm_bridge_connector *bridge_connector =
+ 		to_drm_bridge_connector(connector);
+@@ -149,38 +150,51 @@ static void drm_bridge_connector_hpd_notify(struct drm_connector *connector,
+ 	/* Notify all bridges in the pipeline of hotplug events. */
+ 	drm_for_each_bridge_in_chain(bridge_connector->encoder, bridge) {
+ 		if (bridge->funcs->hpd_notify)
+-			bridge->funcs->hpd_notify(bridge, connector, status);
++			bridge->funcs->hpd_notify(bridge, connector, status, event);
+ 	}
+ }
+ 
+ static void drm_bridge_connector_handle_hpd(struct drm_bridge_connector *drm_bridge_connector,
+-					    enum drm_connector_status status)
++					    enum drm_connector_status status,
++					    enum drm_connector_dp_event event)
+ {
+ 	struct drm_connector *connector = &drm_bridge_connector->base;
++	struct drm_bridge *detect = drm_bridge_connector->bridge_detect;
+ 	struct drm_device *dev = connector->dev;
++	enum drm_connector_status old_status, new_status;
++	bool level_hpd;
++	bool changed;
++
++	level_hpd = event == DRM_CONNECTOR_NO_EXTRA_STATUS;
++
++	drm_bridge_connector_hpd_notify(connector, status, event);
+ 
+ 	mutex_lock(&dev->mode_config.mutex);
+-	connector->status = status;
++	old_status = connector->status;
++	new_status = detect ? detect->funcs->detect(detect, connector) : status;
++	connector->status = new_status;
++	changed = new_status != old_status;
+ 	mutex_unlock(&dev->mode_config.mutex);
+ 
+-	drm_bridge_connector_hpd_notify(connector, status);
+-
+-	drm_kms_helper_connector_hotplug_event(connector);
++	if (changed || level_hpd)
++		drm_kms_helper_connector_hotplug_event(connector);
+ }
+ 
+ static void drm_bridge_connector_hpd_cb(void *cb_data,
+-					enum drm_connector_status status)
++					enum drm_connector_status status,
++					enum drm_connector_dp_event event)
+ {
+-	drm_bridge_connector_handle_hpd(cb_data, status);
++	drm_bridge_connector_handle_hpd(cb_data, status, event);
+ }
+ 
+ static void drm_bridge_connector_oob_hotplug_event(struct drm_connector *connector,
+-						   enum drm_connector_status status)
++						   enum drm_connector_status status,
++						   enum drm_connector_dp_event event)
+ {
+ 	struct drm_bridge_connector *bridge_connector =
+ 		to_drm_bridge_connector(connector);
+ 
+-	drm_bridge_connector_handle_hpd(bridge_connector, status);
++	drm_bridge_connector_handle_hpd(bridge_connector, status, event);
+ }
+ 
+ static void drm_bridge_connector_enable_hpd(struct drm_connector *connector)
+@@ -223,7 +237,11 @@ drm_bridge_connector_detect(struct drm_connector *connector, bool force)
+ 		if (hdmi)
+ 			drm_atomic_helper_connector_hdmi_hotplug(connector, status);
+ 
+-		drm_bridge_connector_hpd_notify(connector, status);
++		/* DP detection may report SST disconnected while MST remains plugged. */
++		if (connector->connector_type != DRM_MODE_CONNECTOR_DisplayPort ||
++		    !bridge_connector->bridge_hpd)
++			drm_bridge_connector_hpd_notify(connector, status,
++							DRM_CONNECTOR_NO_EXTRA_STATUS);
+ 	} else {
+ 		switch (connector->connector_type) {
+ 		case DRM_MODE_CONNECTOR_DPI:
+diff --git a/drivers/gpu/drm/drm_bridge.c b/drivers/gpu/drm/drm_bridge.c
+index a52d5f5..9f42e3d 100644
+--- a/drivers/gpu/drm/drm_bridge.c
++++ b/drivers/gpu/drm/drm_bridge.c
+@@ -1532,7 +1532,8 @@ EXPORT_SYMBOL_GPL(drm_bridge_edid_read);
+  */
+ void drm_bridge_hpd_enable(struct drm_bridge *bridge,
+ 			   void (*cb)(void *data,
+-				      enum drm_connector_status status),
++				      enum drm_connector_status status,
++				      enum drm_connector_dp_event event),
+ 			   void *data)
+ {
+ 	if (!(bridge->ops & DRM_BRIDGE_OP_HPD))
+@@ -1590,25 +1591,28 @@ void drm_bridge_hpd_disable(struct drm_bridge *bridge)
+ EXPORT_SYMBOL_GPL(drm_bridge_hpd_disable);
+ 
+ /**
+- * drm_bridge_hpd_notify - notify hot plug detection events
++ * drm_bridge_hpd_notify_extra - notify hot plug detection and sink IRQ events
+  * @bridge: bridge control structure
+  * @status: output connection status
++ * @event: additional status recorded by the sink
+  *
+  * Bridge drivers shall call this function to report hot plug events when they
+- * detect a change in the output status, when hot plug detection has been
+- * enabled by drm_bridge_hpd_enable().
++ * detect a change in the output status or when the sink has reported extra HPD
++ * status events (like the IRQ_HPD in case of the DisplayPort), when hot plug
++ * detection has been enabled by drm_bridge_hpd_enable().
+  *
+  * This function shall be called in a context that can sleep.
+  */
+-void drm_bridge_hpd_notify(struct drm_bridge *bridge,
+-			   enum drm_connector_status status)
++void drm_bridge_hpd_notify_extra(struct drm_bridge *bridge,
++				 enum drm_connector_status status,
++				 enum drm_connector_dp_event event)
+ {
+ 	mutex_lock(&bridge->hpd_mutex);
+ 	if (bridge->hpd_cb)
+-		bridge->hpd_cb(bridge->hpd_data, status);
++		bridge->hpd_cb(bridge->hpd_data, status, event);
+ 	mutex_unlock(&bridge->hpd_mutex);
+ }
+-EXPORT_SYMBOL_GPL(drm_bridge_hpd_notify);
++EXPORT_SYMBOL_GPL(drm_bridge_hpd_notify_extra);
+ 
+ #ifdef CONFIG_OF
+ /**
+diff --git a/drivers/gpu/drm/drm_connector.c b/drivers/gpu/drm/drm_connector.c
+index 8b4baed..f0faccc 100644
+--- a/drivers/gpu/drm/drm_connector.c
++++ b/drivers/gpu/drm/drm_connector.c
+@@ -3672,20 +3672,24 @@ struct drm_connector *drm_connector_find_by_fwnode(struct fwnode_handle *fwnode)
+ }
+ 
+ /**
+- * drm_connector_oob_hotplug_event - Report out-of-band hotplug event to connector
++ * drm_connector_dp_oob_status - Report out-of-band hotplug event to DisplayPort connector
+  * @connector_fwnode: fwnode_handle to report the event on
+  * @status: hot plug detect logical state
++ * @event: additional event reported by the sink without changing the HPD state
++ * (or in addition to such a change).
+  *
+- * On some hardware a hotplug event notification may come from outside the display
+- * driver / device. An example of this is some USB Type-C setups where the hardware
+- * muxes the DisplayPort data and aux-lines but does not pass the altmode HPD
+- * status bit to the GPU's DP HPD pin.
++ * In some cases when DisplayPort signals are being routed through the USB
++ * Type-C port the hotplug event notifications come from outside of the display
++ * driver / device. In this case hardware muxes the DisplayPort data and
++ * AUX-lines but does not pass the altmode HPD status bit to the GPU's DP HPD
++ * pin.
+  *
+  * This function can be used to report these out-of-band events after obtaining
+  * a drm_connector reference through calling drm_connector_find_by_fwnode().
+  */
+-void drm_connector_oob_hotplug_event(struct fwnode_handle *connector_fwnode,
+-				     enum drm_connector_status status)
++void drm_connector_dp_oob_status(struct fwnode_handle *connector_fwnode,
++				 enum drm_connector_status status,
++				 enum drm_connector_dp_event event)
+ {
+ 	struct drm_connector *connector;
+ 
+@@ -3694,11 +3698,11 @@ void drm_connector_oob_hotplug_event(struct fwnode_handle *connector_fwnode,
+ 		return;
+ 
+ 	if (connector->funcs->oob_hotplug_event)
+-		connector->funcs->oob_hotplug_event(connector, status);
++		connector->funcs->oob_hotplug_event(connector, status, event);
+ 
+ 	drm_connector_put(connector);
+ }
+-EXPORT_SYMBOL(drm_connector_oob_hotplug_event);
++EXPORT_SYMBOL(drm_connector_dp_oob_status);
+ 
+ /**
+  * drm_connector_get_color_format - Return connector color format of @conn_state
+diff --git a/drivers/gpu/drm/i915/display/intel_dp.c b/drivers/gpu/drm/i915/display/intel_dp.c
+index 3152122..66bd67c 100644
+--- a/drivers/gpu/drm/i915/display/intel_dp.c
++++ b/drivers/gpu/drm/i915/display/intel_dp.c
+@@ -6766,7 +6766,8 @@ static int intel_dp_connector_atomic_check(struct drm_connector *_connector,
+ }
+ 
+ static void intel_dp_oob_hotplug_event(struct drm_connector *_connector,
+-				       enum drm_connector_status hpd_state)
++				       enum drm_connector_status hpd_state,
++				       enum drm_connector_dp_event event)
+ {
+ 	struct intel_connector *connector = to_intel_connector(_connector);
+ 	struct intel_display *display = to_intel_display(connector);
+diff --git a/drivers/gpu/drm/meson/meson_encoder_hdmi.c b/drivers/gpu/drm/meson/meson_encoder_hdmi.c
+index 0c7a72c..5e707fd 100644
+--- a/drivers/gpu/drm/meson/meson_encoder_hdmi.c
++++ b/drivers/gpu/drm/meson/meson_encoder_hdmi.c
+@@ -323,7 +323,8 @@ static int meson_encoder_hdmi_atomic_check(struct drm_bridge *bridge,
+ 
+ static void meson_encoder_hdmi_hpd_notify(struct drm_bridge *bridge,
+ 					  struct drm_connector *connector,
+-					  enum drm_connector_status status)
++					  enum drm_connector_status status,
++					  enum drm_connector_dp_event event)
+ {
+ 	struct meson_encoder_hdmi *encoder_hdmi = bridge_to_meson_encoder_hdmi(bridge);
+ 
+diff --git a/drivers/gpu/drm/msm/Makefile b/drivers/gpu/drm/msm/Makefile
+index ac7eebb..edee040 100644
+--- a/drivers/gpu/drm/msm/Makefile
++++ b/drivers/gpu/drm/msm/Makefile
+@@ -146,7 +146,8 @@ msm-display-$(CONFIG_DRM_MSM_DP)+= dp/dp_aux.o \
+ 	dp/dp_panel.o \
+ 	dp/dp_audio.o \
+ 	dp/dp_utils.o \
+-	dp/dp_dsc.o
++	dp/dp_dsc.o \
++	dp/dp_mst_drm.o
+ 
+ msm-display-$(CONFIG_DRM_MSM_HDMI_HDCP) += hdmi/hdmi_hdcp.o
+ 
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c
+index 4d82989..f78e61c 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c
+@@ -1706,18 +1706,20 @@ static void dpu_encoder_virt_atomic_disable(struct drm_encoder *drm_enc,
+ 
+ static struct dpu_hw_intf *dpu_encoder_get_intf(const struct dpu_mdss_cfg *catalog,
+ 		struct dpu_rm *dpu_rm,
+-		enum dpu_intf_type type, u32 controller_id)
++		struct msm_display_info *disp_info, int index)
+ {
+-	int i = 0;
++	int i = 0, cnt = 0;
++	u32 controller_id = disp_info->h_tile_instance[index];
++	int stream_id = disp_info->stream_id;
+ 
+-	if (type == INTF_WB)
++	if (disp_info->intf_type == INTF_WB)
+ 		return NULL;
+ 
+ 	for (i = 0; i < catalog->intf_count; i++) {
+-		if (catalog->intf[i].type == type
+-		    && catalog->intf[i].controller_id == controller_id) {
++		if (catalog->intf[i].type == disp_info->intf_type
++		    && catalog->intf[i].controller_id == controller_id
++		    && cnt++ == stream_id)
+ 			return dpu_rm_get_intf(dpu_rm, catalog->intf[i].id);
+-		}
+ 	}
+ 
+ 	return NULL;
+@@ -3004,8 +3006,7 @@ static int dpu_encoder_setup_display(struct dpu_encoder_virt *dpu_enc,
+ 				i, controller_id, phys_params.split_role);
+ 
+ 		phys_params.hw_intf = dpu_encoder_get_intf(dpu_kms->catalog, &dpu_kms->rm,
+-							   disp_info->intf_type,
+-							   controller_id);
++							   disp_info, i);
+ 
+ 		if (disp_info->intf_type == INTF_WB && controller_id < WB_MAX)
+ 			phys_params.hw_wb = dpu_rm_get_wb(&dpu_kms->rm, controller_id);
+@@ -3070,6 +3071,38 @@ static const struct drm_encoder_helper_funcs dpu_encoder_helper_funcs = {
+ 	.atomic_enable = dpu_encoder_virt_atomic_enable,
+ };
+ 
++static void dpu_encoder_mst_atomic_enable(struct drm_encoder *enc,
++				      struct drm_atomic_commit *state)
++{
++	if (msm_dp_mst_stream_enable(enc, state))
++		return;
++
++	dpu_encoder_virt_atomic_enable(enc, state);
++}
++
++static void dpu_encoder_mst_atomic_disable(struct drm_encoder *enc,
++				       struct drm_atomic_commit *state)
++{
++	msm_dp_mst_stream_disable(enc, state);
++	if (to_dpu_encoder_virt(enc)->enabled)
++		dpu_encoder_virt_atomic_disable(enc, state);
++	msm_dp_mst_stream_post_disable(enc, state);
++}
++
++static int dpu_encoder_mst_atomic_check(struct drm_encoder *enc,
++					struct drm_crtc_state *crtc_state,
++					struct drm_connector_state *conn_state)
++{
++	return msm_dp_mst_stream_atomic_check(enc, crtc_state, conn_state);
++}
++
++static const struct drm_encoder_helper_funcs dpu_mst_encoder_helper_funcs = {
++	.atomic_check    = dpu_encoder_mst_atomic_check,
++	.atomic_mode_set = dpu_encoder_virt_atomic_mode_set,
++	.atomic_enable   = dpu_encoder_mst_atomic_enable,
++	.atomic_disable  = dpu_encoder_mst_atomic_disable,
++};
++
+ static const struct drm_encoder_funcs dpu_encoder_funcs = {
+ 	.debugfs_init = dpu_encoder_debugfs_init,
+ };
+@@ -3095,7 +3128,10 @@ struct drm_encoder *dpu_encoder_init(struct drm_device *dev,
+ 	if (IS_ERR(dpu_enc))
+ 		return ERR_CAST(dpu_enc);
+ 
+-	drm_encoder_helper_add(&dpu_enc->base, &dpu_encoder_helper_funcs);
++	if (drm_enc_mode == DRM_MODE_ENCODER_DPMST)
++		drm_encoder_helper_add(&dpu_enc->base, &dpu_mst_encoder_helper_funcs);
++	else
++		drm_encoder_helper_add(&dpu_enc->base, &dpu_encoder_helper_funcs);
+ 
+ 	spin_lock_init(&dpu_enc->enc_spinlock);
+ 	dpu_enc->enabled = false;
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.h b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.h
+index acde367..328359c 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.h
+@@ -31,6 +31,7 @@ unsigned int dpu_encoder_uke_vrr_min_hz(struct drm_encoder *encoder,
+  * @h_tile_instance:    Controller instance used per tile. Number of elements is
+  *                      based on num_of_h_tiles
+  * @is_cmd_mode		Boolean to indicate if the CMD mode is requested
++ * @stream_id		stream id for which the interface needs to be acquired
+  * @vsync_source:	Source of the TE signal for DSI CMD devices
+  */
+ struct msm_display_info {
+@@ -38,6 +39,7 @@ struct msm_display_info {
+ 	uint32_t num_of_h_tiles;
+ 	uint32_t h_tile_instance[MAX_H_TILES_PER_DISPLAY];
+ 	bool is_cmd_mode;
++	int stream_id;
+ 	enum dpu_vsync_source vsync_source;
+ };
+ 
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
+index 102cb3d..f5bb7a0 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
+@@ -655,7 +655,7 @@ static int _dpu_kms_initialize_displayport(struct drm_device *dev,
+ 	struct msm_display_info info;
+ 	bool yuv_supported;
+ 	int rc;
+-	int i;
++	int i, stream_cnt;
+ 
+ 	for (i = 0; i < ARRAY_SIZE(priv->kms->dp); i++) {
+ 		if (!priv->kms->dp[i])
+@@ -678,6 +678,31 @@ static int _dpu_kms_initialize_displayport(struct drm_device *dev,
+ 			DPU_ERROR("modeset_init failed for DP, rc = %d\n", rc);
+ 			return rc;
+ 		}
++
++		stream_cnt = msm_dp_get_mst_max_stream(priv->kms->dp[i]);
++
++		if (stream_cnt > 1) {
++			rc = msm_dp_mst_register(priv->kms->dp[i]);
++			if (rc) {
++				DPU_ERROR("dp_mst_init failed for DP, rc = %d\n", rc);
++				return rc;
++			}
++		}
++
++		for (int stream_id = 0; stream_cnt > 1 && stream_id < stream_cnt; stream_id++) {
++			info.stream_id = stream_id;
++			encoder = dpu_encoder_init(dev, DRM_MODE_ENCODER_DPMST, &info);
++			if (IS_ERR(encoder)) {
++				DPU_ERROR("encoder init failed for dp mst display\n");
++				return PTR_ERR(encoder);
++			}
++
++			rc = msm_dp_mst_attach_encoder(priv->kms->dp[i], stream_id, encoder);
++			if (rc) {
++				DPU_ERROR("dp_mst attach_encoder failed, rc = %d\n", rc);
++				return rc;
++			}
++		}
+ 	}
+ 
+ 	return 0;
+@@ -917,6 +942,7 @@ static void _dpu_kms_hw_destroy(struct dpu_kms *dpu_kms)
+ static void dpu_kms_destroy(struct msm_kms *kms)
+ {
+ 	struct dpu_kms *dpu_kms;
++	int i;
+ 
+ 	if (!kms) {
+ 		DPU_ERROR("invalid kms\n");
+@@ -924,6 +950,11 @@ static void dpu_kms_destroy(struct msm_kms *kms)
+ 	}
+ 
+ 	dpu_kms = to_dpu_kms(kms);
++	if (dpu_kms->dev) {
++		for (i = 0; i < ARRAY_SIZE(kms->dp); i++)
++			if (kms->dp[i])
++				msm_dp_mst_unregister(kms->dp[i]);
++	}
+ 
+ 	_dpu_kms_hw_destroy(dpu_kms);
+ 
+diff --git a/drivers/gpu/drm/msm/dp/dp_audio.c b/drivers/gpu/drm/msm/dp/dp_audio.c
+index df22294..8118130 100644
+--- a/drivers/gpu/drm/msm/dp/dp_audio.c
++++ b/drivers/gpu/drm/msm/dp/dp_audio.c
+@@ -284,7 +284,7 @@ int msm_dp_audio_prepare(struct drm_bridge *bridge,
+ 	 * such cases check for connection status and bail out if not
+ 	 * connected.
+ 	 */
+-	if (!msm_dp_display->power_on)
++	if (!msm_dp_display->active_stream_cnt)
+ 		goto end;
+ 
+ 	audio = msm_dp_audio_get_data(msm_dp_display);
+diff --git a/drivers/gpu/drm/msm/dp/dp_ctrl.c b/drivers/gpu/drm/msm/dp/dp_ctrl.c
+index af99dce..8c18fb7 100644
+--- a/drivers/gpu/drm/msm/dp/dp_ctrl.c
++++ b/drivers/gpu/drm/msm/dp/dp_ctrl.c
+@@ -67,6 +67,16 @@
+ 	(PSR_UPDATE_MASK | PSR_CAPTURE_MASK | PSR_EXIT_MASK | \
+ 	PSR_UPDATE_ERROR_MASK | PSR_WAKE_ERROR_MASK)
+ 
++#define DP_INTERRUPT_STATUS5 \
++	(DP_INTR_MST_DP0_VCPF_SENT | DP_INTR_MST_DP1_VCPF_SENT)
++#define DP_INTERRUPT_STATUS5_MASK \
++	(DP_INTERRUPT_STATUS5 << DP_INTERRUPT_STATUS_MASK_SHIFT)
++
++#define DP_INTERRUPT_STATUS7 \
++	(DP_INTR_MST_DP2_VCPF_SENT | DP_INTR_MST_DP3_VCPF_SENT)
++#define DP_INTERRUPT_STATUS7_MASK \
++	(DP_INTERRUPT_STATUS7 << DP_INTERRUPT_STATUS_MASK_SHIFT)
++
+ #define DP_CTRL_INTR_READY_FOR_VIDEO     BIT(0)
+ #define DP_CTRL_INTR_IDLE_PATTERN_SENT  BIT(3)
+ 
+@@ -75,6 +85,7 @@
+ #define MR_LINK_PRBS7 0x100
+ #define MR_LINK_CUSTOM80 0x200
+ #define MR_LINK_TRAINING4  0x40
++#define DP_MAX_TIME_SLOTS 64
+ 
+ enum {
+ 	DP_TRAINING_NONE,
+@@ -111,6 +122,12 @@ struct msm_dp_vc_tu_mapping_table {
+ 	u8 tu_size_minus1;
+ };
+ 
++struct msm_dp_mst_ch_slot_info {
++	u32 start_slot;
++	u32 tot_slots;
++	u32 pbn;
++};
++
+ struct msm_dp_ctrl_private {
+ 	struct msm_dp_ctrl msm_dp_ctrl;
+ 	struct drm_device *drm_dev;
+@@ -119,6 +136,8 @@ struct msm_dp_ctrl_private {
+ 	struct msm_dp_link *link;
+ 	void __iomem *ahb_base;
+ 	void __iomem *link_base;
++	void __iomem *mst2link_base;
++	void __iomem *mst3link_base;
+ 
+ 	struct phy *phy;
+ 
+@@ -128,7 +147,8 @@ struct msm_dp_ctrl_private {
+ 	unsigned int num_link_clks;
+ 	struct clk_bulk_data *link_clks;
+ 
+-	struct clk *pixel_clk;
++	struct clk *pixel_clk[DP_STREAM_MAX];
++	unsigned int num_pixel_clks;
+ 
+ 	union phy_configure_opts phy_opts;
+ 
+@@ -141,8 +161,10 @@ struct msm_dp_ctrl_private {
+ 	bool core_clks_on;
+ 	bool phy_powered;
+ 	bool link_clks_on;
+-	bool stream_clks_on;
++	bool stream_clks_on[DP_STREAM_MAX];
+ 	bool fec_prepared;
++	bool mst_active;
++	struct msm_dp_mst_ch_slot_info mst_ch_info[DP_STREAM_MAX];
+ };
+ 
+ static inline u32 msm_dp_read_ahb(const struct msm_dp_ctrl_private *ctrl, u32 offset)
+@@ -175,6 +197,49 @@ static inline void msm_dp_write_link(struct msm_dp_ctrl_private *ctrl,
+ 	writel(data, ctrl->link_base + offset);
+ }
+ 
++static inline u32 msm_dp_read_stream_link(struct msm_dp_ctrl_private *ctrl,
++					   enum msm_dp_stream_id stream_id, u32 offset)
++{
++	offset = msm_dp_stream_reg(stream_id, offset);
++	switch (stream_id) {
++	case DP_STREAM_0:
++	case DP_STREAM_1:
++		return readl_relaxed(ctrl->link_base + offset);
++	case DP_STREAM_2:
++		return readl_relaxed(ctrl->mst2link_base + offset);
++	case DP_STREAM_3:
++		return readl_relaxed(ctrl->mst3link_base + offset);
++	default:
++		DRM_ERROR("error stream_id\n");
++		return 0;
++	}
++}
++
++static inline void msm_dp_write_stream_link(struct msm_dp_ctrl_private *ctrl,
++					     enum msm_dp_stream_id stream_id, u32 offset, u32 data)
++{
++	/*
++	 * To make sure link reg writes happens before any other operation,
++	 * this function uses writel() instread of writel_relaxed()
++	 */
++	offset = msm_dp_stream_reg(stream_id, offset);
++	switch (stream_id) {
++	case DP_STREAM_0:
++	case DP_STREAM_1:
++		writel(data, ctrl->link_base + offset);
++		break;
++	case DP_STREAM_2:
++		writel(data, ctrl->mst2link_base + offset);
++		break;
++	case DP_STREAM_3:
++		writel(data, ctrl->mst3link_base + offset);
++		break;
++	default:
++		DRM_ERROR("error stream_id\n");
++		break;
++	}
++}
++
+ static int msm_dp_aux_link_configure(struct drm_dp_aux *aux,
+ 					struct msm_dp_link_info *link)
+ {
+@@ -202,6 +267,84 @@ static int msm_dp_aux_link_configure(struct drm_dp_aux *aux,
+ 	return err;
+ }
+ 
++int msm_dp_ctrl_mst_send_act(struct msm_dp_ctrl *msm_dp_ctrl,
++			     struct msm_dp_panel *panel)
++{
++	struct msm_dp_ctrl_private *ctrl;
++	const struct drm_display_mode *mode;
++	u32 frame_time_ms;
++
++	ctrl = container_of(msm_dp_ctrl, struct msm_dp_ctrl_private, msm_dp_ctrl);
++
++	if (!ctrl->mst_active)
++		return 0;
++
++	mode = &panel->msm_dp_mode.drm_mode;
++	if (!mode->clock || !mode->htotal || !mode->vtotal)
++		return -EINVAL;
++	frame_time_ms = DIV_ROUND_UP((u64)mode->htotal * mode->vtotal,
++				     mode->clock) + 1;
++
++	msm_dp_write_link(ctrl, REG_DP_MST_ACT, 0x1);
++	/* make sure ACT signal is performed */
++	wmb();
++	msm_dp_read_link(ctrl, REG_DP_MST_ACT);
++
++	msleep(frame_time_ms);
++
++	/* Hardware clears this bit after sending 4 ACT headers */
++	if (msm_dp_read_link(ctrl, REG_DP_MST_ACT)) {
++		drm_dbg_dp(ctrl->drm_dev, "MST ACT trigger complete failed\n");
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++static void msm_dp_ctrl_mst_config(struct msm_dp_ctrl_private *ctrl, bool enable)
++{
++	u32 mainlink_ctrl;
++
++	mainlink_ctrl = msm_dp_read_link(ctrl, REG_DP_MAINLINK_CTRL);
++	if (enable)
++		mainlink_ctrl |= DP_MAINLINK_CTRL_MST_EN;
++	else
++		mainlink_ctrl &= ~DP_MAINLINK_CTRL_MST_EN;
++
++	msm_dp_write_link(ctrl, REG_DP_MAINLINK_CTRL, mainlink_ctrl);
++}
++
++static void msm_dp_ctrl_mst_update_timeslot(struct msm_dp_ctrl_private *ctrl,
++					  enum msm_dp_stream_id stream_id, u32 ch_start_slot,
++					  u32 tot_slot_cnt)
++{
++	u32 slot_reg_1 = 0, slot_reg_2 = 0;
++
++	drm_dbg_dp(ctrl->drm_dev, "stream_id %d, start_slot %d, tot_slot %d\n",
++		   stream_id, ch_start_slot, tot_slot_cnt);
++
++	if (ch_start_slot && tot_slot_cnt) {
++		u64 mask = GENMASK_ULL(ch_start_slot + tot_slot_cnt - 2, ch_start_slot - 1);
++
++		slot_reg_1 = mask & 0xFFFFFFFF;
++		slot_reg_2 = (mask >> 32) & 0xFFFFFFFF;
++	}
++
++	msm_dp_write_stream_link(ctrl, stream_id, REG_DP_DP0_TIMESLOT_1_32, slot_reg_1);
++	msm_dp_write_stream_link(ctrl, stream_id, REG_DP_DP0_TIMESLOT_33_63, slot_reg_2);
++}
++
++static void msm_dp_ctrl_update_rg(struct msm_dp_ctrl_private *ctrl,
++				  enum msm_dp_stream_id stream_id, u32 x_int, u32 y_frac_enum)
++{
++	u32 rg = y_frac_enum | (x_int << 16);
++
++	drm_dbg_dp(ctrl->drm_dev, "stream_id: %d x_int:%d y_frac_enum:%d rg:%d\n",
++		   stream_id, x_int, y_frac_enum, rg);
++
++	msm_dp_write_stream_link(ctrl, stream_id, REG_DP_DP0_RG, rg);
++}
++
+ /*
+  * NOTE: resetting DP controller will also clear any pending HPD related interrupts
+  */
+@@ -264,6 +407,12 @@ void msm_dp_ctrl_enable_irq(struct msm_dp_ctrl *msm_dp_ctrl)
+ 			DP_INTERRUPT_STATUS1_MASK);
+ 	msm_dp_write_ahb(ctrl, REG_DP_INTR_STATUS2,
+ 			DP_INTERRUPT_STATUS2_MASK);
++	msm_dp_write_ahb(ctrl, REG_DP_INTR_STATUS5,
++			 DP_INTERRUPT_STATUS5_MASK);
++	if (ctrl->num_pixel_clks > DP_STREAM_2) {
++		msm_dp_write_ahb(ctrl, REG_DP_INTR_STATUS7,
++				 DP_INTERRUPT_STATUS7_MASK);
++	}
+ }
+ 
+ void msm_dp_ctrl_disable_irq(struct msm_dp_ctrl *msm_dp_ctrl)
+@@ -273,6 +422,9 @@ void msm_dp_ctrl_disable_irq(struct msm_dp_ctrl *msm_dp_ctrl)
+ 
+ 	msm_dp_write_ahb(ctrl, REG_DP_INTR_STATUS, 0x00);
+ 	msm_dp_write_ahb(ctrl, REG_DP_INTR_STATUS2, 0x00);
++	msm_dp_write_ahb(ctrl, REG_DP_INTR_STATUS5, 0x00);
++	if (ctrl->num_pixel_clks > DP_STREAM_2)
++		msm_dp_write_ahb(ctrl, REG_DP_INTR_STATUS7, 0x00);
+ }
+ 
+ static u32 msm_dp_ctrl_get_psr_interrupt(struct msm_dp_ctrl_private *ctrl)
+@@ -292,6 +444,34 @@ static void msm_dp_ctrl_config_psr_interrupt(struct msm_dp_ctrl_private *ctrl)
+ 	msm_dp_write_ahb(ctrl, REG_DP_INTR_MASK4, DP_INTERRUPT_MASK4);
+ }
+ 
++static u32 msm_dp_ctrl_get_mst_vcpf_interrupt_0_1(struct msm_dp_ctrl_private *ctrl)
++{
++	u32 intr, intr_ack;
++
++	intr = msm_dp_read_ahb(ctrl, REG_DP_INTR_STATUS5);
++	intr &= ~DP_INTERRUPT_STATUS5_MASK;
++	intr_ack = (intr & DP_INTERRUPT_STATUS5)
++			<< DP_INTERRUPT_STATUS_ACK_SHIFT;
++	msm_dp_write_ahb(ctrl, REG_DP_INTR_STATUS5,
++			 intr_ack | DP_INTERRUPT_STATUS5_MASK);
++
++	return intr & DP_INTERRUPT_STATUS5;
++}
++
++static u32 msm_dp_ctrl_get_mst_vcpf_interrupt_2_3(struct msm_dp_ctrl_private *ctrl)
++{
++	u32 intr, intr_ack;
++
++	intr = msm_dp_read_ahb(ctrl, REG_DP_INTR_STATUS7);
++	intr &= ~DP_INTERRUPT_STATUS7_MASK;
++	intr_ack = (intr & DP_INTERRUPT_STATUS7)
++			<< DP_INTERRUPT_STATUS_ACK_SHIFT;
++	msm_dp_write_ahb(ctrl, REG_DP_INTR_STATUS7,
++			 intr_ack | DP_INTERRUPT_STATUS7_MASK);
++
++	return intr & DP_INTERRUPT_STATUS7;
++}
++
+ static void msm_dp_ctrl_psr_mainlink_enable(struct msm_dp_ctrl_private *ctrl)
+ {
+ 	u32 val;
+@@ -391,6 +571,35 @@ void msm_dp_ctrl_push_idle(struct msm_dp_ctrl *msm_dp_ctrl)
+ 	drm_dbg_dp(ctrl->drm_dev, "mainlink off\n");
+ }
+ 
++/* Must be called with msm_dp_mst::mst_lock held */
++void msm_dp_ctrl_push_vcpf(struct msm_dp_ctrl *msm_dp_ctrl, struct msm_dp_panel *msm_dp_panel)
++{
++	struct msm_dp_ctrl_private *ctrl;
++	u32 state = 0x0;
++
++	ctrl = container_of(msm_dp_ctrl, struct msm_dp_ctrl_private, msm_dp_ctrl);
++
++	if (!ctrl->mst_active) {
++		msm_dp_ctrl_push_idle(msm_dp_ctrl);
++		return;
++	}
++
++	if (msm_dp_panel->stream_id == DP_STREAM_0)
++		state |= DP_STATE_CTRL_DP0_PUSH_VCPF;
++	else if (msm_dp_panel->stream_id == DP_STREAM_1)
++		state |= DP_STATE_CTRL_DP1_PUSH_VCPF;
++	else
++		state |= DP_MSTLINK_PUSH_VCPF;
++
++	reinit_completion(&ctrl->idle_comp);
++
++	msm_dp_write_stream_link(ctrl, msm_dp_panel->stream_id, REG_DP_STATE_CTRL, state);
++
++	if (!wait_for_completion_timeout(&ctrl->idle_comp,
++			IDLE_PATTERN_COMPLETION_TIMEOUT_JIFFIES))
++		pr_warn("PUSH_VCPF pattern timedout\n");
++}
++
+ static void msm_dp_ctrl_config_ctrl_streams(struct msm_dp_ctrl_private *ctrl,
+ 					    struct msm_dp_panel *msm_dp_panel)
+ {
+@@ -400,7 +609,8 @@ static void msm_dp_ctrl_config_ctrl_streams(struct msm_dp_ctrl_private *ctrl,
+ 	 * RMW: called from atomic_enable(), serialized by the DRM atomic framework.
+ 	 * Clear stream-specific fields before OR-ing to avoid bit accumulation.
+ 	 */
+-	config = msm_dp_read_link(ctrl, REG_DP_CONFIGURATION_CTRL);
++	config = msm_dp_read_stream_link(ctrl, msm_dp_panel->stream_id,
++					 REG_DP_CONFIGURATION_CTRL);
+ 	config &= ~(DP_CONFIGURATION_CTRL_RGB_YUV_MASK |
+ 		    DP_CONFIGURATION_CTRL_BPC_MASK |
+ 		    DP_CONFIGURATION_CTRL_SEND_VSC);
+@@ -418,7 +628,7 @@ static void msm_dp_ctrl_config_ctrl_streams(struct msm_dp_ctrl_private *ctrl,
+ 
+ 	drm_dbg_dp(ctrl->drm_dev, "stream DP_CONFIGURATION_CTRL=0x%x\n", config);
+ 
+-	msm_dp_write_link(ctrl, REG_DP_CONFIGURATION_CTRL, config);
++	msm_dp_write_stream_link(ctrl, msm_dp_panel->stream_id, REG_DP_CONFIGURATION_CTRL, config);
+ }
+ 
+ static void msm_dp_ctrl_config_ctrl_link(struct msm_dp_ctrl_private *ctrl,
+@@ -478,7 +688,7 @@ static void msm_dp_ctrl_config_misc1_misc0(struct msm_dp_ctrl_private *ctrl,
+ 	if (state && state->hdr_enabled)
+ 		colorimetry_cfg = DP_MISC0_COLORIMERY_CFG_LEGACY_RGB;
+ 
+-	misc_val = msm_dp_read_link(ctrl, REG_DP_MISC1_MISC0);
++	misc_val = msm_dp_read_stream_link(ctrl, msm_dp_panel->stream_id, REG_DP_MISC1_MISC0);
+ 
+ 	/* clear bpp bits */
+ 	misc_val &= ~((0x07 << DP_MISC0_TEST_BITS_DEPTH_SHIFT) | GENMASK(4, 1));
+@@ -488,7 +698,7 @@ static void msm_dp_ctrl_config_misc1_misc0(struct msm_dp_ctrl_private *ctrl,
+ 	misc_val |= DP_MISC0_SYNCHRONOUS_CLK;
+ 
+ 	drm_dbg_dp(ctrl->drm_dev, "misc settings = 0x%x\n", misc_val);
+-	msm_dp_write_link(ctrl, REG_DP_MISC1_MISC0, misc_val);
++	msm_dp_write_stream_link(ctrl, msm_dp_panel->stream_id, REG_DP_MISC1_MISC0, misc_val);
+ }
+ 
+ static void msm_dp_ctrl_configure_source_params(struct msm_dp_ctrl_private *ctrl,
+@@ -500,6 +710,7 @@ static void msm_dp_ctrl_configure_source_params(struct msm_dp_ctrl_private *ctrl
+ 	msm_dp_ctrl_config_misc1_misc0(ctrl, panel, state);
+ 
+ 	msm_dp_panel_timing_cfg(panel, ctrl->msm_dp_ctrl.wide_bus_en);
++	msm_dp_panel_mst_async_fifo(panel, ctrl->mst_active);
+ 	if (state) {
+ 		if (state->vsc_enabled)
+ 			msm_dp_panel_enable_vsc_sdp(panel, &state->vsc_sdp);
+@@ -1568,7 +1779,7 @@ static int msm_dp_ctrl_link_lane_down_shift(struct msm_dp_ctrl_private *ctrl,
+ 		return -1;
+ 
+ 	ctrl->link->link_params.num_lanes /= 2;
+-	ctrl->link->link_params.rate = panel->link_info.rate;
++	ctrl->link->link_params.rate = ctrl->link->link_caps.rate;
+ 
+ 	ctrl->link->phy_params.p_level = 0;
+ 	ctrl->link->phy_params.v_level = 0;
+@@ -1833,7 +2044,7 @@ int msm_dp_ctrl_core_clk_enable(struct msm_dp_ctrl *msm_dp_ctrl)
+ 
+ 	drm_dbg_dp(ctrl->drm_dev, "enable core clocks \n");
+ 	drm_dbg_dp(ctrl->drm_dev, "stream_clks:%s link_clks:%s core_clks:%s\n",
+-		   str_on_off(ctrl->stream_clks_on),
++		   str_on_off(ctrl->stream_clks_on[DP_STREAM_0]),
+ 		   str_on_off(ctrl->link_clks_on),
+ 		   str_on_off(ctrl->core_clks_on));
+ 
+@@ -1852,7 +2063,7 @@ void msm_dp_ctrl_core_clk_disable(struct msm_dp_ctrl *msm_dp_ctrl)
+ 
+ 	drm_dbg_dp(ctrl->drm_dev, "disable core clocks \n");
+ 	drm_dbg_dp(ctrl->drm_dev, "stream_clks:%s link_clks:%s core_clks:%s\n",
+-		   str_on_off(ctrl->stream_clks_on),
++		   str_on_off(ctrl->stream_clks_on[DP_STREAM_0]),
+ 		   str_on_off(ctrl->link_clks_on),
+ 		   str_on_off(ctrl->core_clks_on));
+ }
+@@ -1883,7 +2094,7 @@ static int msm_dp_ctrl_link_clk_enable(struct msm_dp_ctrl *msm_dp_ctrl)
+ 
+ 	drm_dbg_dp(ctrl->drm_dev, "enable link clocks\n");
+ 	drm_dbg_dp(ctrl->drm_dev, "stream_clks:%s link_clks:%s core_clks:%s\n",
+-		   str_on_off(ctrl->stream_clks_on),
++		   str_on_off(ctrl->stream_clks_on[DP_STREAM_0]),
+ 		   str_on_off(ctrl->link_clks_on),
+ 		   str_on_off(ctrl->core_clks_on));
+ 
+@@ -1904,7 +2115,7 @@ static void msm_dp_ctrl_link_clk_disable(struct msm_dp_ctrl *msm_dp_ctrl)
+ 
+ 	drm_dbg_dp(ctrl->drm_dev, "disabled link clocks\n");
+ 	drm_dbg_dp(ctrl->drm_dev, "stream_clks:%s link_clks:%s core_clks:%s\n",
+-		   str_on_off(ctrl->stream_clks_on),
++		   str_on_off(ctrl->stream_clks_on[DP_STREAM_0]),
+ 		   str_on_off(ctrl->link_clks_on),
+ 		   str_on_off(ctrl->core_clks_on));
+ }
+@@ -2307,38 +2518,39 @@ static bool msm_dp_ctrl_send_phy_test_pattern(struct msm_dp_ctrl_private *ctrl)
+ 	return success;
+ }
+ 
+-static int msm_dp_ctrl_on_pixel_clk(struct msm_dp_ctrl_private *ctrl, unsigned long pixel_rate)
++static int msm_dp_ctrl_on_pixel_clk(struct msm_dp_ctrl_private *ctrl, unsigned long pixel_rate,
++				    enum msm_dp_stream_id stream_id)
+ {
+ 	int ret;
+ 
+-	ret = clk_set_rate(ctrl->pixel_clk, pixel_rate * 1000);
++	ret = clk_set_rate(ctrl->pixel_clk[stream_id], pixel_rate * 1000);
+ 	if (ret) {
+ 		DRM_ERROR("Failed to set pixel clock rate. ret=%d\n", ret);
+ 		return ret;
+ 	}
+ 
+-	if (WARN_ON_ONCE(ctrl->stream_clks_on))
+-		return 0;
++	if (WARN_ON_ONCE(ctrl->stream_clks_on[stream_id]))
++		return -EINVAL;
+ 
+-	ret = clk_prepare_enable(ctrl->pixel_clk);
++	ret = clk_prepare_enable(ctrl->pixel_clk[stream_id]);
+ 	if (ret) {
+ 		DRM_ERROR("Failed to start pixel clocks. ret=%d\n", ret);
+ 		return ret;
+ 	}
+-	ctrl->stream_clks_on = true;
++	ctrl->stream_clks_on[stream_id] = true;
+ 
+ 	return ret;
+ }
+ 
+-void msm_dp_ctrl_off_pixel_clk(struct msm_dp_ctrl *msm_dp_ctrl)
++void msm_dp_ctrl_off_pixel_clk(struct msm_dp_ctrl *msm_dp_ctrl, enum msm_dp_stream_id stream_id)
+ {
+ 	struct msm_dp_ctrl_private *ctrl;
+ 
+ 	ctrl = container_of(msm_dp_ctrl, struct msm_dp_ctrl_private, msm_dp_ctrl);
+ 
+-	if (ctrl->stream_clks_on) {
+-		clk_disable_unprepare(ctrl->pixel_clk);
+-		ctrl->stream_clks_on = false;
++	if (ctrl->stream_clks_on[stream_id]) {
++		clk_disable_unprepare(ctrl->pixel_clk[stream_id]);
++		ctrl->stream_clks_on[stream_id] = false;
+ 	}
+ }
+ 
+@@ -2359,7 +2571,7 @@ static int msm_dp_ctrl_process_phy_test_request(struct msm_dp_ctrl_private *ctrl
+ 	 * running. Add the global reset just before disabling the
+ 	 * link clocks and core clocks.
+ 	 */
+-	msm_dp_ctrl_off_pixel_clk(&ctrl->msm_dp_ctrl);
++	msm_dp_ctrl_off_pixel_clk(&ctrl->msm_dp_ctrl, panel->stream_id);
+ 	msm_dp_ctrl_off_link(&ctrl->msm_dp_ctrl, panel);
+ 
+ 	ret = msm_dp_ctrl_on_link(&ctrl->msm_dp_ctrl, panel);
+@@ -2368,8 +2580,10 @@ static int msm_dp_ctrl_process_phy_test_request(struct msm_dp_ctrl_private *ctrl
+ 		return ret;
+ 	}
+ 
++	ctrl->mst_active = false;
++
+ 	pixel_rate = panel->msm_dp_mode.drm_mode.clock;
+-	ret = msm_dp_ctrl_on_pixel_clk(ctrl, pixel_rate);
++	ret = msm_dp_ctrl_on_pixel_clk(ctrl, pixel_rate, panel->stream_id);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -2450,6 +2664,14 @@ static bool msm_dp_ctrl_channel_eq_ok(struct msm_dp_ctrl_private *ctrl)
+ 	return drm_dp_channel_eq_ok(link_status, num_lanes);
+ }
+ 
++int msm_dp_ctrl_get_lane_count(struct msm_dp_ctrl *msm_dp_ctrl)
++{
++	struct msm_dp_ctrl_private *ctrl =
++		container_of(msm_dp_ctrl, struct msm_dp_ctrl_private, msm_dp_ctrl);
++
++	return phy_get_bus_width(ctrl->phy);
++}
++
+ int msm_dp_ctrl_on_link(struct msm_dp_ctrl *msm_dp_ctrl,
+ 			struct msm_dp_panel *panel)
+ {
+@@ -2467,7 +2689,7 @@ int msm_dp_ctrl_on_link(struct msm_dp_ctrl *msm_dp_ctrl,
+ 
+ 	ctrl = container_of(msm_dp_ctrl, struct msm_dp_ctrl_private, msm_dp_ctrl);
+ 
+-	rate = panel->link_info.rate;
++	rate = ctrl->link->link_caps.rate;
+ 	pixel_rate = panel->msm_dp_mode.drm_mode.clock;
+ 
+ 	msm_dp_ctrl_core_clk_enable(&ctrl->msm_dp_ctrl);
+@@ -2480,7 +2702,7 @@ int msm_dp_ctrl_on_link(struct msm_dp_ctrl *msm_dp_ctrl,
+ 	} else {
+ 		ctrl->link->link_params.rate = rate;
+ 		ctrl->link->link_params.num_lanes =
+-			panel->link_info.num_lanes;
++			ctrl->link->link_caps.num_lanes;
+ 		if (panel->msm_dp_mode.out_fmt_is_yuv_420)
+ 			pixel_rate >>= 1;
+ 	}
+@@ -2585,14 +2807,14 @@ static int msm_dp_ctrl_link_retrain(struct msm_dp_ctrl_private *ctrl,
+ }
+ 
+ static void msm_dp_ctrl_config_msa(struct msm_dp_ctrl_private *ctrl,
+-			       u32 rate, u32 stream_rate_khz,
+-			       bool is_ycbcr_420)
++				   struct msm_dp_panel *panel, u32 rate)
+ {
+ 	u32 pixel_m, pixel_n;
+ 	u32 mvid, nvid, pixel_div, dispcc_input_rate;
+ 	u32 const nvid_fixed = DP_LINK_CONSTANT_N_VALUE;
+ 	u32 const link_rate_hbr2 = 540000;
+ 	u32 const link_rate_hbr3 = 810000;
++	u32 stream_rate_khz = panel->msm_dp_mode.drm_mode.clock;
+ 	unsigned long den, num;
+ 
+ 	switch (rate) {
+@@ -2638,7 +2860,7 @@ static void msm_dp_ctrl_config_msa(struct msm_dp_ctrl_private *ctrl,
+ 		nvid = temp;
+ 	}
+ 
+-	if (is_ycbcr_420)
++	if (panel->msm_dp_mode.out_fmt_is_yuv_420)
+ 		mvid /= 2;
+ 
+ 	if (link_rate_hbr2 == rate)
+@@ -2648,8 +2870,119 @@ static void msm_dp_ctrl_config_msa(struct msm_dp_ctrl_private *ctrl,
+ 		nvid *= 3;
+ 
+ 	drm_dbg_dp(ctrl->drm_dev, "mvid=0x%x, nvid=0x%x\n", mvid, nvid);
+-	msm_dp_write_link(ctrl, REG_DP_SOFTWARE_MVID, mvid);
+-	msm_dp_write_link(ctrl, REG_DP_SOFTWARE_NVID, nvid);
++	msm_dp_write_stream_link(ctrl, panel->stream_id, REG_DP_SOFTWARE_MVID, mvid);
++	msm_dp_write_stream_link(ctrl, panel->stream_id, REG_DP_SOFTWARE_NVID, nvid);
++}
++
++/*
++ * Calculate MST Rate Governor parameters x_int and y_frac_enum.
++ *
++ * The RG paces symbol delivery per MTP via: M = x_int + y_frac_enum/256
++ * where M is the target symbol count per MTP across all lanes.
++ *
++ * min_slot_cnt = (pclk * bpp/8) / (lclk * lanes) * 64   -- slots at 1.0x BW
++ * max_slot_cnt = pbn * 54 / (lclk * lanes)               -- slots at PBN limit
++ * raw_target_sc = (min + max) / 2                        -- midpoint (~1.003x)
++ *
++ * Quantize raw_target_sc to 1/(256*lanes) steps, then:
++ *   M           = Chosen_TARGET_Slot_Count * lanes
++ *   x_int       = INT(M)
++ *   y_frac_enum = CEIL(256 * MOD(M, 1))
++ */
++static void msm_dp_ctrl_mst_calculate_rg(struct msm_dp_ctrl_private *ctrl,
++					 struct msm_dp_panel *panel,
++					 u32 *p_x_int, u32 *p_y_frac_enum)
++{
++	u64 min_slot_cnt, max_slot_cnt;
++	u64 raw_target_sc, target_sc_fixp;
++	u64 ts_denom, ts_enum, ts_int;
++	u64 pclk = panel->msm_dp_mode.drm_mode.clock;
++	u64 lclk = 0;
++	u64 lanes = ctrl->link->link_params.num_lanes;
++	u64 bpp = panel->msm_dp_mode.bpp;
++	u64 pbn = ctrl->mst_ch_info[panel->stream_id].pbn;
++	u64 numerator, denominator, temp, temp1, temp2;
++	u32 x_int = 0, y_frac_enum = 0;
++	u64 target_strm_sym, ts_int_fixp, ts_frac_fixp, y_frac_enum_fixp;
++
++	lclk = ctrl->link->link_params.rate;
++
++	/* min_slot_cnt */
++	numerator = pclk * bpp * 64 * 1000;
++	denominator = lclk * lanes * 8 * 1000;
++	min_slot_cnt = drm_fixp_from_fraction(numerator, denominator);
++
++	/* max_slot_cnt */
++	numerator = pbn * 54 * 1000;
++	denominator = lclk * lanes;
++	max_slot_cnt = drm_fixp_from_fraction(numerator, denominator);
++
++	/* raw_target_sc */
++	numerator = max_slot_cnt + min_slot_cnt;
++	denominator = drm_fixp_from_fraction(2, 1);
++	raw_target_sc = drm_fixp_div(numerator, denominator);
++
++	/* target_sc */
++	temp = drm_fixp_from_fraction(256 * lanes, 1);
++	numerator = drm_fixp_mul(raw_target_sc, temp);
++	denominator = drm_fixp_from_fraction(256 * lanes, 1);
++	target_sc_fixp = drm_fixp_div(numerator, denominator);
++
++	ts_enum = 256 * lanes;
++	ts_denom = drm_fixp_from_fraction(256 * lanes, 1);
++	ts_int = drm_fixp2int(target_sc_fixp);
++
++	temp = drm_fixp2int_ceil(raw_target_sc);
++	if (temp != ts_int) {
++		temp = drm_fixp_from_fraction(ts_int, 1);
++		temp1 = raw_target_sc - temp;
++		temp2 = drm_fixp_mul(temp1, ts_denom);
++		ts_enum = drm_fixp2int(temp2);
++	}
++
++	/* target_strm_sym */
++	ts_int_fixp = drm_fixp_from_fraction(ts_int, 1);
++	ts_frac_fixp = drm_fixp_from_fraction(ts_enum, drm_fixp2int(ts_denom));
++	temp = ts_int_fixp + ts_frac_fixp;
++	temp1 = drm_fixp_from_fraction(lanes, 1);
++	target_strm_sym = drm_fixp_mul(temp, temp1);
++
++	/* x_int */
++	x_int = drm_fixp2int(target_strm_sym);
++
++	/* y_enum_frac */
++	temp = drm_fixp_from_fraction(x_int, 1);
++	temp1 = target_strm_sym - temp;
++	temp2 = drm_fixp_from_fraction(256, 1);
++	y_frac_enum_fixp = drm_fixp_mul(temp1, temp2);
++
++	temp1 = drm_fixp2int(y_frac_enum_fixp);
++	temp2 = drm_fixp2int_ceil(y_frac_enum_fixp);
++
++	y_frac_enum = (u32)((temp1 == temp2) ? temp1 : temp1 + 1);
++
++	*p_x_int = x_int;
++	*p_y_frac_enum = y_frac_enum;
++
++	drm_dbg_dp(ctrl->drm_dev, "MST lane_cnt:%llu, rate:%llu x_int:%d, y_frac:%d\n",
++		   lanes, lclk, x_int, y_frac_enum);
++}
++
++static void msm_dp_ctrl_mst_stream_setup(struct msm_dp_ctrl_private *ctrl,
++					 struct msm_dp_panel *panel)
++{
++	u32 x_int, y_frac_enum;
++
++	if (!ctrl->mst_active)
++		return;
++
++	drm_dbg_dp(ctrl->drm_dev, "MST stream channel allocation\n");
++
++	msm_dp_ctrl_mst_timeslot_setup(&ctrl->msm_dp_ctrl);
++
++	msm_dp_ctrl_mst_calculate_rg(ctrl, panel, &x_int, &y_frac_enum);
++
++	msm_dp_ctrl_update_rg(ctrl, panel->stream_id, x_int, y_frac_enum);
+ }
+ 
+ int msm_dp_ctrl_prepare_stream_on(struct msm_dp_ctrl *msm_dp_ctrl,
+@@ -2668,9 +3001,8 @@ int msm_dp_ctrl_prepare_stream_on(struct msm_dp_ctrl *msm_dp_ctrl,
+ 		   ctrl->link->link_params.rate,
+ 		   ctrl->link->link_params.num_lanes);
+ 
+-	drm_dbg_dp(ctrl->drm_dev,
+-		"core_clk_on=%d link_clk_on=%d stream_clk_on=%d\n",
+-		ctrl->core_clks_on, ctrl->link_clks_on, ctrl->stream_clks_on);
++	drm_dbg_dp(ctrl->drm_dev, "core_clk_on=%d link_clk_on=%d\n",
++		   ctrl->core_clks_on, ctrl->link_clks_on);
+ 
+ 	if (!ctrl->link_clks_on) { /* link clk is off */
+ 		ret = msm_dp_ctrl_enable_mainlink_clocks(ctrl, panel);
+@@ -2711,7 +3043,7 @@ int msm_dp_ctrl_prepare_stream_on(struct msm_dp_ctrl *msm_dp_ctrl,
+ }
+ 
+ int msm_dp_ctrl_on_stream(struct msm_dp_ctrl *msm_dp_ctrl, struct msm_dp_panel *panel,
+-			  const struct msm_dp_bridge_state *state)
++			  const struct msm_dp_bridge_state *state, bool mst_active)
+ {
+ 	int ret = 0;
+ 	bool mainlink_ready = false;
+@@ -2725,6 +3057,7 @@ int msm_dp_ctrl_on_stream(struct msm_dp_ctrl *msm_dp_ctrl, struct msm_dp_panel *
+ 	ctrl = container_of(msm_dp_ctrl, struct msm_dp_ctrl_private, msm_dp_ctrl);
+ 
+ 	pixel_rate_orig = panel->msm_dp_mode.drm_mode.clock;
++	ctrl->mst_active = mst_active;
+ 	if (state && panel->connector->display_info.is_hdmi &&
+ 	    !msm_dp_utils_tmds_fits(pixel_rate_orig, panel->msm_dp_mode.bpp,
+ 			panel->connector->display_info.max_tmds_clock,
+@@ -2746,7 +3079,7 @@ int msm_dp_ctrl_on_stream(struct msm_dp_ctrl *msm_dp_ctrl, struct msm_dp_panel *
+ 
+ 	drm_dbg_dp(ctrl->drm_dev, "pixel_rate=%lu\n", pixel_rate);
+ 
+-	ret = msm_dp_ctrl_on_pixel_clk(ctrl, pixel_rate);
++	ret = msm_dp_ctrl_on_pixel_clk(ctrl, pixel_rate, panel->stream_id);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -2758,24 +3091,30 @@ int msm_dp_ctrl_on_stream(struct msm_dp_ctrl *msm_dp_ctrl, struct msm_dp_panel *
+ 
+ 	msm_dp_ctrl_lane_mapping(ctrl);
+ 	msm_dp_setup_peripheral_flush(ctrl);
+-	msm_dp_ctrl_config_ctrl_link(ctrl, panel);
++	if (ctrl->mst_active)
++		msm_dp_ctrl_mst_config(ctrl, true);
+ 
+ 	msm_dp_ctrl_configure_source_params(ctrl, panel, state);
+ 
+-	msm_dp_ctrl_config_msa(ctrl,
+-		ctrl->link->link_params.rate,
+-		pixel_rate_orig,
+-		panel->msm_dp_mode.out_fmt_is_yuv_420);
++	msm_dp_ctrl_config_msa(ctrl, panel,
++		ctrl->link->link_params.rate);
+ 
+ 	if (of_device_is_compatible(ctrl->dev->of_node, "qcom,sm7675-dp"))
+ 		msm_dp_panel_config_dsc(panel);
+ 	else
+ 		msm_dp_panel_clear_dsc_dto(panel);
+ 
+-	msm_dp_ctrl_setup_tr_unit(ctrl, panel);
++	if (!ctrl->mst_active)
++		msm_dp_ctrl_setup_tr_unit(ctrl, panel);
++
++	msm_dp_ctrl_mst_stream_setup(ctrl, panel);
+ 
+ 	msm_dp_write_link(ctrl, REG_DP_STATE_CTRL, DP_STATE_CTRL_SEND_VIDEO);
+ 
++	ret = msm_dp_ctrl_mst_send_act(msm_dp_ctrl, panel);
++	if (ret)
++		return ret;
++
+ 	ret = msm_dp_ctrl_wait4video_ready(ctrl);
+ 	if (ret)
+ 		return ret;
+@@ -2813,11 +3152,13 @@ void msm_dp_ctrl_off_link(struct msm_dp_ctrl *msm_dp_ctrl,
+ 	ctrl = container_of(msm_dp_ctrl, struct msm_dp_ctrl_private, msm_dp_ctrl);
+ 
+ 	msm_dp_ctrl_fec_disable(ctrl, panel);
++	ctrl->mst_active = false;
+ 	if (ctrl->link_clks_on) {
+ 		msm_dp_panel_disable_vsc_sdp(panel);
+ 		if (of_device_is_compatible(ctrl->dev->of_node, "qcom,sm7675-dp"))
+ 			msm_dp_panel_disable_hdr_sdp(panel);
+ 		msm_dp_ctrl_mainlink_disable(ctrl);
++		msm_dp_ctrl_mst_config(ctrl, false);
+ 	}
+ 
+ 	msm_dp_ctrl_reset(&ctrl->msm_dp_ctrl, panel);
+@@ -2828,6 +3169,35 @@ void msm_dp_ctrl_off_link(struct msm_dp_ctrl *msm_dp_ctrl,
+ 	msm_dp_ctrl_phy_power_off(ctrl);
+ }
+ 
++void msm_dp_ctrl_set_mst_channel_info(struct msm_dp_ctrl *msm_dp_ctrl,
++				      enum msm_dp_stream_id stream_id,
++				      u32 start_slot, u32 tot_slots, u32 pbn)
++{
++	struct msm_dp_ctrl_private *ctrl;
++
++	if (!msm_dp_ctrl || stream_id >= DP_STREAM_MAX) {
++		DRM_ERROR("invalid input\n");
++		return;
++	}
++	ctrl = container_of(msm_dp_ctrl, struct msm_dp_ctrl_private, msm_dp_ctrl);
++	ctrl->mst_ch_info[stream_id].start_slot = start_slot;
++	ctrl->mst_ch_info[stream_id].tot_slots = tot_slots;
++	ctrl->mst_ch_info[stream_id].pbn = pbn;
++}
++
++void msm_dp_ctrl_mst_timeslot_setup(struct msm_dp_ctrl *msm_dp_ctrl)
++{
++	struct msm_dp_ctrl_private *ctrl;
++	int i;
++
++	ctrl = container_of(msm_dp_ctrl, struct msm_dp_ctrl_private, msm_dp_ctrl);
++	if (!ctrl->mst_active)
++		return;
++	for (i = DP_STREAM_0; i < ctrl->num_pixel_clks; i++)
++		msm_dp_ctrl_mst_update_timeslot(ctrl, i, ctrl->mst_ch_info[i].start_slot,
++					      ctrl->mst_ch_info[i].tot_slots);
++}
++
+ irqreturn_t msm_dp_ctrl_isr(struct msm_dp_ctrl *msm_dp_ctrl,
+ 			    struct msm_dp_panel *panel)
+ {
+@@ -2857,6 +3227,9 @@ irqreturn_t msm_dp_ctrl_isr(struct msm_dp_ctrl *msm_dp_ctrl,
+ 	}
+ 
+ 	isr = msm_dp_ctrl_get_interrupt(ctrl);
++	/* All status2 sources are ACKed by msm_dp_ctrl_get_interrupt(). */
++	if (isr & DP_INTERRUPT_STATUS2)
++		ret = IRQ_HANDLED;
+ 
+ 	if (isr & DP_CTRL_INTR_READY_FOR_VIDEO) {
+ 		drm_dbg_dp(ctrl->drm_dev, "dp_video_ready\n");
+@@ -2870,6 +3243,16 @@ irqreturn_t msm_dp_ctrl_isr(struct msm_dp_ctrl *msm_dp_ctrl,
+ 		ret = IRQ_HANDLED;
+ 	}
+ 
++	isr = msm_dp_ctrl_get_mst_vcpf_interrupt_0_1(ctrl);
++	if (ctrl->num_pixel_clks > DP_STREAM_2)
++		isr |= msm_dp_ctrl_get_mst_vcpf_interrupt_2_3(ctrl);
++
++	if (isr & (DP_INTR_MST_DP0_VCPF_SENT | DP_INTR_MST_DP1_VCPF_SENT |
++		   DP_INTR_MST_DP2_VCPF_SENT | DP_INTR_MST_DP3_VCPF_SENT)) {
++		complete(&ctrl->idle_comp);
++		ret = IRQ_HANDLED;
++	}
++
+ 	/* DP aux isr */
+ 	isr = msm_dp_ctrl_get_aux_interrupt(ctrl);
+ 	if (isr)
+@@ -2888,6 +3271,13 @@ static const char *ctrl_clks[] = {
+ 	"ctrl_link_iface",
+ };
+ 
++static const char * const pixel_clks[] = {
++	"stream_pixel",
++	"stream_1_pixel",
++	"stream_2_pixel",
++	"stream_3_pixel",
++};
++
+ static int msm_dp_ctrl_clk_init(struct msm_dp_ctrl *msm_dp_ctrl)
+ {
+ 	struct msm_dp_ctrl_private *ctrl;
+@@ -2921,18 +3311,49 @@ static int msm_dp_ctrl_clk_init(struct msm_dp_ctrl *msm_dp_ctrl)
+ 	if (rc)
+ 		return rc;
+ 
+-	ctrl->pixel_clk = devm_clk_get(dev, "stream_pixel");
+-	if (IS_ERR(ctrl->pixel_clk))
+-		return PTR_ERR(ctrl->pixel_clk);
++	ctrl->pixel_clk[0] = devm_clk_get(dev, pixel_clks[0]);
++	if (IS_ERR(ctrl->pixel_clk[0]))
++		return PTR_ERR(ctrl->pixel_clk[0]);
++	ctrl->num_pixel_clks = 1;
++
++	for (i = DP_STREAM_1; i < DP_STREAM_MAX; i++) {
++		ctrl->pixel_clk[i] = devm_clk_get_optional(dev, pixel_clks[i]);
++		if (IS_ERR(ctrl->pixel_clk[i]))
++			return PTR_ERR(ctrl->pixel_clk[i]);
++		if (!ctrl->pixel_clk[i])
++			break;
++		ctrl->num_pixel_clks++;
++	}
+ 
+ 	return 0;
+ }
+ 
++bool msm_dp_ctrl_stream_clks_on(struct msm_dp_ctrl *msm_dp_ctrl,
++				enum msm_dp_stream_id stream_id)
++{
++	struct msm_dp_ctrl_private *ctrl;
++
++	ctrl = container_of(msm_dp_ctrl, struct msm_dp_ctrl_private, msm_dp_ctrl);
++
++	return ctrl->stream_clks_on[stream_id];
++}
++
++int msm_dp_ctrl_get_stream_cnt(struct msm_dp_ctrl *msm_dp_ctrl)
++{
++	struct msm_dp_ctrl_private *ctrl;
++
++	ctrl = container_of(msm_dp_ctrl, struct msm_dp_ctrl_private, msm_dp_ctrl);
++
++	return ctrl->num_pixel_clks;
++}
++
+ struct msm_dp_ctrl *msm_dp_ctrl_get(struct device *dev, struct msm_dp_link *link,
+ 			struct drm_dp_aux *aux,
+ 			struct phy *phy,
+ 			void __iomem *ahb_base,
+-			void __iomem *link_base)
++			void __iomem *link_base,
++			void __iomem *mst2link_base,
++			void __iomem *mst3link_base)
+ {
+ 	struct msm_dp_ctrl_private *ctrl;
+ 	int ret;
+@@ -2971,6 +3392,9 @@ struct msm_dp_ctrl *msm_dp_ctrl_get(struct device *dev, struct msm_dp_link *link
+ 	ctrl->phy      = phy;
+ 	ctrl->ahb_base = ahb_base;
+ 	ctrl->link_base = link_base;
++	ctrl->mst2link_base = mst2link_base;
++	ctrl->mst3link_base = mst3link_base;
++	ctrl->mst_active = false;
+ 
+ 	ret = msm_dp_ctrl_clk_init(&ctrl->msm_dp_ctrl);
+ 	if (ret) {
+diff --git a/drivers/gpu/drm/msm/dp/dp_ctrl.h b/drivers/gpu/drm/msm/dp/dp_ctrl.h
+index 070bc58..315c65b 100644
+--- a/drivers/gpu/drm/msm/dp/dp_ctrl.h
++++ b/drivers/gpu/drm/msm/dp/dp_ctrl.h
+@@ -15,19 +15,21 @@ struct msm_dp_ctrl {
+ };
+ 
+ struct phy;
++int msm_dp_ctrl_get_lane_count(struct msm_dp_ctrl *msm_dp_ctrl);
+ 
+ int msm_dp_ctrl_on_link(struct msm_dp_ctrl *msm_dp_ctrl,
+ 			struct msm_dp_panel *panel);
+ struct msm_dp_bridge_state;
+ int msm_dp_ctrl_on_stream(struct msm_dp_ctrl *msm_dp_ctrl, struct msm_dp_panel *panel,
+-			  const struct msm_dp_bridge_state *state);
++			  const struct msm_dp_bridge_state *state, bool mst_active);
+ int msm_dp_ctrl_prepare_stream_on(struct msm_dp_ctrl *msm_dp_ctrl,
+ 				  struct msm_dp_panel *panel,
+ 				  bool force_link_train);
+ void msm_dp_ctrl_off_link(struct msm_dp_ctrl *msm_dp_ctrl,
+ 			  struct msm_dp_panel *panel);
+-void msm_dp_ctrl_off_pixel_clk(struct msm_dp_ctrl *msm_dp_ctrl);
++void msm_dp_ctrl_off_pixel_clk(struct msm_dp_ctrl *msm_dp_ctrl, enum msm_dp_stream_id stream_id);
+ void msm_dp_ctrl_push_idle(struct msm_dp_ctrl *msm_dp_ctrl);
++void msm_dp_ctrl_push_vcpf(struct msm_dp_ctrl *msm_dp_ctrl, struct msm_dp_panel *panel);
+ irqreturn_t msm_dp_ctrl_isr(struct msm_dp_ctrl *msm_dp_ctrl,
+ 			    struct msm_dp_panel *panel);
+ int msm_dp_ctrl_handle_sink_request(struct msm_dp_ctrl *msm_dp_ctrl,
+@@ -37,7 +39,9 @@ struct msm_dp_ctrl *msm_dp_ctrl_get(struct device *dev,
+ 				    struct drm_dp_aux *aux,
+ 				    struct phy *phy,
+ 				    void __iomem *ahb_base,
+-				    void __iomem *link_base);
++				    void __iomem *link_base,
++				    void __iomem *mst2link_base,
++				    void __iomem *mst3link_base);
+ 
+ void msm_dp_ctrl_reset(struct msm_dp_ctrl *msm_dp_ctrl,
+ 		       struct msm_dp_panel *panel);
+@@ -57,4 +61,13 @@ void msm_dp_ctrl_enable_irq(struct msm_dp_ctrl *msm_dp_ctrl);
+ void msm_dp_ctrl_disable_irq(struct msm_dp_ctrl *msm_dp_ctrl);
+ 
+ void msm_dp_ctrl_reinit_phy(struct msm_dp_ctrl *msm_dp_ctrl);
++bool msm_dp_ctrl_stream_clks_on(struct msm_dp_ctrl *dp_ctrl,
++				enum msm_dp_stream_id stream_id);
++int msm_dp_ctrl_get_stream_cnt(struct msm_dp_ctrl *dp_ctrl);
++int msm_dp_ctrl_mst_send_act(struct msm_dp_ctrl *msm_dp_ctrl,
++			     struct msm_dp_panel *panel);
++void msm_dp_ctrl_mst_timeslot_setup(struct msm_dp_ctrl *msm_dp_ctrl);
++void msm_dp_ctrl_set_mst_channel_info(struct msm_dp_ctrl *msm_dp_ctrl,
++				      enum msm_dp_stream_id stream_id,
++				      u32 start_slot, u32 tot_slots, u32 pbn);
+ #endif /* _DP_CTRL_H_ */
+diff --git a/drivers/gpu/drm/msm/dp/dp_debug.c b/drivers/gpu/drm/msm/dp/dp_debug.c
+index 7f04783..7990106 100644
+--- a/drivers/gpu/drm/msm/dp/dp_debug.c
++++ b/drivers/gpu/drm/msm/dp/dp_debug.c
+@@ -28,11 +28,13 @@ struct msm_dp_debug_private {
+ static int msm_dp_output_bits_show(struct seq_file *seq, void *unused)
+ {
+ 	struct msm_dp_debug_private *debug = seq->private;
+-	bool active = READ_ONCE(debug->display->power_on);
++	bool active = READ_ONCE(debug->panel->stream_active);
+ 	unsigned int bpp = active ? READ_ONCE(debug->panel->msm_dp_mode.bpp) : 0;
++	unsigned int dsc_bpp = active && READ_ONCE(debug->panel->dsc_active) ?
++		READ_ONCE(debug->panel->dsc.dsc.bits_per_pixel) : 0;
+ 
+-	seq_printf(seq, "version=1 active=%u bpc=%u bpp=%u dsc_bpp_x16=0\n",
+-		   active, bpp / 3, bpp);
++	seq_printf(seq, "version=1 active=%u bpc=%u bpp=%u dsc_bpp_x16=%u\n",
++		   active, bpp / 3, bpp, dsc_bpp);
+ 	return 0;
+ }
+ DEFINE_SHOW_ATTRIBUTE(msm_dp_output_bits);
+@@ -51,11 +53,11 @@ static int msm_dp_debug_show(struct seq_file *seq, void *p)
+ 
+ 	seq_printf(seq, "\tname = %s\n", DEBUG_NAME);
+ 	seq_printf(seq, "\tdrm_dp_link\n\t\trate = %u\n",
+-			debug->panel->link_info.rate);
++			debug->link->link_caps.rate);
+ 	seq_printf(seq, "\t\tnum_lanes = %u\n",
+-			debug->panel->link_info.num_lanes);
++			debug->link->link_caps.num_lanes);
+ 	seq_printf(seq, "\t\tcapabilities = %lu\n",
+-			debug->panel->link_info.capabilities);
++			debug->link->link_caps.capabilities);
+ 	seq_printf(seq, "\tdp_panel_info:\n\t\tactive = %dx%d\n",
+ 			drm_mode->hdisplay,
+ 			drm_mode->vdisplay);
+diff --git a/drivers/gpu/drm/msm/dp/dp_display.c b/drivers/gpu/drm/msm/dp/dp_display.c
+index 54fd4dc..d8e0928 100644
+--- a/drivers/gpu/drm/msm/dp/dp_display.c
++++ b/drivers/gpu/drm/msm/dp/dp_display.c
+@@ -14,6 +14,7 @@
+ #include <linux/string_choices.h>
+ #include <linux/workqueue.h>
+ #include <drm/display/drm_dp_aux_bus.h>
++#include <drm/display/drm_dp_mst_helper.h>
+ #include <drm/display/drm_hdmi_audio_helper.h>
+ #include <drm/drm_edid.h>
+ #include <drm/drm_probe_helper.h>
+@@ -30,6 +31,7 @@
+ #include "dp_audio.h"
+ #include "dp_debug.h"
+ #include "dp_utils.h"
++#include "dp_mst_drm.h"
+ 
+ static bool psr_enabled = false;
+ module_param(psr_enabled, bool, 0);
+@@ -58,6 +60,7 @@ struct msm_dp_display_private {
+ 	bool color_needs_flush;
+ 	bool stream_pm_active;
+ 	bool stream_link_attempted;
++	bool sink_mst_capable;
+ 	struct work_struct link_status_work;
+ 	bool link_failed;
+ 	bool link_status_notified;
+@@ -94,8 +97,14 @@ struct msm_dp_display_private {
+ 	void __iomem *link_base;
+ 	size_t link_len;
+ 
+-	void __iomem *p0_base;
+-	size_t p0_len;
++	void __iomem *mst2link_base;
++	size_t mst2link_len;
++
++	void __iomem *mst3link_base;
++	size_t mst3link_len;
++
++	void __iomem *pixel_base[DP_STREAM_MAX];
++	size_t pixel_len[DP_STREAM_MAX];
+ };
+ 
+ struct msm_dp_desc {
+@@ -273,10 +282,48 @@ static int msm_dp_display_lttpr_init(struct msm_dp_display_private *dp, u8 *dpcd
+ 	return lttpr_count;
+ }
+ 
++static int msm_dp_display_mst_enable(struct msm_dp_display_private *dp)
++{
++	struct msm_dp *msm_dp = &dp->msm_dp_display;
++	int ret;
++
++	if (dp->panel->dsc_requested) {
++		drm_err(dp->drm_dev, "MST with DSC is not supported by this profile\n");
++		return -EOPNOTSUPP;
++	}
++	/* Clear any pre-existing MST state before enabling MST. */
++	ret = drm_dp_dpcd_write_byte(dp->aux, DP_MSTM_CTRL, 0);
++	if (ret < 0) {
++		DRM_ERROR("failed to clear DP_MSTM_CTRL, ret=%d\n", ret);
++		return ret;
++	}
++
++	ret = drm_dp_dpcd_write_byte(dp->aux, DP_MSTM_CTRL,
++				     DP_MST_EN | DP_UP_REQ_EN | DP_UPSTREAM_IS_SRC);
++	if (ret < 0) {
++		DRM_ERROR("sink MST enablement failed\n");
++		return ret;
++	}
++
++	msm_dp->mst_active = true;
++	ret = msm_dp_mst_display_set_mgr_state(msm_dp, true);
++	if (ret < 0) {
++		msm_dp->mst_active = false;
++		drm_dp_dpcd_write_byte(dp->aux, DP_MSTM_CTRL, 0);
++		return ret;
++	}
++
++	scoped_guard(mutex, &msm_dp->connector->dev->mode_config.mutex)
++		msm_dp->connector->status = connector_status_disconnected;
++
++	return 0;
++}
++
+ static int msm_dp_display_process_hpd_high(struct msm_dp_display_private *dp)
+ {
+ 	struct drm_connector *connector = dp->msm_dp_display.connector;
+ 	const struct drm_display_info *info = &connector->display_info;
++	enum drm_dp_mst_mode mst_mode = DRM_DP_SST;
+ 	int rc = 0;
+ 	u8 dpcd[DP_RECEIVER_CAP_SIZE];
+ 	const struct drm_edid *drm_edid = NULL;
+@@ -290,15 +337,30 @@ static int msm_dp_display_process_hpd_high(struct msm_dp_display_private *dp)
+ 	rc = msm_dp_panel_read_link_caps(dp->panel, connector);
+ 	if (rc)
+ 		goto end;
++	if (of_device_is_compatible(dp->msm_dp_display.pdev->dev.of_node, "qcom,sm7675-dp")) {
++		int lanes = msm_dp_ctrl_get_lane_count(dp->ctrl);
++
++		if (!is_lane_count_valid(lanes)) {
++			rc = -ENOTCONN;
++			goto end;
++		}
++		dp->link->link_caps.num_lanes = min_t(u32, dp->link->link_caps.num_lanes, lanes);
++	}
+ 
+-	drm_edid = drm_edid_read_ddc(connector, &dp->aux->ddc);
+-	drm_edid_connector_update(connector, drm_edid);
++	if (msm_dp_ctrl_get_stream_cnt(dp->ctrl) > 1)
++		mst_mode = drm_dp_read_mst_cap(dp->aux, dp->panel->dpcd);
++	dp->sink_mst_capable = mst_mode == DRM_DP_MST;
+ 
+-	if (!drm_edid) {
+-		DRM_ERROR("panel edid read failed\n");
+-		/* check edid read fail is due to unplug */
+-		if (!msm_dp_aux_is_link_connected(dp->aux))
+-			return -ETIMEDOUT;
++	if (mst_mode != DRM_DP_MST) {
++		drm_edid = drm_edid_read_ddc(connector, &dp->aux->ddc);
++		drm_edid_connector_update(connector, drm_edid);
++
++		if (!drm_edid) {
++			DRM_ERROR("panel edid read failed\n");
++			/* check edid read fail is due to unplug */
++			if (!msm_dp_aux_is_link_connected(dp->aux))
++				return -ETIMEDOUT;
++		}
+ 	}
+ 
+ 	msm_dp_link_process_request(dp->link);
+@@ -318,7 +380,10 @@ static int msm_dp_display_process_hpd_high(struct msm_dp_display_private *dp)
+ 	 * set sink to normal operation mode -- D0
+ 	 * before dpcd read
+ 	 */
+-	msm_dp_link_psm_config(dp->link, &dp->panel->link_info, false);
++	msm_dp_link_psm_config(dp->link, &dp->link->link_caps, false);
++
++	if (mst_mode == DRM_DP_MST)
++		rc = msm_dp_display_mst_enable(dp);
+ 
+ 	msm_dp_link_reset_phy_params_vx_px(dp->link);
+ 
+@@ -432,6 +497,9 @@ static int msm_dp_hpd_plug_handle(struct msm_dp_display_private *dp)
+ 
+ 	guard(mutex)(&dp->plugged_lock);
+ 
++	if (dp->plugged)
++		return 0;
++
+ 	ret = pm_runtime_resume_and_get(&pdev->dev);
+ 	if (ret) {
+ 		DRM_ERROR("failed to pm_runtime_resume\n");
+@@ -471,6 +539,16 @@ static void msm_dp_display_handle_plugged_change(struct msm_dp *msm_dp_display,
+ 							plugged);
+ }
+ 
++bool msm_dp_display_is_plugged(struct msm_dp *msm_dp_display)
++{
++	struct msm_dp_display_private *dp;
++
++	dp = container_of(msm_dp_display,
++			  struct msm_dp_display_private, msm_dp_display);
++
++	return READ_ONCE(dp->plugged);
++}
++
+ static int msm_dp_hpd_unplug_handle(struct msm_dp_display_private *dp)
+ {
+ 	struct platform_device *pdev = dp->msm_dp_display.pdev;
+@@ -505,6 +583,12 @@ static int msm_dp_hpd_unplug_handle(struct msm_dp_display_private *dp)
+ 						 dp->panel->dpcd,
+ 						 dp->panel->downstream_ports);
+ 
++	if (dp->msm_dp_display.mst_active) {
++		msm_dp_mst_display_set_mgr_state(&dp->msm_dp_display, false);
++		dp->msm_dp_display.mst_active = false;
++	}
++	dp->sink_mst_capable = false;
++
+ 	/* signal the disconnect event early to ensure proper teardown */
+ 	msm_dp_display_handle_plugged_change(&dp->msm_dp_display, false);
+ 
+@@ -526,12 +610,18 @@ static int msm_dp_irq_hpd_handle(struct msm_dp_display_private *dp)
+ {
+ 	u32 sink_request;
+ 	int rc = 0;
++	struct msm_dp *msm_dp_display = &dp->msm_dp_display;
+ 
+ 	/* irq_hpd can happen at either connected or disconnected state */
+ 	drm_dbg_dp(dp->drm_dev, "Before, type=%d, sink_count=%d\n",
+ 			dp->msm_dp_display.connector_type,
+ 			dp->link->sink_count);
+ 
++	if (msm_dp_display->mst_active) {
++		msm_dp_mst_display_hpd_irq(&dp->msm_dp_display);
++		return 0;
++	}
++
+ 	/* check for any test request issued by sink */
+ 	rc = msm_dp_link_process_request(dp->link);
+ 	if (!rc) {
+@@ -550,6 +640,33 @@ static int msm_dp_irq_hpd_handle(struct msm_dp_display_private *dp)
+ 	return rc;
+ }
+ 
++struct msm_dp_panel *msm_dp_display_get_panel(struct msm_dp *msm_dp_display,
++					      enum msm_dp_stream_id stream_id)
++{
++	struct msm_dp_display_private *dp;
++	struct msm_dp_panel *dp_panel;
++
++	dp = container_of(msm_dp_display, struct msm_dp_display_private, msm_dp_display);
++
++	if (stream_id >= msm_dp_ctrl_get_stream_cnt(dp->ctrl)) {
++		DRM_ERROR("invalid stream_id %d\n", stream_id);
++		return NULL;
++	}
++
++	dp_panel = msm_dp_panel_get(&dp->msm_dp_display.pdev->dev, dp->aux, dp->link,
++				    dp->link_base, dp->mst2link_base, dp->mst3link_base,
++				    dp->pixel_base[stream_id]);
++
++	if (IS_ERR(dp_panel)) {
++		DRM_ERROR("failed to initialize panel\n");
++		return NULL;
++	}
++
++	dp_panel->stream_id = stream_id;
++
++	return dp_panel;
++}
++
+ static void msm_dp_display_deinit_sub_modules(struct msm_dp_display_private *dp)
+ {
+ 	msm_dp_audio_put(dp->audio);
+@@ -589,7 +706,8 @@ static int msm_dp_init_sub_modules(struct msm_dp_display_private *dp)
+ 		goto error_link;
+ 	}
+ 
+-	dp->panel = msm_dp_panel_get(dev, dp->aux, dp->link, dp->link_base, dp->p0_base);
++	dp->panel = msm_dp_panel_get(dev, dp->aux, dp->link, dp->link_base,
++				     dp->mst2link_base, dp->mst3link_base, dp->pixel_base[0]);
+ 	if (IS_ERR(dp->panel)) {
+ 		rc = PTR_ERR(dp->panel);
+ 		DRM_ERROR("failed to initialize panel, rc = %d\n", rc);
+@@ -598,7 +716,8 @@ static int msm_dp_init_sub_modules(struct msm_dp_display_private *dp)
+ 	}
+ 
+ 	dp->ctrl = msm_dp_ctrl_get(dev, dp->link, dp->aux,
+-				   phy, dp->ahb_base, dp->link_base);
++			       phy, dp->ahb_base, dp->link_base,
++			       dp->mst2link_base, dp->mst3link_base);
+ 	if (IS_ERR(dp->ctrl)) {
+ 		rc = PTR_ERR(dp->ctrl);
+ 		DRM_ERROR("failed to initialize ctrl, rc = %d\n", rc);
+@@ -629,6 +748,8 @@ unsigned int msm_dp_output_bpc(const struct msm_dp *dp,
+ 	unsigned int bpc, pclk;
+ 	if (!dp || !dp->connector || !mode)
+ 		return 8;
++	if (dp->mst_active)
++		return 8;
+ 	display = container_of(dp, struct msm_dp_display_private, msm_dp_display);
+ 	if (display->panel->video_test)
+ 		return msm_dp_link_bit_depth_to_bpp(display->link->test_video.test_bit_depth) / 3;
+@@ -654,7 +775,9 @@ static int msm_dp_display_set_mode(struct msm_dp *msm_dp_display,
+ 
+ 	dp = container_of(msm_dp_display, struct msm_dp_display_private, msm_dp_display);
+ 
+-	if (msm_dp_display_check_video_test(msm_dp_display))
++	if (msm_dp_display->mst_active)
++		bpp = 24;
++	else if (msm_dp_display_check_video_test(msm_dp_display))
+ 		bpp = msm_dp_display_get_test_bpp(msm_dp_display);
+ 	else if (of_device_is_compatible(msm_dp_display->pdev->dev.of_node, "qcom,sm7675-dp"))
+ 		bpp = msm_dp_output_bpc(msm_dp_display, adjusted_mode) * 3;
+@@ -681,17 +804,22 @@ static int msm_dp_display_set_mode(struct msm_dp *msm_dp_display,
+ 	return 0;
+ }
+ 
+-static int msm_dp_display_prepare_link(struct msm_dp_display_private *dp)
++int msm_dp_display_prepare_link(struct msm_dp *msm_dp_display)
+ {
+-	struct msm_dp *msm_dp_display = &dp->msm_dp_display;
++	struct msm_dp_display_private *dp;
+ 	int rc = 0;
+ 	bool force_link_train = false;
+ 
++	dp = container_of(msm_dp_display, struct msm_dp_display_private, msm_dp_display);
++
+ 	drm_dbg_dp(dp->drm_dev, "sink_count=%d\n", dp->link->sink_count);
+ 
+ 	if (msm_dp_display->is_edp)
+ 		msm_dp_hpd_plug_handle(dp);
+ 
++	if (msm_dp_display->link_ready)
++		return 0;
++
+ 	rc = pm_runtime_resume_and_get(&msm_dp_display->pdev->dev);
+ 	if (rc) {
+ 		DRM_ERROR("failed to pm_runtime_resume\n");
+@@ -699,22 +827,40 @@ static int msm_dp_display_prepare_link(struct msm_dp_display_private *dp)
+ 	}
+ 	dp->stream_pm_active = true;
+ 
+-	if (dp->link->sink_count == 0)
+-		return -ENOTCONN;
++	if (dp->link->sink_count == 0) {
++		rc = -ENOTCONN;
++		goto failed;
++	}
+ 
+-	if (!msm_dp_display->power_on) {
++	if (!msm_dp_display->active_stream_cnt) {
+ 		msm_dp_display_host_phy_init(dp);
+ 		force_link_train = true;
++
++		dp->stream_link_attempted = true;
++		rc = msm_dp_ctrl_on_link(dp->ctrl, dp->panel);
++		if (rc) {
++			DRM_ERROR("Failed link training (rc=%d)\n", rc);
++			goto failed;
++		}
+ 	}
+ 
+-	dp->stream_link_attempted = true;
+-	rc = msm_dp_ctrl_on_link(dp->ctrl, dp->panel);
+-	if (rc) {
+-		DRM_ERROR("Failed link training (rc=%d)\n", rc);
+-		return rc;
++	rc = msm_dp_ctrl_prepare_stream_on(dp->ctrl, dp->panel, force_link_train);
++	if (rc)
++		goto failed;
++	if (msm_dp_display->mst_active &&
++	    (dp->link->link_params.rate < dp->link->link_caps.rate ||
++	     dp->link->link_params.num_lanes < dp->link->link_caps.num_lanes)) {
++		dp->link->link_caps.rate = dp->link->link_params.rate;
++		dp->link->link_caps.num_lanes = dp->link->link_params.num_lanes;
++		rc = -EAGAIN;
++		goto failed;
+ 	}
++	msm_dp_display->link_ready = true;
++	return 0;
+ 
+-	return msm_dp_ctrl_prepare_stream_on(dp->ctrl, dp->panel, force_link_train);
++failed:
++	msm_dp_display_unprepare(msm_dp_display);
++	return rc;
+ }
+ 
+ static int msm_dp_display_enable(struct msm_dp_display_private *dp,
+@@ -725,15 +871,16 @@ static int msm_dp_display_enable(struct msm_dp_display_private *dp,
+ 	struct msm_dp *msm_dp_display = &dp->msm_dp_display;
+ 
+ 	drm_dbg_dp(dp->drm_dev, "sink_count=%d\n", dp->link->sink_count);
+-	if (msm_dp_display->power_on) {
+-		drm_dbg_dp(dp->drm_dev, "Link already setup, return\n");
++	if (msm_dp_panel->stream_active)
+ 		return 0;
++	rc = msm_dp_ctrl_on_stream(dp->ctrl, msm_dp_panel, state, msm_dp_display->mst_active);
++	if (!rc) {
++		msm_dp_panel->stream_active = true;
++		msm_dp_display->active_stream_cnt++;
++	} else {
++		msm_dp_ctrl_off_pixel_clk(dp->ctrl, msm_dp_panel->stream_id);
+ 	}
+ 
+-	rc = msm_dp_ctrl_on_stream(dp->ctrl, msm_dp_panel, state);
+-	if (!rc)
+-		msm_dp_display->power_on = true;
+-
+ 	return rc;
+ }
+ 
+@@ -781,28 +928,31 @@ static int msm_dp_display_disable(struct msm_dp_display_private *dp,
+ {
+ 	struct msm_dp *msm_dp_display = &dp->msm_dp_display;
+ 
+-	if (!msm_dp_display->power_on)
++	if (!msm_dp_panel->stream_active)
+ 		return 0;
+-
+ 	msm_dp_panel_disable_vsc_sdp(msm_dp_panel);
++	if (of_device_is_compatible(msm_dp_display->pdev->dev.of_node, "qcom,sm7675-dp"))
++		msm_dp_panel_disable_hdr_sdp(msm_dp_panel);
+ 
+-	msm_dp_ctrl_off_pixel_clk(dp->ctrl);
++	msm_dp_ctrl_off_pixel_clk(dp->ctrl, msm_dp_panel->stream_id);
+ 
+-	/* dongle is still connected but sinks are disconnected */
+-	if (dp->link->sink_count == 0)
+-		msm_dp_link_psm_config(dp->link, &msm_dp_panel->link_info, true);
++	msm_dp_panel->stream_active = false;
++	if (!WARN_ON_ONCE(!msm_dp_display->active_stream_cnt))
++		msm_dp_display->active_stream_cnt--;
+ 
+-	msm_dp_ctrl_off_link(dp->ctrl, msm_dp_panel);
++	drm_dbg_dp(dp->drm_dev, "sink count: %d\n", dp->link->sink_count);
++	return 0;
++}
+ 
+-	if (dp->link->sink_count == 0)
+-		/* re-init the PHY so that we can listen to Dongle disconnect */
+-		msm_dp_ctrl_reinit_phy(dp->ctrl);
+-	else
+-		msm_dp_display_host_phy_exit(dp);
++int msm_dp_display_set_stream_info(struct msm_dp *msm_dp_display, struct msm_dp_panel *panel,
++				   u32 start_slot, u32 num_slots, u32 pbn)
++{
++	struct msm_dp_display_private *dp;
++
++	dp = container_of(msm_dp_display, struct msm_dp_display_private, msm_dp_display);
+ 
+-	msm_dp_display->power_on = false;
++	msm_dp_ctrl_set_mst_channel_info(dp->ctrl, panel->stream_id, start_slot, num_slots, pbn);
+ 
+-	drm_dbg_dp(dp->drm_dev, "sink count: %d\n", dp->link->sink_count);
+ 	return 0;
+ }
+ 
+@@ -831,15 +981,17 @@ enum drm_mode_status msm_dp_display_mode_valid(struct msm_dp *dp,
+ 	}
+ 
+ 	msm_dp_display = container_of(dp, struct msm_dp_display_private, msm_dp_display);
+-	link_info = &msm_dp_display->panel->link_info;
++	link_info = &msm_dp_display->link->link_caps;
+ 
+-	is_yuv_420 = drm_mode_is_420_only(&dp->connector->display_info, mode);
++	is_yuv_420 = drm_mode_is_420_only(info, mode);
++	if (dp->mst_active && (is_yuv_420 || (info->bpc && info->bpc < 8)))
++		return MODE_BAD;
+ 
+ 	/*
+ 	 * YUV 420 is carried over DP by signalling the colorimetry through a
+ 	 * VSC SDP, so a 420-only mode cannot be driven without VSC SDP support.
+ 	 */
+-	if (is_yuv_420 && !msm_dp_display->panel->vsc_sdp_supported)
++	if (is_yuv_420 && !msm_dp_display->link->vsc_sdp_supported)
+ 		return MODE_NO_420;
+ 
+ 	link_pclk_khz = is_yuv_420 ? mode_pclk_khz / 2 : mode_pclk_khz;
+@@ -860,7 +1012,7 @@ enum drm_mode_status msm_dp_display_mode_valid(struct msm_dp *dp,
+ 			link_info->rate, link_info->num_lanes, &config) ? MODE_BAD : MODE_OK;
+ 	}
+ 
+-	mode_bpp = dp->connector->display_info.bpc * num_components;
++	mode_bpp = dp->mst_active ? 24 : info->bpc * num_components;
+ 	if (!mode_bpp)
+ 		mode_bpp = default_bpp;
+ 
+@@ -924,10 +1076,10 @@ void msm_dp_snapshot(struct msm_disp_state *disp_state, struct msm_dp *dp)
+ 	 * if we are reading registers we need the link clocks to be on
+ 	 * however till DP cable is connected this will not happen as we
+ 	 * do not know the resolution to power up with. Hence check the
+-	 * power_on status before dumping DP registers to avoid crash due
++	 * active_stream_cnt status before dumping DP registers to avoid crash due
+ 	 * to unclocked access
+ 	 */
+-	if (!dp->power_on)
++	if (!dp->active_stream_cnt)
+ 		return;
+ 
+ 	msm_disp_snapshot_add_block(disp_state, msm_dp_display->ahb_len,
+@@ -936,8 +1088,19 @@ void msm_dp_snapshot(struct msm_disp_state *disp_state, struct msm_dp *dp)
+ 				    msm_dp_display->aux_base, "dp_aux");
+ 	msm_disp_snapshot_add_block(disp_state, msm_dp_display->link_len,
+ 				    msm_dp_display->link_base, "dp_link");
+-	msm_disp_snapshot_add_block(disp_state, msm_dp_display->p0_len,
+-				    msm_dp_display->p0_base, "dp_p0");
++	if (msm_dp_display->mst2link_base)
++		msm_disp_snapshot_add_block(disp_state, msm_dp_display->mst2link_len,
++					    msm_dp_display->mst2link_base, "dp_mst2link");
++	if (msm_dp_display->mst3link_base)
++		msm_disp_snapshot_add_block(disp_state, msm_dp_display->mst3link_len,
++					    msm_dp_display->mst3link_base, "dp_mst3link");
++
++	for (int i = 0; i < DP_STREAM_MAX; i++) {
++		if (!msm_dp_ctrl_stream_clks_on(msm_dp_display->ctrl, i))
++			continue;
++		msm_disp_snapshot_add_block(disp_state, msm_dp_display->pixel_len[i],
++					    msm_dp_display->pixel_base[i], "dp_p%d", i);
++	}
+ }
+ 
+ void msm_dp_display_set_psr(struct msm_dp *msm_dp_display, bool enter)
+@@ -979,6 +1142,10 @@ enum drm_connector_status msm_dp_bridge_detect(struct drm_bridge *bridge,
+ 	priv = container_of(dp, struct msm_dp_display_private, msm_dp_display);
+ 
+ 	guard(mutex)(&priv->plugged_lock);
++
++	if (dp->mst_active)
++		return status;
++
+ 	ret = pm_runtime_resume_and_get(&dp->pdev->dev);
+ 	if (ret) {
+ 		DRM_ERROR("failed to pm_runtime_resume\n");
+@@ -1023,6 +1190,11 @@ enum drm_connector_status msm_dp_bridge_detect(struct drm_bridge *bridge,
+ 			status = connector_status_disconnected;
+ 	}
+ 
++	/* Mark SST connector as disconnected in DP boot-up case */
++	if (msm_dp_ctrl_get_stream_cnt(priv->ctrl) > 1 &&
++	    drm_dp_read_mst_cap(priv->aux, dpcd) == DRM_DP_MST)
++		status = connector_status_disconnected;
++
+ end:
+ 	/*
+ 	 * If we detected the DPRX, leave the controller on so that it doesn't
+@@ -1046,23 +1218,24 @@ static irqreturn_t msm_dp_display_irq_handler(int irq, void *dev_id)
+ 	u32 hpd_isr_status;
+ 	unsigned long flags;
+ 	irqreturn_t ret = IRQ_HANDLED;
++	bool hpd_irq_pending;
+ 
+ 	hpd_isr_status = msm_dp_aux_get_hpd_intr_status(dp->aux);
++	hpd_irq_pending = hpd_isr_status & DP_DP_HPD_INT_MASK;
+ 
+-	if (hpd_isr_status & 0x0F) {
++	if (hpd_irq_pending) {
+ 		drm_dbg_dp(dp->drm_dev, "type=%d isr=0x%x\n",
+ 			dp->msm_dp_display.connector_type, hpd_isr_status);
+ 
+ 		spin_lock_irqsave(&dp->irq_thread_lock, flags);
+ 		dp->hpd_isr_status |= hpd_isr_status;
+-		ret = IRQ_WAKE_THREAD;
+ 		spin_unlock_irqrestore(&dp->irq_thread_lock, flags);
+ 	}
+ 
+ 	/* DP controller isr */
+ 	ret |= msm_dp_ctrl_isr(dp->ctrl, dp->panel);
+ 
+-	return ret;
++	return hpd_irq_pending ? IRQ_WAKE_THREAD : ret;
+ }
+ 
+ static irqreturn_t msm_dp_display_irq_thread(int irq, void *dev_id)
+@@ -1085,10 +1258,12 @@ static irqreturn_t msm_dp_display_irq_thread(int irq, void *dev_id)
+ 		drm_bridge_hpd_notify(dp->msm_dp_display.bridge,
+ 				      connector_status_connected);
+ 
+-	/* Send HPD as connected and distinguish it in the notifier */
+-	if (hpd_isr_status & DP_DP_IRQ_HPD_INT_MASK)
+-		drm_bridge_hpd_notify(dp->msm_dp_display.bridge,
+-				      connector_status_connected);
++	if ((hpd_isr_status & DP_DP_IRQ_HPD_INT_MASK) &&
++	    (!(hpd_isr_status & DP_DP_HPD_UNPLUG_INT_MASK) ||
++	     (hpd_isr_status & DP_DP_HPD_PLUG_INT_MASK)))
++		drm_bridge_hpd_notify_extra(dp->msm_dp_display.bridge,
++					    connector_status_connected,
++					    DRM_CONNECTOR_DP_IRQ_HPD);
+ 
+ 	ret = IRQ_HANDLED;
+ 
+@@ -1205,6 +1380,26 @@ static void __iomem *msm_dp_ioremap(struct platform_device *pdev, int idx, size_
+ 	return base;
+ }
+ 
++static void __iomem *msm_dp_ioremap_optional(struct platform_device *pdev,
++					     int idx, size_t *len)
++{
++	struct resource *res;
++	void __iomem *base;
++
++	if (len)
++		*len = 0;
++
++	res = platform_get_resource(pdev, IORESOURCE_MEM, idx);
++	if (!res)
++		return NULL;
++
++	base = devm_ioremap_resource(&pdev->dev, res);
++	if (!IS_ERR(base))
++		*len = resource_size(res);
++
++	return base;
++}
++
+ #define DP_DEFAULT_AHB_OFFSET	0x0000
+ #define DP_DEFAULT_AHB_SIZE	0x0200
+ #define DP_DEFAULT_AUX_OFFSET	0x0200
+@@ -1217,6 +1412,7 @@ static void __iomem *msm_dp_ioremap(struct platform_device *pdev, int idx, size_
+ static int msm_dp_display_get_io(struct msm_dp_display_private *display)
+ {
+ 	struct platform_device *pdev = display->msm_dp_display.pdev;
++	int i;
+ 
+ 	display->ahb_base = msm_dp_ioremap(pdev, 0, &display->ahb_len);
+ 	if (IS_ERR(display->ahb_base))
+@@ -1246,8 +1442,8 @@ static int msm_dp_display_get_io(struct msm_dp_display_private *display)
+ 		display->aux_len = DP_DEFAULT_AUX_SIZE;
+ 		display->link_base = display->ahb_base + DP_DEFAULT_LINK_OFFSET;
+ 		display->link_len = DP_DEFAULT_LINK_SIZE;
+-		display->p0_base = display->ahb_base + DP_DEFAULT_P0_OFFSET;
+-		display->p0_len = DP_DEFAULT_P0_SIZE;
++		display->pixel_base[0] = display->ahb_base + DP_DEFAULT_P0_OFFSET;
++		display->pixel_len[DP_STREAM_0] = DP_DEFAULT_P0_SIZE;
+ 
+ 		return 0;
+ 	}
+@@ -1258,12 +1454,28 @@ static int msm_dp_display_get_io(struct msm_dp_display_private *display)
+ 		return PTR_ERR(display->link_base);
+ 	}
+ 
+-	display->p0_base = msm_dp_ioremap(pdev, 3, &display->p0_len);
+-	if (IS_ERR(display->p0_base)) {
+-		DRM_ERROR("unable to remap p0 region: %pe\n", display->p0_base);
+-		return PTR_ERR(display->p0_base);
++	display->pixel_base[0] = msm_dp_ioremap(pdev, 3,
++					  &display->pixel_len[DP_STREAM_0]);
++	if (IS_ERR(display->pixel_base[0]))
++		return PTR_ERR(display->pixel_base[0]);
++
++	for (i = DP_STREAM_1; i < DP_STREAM_MAX; i++) {
++		display->pixel_base[i] = msm_dp_ioremap_optional(pdev, i + 3,
++							   &display->pixel_len[i]);
++		if (IS_ERR(display->pixel_base[i]))
++			return PTR_ERR(display->pixel_base[i]);
++		if (!display->pixel_base[i])
++			break;
+ 	}
+ 
++	display->mst2link_base = msm_dp_ioremap_optional(pdev, 7, &display->mst2link_len);
++	if (IS_ERR(display->mst2link_base))
++		return PTR_ERR(display->mst2link_base);
++
++	display->mst3link_base = msm_dp_ioremap_optional(pdev, 8, &display->mst3link_len);
++	if (IS_ERR(display->mst3link_base))
++		return PTR_ERR(display->mst3link_base);
++
+ 	return 0;
+ }
+ 
+@@ -1276,19 +1488,23 @@ static ssize_t uke_dp_stream_state_show(struct device *dev,
+ 
+ 	/* Cached software state only: no runtime resume, AUX access or MMIO. */
+ 	guard(mutex)(&dp->plugged_lock);
+-	active = READ_ONCE(dp->msm_dp_display.power_on);
++	active = READ_ONCE(dp->msm_dp_display.active_stream_cnt);
+ 	return sysfs_emit(buf,
+-		"version=1 active=%u lanes=%u rate_khz=%u bpp=%u max_lanes=%u max_rate_khz=%u source_max_lanes=%u sink_max_lanes=%u dpcd_revision=0x%02x vsc_supported=%u hw_revision=0x%x hdr_requested=%u mst_driver=0 lane_limit=%u dsc_requested=%u dsc_active=%u dsc_bpp_x16=%u dsc_slices=%u\n",
++		"version=1 active=%u lanes=%u rate_khz=%u bpp=%u max_lanes=%u max_rate_khz=%u source_max_lanes=%u sink_max_lanes=%u dpcd_revision=0x%02x vsc_supported=%u hw_revision=0x%x hdr_requested=%u mst_driver=%u lane_limit=%u dsc_requested=%u dsc_active=%u dsc_bpp_x16=%u dsc_slices=%u mst_active=%u mst_max_streams=%u active_streams=%u sink_mst_capable=%u negotiated_lanes=%u\n",
+ 		active, active ? READ_ONCE(dp->link->link_params.num_lanes) : 0,
+ 		active ? READ_ONCE(dp->link->link_params.rate) : 0,
+-		active ? READ_ONCE(panel->msm_dp_mode.bpp) : 0,
+-		panel->link_info.num_lanes, panel->link_info.rate,
++		active && !dp->msm_dp_display.mst_active ? READ_ONCE(panel->msm_dp_mode.bpp) : 0,
++		dp->link->link_caps.num_lanes, dp->link->link_caps.rate,
+ 		dp->link->max_dp_lanes, drm_dp_max_lane_count(panel->dpcd), panel->dpcd[DP_DPCD_REV],
+-		panel->vsc_sdp_supported, panel->hw_revision, READ_ONCE(panel->hdr_active),
++		dp->link->vsc_sdp_supported, panel->hw_revision, READ_ONCE(panel->hdr_active),
++		!!dp->msm_dp_display.msm_dp_mst,
+ 		panel->lane_limit, READ_ONCE(panel->dsc_requested),
+ 		active && READ_ONCE(panel->dsc_active),
+ 		active && READ_ONCE(panel->dsc_active) ? READ_ONCE(panel->dsc.dsc.bits_per_pixel) : 0,
+-		active && READ_ONCE(panel->dsc_active) ? READ_ONCE(panel->dsc.dsc.slice_count) : 0);
++		active && READ_ONCE(panel->dsc_active) ? READ_ONCE(panel->dsc.dsc.slice_count) : 0,
++		READ_ONCE(dp->msm_dp_display.mst_active), msm_dp_ctrl_get_stream_cnt(dp->ctrl),
++		READ_ONCE(dp->msm_dp_display.active_stream_cnt), READ_ONCE(dp->sink_mst_capable),
++		msm_dp_ctrl_get_lane_count(dp->ctrl));
+ }
+ static DEVICE_ATTR_RO(uke_dp_stream_state);
+ 
+@@ -1299,7 +1515,7 @@ static int msm_dp_display_set_lane_limit(struct msm_dp_display_private *dp,
+ 	if ((lanes != 1 && lanes != 2 && lanes != 4) || lanes > dp->link->max_dp_lanes)
+ 		return -EINVAL;
+ 	/* A policy change must not race sink discovery or disturb a live stream. */
+-	if (dp->plugged || READ_ONCE(dp->msm_dp_display.power_on) ||
++	if (dp->plugged || READ_ONCE(dp->msm_dp_display.active_stream_cnt) ||
+ 	    READ_ONCE(dp->stream_pm_active) || READ_ONCE(dp->stream_link_attempted))
+ 		return -EBUSY;
+ 	WRITE_ONCE(dp->panel->lane_limit, lanes);
+@@ -1349,7 +1565,7 @@ static ssize_t uke_dp_dsc_store(struct device *dev, struct device_attribute *att
+ 	if (ret)
+ 		return ret;
+ 	guard(mutex)(&dp->plugged_lock);
+-	if (dp->plugged || READ_ONCE(dp->msm_dp_display.power_on) ||
++	if (dp->plugged || READ_ONCE(dp->msm_dp_display.active_stream_cnt) ||
+ 	    READ_ONCE(dp->stream_pm_active) || READ_ONCE(dp->stream_link_attempted))
+ 		return -EBUSY;
+ 	dp->panel->dsc_requested = enabled;
+@@ -1367,6 +1583,20 @@ static const struct attribute_group uke_dp_stream_group = {
+ 	.attrs = uke_dp_stream_attrs,
+ };
+ 
++void msm_dp_display_set_link_failure(struct msm_dp *display, bool failed)
++{
++	struct msm_dp_display_private *dp =
++		container_of(display, struct msm_dp_display_private, msm_dp_display);
++
++	scoped_guard(mutex, &dp->plugged_lock) {
++		dp->link_failed = failed;
++		if (!failed)
++			dp->link_status_notified = false;
++	}
++	if (failed)
++		schedule_work(&dp->link_status_work);
++}
++
+ static void msm_dp_display_link_status_work(struct work_struct *work)
+ {
+ 	struct msm_dp_display_private *dp = container_of(work,
+@@ -1380,12 +1610,45 @@ static void msm_dp_display_link_status_work(struct work_struct *work)
+ 		notify = !dp->link_status_notified;
+ 		dp->link_status_notified = true;
+ 	}
++	if (READ_ONCE(dp->msm_dp_display.mst_active)) {
++		msm_dp_mst_report_link_failure(&dp->msm_dp_display, notify);
++		return;
++	}
+ 	/* This helper takes connection_mutex; never hold plugged_lock here. */
+ 	drm_connector_set_link_status_property(connector, DRM_MODE_LINK_STATUS_BAD);
+ 	if (notify)
+ 		drm_kms_helper_connector_hotplug_event(connector);
+ }
+ 
++int msm_dp_get_mst_max_stream(struct msm_dp *msm_dp_display)
++{
++	struct msm_dp_display_private *dp =
++		container_of(msm_dp_display, struct msm_dp_display_private, msm_dp_display);
++
++	return msm_dp_ctrl_get_stream_cnt(dp->ctrl);
++}
++
++int msm_dp_mst_register(struct msm_dp *msm_dp_display)
++{
++	struct msm_dp_display_private *dp =
++		container_of(msm_dp_display, struct msm_dp_display_private, msm_dp_display);
++
++	return msm_dp_mst_mgr_init(msm_dp_display, dp->link,
++				   msm_dp_ctrl_get_stream_cnt(dp->ctrl), dp->aux);
++}
++
++void msm_dp_mst_unregister(struct msm_dp *msm_dp_display)
++{
++	struct msm_dp_display_private *dp =
++		container_of(msm_dp_display, struct msm_dp_display_private, msm_dp_display);
++
++	if (!msm_dp_display->msm_dp_mst)
++		return;
++	synchronize_irq(dp->irq);
++	cancel_work_sync(&dp->link_status_work);
++	msm_dp_mst_mgr_destroy(msm_dp_display);
++}
++
+ static int msm_dp_display_probe(struct platform_device *pdev)
+ {
+ 	int rc = 0;
+@@ -1574,7 +1837,7 @@ int msm_dp_display_atomic_check(struct msm_dp *display,
+ 	bool hdr;
+ 
+ 	guard(mutex)(&dp->plugged_lock);
+-	if (!dp->plugged || !dp->panel->link_info.rate || !dp->panel->link_info.num_lanes)
++	if (!dp->plugged || !dp->link->link_caps.rate || !dp->link->link_caps.num_lanes)
+ 		return -ENODEV;
+ 	ret = msm_dp_utils_pack_hdr_sdp(conn_state, &state->hdr_sdp);
+ 	if (ret)
+@@ -1594,7 +1857,7 @@ int msm_dp_display_atomic_check(struct msm_dp *display,
+ 								   info->max_tmds_clock, false))
+ 				continue;
+ 			ret = msm_dp_dsc_prepare(dp->panel->dsc_dpcd, dp->panel->fec_cap,
+-				mode, bpc, dp->panel->link_info.rate, dp->panel->link_info.num_lanes,
++				mode, bpc, dp->link->link_caps.rate, dp->link->link_caps.num_lanes,
+ 				&state->dsc);
+ 			if (!ret)
+ 				break;
+@@ -1604,7 +1867,7 @@ int msm_dp_display_atomic_check(struct msm_dp *display,
+ 		bpp = bpc * 3;
+ 	} else {
+ 		bpp = msm_dp_utils_select_bpp(info->bpc, conn_state->max_requested_bpc ?: 8,
+-			mode->clock, dp->panel->link_info.rate, dp->panel->link_info.num_lanes,
++			mode->clock, dp->link->link_caps.rate, dp->link->link_caps.num_lanes,
+ 			yuv420, hdr,
+ 			info->is_hdmi ? info->max_tmds_clock : 0);
+ 	}
+@@ -1616,7 +1879,7 @@ int msm_dp_display_atomic_check(struct msm_dp *display,
+ 		state->colorspace != DRM_MODE_COLORIMETRY_DEFAULT;
+ 	if (!state->vsc_enabled)
+ 		return 0;
+-	if (!dp->panel->vsc_sdp_supported)
++	if (!dp->link->vsc_sdp_supported)
+ 		return -EINVAL;
+ 	return msm_dp_utils_pack_vsc_sdp(&state->vsc_sdp, state->colorspace, bpp / 3, yuv420);
+ }
+@@ -1629,7 +1892,7 @@ struct drm_dsc_config *msm_dp_get_dsc_config(struct msm_dp *display,
+ 	struct msm_dp_dsc_config *config = &dp->panel->dsc;
+ 	struct drm_bridge_state *bridge_state;
+ 
+-	if (display->is_edp ||
++	if (display->is_edp || display->mst_active ||
+ 	    !of_device_is_compatible(display->pdev->dev.of_node, "qcom,sm7675-dp"))
+ 		return NULL;
+ 	if (state) {
+@@ -1697,21 +1960,21 @@ int msm_dp_modeset_init(struct msm_dp *msm_dp_display, struct drm_device *dev,
+ 	return 0;
+ }
+ 
+-void msm_dp_display_atomic_pre_enable(struct msm_dp *msm_dp_display,
+-				      struct drm_atomic_commit *state)
++int msm_dp_display_set_mode_helper(struct msm_dp *msm_dp_display,
++				   struct drm_atomic_commit *state,
++				   struct drm_encoder *encoder,
++				   struct msm_dp_panel *msm_dp_panel)
+ {
+-	struct msm_dp_display_private *dp;
+ 	struct drm_crtc *crtc;
+ 	struct drm_crtc_state *crtc_state;
+ 	const struct msm_dp_bridge_state *color = NULL;
+ 
+-	dp = container_of(msm_dp_display, struct msm_dp_display_private, msm_dp_display);
+-
+-	crtc = drm_atomic_get_new_crtc_for_encoder(state, msm_dp_display->bridge->encoder);
++	crtc = drm_atomic_get_new_crtc_for_encoder(state, encoder);
+ 	if (!crtc)
+-		return;
++		return 0;
+ 	crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
+-	if (of_device_is_compatible(msm_dp_display->pdev->dev.of_node, "qcom,sm7675-dp"))
++	if (!msm_dp_display->mst_active &&
++	    of_device_is_compatible(msm_dp_display->pdev->dev.of_node, "qcom,sm7675-dp"))
+ 		color = to_dp_bridge_state(drm_atomic_get_new_bridge_state(state,
+ 								    msm_dp_display->bridge));
+ 
+@@ -1720,7 +1983,17 @@ void msm_dp_display_atomic_pre_enable(struct msm_dp *msm_dp_display,
+ 	 * state and runs before the bridge's .atomic_enable(), so the mode must
+ 	 * be programmed here, in .atomic_pre_enable().
+ 	 */
+-	msm_dp_display_set_mode(msm_dp_display, &crtc_state->adjusted_mode, dp->panel, color);
++	return msm_dp_display_set_mode(msm_dp_display, &crtc_state->adjusted_mode, msm_dp_panel, color);
++}
++
++void msm_dp_display_atomic_pre_enable(struct msm_dp *msm_dp_display,
++				      struct drm_atomic_commit *state)
++{
++	struct msm_dp_display_private *dp =
++		container_of(msm_dp_display, struct msm_dp_display_private, msm_dp_display);
++
++	msm_dp_display_set_mode_helper(msm_dp_display, state,
++				      msm_dp_display->bridge->encoder, dp->panel);
+ }
+ 
+ void msm_dp_display_atomic_enable(struct msm_dp *msm_dp_display,
+@@ -1735,7 +2008,7 @@ void msm_dp_display_atomic_enable(struct msm_dp *msm_dp_display,
+ 		color = to_dp_bridge_state(drm_atomic_get_new_bridge_state(state,
+ 								    msm_dp_display->bridge));
+ 
+-	rc = msm_dp_display_prepare_link(dp);
++	rc = msm_dp_display_prepare_link(msm_dp_display);
+ 	if (rc) {
+ 		DRM_ERROR("DP display prepare failed, rc=%d\n", rc);
+ 		goto failed;
+@@ -1751,85 +2024,141 @@ void msm_dp_display_atomic_enable(struct msm_dp *msm_dp_display,
+ 	if (rc) {
+ 		DRM_ERROR("DP display post enable failed, rc=%d\n", rc);
+ 		msm_dp_display_disable(dp, dp->panel);
+-		dp->stream_link_attempted = false;
+ 		goto failed;
+ 	}
+ 
+ 	drm_dbg_dp(msm_dp_display->drm_dev, "type=%d Done\n", msm_dp_display->connector_type);
+-	scoped_guard(mutex, &dp->plugged_lock) {
+-		dp->link_failed = false;
+-		dp->link_status_notified = false;
+-	}
++	msm_dp_display_set_link_failure(msm_dp_display, false);
+ 	return;
+ 
+ failed:
+-	if (dp->stream_link_attempted) {
+-		msm_dp_ctrl_off_pixel_clk(dp->ctrl);
+-		msm_dp_ctrl_off_link(dp->ctrl, dp->panel);
+-		dp->stream_link_attempted = false;
+-	}
++	msm_dp_ctrl_off_pixel_clk(dp->ctrl, dp->panel->stream_id);
+ 	WRITE_ONCE(dp->panel->hdr_active, false);
+-	if (dp->stream_pm_active) {
+-		msm_dp_display_host_phy_exit(dp);
+-		dp->stream_pm_active = false;
+-		pm_runtime_put_sync(&msm_dp_display->pdev->dev);
++	msm_dp_display_unprepare(msm_dp_display);
++	msm_dp_display_set_link_failure(msm_dp_display, true);
++}
++
++int msm_dp_display_enable_helper(struct msm_dp *msm_dp_display,
++				  struct msm_dp_panel *msm_dp_panel)
++{
++	struct msm_dp_display_private *dp =
++		container_of(msm_dp_display, struct msm_dp_display_private, msm_dp_display);
++	int ret;
++
++	if (!msm_dp_display->link_ready)
++		return -EIO;
++	ret = msm_dp_display_enable(dp, msm_dp_panel, NULL);
++	if (ret) {
++		drm_err(dp->drm_dev, "MST stream enable failed: %d\n", ret);
++		return ret;
+ 	}
+-	scoped_guard(mutex, &dp->plugged_lock)
+-		dp->link_failed = true;
+-	schedule_work(&dp->link_status_work);
++	if (msm_dp_panel->stream_id == DP_STREAM_0) {
++		ret = msm_dp_display_post_enable(msm_dp_display);
++		if (ret)
++			msm_dp_display_disable(dp, msm_dp_panel);
++	}
++	return ret;
+ }
+ 
+-void msm_dp_display_atomic_disable(struct msm_dp *dp)
++int msm_dp_display_mst_send_act(struct msm_dp *msm_dp_display, struct msm_dp_panel *panel)
+ {
+-	struct msm_dp_display_private *msm_dp_display;
++	struct msm_dp_display_private *dp =
++		container_of(msm_dp_display, struct msm_dp_display_private, msm_dp_display);
+ 
+-	msm_dp_display = container_of(dp, struct msm_dp_display_private, msm_dp_display);
++	if (!msm_dp_display->active_stream_cnt)
++		return 0;
++	msm_dp_ctrl_mst_timeslot_setup(dp->ctrl);
++	return msm_dp_ctrl_mst_send_act(dp->ctrl, panel);
++}
++
++void msm_dp_display_disable_helper(struct msm_dp *msm_dp_display,
++				   struct msm_dp_panel *msm_dp_panel)
++{
++	struct msm_dp_display_private *dp =
++		container_of(msm_dp_display, struct msm_dp_display_private, msm_dp_display);
+ 
+ 	/*
+ 	 * If .atomic_enable() bailed out - link training failure is the common
+-	 * case - the mainlink was never brought up and ->power_on stayed false.
++	 * case - the mainlink was never brought up and ->active_stream_cnt stayed false.
+ 	 * Driving the PUSH_IDLE pattern into a controller that was never
+ 	 * enabled times out, and .atomic_post_disable() then drops the
+ 	 * controller's runtime-PM reference without tearing the PHY back down,
+-	 * because msm_dp_display_disable() returns early on !power_on.  On
++	 * because msm_dp_display_disable() returns early on !active_stream_cnt.  On
+ 	 * glymur (Snapdragon X2 Elite) that combination is answered by a
+ 	 * TrustZone-level SOCCP/ADSP force-stop and a silent SoC reset.
+ 	 * There is nothing to push idle, so leave it alone.
+ 	 */
+-	if (!dp->power_on)
++	if (!msm_dp_panel->stream_active)
+ 		return;
+ 
+-	msm_dp_ctrl_push_idle(msm_dp_display->ctrl);
++	msm_dp_ctrl_push_vcpf(dp->ctrl, msm_dp_panel);
++	if (msm_dp_display_mst_send_act(msm_dp_display, msm_dp_panel))
++		drm_err(dp->drm_dev, "MST payload ACT failed during disable\n");
+ }
+ 
+-static void msm_dp_display_unprepare(struct msm_dp_display_private *dp)
++void msm_dp_display_atomic_disable(struct msm_dp *dp)
+ {
+-	struct msm_dp *msm_dp_display = &dp->msm_dp_display;
++	struct msm_dp_display_private *msm_dp_display;
+ 
+-	pm_runtime_put_sync(&msm_dp_display->pdev->dev);
++	msm_dp_display = container_of(dp, struct msm_dp_display_private, msm_dp_display);
+ 
+-	drm_dbg_dp(dp->drm_dev, "type=%d Done\n", msm_dp_display->connector_type);
++	msm_dp_display_disable_helper(dp, msm_dp_display->panel);
+ }
+ 
+-void msm_dp_display_atomic_post_disable(struct msm_dp *dp)
++void msm_dp_display_unprepare(struct msm_dp *msm_dp_display)
++{
++	struct msm_dp_display_private *dp;
++
++	dp = container_of(msm_dp_display, struct msm_dp_display_private, msm_dp_display);
++
++	if (msm_dp_display->active_stream_cnt) {
++		drm_dbg_dp(dp->drm_dev, "stream still active, return\n");
++		return;
++	}
++	if (!dp->stream_pm_active)
++		return;
++
++	/* dongle is still connected but sinks are disconnected */
++	if (dp->stream_link_attempted) {
++		if (dp->link->sink_count == 0)
++			msm_dp_link_psm_config(dp->link, &dp->link->link_caps, true);
++		msm_dp_ctrl_off_link(dp->ctrl, dp->panel);
++		if (dp->link->sink_count == 0)
++			msm_dp_ctrl_reinit_phy(dp->ctrl);
++		dp->stream_link_attempted = false;
++	}
++	msm_dp_display_host_phy_exit(dp);
++
++	dp->stream_pm_active = false;
++	msm_dp_display->link_ready = false;
++	pm_runtime_put_sync(&msm_dp_display->pdev->dev);
++}
++
++void msm_dp_display_atomic_post_disable_helper(struct msm_dp *dp, struct msm_dp_panel *msm_dp_panel)
+ {
+ 	struct msm_dp_display_private *msm_dp_display;
+ 
+ 	msm_dp_display = container_of(dp, struct msm_dp_display_private, msm_dp_display);
+-	if (!msm_dp_display->stream_pm_active)
++	if (!msm_dp_panel->stream_active)
+ 		return;
+ 
+ 	if (dp->is_edp)
+ 		msm_dp_hpd_unplug_handle(msm_dp_display);
+ 
+-	msm_dp_display_audio_notify_disable(msm_dp_display);
++	if (msm_dp_panel->stream_id == DP_STREAM_0)
++		msm_dp_display_audio_notify_disable(msm_dp_display);
+ 
+-	msm_dp_display_disable(msm_dp_display, msm_dp_display->panel);
+-	msm_dp_display->stream_link_attempted = false;
+-	msm_dp_display->stream_pm_active = false;
+-	WRITE_ONCE(msm_dp_display->panel->hdr_active, false);
++	msm_dp_display_disable(msm_dp_display, msm_dp_panel);
++	WRITE_ONCE(msm_dp_panel->hdr_active, false);
++}
+ 
+-	msm_dp_display_unprepare(msm_dp_display);
++void msm_dp_display_atomic_post_disable(struct msm_dp *dp)
++{
++	struct msm_dp_display_private *msm_dp_display =
++		container_of(dp, struct msm_dp_display_private, msm_dp_display);
++
++	msm_dp_display_atomic_post_disable_helper(dp, msm_dp_display->panel);
++	msm_dp_display_unprepare(dp);
+ }
+ 
+ void msm_dp_bridge_hpd_enable(struct drm_bridge *bridge)
+@@ -1869,12 +2198,13 @@ void msm_dp_bridge_hpd_disable(struct drm_bridge *bridge)
+ 
+ void msm_dp_bridge_hpd_notify(struct drm_bridge *bridge,
+ 			      struct drm_connector *connector,
+-			      enum drm_connector_status status)
++			      enum drm_connector_status status,
++			      enum drm_connector_dp_event event)
+ {
+ 	struct msm_dp_bridge *msm_dp_bridge = to_dp_bridge(bridge);
+ 	struct msm_dp *msm_dp_display = msm_dp_bridge->msm_dp_display;
+ 	struct msm_dp_display_private *dp = container_of(msm_dp_display, struct msm_dp_display_private, msm_dp_display);
+-	u32 hpd_link_status = 0;
++	u32 hpd_link_status;
+ 
+ 	if (pm_runtime_resume_and_get(&msm_dp_display->pdev->dev)) {
+ 		DRM_ERROR("failed to pm_runtime_resume\n");
+@@ -1890,12 +2220,14 @@ void msm_dp_bridge_hpd_notify(struct drm_bridge *bridge,
+ 		if (hpd_link_status == ISR_HPD_REPLUG_COUNT) {
+ 			msm_dp_hpd_unplug_handle(dp);
+ 			msm_dp_hpd_plug_handle(dp);
+-		} else if (hpd_link_status == ISR_IRQ_HPD_PULSE_COUNT) {
+-			msm_dp_irq_hpd_handle(dp);
+ 		} else {
+ 			msm_dp_hpd_plug_handle(dp);
+ 		}
+-	} else {
++
++		if (hpd_link_status == ISR_IRQ_HPD_PULSE_COUNT ||
++		    event == DRM_CONNECTOR_DP_IRQ_HPD)
++			msm_dp_irq_hpd_handle(dp);
++	} else if (status == connector_status_disconnected) {
+ 		msm_dp_hpd_unplug_handle(dp);
+ 	}
+ 
+diff --git a/drivers/gpu/drm/msm/dp/dp_display.h b/drivers/gpu/drm/msm/dp/dp_display.h
+index 83117e7..e3ad3e3 100644
+--- a/drivers/gpu/drm/msm/dp/dp_display.h
++++ b/drivers/gpu/drm/msm/dp/dp_display.h
+@@ -18,10 +18,14 @@ struct msm_dp {
+ 	struct drm_bridge *next_bridge;
+ 	struct drm_bridge *bridge;
+ 	bool audio_enabled;
+-	bool power_on;
++	u32 active_stream_cnt;
++	bool mst_active;
++	bool link_ready;
+ 	unsigned int connector_type;
+ 	bool is_edp;
+ 
++	void *msm_dp_mst;
++
+ 	struct msm_dp_audio *msm_dp_audio;
+ 	bool psr_supported;
+ };
+@@ -42,5 +46,27 @@ void msm_dp_display_atomic_enable(struct msm_dp *dp_display,
+ enum drm_mode_status msm_dp_display_mode_valid(struct msm_dp *dp,
+ 					       const struct drm_display_info *info,
+ 					       const struct drm_display_mode *mode);
++int msm_dp_display_set_stream_info(struct msm_dp *msm_dp_display, struct msm_dp_panel *panel,
++				   u32 start_slot, u32 num_slots, u32 pbn);
++int msm_dp_display_enable_helper(struct msm_dp *msm_dp_display,
++				  struct msm_dp_panel *msm_dp_panel);
++int msm_dp_display_mst_send_act(struct msm_dp *msm_dp_display, struct msm_dp_panel *panel);
++void msm_dp_display_disable_helper(struct msm_dp *msm_dp_display,
++				   struct msm_dp_panel *msm_dp_panel);
++void msm_dp_display_atomic_post_disable_helper(struct msm_dp *msm_dp_display,
++					       struct msm_dp_panel *msm_dp_panel);
++int msm_dp_display_set_mode_helper(struct msm_dp *msm_dp_display,
++				   struct drm_atomic_commit *state,
++				   struct drm_encoder *drm_encoder,
++				   struct msm_dp_panel *msm_dp_panel);
++int msm_dp_display_prepare_link(struct msm_dp *msm_dp_display);
++void msm_dp_display_unprepare(struct msm_dp *dp);
++void msm_dp_display_set_link_failure(struct msm_dp *dp, bool failed);
+ 
++int msm_dp_get_mst_max_stream(struct msm_dp *msm_dp_display);
++int msm_dp_mst_register(struct msm_dp *msm_dp_display);
++void msm_dp_mst_unregister(struct msm_dp *msm_dp_display);
++struct msm_dp_panel *msm_dp_display_get_panel(struct msm_dp *msm_dp_display,
++					      enum msm_dp_stream_id stream_id);
++bool msm_dp_display_is_plugged(struct msm_dp *msm_dp_display);
+ #endif /* _DP_DISPLAY_H_ */
+diff --git a/drivers/gpu/drm/msm/dp/dp_drm.c b/drivers/gpu/drm/msm/dp/dp_drm.c
+index 14d6e81..0065ea5 100644
+--- a/drivers/gpu/drm/msm/dp/dp_drm.c
++++ b/drivers/gpu/drm/msm/dp/dp_drm.c
+@@ -54,6 +54,8 @@ static int msm_dp_bridge_atomic_check(struct drm_bridge *bridge,
+ 	struct drm_connector_state *old;
+ 	int ret;
+ 
++	if (to_dp_bridge(bridge)->msm_dp_display->mst_active && conn_state->crtc)
++		return -EBUSY;
+ 	if (!msm_dp_color_managed(bridge) || !conn_state->crtc || !crtc_state)
+ 		return 0;
+ 	ret = msm_dp_display_atomic_check(to_dp_bridge(bridge)->msm_dp_display,
+diff --git a/drivers/gpu/drm/msm/dp/dp_drm.h b/drivers/gpu/drm/msm/dp/dp_drm.h
+index e73b16d..5760129 100644
+--- a/drivers/gpu/drm/msm/dp/dp_drm.h
++++ b/drivers/gpu/drm/msm/dp/dp_drm.h
+@@ -52,6 +52,7 @@ void msm_dp_bridge_hpd_enable(struct drm_bridge *bridge);
+ void msm_dp_bridge_hpd_disable(struct drm_bridge *bridge);
+ void msm_dp_bridge_hpd_notify(struct drm_bridge *bridge,
+ 			      struct drm_connector *connector,
+-			      enum drm_connector_status status);
++			      enum drm_connector_status status,
++			      enum drm_connector_dp_event event);
+ 
+ #endif /* _DP_DRM_H_ */
+diff --git a/drivers/gpu/drm/msm/dp/dp_link.h b/drivers/gpu/drm/msm/dp/dp_link.h
+index 76125e9..80116d5 100644
+--- a/drivers/gpu/drm/msm/dp/dp_link.h
++++ b/drivers/gpu/drm/msm/dp/dp_link.h
+@@ -75,7 +75,9 @@ struct msm_dp_link {
+ 	struct msm_dp_link_test_video test_video;
+ 	struct msm_dp_link_test_audio test_audio;
+ 	struct msm_dp_link_phy_params phy_params;
++	struct msm_dp_link_info link_caps;
+ 	struct msm_dp_link_info link_params;
++	bool vsc_sdp_supported;
+ 
+ 	u32 lane_map[DP_MAX_NUM_DP_LANES];
+ 	u32 max_dp_lanes;
+diff --git a/drivers/gpu/drm/msm/dp/dp_mst_drm.c b/drivers/gpu/drm/msm/dp/dp_mst_drm.c
+new file mode 100644
+index 0000000..3c6a63c
+--- /dev/null
++++ b/drivers/gpu/drm/msm/dp/dp_mst_drm.c
+@@ -0,0 +1,668 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Copyright (c) 2025 Qualcomm Innovation Center, Inc. All rights reserved.
++ */
++
++#include <drm/drm_edid.h>
++#include <drm/drm_fixed.h>
++#include <drm/drm_atomic_helper.h>
++#include <drm/display/drm_dp_mst_helper.h>
++#include <linux/pm_runtime.h>
++#include <linux/debugfs.h>
++#include <linux/seq_file.h>
++
++#include "dp_mst_drm.h"
++#include "dp_panel.h"
++
++#define to_dp_mst_connector(x) \
++		container_of((x), struct msm_dp_mst_connector, connector)
++
++#define MSM_DP_MST_HPD_IRQ_MAX_TRIES 30
++
++struct msm_dp_mst_connector {
++	struct drm_connector connector;
++	struct drm_dp_mst_port *mst_port;
++	struct msm_dp_mst *dp_mst;
++};
++
++struct msm_dp_mst_encoder {
++	struct drm_encoder *enc;
++	int stream_id;
++	struct msm_dp_panel *dp_panel;
++};
++
++struct msm_dp_mst {
++	struct drm_dp_mst_topology_mgr mst_mgr;
++	struct msm_dp_mst_encoder mst_encoders[DP_STREAM_MAX];
++	struct msm_dp *msm_dp;
++	struct msm_dp_link *link;
++	struct drm_dp_aux *dp_aux;
++	u32 max_streams;
++	/* Serializes concurrent stream link-state access across streams. */
++	struct mutex mst_lock;
++	/* Serializes HPD IRQ handling between IRQ handler and poll_hpd_irq. */
++	struct mutex hpd_irq_lock;
++};
++
++static int msm_dp_mst_output_bits_show(struct seq_file *seq, void *unused)
++{
++	struct msm_dp_mst_connector *conn = seq->private;
++	struct msm_dp_mst *mst = conn->dp_mst;
++	unsigned int bpp = 0;
++	unsigned int i;
++
++	guard(mutex)(&mst->mst_lock);
++	for (i = 0; i < mst->max_streams; i++) {
++		struct msm_dp_panel *panel = mst->mst_encoders[i].dp_panel;
++
++		if (panel && panel->connector == &conn->connector && panel->stream_active) {
++			bpp = panel->msm_dp_mode.bpp;
++			break;
++		}
++	}
++	seq_printf(seq, "version=1 active=%u bpc=%u bpp=%u dsc_bpp_x16=0\n",
++		   !!bpp, bpp / 3, bpp);
++	return 0;
++}
++DEFINE_SHOW_ATTRIBUTE(msm_dp_mst_output_bits);
++
++static void msm_dp_mst_debugfs_init(struct drm_connector *connector, struct dentry *root)
++{
++	debugfs_create_file("output_bits", 0444, root, to_dp_mst_connector(connector),
++			    &msm_dp_mst_output_bits_fops);
++}
++
++static void dp_mst_connector_destroy(struct drm_connector *connector)
++{
++	struct msm_dp_mst_connector *mst_conn = to_dp_mst_connector(connector);
++
++	drm_connector_cleanup(connector);
++	drm_dp_mst_put_port_malloc(mst_conn->mst_port);
++	kfree(mst_conn);
++}
++
++static const struct drm_connector_funcs msm_dp_drm_mst_connector_funcs = {
++	.debugfs_init = msm_dp_mst_debugfs_init,
++	.reset = drm_atomic_helper_connector_reset,
++	.destroy = dp_mst_connector_destroy,
++	.fill_modes = drm_helper_probe_single_connector_modes,
++	.atomic_duplicate_state = drm_atomic_helper_connector_duplicate_state,
++	.atomic_destroy_state = drm_atomic_helper_connector_destroy_state,
++};
++
++/* DP MST Connector OPs */
++static int
++msm_dp_mst_connector_detect(struct drm_connector *connector,
++			    struct drm_modeset_acquire_ctx *ctx,
++			    bool force)
++{
++	struct msm_dp_mst_connector *mst_conn = to_dp_mst_connector(connector);
++	struct msm_dp_mst *mst = mst_conn->dp_mst;
++	struct msm_dp *dp_display = mst->msm_dp;
++	struct device *dev = dp_display->drm_dev->dev;
++	enum drm_connector_status status = connector_status_disconnected;
++	int ret;
++
++	ret = pm_runtime_resume_and_get(dev);
++	if (ret < 0)
++		return status;
++
++	if (dp_display->mst_active)
++		status = drm_dp_mst_detect_port(connector,
++						ctx, &mst->mst_mgr, mst_conn->mst_port);
++
++	pm_runtime_put_autosuspend(dev);
++
++	return status;
++}
++
++static int msm_dp_mst_connector_get_modes(struct drm_connector *connector)
++{
++	struct msm_dp_mst_connector *mst_conn = to_dp_mst_connector(connector);
++	struct msm_dp_mst *mst = mst_conn->dp_mst;
++	const struct drm_edid *drm_edid;
++	int rc;
++
++	drm_edid = drm_dp_mst_edid_read(connector, &mst->mst_mgr, mst_conn->mst_port);
++	drm_edid_connector_update(connector, drm_edid);
++
++	rc = drm_edid_connector_add_modes(connector);
++
++	drm_edid_free(drm_edid);
++
++	return rc;
++}
++
++static enum drm_mode_status msm_dp_mst_connector_mode_valid(struct drm_connector *connector,
++							    const struct drm_display_mode *mode)
++{
++	struct msm_dp_mst_connector *mst_conn;
++	struct drm_dp_mst_port *mst_port;
++	struct msm_dp *dp_display;
++	int required_pbn;
++
++	if (drm_connector_is_unregistered(connector))
++		return 0;
++
++	mst_conn = to_dp_mst_connector(connector);
++	mst_port = mst_conn->mst_port;
++	dp_display = mst_conn->dp_mst->msm_dp;
++
++	/* Use minimum possible bpp (6bpc RGB, 8b10b) to avoid rejecting modes
++	 * that would be feasible at the actual link bpp. mode_valid must not
++	 * depend on negotiated parameters.
++	 */
++	required_pbn = drm_dp_calc_pbn_mode(mode->clock, (6 * 3) << 4);
++
++	if (required_pbn > mst_port->full_pbn) {
++		drm_dbg_dp(dp_display->drm_dev, "mode:%s not supported.\n", mode->name);
++		return MODE_CLOCK_HIGH;
++	}
++
++	return msm_dp_display_mode_valid(dp_display, &connector->display_info, mode);
++}
++
++static int msm_dp_mst_connector_atomic_check(struct drm_connector *connector,
++					     struct drm_atomic_commit *state)
++{
++	struct msm_dp_mst_connector *mst_conn = to_dp_mst_connector(connector);
++	struct msm_dp_mst *mst = mst_conn->dp_mst;
++
++	return drm_dp_atomic_release_time_slots(state, &mst->mst_mgr, mst_conn->mst_port);
++}
++
++static struct msm_dp_panel *msm_dp_mst_panel_from_encoder(struct msm_dp_mst *mst,
++							   struct drm_encoder *enc)
++{
++	int i;
++
++	for (i = 0; i < mst->max_streams; i++) {
++		if (mst->mst_encoders[i].enc == enc)
++			return mst->mst_encoders[i].dp_panel;
++	}
++	return NULL;
++}
++
++static void msm_dp_mst_remove_payload(struct msm_dp_mst *mst,
++				      struct drm_dp_mst_topology_state *mst_state,
++				      struct msm_dp_panel *panel)
++{
++	struct msm_dp_panel *dp_panel;
++	struct drm_dp_mst_atomic_payload *payload;
++	int i;
++
++	msm_dp_display_set_stream_info(mst->msm_dp, panel, 0, 0, 0);
++
++	/* Apply the slot shift to the remaining payloads. */
++	for (i = 0; i < mst->max_streams; i++) {
++		dp_panel = mst->mst_encoders[i].dp_panel;
++		if (dp_panel == panel || !dp_panel->connector)
++			continue;
++
++		payload = drm_atomic_get_mst_payload_state(mst_state,
++				to_dp_mst_connector(dp_panel->connector)->mst_port);
++		if (!payload || payload->vc_start_slot < 0)
++			continue;
++
++		msm_dp_display_set_stream_info(mst->msm_dp, dp_panel,
++					       payload->vc_start_slot,
++					       payload->time_slots, payload->pbn);
++	}
++}
++
++static int msm_dp_mst_encoder_stream_id(struct msm_dp_mst *mst,
++					struct drm_encoder *enc)
++{
++	int i;
++
++	for (i = 0; i < mst->max_streams; i++) {
++		if (mst->mst_encoders[i].enc == enc)
++			return mst->mst_encoders[i].stream_id;
++	}
++	return -1;
++}
++
++int msm_dp_mst_stream_enable(struct drm_encoder *encoder,
++			      struct drm_atomic_commit *state)
++{
++	struct drm_connector *connector =
++		drm_atomic_get_new_connector_for_encoder(state, encoder);
++	struct msm_dp_mst_connector *mst_conn = to_dp_mst_connector(connector);
++	struct msm_dp_mst *mst = mst_conn->dp_mst;
++	struct msm_dp *dp_display = mst->msm_dp;
++	struct msm_dp_panel *panel = msm_dp_mst_panel_from_encoder(mst, encoder);
++	struct drm_dp_mst_port *port = mst_conn->mst_port;
++	struct drm_dp_mst_topology_state *mst_state =
++		drm_atomic_get_new_mst_topology_state(state, &mst->mst_mgr);
++	struct drm_dp_mst_atomic_payload *payload =
++		drm_atomic_get_mst_payload_state(mst_state, port);
++	int rc;
++	bool payload_started = false;
++
++	guard(mutex)(&mst->mst_lock);
++
++	if (panel->connector)
++		return -EBUSY;
++	drm_connector_get(connector);
++	panel->connector = connector;
++
++	rc = msm_dp_display_set_mode_helper(dp_display, state, encoder, panel);
++	if (rc) {
++		drm_err(dp_display->drm_dev,
++			"[MST] stream:%u set_mode failed rc=%d\n", panel->stream_id, rc);
++		goto failed;
++	}
++
++	rc = msm_dp_display_prepare_link(dp_display);
++	if (rc) {
++		drm_err(dp_display->drm_dev,
++			"[MST] stream:%u prepare_link failed rc=%d\n", panel->stream_id, rc);
++		goto failed;
++	}
++
++	drm_dp_mst_update_slots(mst_state, DP_CAP_ANSI_8B10B);
++
++	payload_started = true;
++	rc = drm_dp_add_payload_part1(&mst->mst_mgr, mst_state, payload);
++	if (rc)
++		goto failed;
++
++	msm_dp_display_set_stream_info(mst->msm_dp, panel,
++				       payload->vc_start_slot,
++				       payload->time_slots, payload->pbn);
++	drm_dbg_kms(dp_display->drm_dev,
++		    "[MST] stream:%u timeslots vc_start:%d slots:%d pbn:%d\n",
++		    panel->stream_id, payload->vc_start_slot,
++		    payload->time_slots, payload->pbn);
++
++	rc = msm_dp_display_enable_helper(dp_display, panel);
++	if (rc)
++		goto failed;
++
++	rc = drm_dp_check_act_status(&mst->mst_mgr);
++	if (rc)
++		goto failed;
++
++	rc = drm_dp_add_payload_part2(&mst->mst_mgr, payload);
++	if (rc)
++		goto failed;
++
++	msm_dp_display_set_link_failure(dp_display, false);
++	return 0;
++
++failed:
++	if (payload_started && payload->payload_allocation_status != DRM_DP_MST_PAYLOAD_ALLOCATION_NONE) {
++		drm_dp_remove_payload_part1(&mst->mst_mgr, mst_state, payload);
++		drm_dp_remove_payload_part2(&mst->mst_mgr, mst_state, payload, payload);
++		msm_dp_mst_remove_payload(mst, mst_state, panel);
++	}
++	msm_dp_display_atomic_post_disable_helper(dp_display, panel);
++	if (payload_started && msm_dp_display_is_plugged(dp_display) && msm_dp_display_mst_send_act(dp_display, panel))
++		drm_err(dp_display->drm_dev, "MST payload rollback ACT failed\n");
++	msm_dp_display_unprepare(dp_display);
++	panel->connector = NULL;
++	drm_connector_put(connector);
++	msm_dp_display_set_link_failure(dp_display, true);
++	return rc;
++}
++
++void msm_dp_mst_stream_disable(struct drm_encoder *encoder,
++			       struct drm_atomic_commit *state)
++{
++	struct drm_connector *connector = drm_atomic_get_old_connector_for_encoder(state, encoder);
++	struct msm_dp_mst_connector *mst_conn = to_dp_mst_connector(connector);
++	struct msm_dp_mst *mst = mst_conn->dp_mst;
++	struct msm_dp_panel *panel = msm_dp_mst_panel_from_encoder(mst, encoder);
++	struct drm_dp_mst_topology_state *old_mst_state =
++		drm_atomic_get_old_mst_topology_state(state, &mst->mst_mgr);
++	struct drm_dp_mst_topology_state *new_mst_state =
++		drm_atomic_get_new_mst_topology_state(state, &mst->mst_mgr);
++	struct drm_dp_mst_atomic_payload *old_payload =
++		drm_atomic_get_mst_payload_state(old_mst_state, mst_conn->mst_port);
++	struct drm_dp_mst_atomic_payload *new_payload =
++		drm_atomic_get_mst_payload_state(new_mst_state, mst_conn->mst_port);
++
++	guard(mutex)(&mst->mst_lock);
++
++	if (panel->connector != connector)
++		return;
++	drm_dp_remove_payload_part1(&mst->mst_mgr, new_mst_state, new_payload);
++
++	drm_dp_remove_payload_part2(&mst->mst_mgr, new_mst_state, old_payload, new_payload);
++
++	msm_dp_mst_remove_payload(mst, new_mst_state, panel);
++	drm_dbg_kms(mst->msm_dp->drm_dev,
++		    "[MST] stream:%u timeslots vc_start:%d slots:%d pbn:%d\n",
++		    panel->stream_id, new_payload->vc_start_slot,
++		    new_payload->time_slots, new_payload->pbn);
++
++	if (!msm_dp_display_is_plugged(mst->msm_dp))
++		return;
++
++	msm_dp_display_disable_helper(mst->msm_dp, panel);
++
++	drm_dp_check_act_status(&mst->mst_mgr);
++}
++
++void msm_dp_mst_stream_post_disable(struct drm_encoder *encoder,
++				    struct drm_atomic_commit *state)
++{
++	struct drm_connector *connector = drm_atomic_get_old_connector_for_encoder(state, encoder);
++	struct msm_dp_mst_connector *mst_conn = to_dp_mst_connector(connector);
++	struct msm_dp_mst *mst = mst_conn->dp_mst;
++	struct msm_dp_panel *panel = msm_dp_mst_panel_from_encoder(mst, encoder);
++
++	guard(mutex)(&mst->mst_lock);
++
++	if (panel->connector != connector)
++		return;
++	msm_dp_display_atomic_post_disable_helper(mst->msm_dp, panel);
++
++	msm_dp_display_unprepare(mst->msm_dp);
++
++	panel->connector = NULL;
++
++	drm_connector_put(connector);
++}
++
++int msm_dp_mst_stream_atomic_check(struct drm_encoder *enc,
++				   struct drm_crtc_state *crtc_state,
++				   struct drm_connector_state *conn_state)
++{
++	struct msm_dp_mst_connector *mst_conn = to_dp_mst_connector(conn_state->connector);
++	struct msm_dp_mst *mst = mst_conn->dp_mst;
++	struct drm_dp_mst_topology_state *mst_state;
++	int bpp, pbn, slots;
++
++	if (!conn_state->crtc)
++		return 0;
++
++	if (!drm_atomic_crtc_needs_modeset(crtc_state) || !crtc_state->active)
++		return 0;
++	if (conn_state->hdr_output_metadata || conn_state->colorspace ||
++	    drm_mode_is_420_only(&conn_state->connector->display_info, &crtc_state->mode))
++		return -EOPNOTSUPP;
++
++	bpp = 24;
++	pbn = drm_dp_calc_pbn_mode(crtc_state->mode.clock, bpp << 4);
++
++	mst_state = drm_atomic_get_mst_topology_state(crtc_state->state, &mst->mst_mgr);
++	if (IS_ERR(mst_state))
++		return PTR_ERR(mst_state);
++
++	mst_state->pbn_div = drm_dp_get_vc_payload_bw(mst->link->link_caps.rate,
++						    mst->link->link_caps.num_lanes);
++
++	slots = drm_dp_atomic_find_time_slots(crtc_state->state, &mst->mst_mgr,
++					      mst_conn->mst_port, pbn);
++	if (slots < 0)
++		return slots;
++
++	return 0;
++}
++
++int msm_dp_mst_attach_encoder(struct msm_dp *dp_display, unsigned int stream_id,
++			      struct drm_encoder *encoder)
++{
++	struct msm_dp_mst *mst = dp_display->msm_dp_mst;
++	struct msm_dp_panel *dp_panel;
++
++	if (stream_id >= mst->max_streams || mst->mst_encoders[stream_id].enc)
++		return -EINVAL;
++	dp_panel = msm_dp_display_get_panel(dp_display, stream_id);
++	if (!dp_panel) {
++		drm_err(dp_display->drm_dev,
++			"[MST] failed to allocate panel for stream %d\n", stream_id);
++		return -ENOMEM;
++	}
++
++	mst->mst_encoders[stream_id].enc = encoder;
++	mst->mst_encoders[stream_id].stream_id = stream_id;
++	mst->mst_encoders[stream_id].dp_panel = dp_panel;
++
++	return 0;
++}
++
++int msm_dp_mst_display_set_mgr_state(struct msm_dp *dp_display, bool state)
++{
++	struct msm_dp_mst *mst = dp_display->msm_dp_mst;
++	int rc;
++
++	rc = drm_dp_mst_topology_mgr_set_mst(&mst->mst_mgr, state);
++	if (rc < 0) {
++		drm_err(dp_display->drm_dev,
++			"[MST] failed to set topology mgr state to %d rc:%d\n", state, rc);
++	}
++
++	drm_dbg_kms(dp_display->drm_dev, "[MST] set_mgr_state state:%d\n", state);
++	return rc;
++}
++
++void msm_dp_mst_display_hpd_irq(struct msm_dp *dp_display)
++{
++	int rc;
++	struct msm_dp_mst *mst = dp_display->msm_dp_mst;
++	unsigned int esi_res = DP_SINK_COUNT_ESI + 1;
++	int i;
++
++	guard(mutex)(&mst->hpd_irq_lock);
++
++	for (i = 0; i < MSM_DP_MST_HPD_IRQ_MAX_TRIES; i++) {
++		u8 ack[8] = {};
++		u8 esi[4];
++		bool handled;
++
++		rc = drm_dp_dpcd_read_data(mst->dp_aux, DP_SINK_COUNT_ESI, esi, 4);
++		if (rc < 0) {
++			DRM_ERROR("DPCD sink status read failed, rlen=%d\n", rc);
++			return;
++		}
++
++		rc = drm_dp_mst_hpd_irq_handle_event(&mst->mst_mgr, esi, ack, &handled);
++		if (!handled)
++			break;
++
++		rc = drm_dp_dpcd_write_byte(mst->dp_aux, esi_res, ack[1]);
++		if (rc < 0) {
++			DRM_ERROR("DPCD esi_res failed. rc=%d\n", rc);
++			return;
++		}
++
++		drm_dp_mst_hpd_irq_send_new_request(&mst->mst_mgr);
++	}
++}
++
++static struct drm_encoder *
++msm_dp_mst_atomic_best_encoder(struct drm_connector *connector, struct drm_atomic_commit *state)
++{
++	struct msm_dp_mst_connector *mst_conn = to_dp_mst_connector(connector);
++	struct msm_dp_mst *mst = mst_conn->dp_mst;
++	struct drm_connector_state *conn_state;
++	struct drm_connector *iter;
++	struct drm_connector_list_iter conn_iter;
++	u32 stream_mask = 0;
++	u32 i;
++
++	conn_state = drm_atomic_get_new_connector_state(state, connector);
++	if (!conn_state)
++		return NULL;
++
++	if (conn_state->best_encoder)
++		return conn_state->best_encoder;
++
++	drm_connector_list_iter_begin(connector->dev, &conn_iter);
++	drm_for_each_connector_iter(iter, &conn_iter) {
++		struct drm_connector_state *peer_state;
++		int stream_id;
++
++		if (iter == connector ||
++		    iter->funcs != &msm_dp_drm_mst_connector_funcs ||
++		    to_dp_mst_connector(iter)->dp_mst != mst)
++			continue;
++
++		peer_state = drm_atomic_get_new_connector_state(state, iter) ?: iter->state;
++		if (!peer_state || !peer_state->crtc || !peer_state->best_encoder)
++			continue;
++
++		stream_id = msm_dp_mst_encoder_stream_id(mst, peer_state->best_encoder);
++		if (stream_id >= 0 && stream_id < mst->max_streams)
++			stream_mask |= BIT(stream_id);
++	}
++	drm_connector_list_iter_end(&conn_iter);
++
++	for (i = 0; i < mst->max_streams; i++) {
++		if (!(stream_mask & BIT(i))) {
++			return mst->mst_encoders[i].enc;
++		}
++	}
++
++	return NULL;
++}
++
++/* DRM MST callbacks */
++static const struct drm_connector_helper_funcs msm_dp_drm_mst_connector_helper_funcs = {
++	.get_modes =    msm_dp_mst_connector_get_modes,
++	.detect_ctx =   msm_dp_mst_connector_detect,
++	.mode_valid =   msm_dp_mst_connector_mode_valid,
++	.atomic_best_encoder = msm_dp_mst_atomic_best_encoder,
++	.atomic_check = msm_dp_mst_connector_atomic_check,
++};
++
++void msm_dp_mst_report_link_failure(struct msm_dp *dp_display, bool notify)
++{
++	struct msm_dp_mst *mst = dp_display->msm_dp_mst;
++	struct drm_connector_list_iter iter;
++	struct drm_connector *connector;
++
++	if (!mst)
++		return;
++	drm_connector_list_iter_begin(dp_display->drm_dev, &iter);
++	drm_for_each_connector_iter(connector, &iter)
++		if (connector->funcs == &msm_dp_drm_mst_connector_funcs &&
++		    to_dp_mst_connector(connector)->dp_mst == mst)
++			drm_connector_set_link_status_property(connector, DRM_MODE_LINK_STATUS_BAD);
++	drm_connector_list_iter_end(&iter);
++	if (notify)
++		drm_kms_helper_hotplug_event(dp_display->drm_dev);
++}
++
++static struct drm_connector *
++msm_dp_mst_add_connector(struct drm_dp_mst_topology_mgr *mgr,
++			 struct drm_dp_mst_port *port, const char *pathprop)
++{
++	struct msm_dp_mst *mst = container_of(mgr, struct msm_dp_mst, mst_mgr);
++	struct drm_device *dev = mst->msm_dp->drm_dev;
++	struct msm_dp_mst_connector *mst_conn;
++	struct drm_connector *connector;
++	int rc, i;
++
++	mst_conn = kzalloc_obj(*mst_conn);
++	if (!mst_conn)
++		return NULL;
++
++	connector = &mst_conn->connector;
++	rc = drm_connector_dynamic_init(dev, connector,
++					&msm_dp_drm_mst_connector_funcs,
++					DRM_MODE_CONNECTOR_DisplayPort, NULL);
++	if (rc)
++		goto err_free;
++
++	mst_conn->dp_mst = mst;
++
++	drm_connector_helper_add(connector, &msm_dp_drm_mst_connector_helper_funcs);
++	connector->funcs->reset(connector);
++
++	/* add all encoders as possible encoders */
++	for (i = 0; i < mst->max_streams; i++) {
++		rc = drm_connector_attach_encoder(connector, mst->mst_encoders[i].enc);
++		if (rc) {
++			drm_err(dev, "[MST] failed to attach encoder:%u to conn:%d rc:%d\n",
++				mst->mst_encoders[i].enc->base.id,
++				connector->base.id, rc);
++			goto err_connector;
++		}
++	}
++
++	mst_conn->mst_port = port;
++	drm_dp_mst_get_port_malloc(port);
++
++	drm_object_attach_property(&connector->base,
++				   dev->mode_config.path_property, 0);
++	drm_object_attach_property(&connector->base,
++				   dev->mode_config.tile_property, 0);
++	drm_connector_set_path_property(connector, pathprop);
++
++	drm_dbg_kms(dev, "[MST] add_connector done conn:%d max_streams:%u\n",
++		    connector->base.id, mst->max_streams);
++
++	return connector;
++
++err_connector:
++	drm_connector_cleanup(connector);
++err_free:
++	kfree(mst_conn);
++	return NULL;
++}
++
++static void msm_dp_mst_poll_hpd_irq(struct drm_dp_mst_topology_mgr *mgr)
++{
++	struct msm_dp_mst *mst = container_of(mgr, struct msm_dp_mst, mst_mgr);
++
++	msm_dp_mst_display_hpd_irq(mst->msm_dp);
++}
++
++static const struct drm_dp_mst_topology_cbs msm_dp_mst_drm_cbs = {
++	.add_connector = msm_dp_mst_add_connector,
++	.poll_hpd_irq  = msm_dp_mst_poll_hpd_irq,
++};
++
++int msm_dp_mst_mgr_init(struct msm_dp *dp_display, struct msm_dp_link *link,
++			 u32 max_streams, struct drm_dp_aux *drm_aux)
++{
++	struct drm_device *dev = dp_display->drm_dev;
++	struct msm_dp_mst *mst;
++	int ret;
++
++	mst = kzalloc_obj(*mst);
++	if (!mst)
++		return -ENOMEM;
++
++	mst->mst_mgr.cbs = &msm_dp_mst_drm_cbs;
++	mst->msm_dp = dp_display;
++	mst->link = link;
++	mst->max_streams = max_streams;
++	mst->dp_aux = drm_aux;
++
++	ret = drm_dp_mst_topology_mgr_init(&mst->mst_mgr, dev,
++					   drm_aux,
++					   16,
++					   max_streams,
++					   dp_display->connector->base.id);
++	if (ret) {
++		drm_err(dev, "[MST] topology manager init failed\n");
++		kfree(mst);
++		return ret;
++	}
++
++	mutex_init(&mst->mst_lock);
++	mutex_init(&mst->hpd_irq_lock);
++	dp_display->msm_dp_mst = mst;
++	return 0;
++}
++
++void msm_dp_mst_mgr_destroy(struct msm_dp *dp_display)
++{
++	struct msm_dp_mst *mst = dp_display->msm_dp_mst;
++	unsigned int i;
++
++	if (!mst)
++		return;
++
++	drm_dp_mst_topology_mgr_destroy(&mst->mst_mgr);
++	for (i = 0; i < mst->max_streams; i++)
++		msm_dp_panel_put(mst->mst_encoders[i].dp_panel);
++	mutex_destroy(&mst->hpd_irq_lock);
++	mutex_destroy(&mst->mst_lock);
++	dp_display->msm_dp_mst = NULL;
++	kfree(mst);
++}
+diff --git a/drivers/gpu/drm/msm/dp/dp_mst_drm.h b/drivers/gpu/drm/msm/dp/dp_mst_drm.h
+new file mode 100644
+index 0000000..b16fbc7
+--- /dev/null
++++ b/drivers/gpu/drm/msm/dp/dp_mst_drm.h
+@@ -0,0 +1,19 @@
++/* SPDX-License-Identifier: GPL-2.0-only
++ * Copyright (c) 2025 Qualcomm Innovation Center, Inc. All rights reserved.
++ */
++
++#ifndef _DP_MST_DRM_H_
++#define _DP_MST_DRM_H_
++
++#include "dp_display.h"
++
++int msm_dp_mst_mgr_init(struct msm_dp *dp_display, struct msm_dp_link *link,
++			 u32 max_streams, struct drm_dp_aux *drm_aux);
++void msm_dp_mst_mgr_destroy(struct msm_dp *dp_display);
++int msm_dp_mst_attach_encoder(struct msm_dp *dp_display, unsigned int stream_id,
++			      struct drm_encoder *encoder);
++int msm_dp_mst_display_set_mgr_state(struct msm_dp *dp_display, bool state);
++void msm_dp_mst_display_hpd_irq(struct msm_dp *dp_display);
++void msm_dp_mst_report_link_failure(struct msm_dp *dp_display, bool notify);
++
++#endif /* _DP_MST_DRM_H_ */
+diff --git a/drivers/gpu/drm/msm/dp/dp_panel.c b/drivers/gpu/drm/msm/dp/dp_panel.c
+index e9b2e69..2a8f05f 100644
+--- a/drivers/gpu/drm/msm/dp/dp_panel.c
++++ b/drivers/gpu/drm/msm/dp/dp_panel.c
+@@ -27,13 +27,92 @@ struct msm_dp_panel_private {
+ 	struct drm_dp_aux *aux;
+ 	struct msm_dp_link *link;
+ 	void __iomem *link_base;
+-	void __iomem *p0_base;
++	void __iomem *mst2link_base;
++	void __iomem *mst3link_base;
++	void __iomem *pixel_base;
+ 	bool panel_on;
+ };
+ 
++u32 msm_dp_stream_reg(enum msm_dp_stream_id id, u32 reg)
++{
++	bool is_s1 = (id == DP_STREAM_1);
++
++	if (id == DP_STREAM_0)
++		return reg;
++
++	switch (reg) {
++	case REG_DP_STATE_CTRL:
++		return is_s1 ? REG_DP_STATE_CTRL : REG_DP_MSTLINK_STATE_CTRL;
++	case REG_DP_CONFIGURATION_CTRL:
++		return is_s1 ? REG_DP1_CONFIGURATION_CTRL : REG_DP_MSTLINK_CONFIGURATION_CTRL;
++	case REG_DP_SOFTWARE_MVID:
++		return is_s1 ? REG_DP1_SOFTWARE_MVID : REG_DP_MSTLINK_SOFTWARE_MVID;
++	case REG_DP_SOFTWARE_NVID:
++		return is_s1 ? REG_DP1_SOFTWARE_NVID : REG_DP_MSTLINK_SOFTWARE_NVID;
++	case REG_DP_TOTAL_HOR_VER:
++		return is_s1 ? REG_DP1_TOTAL_HOR_VER : REG_DP_MSTLINK_TOTAL_HOR_VER;
++	case REG_DP_START_HOR_VER_FROM_SYNC:
++		return is_s1 ? REG_DP1_START_HOR_VER_FROM_SYNC
++			     : REG_DP_MSTLINK_START_HOR_VER_FROM_SYNC;
++	case REG_DP_HSYNC_VSYNC_WIDTH_POLARITY:
++		return is_s1 ? REG_DP1_HSYNC_VSYNC_WIDTH_POLARITY
++			     : REG_DP_MSTLINK_HSYNC_VSYNC_WIDTH_POLARITY;
++	case REG_DP_ACTIVE_HOR_VER:
++		return is_s1 ? REG_DP1_ACTIVE_HOR_VER : REG_DP_MSTLINK_ACTIVE_HOR_VER;
++	case REG_DP_MISC1_MISC0:
++		return is_s1 ? REG_DP1_MISC1_MISC0 : REG_DP_MSTLINK_MISC1_MISC0;
++	case REG_DP_DP0_TIMESLOT_1_32:
++		return is_s1 ? REG_DP_DP1_TIMESLOT_1_32 : REG_DP_MSTLINK_TIMESLOT_1_32;
++	case REG_DP_DP0_TIMESLOT_33_63:
++		return is_s1 ? REG_DP_DP1_TIMESLOT_33_63 : REG_DP_MSTLINK_TIMESLOT_33_63;
++	case REG_DP_DP0_RG:
++		return is_s1 ? REG_DP_DP1_RG : REG_DP_MSTLINK_DP_RG;
++	case MMSS_DP_SDP_CFG:
++		return is_s1 ? MMSS_DP1_SDP_CFG : MMSS_DP_MSTLINK_SDP_CFG;
++	case MMSS_DP_SDP_CFG2:
++		return is_s1 ? MMSS_DP1_SDP_CFG2 : MMSS_DP_MSTLINK_SDP_CFG2;
++	case MMSS_DP_SDP_CFG3:
++		return is_s1 ? MMSS_DP1_SDP_CFG3 : MMSS_DP_MSTLINK_SDP_CFG3;
++	case MMSS_DP_GENERIC0_0:
++		return is_s1 ? MMSS_DP1_GENERIC0_0 : MMSS_DP_MSTLINK_GENERIC0_0;
++	case MMSS_DP_GENERIC0_1:
++		return is_s1 ? MMSS_DP1_GENERIC0_1 : MMSS_DP_MSTLINK_GENERIC0_1;
++	case MMSS_DP_GENERIC0_2:
++		return is_s1 ? MMSS_DP1_GENERIC0_2 : MMSS_DP_MSTLINK_GENERIC0_2;
++	case MMSS_DP_GENERIC0_3:
++		return is_s1 ? MMSS_DP1_GENERIC0_3 : MMSS_DP_MSTLINK_GENERIC0_3;
++	case MMSS_DP_GENERIC0_4:
++		return is_s1 ? MMSS_DP1_GENERIC0_4 : MMSS_DP_MSTLINK_GENERIC0_4;
++	case MMSS_DP_GENERIC0_5:
++		return is_s1 ? MMSS_DP1_GENERIC0_5 : MMSS_DP_MSTLINK_GENERIC0_5;
++	case MMSS_DP_GENERIC0_6:
++		return is_s1 ? MMSS_DP1_GENERIC0_6 : MMSS_DP_MSTLINK_GENERIC0_6;
++	case MMSS_DP_GENERIC0_7:
++		return is_s1 ? MMSS_DP1_GENERIC0_7 : MMSS_DP_MSTLINK_GENERIC0_7;
++	case MMSS_DP_GENERIC0_8:
++		return is_s1 ? MMSS_DP1_GENERIC0_8 : MMSS_DP_MSTLINK_GENERIC0_8;
++	case MMSS_DP_GENERIC0_9:
++		return is_s1 ? MMSS_DP1_GENERIC0_9 : MMSS_DP_MSTLINK_GENERIC0_9;
++	default:
++		return reg;
++	}
++}
++
+ static inline u32 msm_dp_read_link(struct msm_dp_panel_private *panel, u32 offset)
+ {
+-	return readl_relaxed(panel->link_base + offset);
++	offset = msm_dp_stream_reg(panel->msm_dp_panel.stream_id, offset);
++	switch (panel->msm_dp_panel.stream_id) {
++	case DP_STREAM_0:
++	case DP_STREAM_1:
++		return readl_relaxed(panel->link_base + offset);
++	case DP_STREAM_2:
++		return readl_relaxed(panel->mst2link_base + offset);
++	case DP_STREAM_3:
++		return readl_relaxed(panel->mst3link_base + offset);
++	default:
++		DRM_ERROR("error stream_id\n");
++		return 0;
++	}
+ }
+ 
+ static inline void msm_dp_write_link(struct msm_dp_panel_private *panel,
+@@ -43,27 +122,42 @@ static inline void msm_dp_write_link(struct msm_dp_panel_private *panel,
+ 	 * To make sure link reg writes happens before any other operation,
+ 	 * this function uses writel() instread of writel_relaxed()
+ 	 */
+-	writel(data, panel->link_base + offset);
++	offset = msm_dp_stream_reg(panel->msm_dp_panel.stream_id, offset);
++	switch (panel->msm_dp_panel.stream_id) {
++	case DP_STREAM_0:
++	case DP_STREAM_1:
++		writel(data, panel->link_base + offset);
++		break;
++	case DP_STREAM_2:
++		writel(data, panel->mst2link_base + offset);
++		break;
++	case DP_STREAM_3:
++		writel(data, panel->mst3link_base + offset);
++		break;
++	default:
++		DRM_ERROR("error stream_id\n");
++		break;
++	}
+ }
+ 
+-static inline void msm_dp_write_p0(struct msm_dp_panel_private *panel,
+-			       u32 offset, u32 data)
++static inline void msm_dp_write_pn(struct msm_dp_panel_private *panel,
++				   u32 offset, u32 data)
+ {
+ 	/*
+-	 * To make sure interface reg writes happens before any other operation,
+-	 * this function uses writel() instread of writel_relaxed()
++	 * Use writel() instead of writel_relaxed() to ensure the interface
++	 * register write reaches the hardware before subsequent operations.
+ 	 */
+-	writel(data, panel->p0_base + offset);
++	writel(data, panel->pixel_base + offset);
+ }
+ 
+-static inline u32 msm_dp_read_p0(struct msm_dp_panel_private *panel,
+-			       u32 offset)
++static inline u32 msm_dp_read_pn(struct msm_dp_panel_private *panel,
++				 u32 offset)
+ {
+ 	/*
+-	 * To make sure interface reg writes happens before any other operation,
+-	 * this function uses writel() instread of writel_relaxed()
++	 * Only reads a configuration register: no DMA or memory ordering is
++	 * required, so readl_relaxed() is sufficient.
+ 	 */
+-	return readl_relaxed(panel->p0_base + offset);
++	return readl_relaxed(panel->pixel_base + offset);
+ }
+ 
+ static void msm_dp_panel_read_psr_cap(struct msm_dp_panel_private *panel)
+@@ -101,7 +195,8 @@ static int msm_dp_panel_read_dpcd(struct msm_dp_panel *msm_dp_panel)
+ 	if (rc)
+ 		return rc;
+ 
+-	msm_dp_panel->vsc_sdp_supported = drm_dp_vsc_sdp_supported(panel->aux, dpcd);
++	link = panel->link;
++	link->vsc_sdp_supported = drm_dp_vsc_sdp_supported(panel->aux, dpcd);
+ 	memset(msm_dp_panel->dsc_dpcd, 0, sizeof(msm_dp_panel->dsc_dpcd));
+ 	msm_dp_panel->fec_cap = 0;
+ 	msm_dp_panel->dsc_caps_valid = dpcd[DP_DPCD_REV] < 0x14;
+@@ -119,7 +214,8 @@ static int msm_dp_panel_read_dpcd(struct msm_dp_panel *msm_dp_panel)
+ 			drm_dbg_dp(panel->drm_dev, "DSC/FEC capabilities unavailable: %d\n", rc);
+ 		}
+ 	}
+-	link_info = &msm_dp_panel->link_info;
++	link_info = &link->link_caps;
++	memset(link_info, 0, sizeof(*link_info));
+ 	link_info->revision = dpcd[DP_DPCD_REV];
+ 	major = (link_info->revision >> 4) & 0x0f;
+ 	minor = link_info->revision & 0x0f;
+@@ -234,13 +330,15 @@ static int msm_dp_panel_read_dpcd(struct msm_dp_panel *msm_dp_panel)
+ static u32 msm_dp_panel_get_supported_bpp(struct msm_dp_panel *msm_dp_panel,
+ 		u32 mode_edid_bpp, u32 mode_pclk_khz)
+ {
++	struct msm_dp_panel_private *panel =
++		container_of(msm_dp_panel, struct msm_dp_panel_private, msm_dp_panel);
+ 	const struct msm_dp_link_info *link_info;
+ 	const u32 max_supported_bpp = 30, min_supported_bpp = 18;
+ 	u32 bpp, data_rate_khz;
+ 
+ 	bpp = min(mode_edid_bpp, max_supported_bpp);
+ 
+-	link_info = &msm_dp_panel->link_info;
++	link_info = &panel->link->link_caps;
+ 	data_rate_khz = link_info->num_lanes * link_info->rate * 8;
+ 
+ 	do {
+@@ -272,12 +370,12 @@ int msm_dp_panel_read_link_caps(struct msm_dp_panel *msm_dp_panel,
+ 		return rc;
+ 	}
+ 
+-	bw_code = drm_dp_link_rate_to_bw_code(msm_dp_panel->link_info.rate);
++	bw_code = drm_dp_link_rate_to_bw_code(panel->link->link_caps.rate);
+ 	if (!is_link_rate_valid(bw_code) ||
+-			!is_lane_count_valid(msm_dp_panel->link_info.num_lanes) ||
++			!is_lane_count_valid(panel->link->link_caps.num_lanes) ||
+ 			(bw_code > msm_dp_panel->max_bw_code)) {
+-		DRM_ERROR("Illegal link rate=%d lane=%d\n", msm_dp_panel->link_info.rate,
+-				msm_dp_panel->link_info.num_lanes);
++		DRM_ERROR("Illegal link rate=%d lane=%d\n", panel->link->link_caps.rate,
++				panel->link->link_caps.num_lanes);
+ 		return -EINVAL;
+ 	}
+ 
+@@ -387,34 +485,34 @@ static void msm_dp_panel_tpg_enable(struct msm_dp_panel *msm_dp_panel,
+ 	display_hctl = (hsync_end_x << 16) | hsync_start_x;
+ 
+ 
+-	msm_dp_write_p0(panel, MMSS_DP_INTF_HSYNC_CTL, hsync_ctl);
+-	msm_dp_write_p0(panel, MMSS_DP_INTF_VSYNC_PERIOD_F0, vsync_period *
++	msm_dp_write_pn(panel, MMSS_DP_INTF_HSYNC_CTL, hsync_ctl);
++	msm_dp_write_pn(panel, MMSS_DP_INTF_VSYNC_PERIOD_F0, vsync_period *
+ 			hsync_period);
+-	msm_dp_write_p0(panel, MMSS_DP_INTF_VSYNC_PULSE_WIDTH_F0, v_sync_width *
++	msm_dp_write_pn(panel, MMSS_DP_INTF_VSYNC_PULSE_WIDTH_F0, v_sync_width *
+ 			hsync_period);
+-	msm_dp_write_p0(panel, MMSS_DP_INTF_VSYNC_PERIOD_F1, 0);
+-	msm_dp_write_p0(panel, MMSS_DP_INTF_VSYNC_PULSE_WIDTH_F1, 0);
+-	msm_dp_write_p0(panel, MMSS_DP_INTF_DISPLAY_HCTL, display_hctl);
+-	msm_dp_write_p0(panel, MMSS_DP_INTF_ACTIVE_HCTL, 0);
+-	msm_dp_write_p0(panel, MMSS_INTF_DISPLAY_V_START_F0, display_v_start);
+-	msm_dp_write_p0(panel, MMSS_DP_INTF_DISPLAY_V_END_F0, display_v_end);
+-	msm_dp_write_p0(panel, MMSS_INTF_DISPLAY_V_START_F1, 0);
+-	msm_dp_write_p0(panel, MMSS_DP_INTF_DISPLAY_V_END_F1, 0);
+-	msm_dp_write_p0(panel, MMSS_DP_INTF_ACTIVE_V_START_F0, 0);
+-	msm_dp_write_p0(panel, MMSS_DP_INTF_ACTIVE_V_END_F0, 0);
+-	msm_dp_write_p0(panel, MMSS_DP_INTF_ACTIVE_V_START_F1, 0);
+-	msm_dp_write_p0(panel, MMSS_DP_INTF_ACTIVE_V_END_F1, 0);
+-	msm_dp_write_p0(panel, MMSS_DP_INTF_POLARITY_CTL, 0);
+-
+-	msm_dp_write_p0(panel, MMSS_DP_TPG_MAIN_CONTROL,
+-				DP_TPG_CHECKERED_RECT_PATTERN);
+-	msm_dp_write_p0(panel, MMSS_DP_TPG_VIDEO_CONFIG,
+-				DP_TPG_VIDEO_CONFIG_BPP_8BIT |
+-				DP_TPG_VIDEO_CONFIG_RGB);
+-	msm_dp_write_p0(panel, MMSS_DP_BIST_ENABLE,
+-				DP_BIST_ENABLE_DPBIST_EN);
+-	msm_dp_write_p0(panel, MMSS_DP_TIMING_ENGINE_EN,
+-				DP_TIMING_ENGINE_EN_EN);
++	msm_dp_write_pn(panel, MMSS_DP_INTF_VSYNC_PERIOD_F1, 0);
++	msm_dp_write_pn(panel, MMSS_DP_INTF_VSYNC_PULSE_WIDTH_F1, 0);
++	msm_dp_write_pn(panel, MMSS_DP_INTF_DISPLAY_HCTL, display_hctl);
++	msm_dp_write_pn(panel, MMSS_DP_INTF_ACTIVE_HCTL, 0);
++	msm_dp_write_pn(panel, MMSS_INTF_DISPLAY_V_START_F0, display_v_start);
++	msm_dp_write_pn(panel, MMSS_DP_INTF_DISPLAY_V_END_F0, display_v_end);
++	msm_dp_write_pn(panel, MMSS_INTF_DISPLAY_V_START_F1, 0);
++	msm_dp_write_pn(panel, MMSS_DP_INTF_DISPLAY_V_END_F1, 0);
++	msm_dp_write_pn(panel, MMSS_DP_INTF_ACTIVE_V_START_F0, 0);
++	msm_dp_write_pn(panel, MMSS_DP_INTF_ACTIVE_V_END_F0, 0);
++	msm_dp_write_pn(panel, MMSS_DP_INTF_ACTIVE_V_START_F1, 0);
++	msm_dp_write_pn(panel, MMSS_DP_INTF_ACTIVE_V_END_F1, 0);
++	msm_dp_write_pn(panel, MMSS_DP_INTF_POLARITY_CTL, 0);
++
++	msm_dp_write_pn(panel, MMSS_DP_TPG_MAIN_CONTROL,
++			DP_TPG_CHECKERED_RECT_PATTERN);
++	msm_dp_write_pn(panel, MMSS_DP_TPG_VIDEO_CONFIG,
++			DP_TPG_VIDEO_CONFIG_BPP_8BIT |
++			DP_TPG_VIDEO_CONFIG_RGB);
++	msm_dp_write_pn(panel, MMSS_DP_BIST_ENABLE,
++			DP_BIST_ENABLE_DPBIST_EN);
++	msm_dp_write_pn(panel, MMSS_DP_TIMING_ENGINE_EN,
++			DP_TIMING_ENGINE_EN_EN);
+ 	drm_dbg_dp(panel->drm_dev, "%s: enabled tpg\n", __func__);
+ }
+ 
+@@ -423,9 +521,9 @@ static void msm_dp_panel_tpg_disable(struct msm_dp_panel *msm_dp_panel)
+ 	struct msm_dp_panel_private *panel =
+ 		container_of(msm_dp_panel, struct msm_dp_panel_private, msm_dp_panel);
+ 
+-	msm_dp_write_p0(panel, MMSS_DP_TPG_MAIN_CONTROL, 0x0);
+-	msm_dp_write_p0(panel, MMSS_DP_BIST_ENABLE, 0x0);
+-	msm_dp_write_p0(panel, MMSS_DP_TIMING_ENGINE_EN, 0x0);
++	msm_dp_write_pn(panel, MMSS_DP_TPG_MAIN_CONTROL, 0x0);
++	msm_dp_write_pn(panel, MMSS_DP_BIST_ENABLE, 0x0);
++	msm_dp_write_pn(panel, MMSS_DP_TIMING_ENGINE_EN, 0x0);
+ }
+ 
+ void msm_dp_panel_tpg_config(struct msm_dp_panel *msm_dp_panel, bool enable)
+@@ -459,7 +557,7 @@ void msm_dp_panel_clear_dsc_dto(struct msm_dp_panel *msm_dp_panel)
+ 	struct msm_dp_panel_private *panel =
+ 		container_of(msm_dp_panel, struct msm_dp_panel_private, msm_dp_panel);
+ 
+-	msm_dp_write_p0(panel, MMSS_DP_DSC_DTO, 0x0);
++	msm_dp_write_pn(panel, MMSS_DP_DSC_DTO, 0x0);
+ }
+ 
+ void msm_dp_panel_config_dsc(struct msm_dp_panel *msm_dp_panel)
+@@ -494,9 +592,9 @@ void msm_dp_panel_config_dsc(struct msm_dp_panel *msm_dp_panel)
+ 	for (i = 0; i < MSM_DP_DSC_RGB_PPS_BYTES / 4; i++)
+ 		msm_dp_write_link(panel, REG_DP_PPS_DATA + i * 4,
+ 				  get_unaligned_le32(payload + i * 4));
+-	msm_dp_write_p0(panel, MMSS_DP_DSC_DTO_COUNT, config->dto_count);
++	msm_dp_write_pn(panel, MMSS_DP_DSC_DTO_COUNT, config->dto_count);
+ 	/* 8 compressed bpp on the two-pixel RGB interface uses the OEM 1/3 DTO. */
+-	msm_dp_write_p0(panel, MMSS_DP_DSC_DTO, BIT(0) | BIT(3) | (1 << 8) | (3 << 16));
++	msm_dp_write_pn(panel, MMSS_DP_DSC_DTO, BIT(0) | BIT(3) | (1 << 8) | (3 << 16));
+ 	msm_dp_write_link(panel, REG_DP_COMPRESSION_MODE_CTRL, config->compression_ctrl);
+ 	flush = msm_dp_read_link(panel, REG_DP_SDP_FLUSH);
+ 	msm_dp_write_link(panel, REG_DP_SDP_FLUSH, flush | BIT(2));
+@@ -715,7 +813,7 @@ int msm_dp_panel_timing_cfg(struct msm_dp_panel *msm_dp_panel, bool wide_bus_en)
+ 	msm_dp_write_link(panel, REG_DP_HSYNC_VSYNC_WIDTH_POLARITY, width_blanking);
+ 	msm_dp_write_link(panel, REG_DP_ACTIVE_HOR_VER, msm_dp_active);
+ 
+-	reg = msm_dp_read_p0(panel, MMSS_DP_INTF_CONFIG);
++	reg = msm_dp_read_pn(panel, MMSS_DP_INTF_CONFIG);
+ 	if (wide_bus_en)
+ 		reg |= DP_INTF_CONFIG_DATABUS_WIDEN;
+ 	else
+@@ -723,7 +821,7 @@ int msm_dp_panel_timing_cfg(struct msm_dp_panel *msm_dp_panel, bool wide_bus_en)
+ 
+ 	drm_dbg_dp(panel->drm_dev, "wide_bus_en=%d reg=%#x\n", wide_bus_en, reg);
+ 
+-	msm_dp_write_p0(panel, MMSS_DP_INTF_CONFIG, reg);
++	msm_dp_write_pn(panel, MMSS_DP_INTF_CONFIG, reg);
+ 
+ 	if (msm_dp_panel->msm_dp_mode.out_fmt_is_yuv_420)
+ 		msm_dp_panel_setup_vsc_sdp_yuv_420(msm_dp_panel);
+@@ -733,6 +831,18 @@ int msm_dp_panel_timing_cfg(struct msm_dp_panel *msm_dp_panel, bool wide_bus_en)
+ 	return 0;
+ }
+ 
++void msm_dp_panel_mst_async_fifo(struct msm_dp_panel *msm_dp_panel, bool mst_en)
++{
++	struct msm_dp_panel_private *panel;
++
++	panel = container_of(msm_dp_panel, struct msm_dp_panel_private, msm_dp_panel);
++
++	if (mst_en)
++		msm_dp_write_pn(panel, MMSS_DP_ASYNC_FIFO_CONFIG, 0x01);
++	else
++		msm_dp_write_pn(panel, MMSS_DP_ASYNC_FIFO_CONFIG, 0x00);
++}
++
+ int msm_dp_panel_init_panel_info(struct msm_dp_panel *msm_dp_panel,
+ 				 const struct drm_display_mode *adjusted_mode,
+ 				 u32 bpp)
+@@ -750,7 +860,7 @@ int msm_dp_panel_init_panel_info(struct msm_dp_panel *msm_dp_panel,
+ 		!!(adjusted_mode->flags & DRM_MODE_FLAG_NHSYNC);
+ 	msm_dp_panel->msm_dp_mode.out_fmt_is_yuv_420 =
+ 		drm_mode_is_420_only(&msm_dp_panel->connector->display_info, adjusted_mode) &&
+-		msm_dp_panel->vsc_sdp_supported;
++		panel->link->vsc_sdp_supported;
+ 
+ 	drm_mode = &msm_dp_panel->msm_dp_mode.drm_mode;
+ 
+@@ -784,10 +894,22 @@ int msm_dp_panel_init_panel_info(struct msm_dp_panel *msm_dp_panel,
+ 	return 0;
+ }
+ 
++void msm_dp_panel_put(struct msm_dp_panel *msm_dp_panel)
++{
++	struct msm_dp_panel_private *panel;
++
++	if (!msm_dp_panel)
++		return;
++	panel = container_of(msm_dp_panel, struct msm_dp_panel_private, msm_dp_panel);
++	devm_kfree(panel->dev, panel);
++}
++
+ struct msm_dp_panel *msm_dp_panel_get(struct device *dev, struct drm_dp_aux *aux,
+ 			      struct msm_dp_link *link,
+ 			      void __iomem *link_base,
+-			      void __iomem *p0_base)
++			      void __iomem *mst2link_base,
++			      void __iomem *mst3link_base,
++			      void __iomem *pixel_base)
+ {
+ 	struct msm_dp_panel_private *panel;
+ 	struct msm_dp_panel *msm_dp_panel;
+@@ -805,12 +927,14 @@ struct msm_dp_panel *msm_dp_panel_get(struct device *dev, struct drm_dp_aux *aux
+ 	panel->aux = aux;
+ 	panel->link = link;
+ 	panel->link_base = link_base;
+-	panel->p0_base = p0_base;
++	panel->pixel_base = pixel_base;
++	panel->mst2link_base = mst2link_base;
++	panel->mst3link_base = mst3link_base;
+ 
+ 	msm_dp_panel = &panel->msm_dp_panel;
+ 	msm_dp_panel->max_bw_code = DP_LINK_BW_8_1;
+ 	msm_dp_panel->lane_limit = 4;
++	msm_dp_panel->stream_id = DP_STREAM_0;
+ 
+ 	return msm_dp_panel;
+ }
+-
+diff --git a/drivers/gpu/drm/msm/dp/dp_panel.h b/drivers/gpu/drm/msm/dp/dp_panel.h
+index 02378ec..1328ff5 100644
+--- a/drivers/gpu/drm/msm/dp/dp_panel.h
++++ b/drivers/gpu/drm/msm/dp/dp_panel.h
+@@ -28,6 +28,15 @@ struct msm_dp_panel_psr {
+ 	u8 capabilities;
+ };
+ 
++/* stream id */
++enum msm_dp_stream_id {
++	DP_STREAM_0,
++	DP_STREAM_1,
++	DP_STREAM_2,
++	DP_STREAM_3,
++	DP_STREAM_MAX,
++};
++
+ struct msm_dp_panel {
+ 	/* dpcd raw data */
+ 	u8 dpcd[DP_RECEIVER_CAP_SIZE];
+@@ -39,15 +48,16 @@ struct msm_dp_panel {
+ 	bool dsc_active;
+ 	struct msm_dp_dsc_config dsc;
+ 
+-	struct msm_dp_link_info link_info;
+ 	struct drm_connector *connector;
+ 	struct msm_dp_display_mode msm_dp_mode;
+ 	struct msm_dp_panel_psr psr_cap;
+ 	bool video_test;
+ 	bool hdr_active;
+-	bool vsc_sdp_supported;
++	bool stream_active;
+ 	u32 hw_revision;
+ 
++	enum msm_dp_stream_id stream_id;
++
+ 	u32 max_bw_code;
+ 	u32 lane_limit;
+ };
+@@ -56,6 +66,7 @@ int msm_dp_panel_init_panel_info(struct msm_dp_panel *msm_dp_panel,
+ 				 const struct drm_display_mode *adjusted_mode,
+ 				 u32 bpp);
+ int msm_dp_panel_deinit(struct msm_dp_panel *msm_dp_panel);
++void msm_dp_panel_put(struct msm_dp_panel *msm_dp_panel);
+ int msm_dp_panel_timing_cfg(struct msm_dp_panel *msm_dp_panel, bool wide_bus_en);
+ int msm_dp_panel_read_link_caps(struct msm_dp_panel *msm_dp_panel,
+ 				struct drm_connector *connector);
+@@ -70,6 +81,7 @@ void msm_dp_panel_config_dsc(struct msm_dp_panel *msm_dp_panel);
+ 
+ void msm_dp_panel_enable_vsc_sdp(struct msm_dp_panel *msm_dp_panel, const struct dp_sdp *vsc_sdp);
+ void msm_dp_panel_disable_vsc_sdp(struct msm_dp_panel *msm_dp_panel);
++void msm_dp_panel_mst_async_fifo(struct msm_dp_panel *msm_dp_panel, bool mst_en);
+ void msm_dp_panel_enable_hdr_sdp(struct msm_dp_panel *msm_dp_panel,
+ 				 const struct dp_sdp *hdr_sdp);
+ void msm_dp_panel_disable_hdr_sdp(struct msm_dp_panel *msm_dp_panel);
+@@ -101,8 +113,12 @@ static inline bool is_lane_count_valid(u32 lane_count)
+ 		lane_count == 4);
+ }
+ 
++u32 msm_dp_stream_reg(enum msm_dp_stream_id id, u32 reg);
++
+ struct msm_dp_panel *msm_dp_panel_get(struct device *dev, struct drm_dp_aux *aux,
+ 			      struct msm_dp_link *link,
+ 			      void __iomem *link_base,
+-			      void __iomem *p0_base);
++			      void __iomem *mst2link_base,
++			      void __iomem *mst3link_base,
++			      void __iomem *pixel_base);
+ #endif /* _DP_PANEL_H_ */
+diff --git a/drivers/gpu/drm/msm/dp/dp_reg.h b/drivers/gpu/drm/msm/dp/dp_reg.h
+index 0513010..3097a8e 100644
+--- a/drivers/gpu/drm/msm/dp/dp_reg.h
++++ b/drivers/gpu/drm/msm/dp/dp_reg.h
+@@ -42,6 +42,9 @@
+ #define DP_INTR_FRAME_END		BIT(6)
+ #define DP_INTR_CRC_UPDATED		BIT(9)
+ 
++#define DP_INTR_MST_DP0_VCPF_SENT	BIT(0)
++#define DP_INTR_MST_DP1_VCPF_SENT	BIT(3)
++
+ #define REG_DP_INTR_STATUS3			(0x00000028)
+ 
+ #define REG_DP_INTR_STATUS4			(0x0000002C)
+@@ -58,6 +61,12 @@
+ #define PSR_UPDATE_ERROR_MASK			(0x00000008)
+ #define PSR_WAKE_ERROR_MASK			(0x00000010)
+ 
++#define REG_DP_INTR_STATUS5			(0x00000034)
++
++#define REG_DP_INTR_STATUS7			(0x000000FC)
++#define DP_INTR_MST_DP2_VCPF_SENT	BIT(18)
++#define DP_INTR_MST_DP3_VCPF_SENT	BIT(21)
++
+ #define REG_DP_DP_HPD_CTRL			(0x00000000)
+ #define DP_DP_HPD_CTRL_HPD_EN			(0x00000001)
+ 
+@@ -128,6 +137,10 @@
+ #define DP_MAINLINK_FLUSH_MODE_UPDATE_SDP	FIELD_PREP(DP_MAINLINK_CTRL_FLUSH_MODE_MASK, 1)
+ #define DP_MAINLINK_FLUSH_MODE_SDE_PERIPH_UPDATE	FIELD_PREP(DP_MAINLINK_CTRL_FLUSH_MODE_MASK, 3)
+ #define DP_MAINLINK_FB_BOUNDARY_SEL		(0x02000000)
++#define DP_MAINLINK_CTRL_ECF_MODE		BIT(26)
++#define DP_MAINLINK_CTRL_MST_ACTIVE		BIT(8)
++#define DP_MAINLINK_CTRL_MST_EN			(DP_MAINLINK_CTRL_ECF_MODE | \
++						DP_MAINLINK_CTRL_MST_ACTIVE)
+ 
+ #define REG_DP_STATE_CTRL			(0x00000004)
+ #define DP_STATE_CTRL_LINK_TRAINING_PATTERN1	(0x00000001)
+@@ -139,6 +152,8 @@
+ #define DP_STATE_CTRL_LINK_TEST_CUSTOM_PATTERN	(0x00000040)
+ #define DP_STATE_CTRL_SEND_VIDEO		(0x00000080)
+ #define DP_STATE_CTRL_PUSH_IDLE			(0x00000100)
++#define DP_STATE_CTRL_DP0_PUSH_VCPF		BIT(12)
++#define DP_STATE_CTRL_DP1_PUSH_VCPF		BIT(14)
+ 
+ #define REG_DP_CONFIGURATION_CTRL		(0x00000008)
+ #define DP_CONFIGURATION_CTRL_SYNC_ASYNC_CLK	(0x00000001)
+@@ -311,6 +326,36 @@
+ #define MMSS_DP_VSCEXT_8			(0x000002F0)
+ #define MMSS_DP_VSCEXT_9			(0x000002F4)
+ 
++/* Stream 1 (DP1) registers, relative to link_base. */
++#define REG_DP1_CONFIGURATION_CTRL		(0x00000400)
++#define REG_DP_DP0_TIMESLOT_1_32		(0x00000404)
++#define REG_DP_DP0_TIMESLOT_33_63		(0x00000408)
++#define REG_DP_DP1_TIMESLOT_1_32		(0x0000040C)
++#define REG_DP_DP1_TIMESLOT_33_63		(0x00000410)
++#define REG_DP1_SOFTWARE_MVID			(0x00000414)
++#define REG_DP1_SOFTWARE_NVID			(0x00000418)
++#define REG_DP1_TOTAL_HOR_VER			(0x0000041c)
++#define REG_DP1_START_HOR_VER_FROM_SYNC		(0x00000420)
++#define REG_DP1_HSYNC_VSYNC_WIDTH_POLARITY	(0x00000424)
++#define REG_DP1_ACTIVE_HOR_VER			(0x00000428)
++#define REG_DP1_MISC1_MISC0			(0x0000042c)
++#define MMSS_DP1_GENERIC0_0			(0x00000490)
++#define MMSS_DP1_GENERIC0_1			(0x00000494)
++#define MMSS_DP1_GENERIC0_2			(0x00000498)
++#define MMSS_DP1_GENERIC0_3			(0x0000049c)
++#define MMSS_DP1_GENERIC0_4			(0x000004a0)
++#define MMSS_DP1_GENERIC0_5			(0x000004a4)
++#define MMSS_DP1_GENERIC0_6			(0x000004a8)
++#define MMSS_DP1_GENERIC0_7			(0x000004ac)
++#define MMSS_DP1_GENERIC0_8			(0x000004b0)
++#define MMSS_DP1_GENERIC0_9			(0x000004b4)
++#define MMSS_DP1_SDP_CFG			(0x000004e0)
++#define MMSS_DP1_SDP_CFG2			(0x000004e4)
++#define MMSS_DP1_SDP_CFG3			(0x000004e8)
++#define REG_DP_DP0_RG				(0x000004f8)
++#define REG_DP_DP1_RG				(0x000004fc)
++#define REG_DP_MST_ACT				(0x00000500)
++
+ #define MMSS_DP_BIST_ENABLE			(0x00000000)
+ #define DP_BIST_ENABLE_DPBIST_EN		(0x00000001)
+ 
+@@ -344,6 +389,34 @@
+ #define DP_TPG_VIDEO_CONFIG_BPP_8BIT		(0x00000001)
+ #define DP_TPG_VIDEO_CONFIG_RGB			(0x00000004)
+ 
++/* Streams 2/3 registers, relative to mst2link_base / mst3link_base. */
++#define REG_DP_MSTLINK_STATE_CTRL		(0x00000000)
++#define DP_MSTLINK_PUSH_VCPF			BIT(12)
++#define REG_DP_MSTLINK_CONFIGURATION_CTRL	(0x00000034)
++#define REG_DP_MSTLINK_TIMESLOT_1_32		(0x00000038)
++#define REG_DP_MSTLINK_TIMESLOT_33_63		(0x0000003c)
++#define REG_DP_MSTLINK_SOFTWARE_MVID		(0x00000040)
++#define REG_DP_MSTLINK_SOFTWARE_NVID		(0x00000044)
++#define REG_DP_MSTLINK_TOTAL_HOR_VER		(0x00000048)
++#define REG_DP_MSTLINK_START_HOR_VER_FROM_SYNC	(0x0000004c)
++#define REG_DP_MSTLINK_HSYNC_VSYNC_WIDTH_POLARITY	(0x00000050)
++#define REG_DP_MSTLINK_ACTIVE_HOR_VER		(0x00000054)
++#define REG_DP_MSTLINK_MISC1_MISC0		(0x00000058)
++#define MMSS_DP_MSTLINK_GENERIC0_0		(0x000000bc)
++#define MMSS_DP_MSTLINK_GENERIC0_1		(0x000000c0)
++#define MMSS_DP_MSTLINK_GENERIC0_2		(0x000000c4)
++#define MMSS_DP_MSTLINK_GENERIC0_3		(0x000000c8)
++#define MMSS_DP_MSTLINK_GENERIC0_4		(0x000000cc)
++#define MMSS_DP_MSTLINK_GENERIC0_5		(0x000000d0)
++#define MMSS_DP_MSTLINK_GENERIC0_6		(0x000000d4)
++#define MMSS_DP_MSTLINK_GENERIC0_7		(0x000000d8)
++#define MMSS_DP_MSTLINK_GENERIC0_8		(0x000000dc)
++#define MMSS_DP_MSTLINK_GENERIC0_9		(0x000000e0)
++#define MMSS_DP_MSTLINK_SDP_CFG			(0x0000010c)
++#define MMSS_DP_MSTLINK_SDP_CFG2		(0x00000110)
++#define MMSS_DP_MSTLINK_SDP_CFG3		(0x00000114)
++#define REG_DP_MSTLINK_DP_RG			(0x0000011C)
++
+ #define MMSS_DP_ASYNC_FIFO_CONFIG		(0x00000088)
+ 
+ #define REG_DP_PHY_AUX_INTERRUPT_CLEAR          (0x0000004C)
+diff --git a/drivers/gpu/drm/msm/msm_atomic.c b/drivers/gpu/drm/msm/msm_atomic.c
+index ba72b8b..2625e81 100644
+--- a/drivers/gpu/drm/msm/msm_atomic.c
++++ b/drivers/gpu/drm/msm/msm_atomic.c
+@@ -5,6 +5,7 @@
+  */
+ 
+ #include <linux/iopoll.h>
++#include <drm/display/drm_dp_mst_helper.h>
+ #include <drm/drm_atomic_uapi.h>
+ #include <drm/drm_vblank.h>
+ 
+@@ -404,7 +405,16 @@ int msm_atomic_check(struct drm_device *dev, struct drm_atomic_commit *state)
+ 	if (ret)
+ 		return ret;
+ 
+-	return drm_atomic_helper_check(dev, state);
++	ret = drm_atomic_helper_check(dev, state);
++	if (ret)
++		return ret;
++
++	return drm_dp_mst_atomic_check(state);
++}
++
++int msm_atomic_commit_setup(struct drm_atomic_commit *state)
++{
++	return drm_dp_mst_atomic_setup_commit(state);
+ }
+ 
+ void msm_atomic_commit_tail(struct drm_atomic_commit *state)
+@@ -419,6 +429,8 @@ void msm_atomic_commit_tail(struct drm_atomic_commit *state)
+ 
+ 	trace_msm_atomic_commit_tail_start(async, crtc_mask);
+ 
++	drm_dp_mst_atomic_wait_for_dependencies(state);
++
+ 	kms->funcs->enable_commit(kms);
+ 
+ 	/*
+diff --git a/drivers/gpu/drm/msm/msm_drv.h b/drivers/gpu/drm/msm/msm_drv.h
+index c35857b..ddc359e 100644
+--- a/drivers/gpu/drm/msm/msm_drv.h
++++ b/drivers/gpu/drm/msm/msm_drv.h
+@@ -211,6 +211,7 @@ int msm_atomic_init_pending_timer(struct msm_pending_timer *timer,
+ 		struct msm_kms *kms, int crtc_idx);
+ void msm_atomic_destroy_pending_timer(struct msm_pending_timer *timer);
+ void msm_atomic_commit_tail(struct drm_atomic_commit *state);
++int msm_atomic_commit_setup(struct drm_atomic_commit *state);
+ int msm_atomic_check(struct drm_device *dev, struct drm_atomic_commit *state);
+ struct drm_atomic_commit *msm_atomic_state_alloc(struct drm_device *dev);
+ 
+@@ -366,6 +367,17 @@ static inline const char *msm_dsi_get_te_source(struct msm_dsi *msm_dsi)
+ 
+ struct msm_dp;
+ #ifdef CONFIG_DRM_MSM_DP
++int msm_dp_get_mst_max_stream(struct msm_dp *dp_display);
++int msm_dp_mst_register(struct msm_dp *dp_display);
++void msm_dp_mst_unregister(struct msm_dp *dp_display);
++int msm_dp_mst_attach_encoder(struct msm_dp *dp_display, unsigned int stream_id,
++			      struct drm_encoder *encoder);
++int msm_dp_mst_stream_enable(struct drm_encoder *enc, struct drm_atomic_commit *state);
++void msm_dp_mst_stream_disable(struct drm_encoder *enc, struct drm_atomic_commit *state);
++void msm_dp_mst_stream_post_disable(struct drm_encoder *enc, struct drm_atomic_commit *state);
++int msm_dp_mst_stream_atomic_check(struct drm_encoder *enc,
++				   struct drm_crtc_state *crtc_state,
++				   struct drm_connector_state *conn_state);
+ int __init msm_dp_register(void);
+ void __exit msm_dp_unregister(void);
+ int msm_dp_modeset_init(struct msm_dp *dp_display, struct drm_device *dev,
+@@ -384,6 +396,38 @@ static inline int __init msm_dp_register(void)
+ {
+ 	return -EINVAL;
+ }
++static inline int msm_dp_get_mst_max_stream(struct msm_dp *dp_display)
++{
++	return -EINVAL;
++}
++static inline int msm_dp_mst_register(struct msm_dp *dp_display)
++{
++	return -EINVAL;
++}
++static inline void msm_dp_mst_unregister(struct msm_dp *dp_display)
++{
++}
++static inline int msm_dp_mst_attach_encoder(struct msm_dp *dp_display,
++					    unsigned int stream_id,
++					    struct drm_encoder *encoder)
++{
++	return -EINVAL;
++}
++static inline int msm_dp_mst_stream_enable(struct drm_encoder *enc,
++					    struct drm_atomic_commit *state)
++{
++	return 0;
++}
++static inline void msm_dp_mst_stream_disable(struct drm_encoder *enc,
++					     struct drm_atomic_commit *state) {}
++static inline void msm_dp_mst_stream_post_disable(struct drm_encoder *enc,
++						  struct drm_atomic_commit *state) {}
++static inline int msm_dp_mst_stream_atomic_check(struct drm_encoder *enc,
++						 struct drm_crtc_state *cs,
++						 struct drm_connector_state *cos)
++{
++	return -EINVAL;
++}
+ static inline void __exit msm_dp_unregister(void)
+ {
+ }
+diff --git a/drivers/gpu/drm/msm/msm_kms.c b/drivers/gpu/drm/msm/msm_kms.c
+index e5d0ea6..33ab303 100644
+--- a/drivers/gpu/drm/msm/msm_kms.c
++++ b/drivers/gpu/drm/msm/msm_kms.c
+@@ -29,6 +29,7 @@ static const struct drm_mode_config_funcs mode_config_funcs = {
+ 
+ static const struct drm_mode_config_helper_funcs mode_config_helper_funcs = {
+ 	.atomic_commit_tail = msm_atomic_commit_tail,
++	.atomic_commit_setup = msm_atomic_commit_setup,
+ };
+ 
+ static irqreturn_t msm_irq(int irq, void *arg)
+diff --git a/drivers/gpu/drm/omapdrm/dss/hdmi4.c b/drivers/gpu/drm/omapdrm/dss/hdmi4.c
+index 61cfd00..4a4b427 100644
+--- a/drivers/gpu/drm/omapdrm/dss/hdmi4.c
++++ b/drivers/gpu/drm/omapdrm/dss/hdmi4.c
+@@ -429,7 +429,8 @@ static void hdmi4_bridge_disable(struct drm_bridge *bridge,
+ 
+ static void hdmi4_bridge_hpd_notify(struct drm_bridge *bridge,
+ 				    struct drm_connector *connector,
+-				    enum drm_connector_status status)
++				    enum drm_connector_status status,
++				    enum drm_connector_dp_event event)
+ {
+ 	struct omap_hdmi *hdmi = drm_bridge_to_hdmi(bridge);
+ 
+diff --git a/drivers/phy/qualcomm/phy-qcom-qmp-combo.c b/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
+index fb1aa82..2f4e0a8 100644
+--- a/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
++++ b/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
+@@ -4267,9 +4267,12 @@ static int qmp_combo_dp_configure(struct phy *phy, union phy_configure_opts *opt
+ 	struct qmp_combo *qmp = phy_get_drvdata(phy);
+ 	const struct qmp_phy_cfg *cfg = qmp->cfg;
+ 	unsigned int i;
++	guard(mutex)(&qmp->phy_mutex);
+ 	if (qmp->uke_gdsc) {
+ 		if (qmp->uke_route_error)
+ 			return qmp->uke_route_error;
++		if (!phy_get_bus_width(phy) || dp_opts->lanes > phy_get_bus_width(phy))
++			return -ENOSPC;
+ 		if ((dp_opts->lanes != 1 && dp_opts->lanes != 2 && dp_opts->lanes != 4) ||
+ 		    (dp_opts->link_rate != 1620 && dp_opts->link_rate != 2700 &&
+ 		     dp_opts->link_rate != 5400))
+@@ -4285,16 +4288,12 @@ static int qmp_combo_dp_configure(struct phy *phy, union phy_configure_opts *opt
+ 	     qmp->cfg == &sm7675_usb3dpphy_cfg) && dp_opts->link_rate > 5400)
+ 		return -EINVAL;
+ 
+-	mutex_lock(&qmp->phy_mutex);
+-
+ 	memcpy(&qmp->dp_opts, dp_opts, sizeof(*dp_opts));
+ 	if (qmp->dp_opts.set_voltages) {
+ 		cfg->configure_dp_tx(qmp);
+ 		qmp->dp_opts.set_voltages = 0;
+ 	}
+ 
+-	mutex_unlock(&qmp->phy_mutex);
+-
+ 	return 0;
+ }
+ 
+@@ -5242,6 +5241,7 @@ static int qmp_combo_typec_mux_set(struct typec_mux_dev *mux, struct typec_mux_s
+ 	const struct qmp_phy_cfg *cfg = qmp->cfg;
+ 	enum qmpphy_mode new_mode;
+ 	unsigned int svid;
++	int ret;
+ 
+ 	guard(mutex)(&qmp->phy_mutex);
+ 	if (qmp->uke_route_error)
+@@ -5288,6 +5288,10 @@ static int qmp_combo_typec_mux_set(struct typec_mux_dev *mux, struct typec_mux_s
+ 	}
+ 
+ 	if (new_mode == qmp->qmpphy_mode) {
++		if (qmp->uke_gdsc)
++			phy_set_bus_width(qmp->dp_phy,
++				new_mode == QMPPHY_MODE_DP_ONLY ? 4 :
++				new_mode == QMPPHY_MODE_USB3DP ? 2 : 0);
+ 		dev_dbg(qmp->dev, "typec_mux_set: same qmpphy mode, bail out\n");
+ 		return 0;
+ 	}
+@@ -5301,8 +5305,15 @@ static int qmp_combo_typec_mux_set(struct typec_mux_dev *mux, struct typec_mux_s
+ 		qmp->qmpphy_mode, new_mode);
+ 
+ 	qmp->qmpphy_mode = new_mode;
+-	if (qmp->uke_gdsc)
+-		return qmp_combo_uke_reconfigure(qmp);
++	if (qmp->uke_gdsc) {
++		phy_set_bus_width(qmp->dp_phy, 0);
++		ret = qmp_combo_uke_reconfigure(qmp);
++		if (!ret)
++			phy_set_bus_width(qmp->dp_phy,
++				new_mode == QMPPHY_MODE_DP_ONLY ? 4 :
++				new_mode == QMPPHY_MODE_USB3DP ? 2 : 0);
++		return ret;
++	}
+ 
+ 	if (qmp->init_count) {
+ 		if (qmp->usb_init_count)
+diff --git a/drivers/soc/qcom/pmic_glink_altmode.c b/drivers/soc/qcom/pmic_glink_altmode.c
+index 2c36c3a..4b2b35f 100644
+--- a/drivers/soc/qcom/pmic_glink_altmode.c
++++ b/drivers/soc/qcom/pmic_glink_altmode.c
+@@ -134,6 +134,10 @@ struct pmic_glink_altmode_port {
+ 	u8 hpd_state;
+ 	u8 hpd_irq;
+ 	u8 mux_ctrl;
++	bool retimer_dp_valid;
++	u8 retimer_dp_mode;
++	bool retimer_dp_hpd_state;
++	enum typec_orientation retimer_dp_orientation;
+ };
+ 
+ #define work_to_altmode(w) container_of((w), struct pmic_glink_altmode, enable_work)
+@@ -218,6 +222,7 @@ static int pmic_glink_altmode_enable_dp(struct pmic_glink_altmode *altmode,
+ 
+ 	ret = typec_mux_set(port->typec_mux, &port->state);
+ 	if (ret) {
++		port->retimer_dp_valid = false;
+ 		dev_err(altmode->dev, "failed to switch mux to DP: %d\n", ret);
+ 		return ret;
+ 	}
+@@ -225,12 +230,21 @@ static int pmic_glink_altmode_enable_dp(struct pmic_glink_altmode *altmode,
+ 	port->retimer_state.alt = &port->dp_alt;
+ 	port->retimer_state.data = &dp_data;
+ 	port->retimer_state.mode = TYPEC_MODAL_STATE(mode);
++	if (hpd_irq && port->retimer_dp_valid && port->retimer_dp_mode == mode &&
++	    port->retimer_dp_hpd_state == hpd_state &&
++	    port->retimer_dp_orientation == port->orientation)
++		return 0;
+ 
+ 	ret = typec_retimer_set(port->typec_retimer, &port->retimer_state);
+ 	if (ret) {
++		port->retimer_dp_valid = false;
+ 		dev_err(altmode->dev, "failed to setup retimer to DP: %d\n", ret);
+ 		return ret;
+ 	}
++	port->retimer_dp_valid = true;
++	port->retimer_dp_mode = mode;
++	port->retimer_dp_hpd_state = hpd_state;
++	port->retimer_dp_orientation = port->orientation;
+ 	return 0;
+ }
+ 
+@@ -241,6 +255,7 @@ static int pmic_glink_altmode_enable_tbt(struct pmic_glink_altmode *altmode,
+ 	struct typec_thunderbolt_data tbt_data = {};
+ 	u32 cable_speed;
+ 	int ret;
++	port->retimer_dp_valid = false;
+ 
+ 	/* Device Discover Mode VDO */
+ 	tbt_data.device_mode = TBT_MODE;
+@@ -303,6 +318,7 @@ static int pmic_glink_altmode_enable_usb4(struct pmic_glink_altmode *altmode,
+ 	struct usbc_sc8280x_tbt_data *tbt = &port->tbt_data;
+ 	struct enter_usb_data data = {};
+ 	int ret;
++	port->retimer_dp_valid = false;
+ 
+ 	data.eudo = FIELD_PREP(EUDO_USB_MODE_MASK, EUDO_USB_MODE_USB4);
+ 
+@@ -344,6 +360,7 @@ static int pmic_glink_altmode_enable_usb(struct pmic_glink_altmode *altmode,
+ 					  struct pmic_glink_altmode_port *port)
+ {
+ 	int ret;
++	port->retimer_dp_valid = false;
+ 
+ 	port->state.alt = NULL;
+ 	port->state.data = NULL;
+@@ -371,6 +388,7 @@ static int pmic_glink_altmode_safe(struct pmic_glink_altmode *altmode,
+ 				    struct pmic_glink_altmode_port *port)
+ {
+ 	int ret;
++	port->retimer_dp_valid = false;
+ 
+ 	port->state.alt = NULL;
+ 	port->state.data = NULL;
+@@ -400,7 +418,9 @@ static void pmic_glink_altmode_hpd_notify(struct pmic_glink_altmode_port *port,
+ 	if (port->altmode->uke && !force && port->hpd_status == status)
+ 		return;
+ 	port->hpd_status = status;
+-	drm_aux_hpd_bridge_notify(&port->bridge->dev, status);
++	drm_aux_hpd_bridge_notify_extra(&port->bridge->dev, status,
++		status == connector_status_connected && port->hpd_irq ?
++		DRM_CONNECTOR_DP_IRQ_HPD : DRM_CONNECTOR_NO_EXTRA_STATUS);
+ }
+ 
+ static void pmic_glink_altmode_worker(struct work_struct *work)
+diff --git a/drivers/usb/typec/altmodes/displayport.c b/drivers/usb/typec/altmodes/displayport.c
+index 51c92dd..2106074 100644
+--- a/drivers/usb/typec/altmodes/displayport.c
++++ b/drivers/usb/typec/altmodes/displayport.c
+@@ -187,9 +187,11 @@ static int dp_altmode_status_update(struct dp_altmode *dp)
+ 				dp->pending_irq_hpd = true;
+ 		}
+ 	} else {
+-		drm_connector_oob_hotplug_event(dp->connector_fwnode,
+-						hpd ? connector_status_connected :
+-						      connector_status_disconnected);
++		drm_connector_dp_oob_status(dp->connector_fwnode,
++					    hpd ? connector_status_connected :
++						  connector_status_disconnected,
++					    (hpd && irq_hpd) ? DRM_CONNECTOR_DP_IRQ_HPD :
++							       DRM_CONNECTOR_NO_EXTRA_STATUS);
+ 		dp->hpd = hpd;
+ 		sysfs_notify(&dp->alt->dev.kobj, "displayport", "hpd");
+ 		if (hpd && irq_hpd) {
+@@ -211,8 +213,11 @@ static int dp_altmode_configured(struct dp_altmode *dp)
+ 	 * configuration is complete to signal HPD.
+ 	 */
+ 	if (dp->pending_hpd) {
+-		drm_connector_oob_hotplug_event(dp->connector_fwnode,
+-						connector_status_connected);
++		drm_connector_dp_oob_status(dp->connector_fwnode,
++					    connector_status_connected,
++						dp->pending_irq_hpd ?
++						DRM_CONNECTOR_DP_IRQ_HPD :
++						DRM_CONNECTOR_NO_EXTRA_STATUS);
+ 		sysfs_notify(&dp->alt->dev.kobj, "displayport", "hpd");
+ 		dp->pending_hpd = false;
+ 		if (dp->pending_irq_hpd) {
+@@ -396,8 +401,9 @@ static int dp_altmode_vdm(struct typec_altmode *alt,
+ 			dp->data.status = 0;
+ 			dp->data.conf = 0;
+ 			if (dp->hpd) {
+-				drm_connector_oob_hotplug_event(dp->connector_fwnode,
+-								connector_status_disconnected);
++				drm_connector_dp_oob_status(dp->connector_fwnode,
++							    connector_status_disconnected,
++							    DRM_CONNECTOR_NO_EXTRA_STATUS);
+ 				dp->hpd = false;
+ 				sysfs_notify(&dp->alt->dev.kobj, "displayport", "hpd");
+ 			}
+@@ -844,8 +850,9 @@ void dp_altmode_remove(struct typec_altmode *alt)
+ 	typec_altmode_put_plug(dp->plug_prime);
+ 
+ 	if (dp->connector_fwnode) {
+-		drm_connector_oob_hotplug_event(dp->connector_fwnode,
+-						connector_status_disconnected);
++		drm_connector_dp_oob_status(dp->connector_fwnode,
++					    connector_status_disconnected,
++					    DRM_CONNECTOR_NO_EXTRA_STATUS);
+ 
+ 		fwnode_handle_put(dp->connector_fwnode);
+ 	}
+diff --git a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
+index 57b37fc..cb0312e 100644
+--- a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
++++ b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
+@@ -316,10 +316,13 @@ static void gaokun_ucsi_handle_usb_mode(struct gaokun_ucsi_port *port)
+ 
+ 	/* UCSI callback .connector_status() have set orientation */
+ 	if (port->bridge && port->svid == USB_TYPEC_DP_SID)
+-		drm_aux_hpd_bridge_notify(&port->bridge->dev,
+-					  port->hpd_state ?
+-					  connector_status_connected :
+-					  connector_status_disconnected);
++		drm_aux_hpd_bridge_notify_extra(&port->bridge->dev,
++						port->hpd_state ?
++						connector_status_connected :
++						connector_status_disconnected,
++						port->hpd_irq ?
++						DRM_CONNECTOR_DP_IRQ_HPD :
++						DRM_CONNECTOR_NO_EXTRA_STATUS);
+ 
+ 	gaokun_ec_ucsi_pan_ack(uec->ec, port->idx);
+ }
+diff --git a/include/drm/bridge/aux-bridge.h b/include/drm/bridge/aux-bridge.h
+index c2f5a85..233ca88 100644
+--- a/include/drm/bridge/aux-bridge.h
++++ b/include/drm/bridge/aux-bridge.h
+@@ -25,7 +25,9 @@ struct auxiliary_device *devm_drm_dp_hpd_bridge_alloc(struct device *parent, str
+ int devm_drm_dp_hpd_bridge_add(struct device *dev, struct auxiliary_device *adev);
+ struct device *drm_dp_hpd_bridge_register(struct device *parent,
+ 					  struct device_node *np);
+-void drm_aux_hpd_bridge_notify(struct device *dev, enum drm_connector_status status);
++void drm_aux_hpd_bridge_notify_extra(struct device *dev,
++				     enum drm_connector_status status,
++				     enum drm_connector_dp_event event);
+ #else
+ static inline struct auxiliary_device *devm_drm_dp_hpd_bridge_alloc(struct device *parent,
+ 								    struct device_node *np)
+@@ -44,9 +46,16 @@ static inline struct device *drm_dp_hpd_bridge_register(struct device *parent,
+ 	return NULL;
+ }
+ 
+-static inline void drm_aux_hpd_bridge_notify(struct device *dev, enum drm_connector_status status)
++static inline void drm_aux_hpd_bridge_notify_extra(struct device *dev,
++						   enum drm_connector_status status,
++						   enum drm_connector_dp_event event)
+ {
+ }
+ #endif
+ 
++static inline void drm_aux_hpd_bridge_notify(struct device *dev, enum drm_connector_status status)
++{
++	drm_aux_hpd_bridge_notify_extra(dev, status, DRM_CONNECTOR_NO_EXTRA_STATUS);
++}
++
+ #endif
+diff --git a/include/drm/drm_bridge.h b/include/drm/drm_bridge.h
+index 58fff04..2b3cad4 100644
+--- a/include/drm/drm_bridge.h
++++ b/include/drm/drm_bridge.h
+@@ -509,7 +509,8 @@ struct drm_bridge_funcs {
+ 	 */
+ 	void (*hpd_notify)(struct drm_bridge *bridge,
+ 			   struct drm_connector *connector,
+-			   enum drm_connector_status status);
++			   enum drm_connector_status status,
++			   enum drm_connector_dp_event event);
+ 
+ 	/**
+ 	 * @hpd_enable:
+@@ -1158,7 +1159,8 @@ struct drm_bridge {
+ 	 * @hpd_cb: Hot plug detection callback, registered with
+ 	 * drm_bridge_hpd_enable().
+ 	 */
+-	void (*hpd_cb)(void *data, enum drm_connector_status status);
++	void (*hpd_cb)(void *data, enum drm_connector_status status,
++		       enum drm_connector_dp_event event);
+ 	/**
+ 	 * @hpd_data: Private data passed to the Hot plug detection callback
+ 	 * @hpd_cb.
+@@ -1467,11 +1469,30 @@ const struct drm_edid *drm_bridge_edid_read(struct drm_bridge *bridge,
+ 					    struct drm_connector *connector);
+ void drm_bridge_hpd_enable(struct drm_bridge *bridge,
+ 			   void (*cb)(void *data,
+-				      enum drm_connector_status status),
++				      enum drm_connector_status status,
++				      enum drm_connector_dp_event event),
+ 			   void *data);
+ void drm_bridge_hpd_disable(struct drm_bridge *bridge);
+-void drm_bridge_hpd_notify(struct drm_bridge *bridge,
+-			   enum drm_connector_status status);
++void drm_bridge_hpd_notify_extra(struct drm_bridge *bridge,
++				 enum drm_connector_status status,
++				 enum drm_connector_dp_event event);
++
++/**
++ * drm_bridge_hpd_notify - notify hot plug detection events
++ * @bridge: bridge control structure
++ * @status: output connection status
++ *
++ * Bridge drivers shall call this function to report hot plug events when they
++ * detect a change in the output status, when hot plug detection has been
++ * enabled by drm_bridge_hpd_enable().
++ *
++ * This function shall be called in a context that can sleep.
++ */
++static inline void drm_bridge_hpd_notify(struct drm_bridge *bridge,
++					 enum drm_connector_status status)
++{
++	drm_bridge_hpd_notify_extra(bridge, status, DRM_CONNECTOR_NO_EXTRA_STATUS);
++}
+ 
+ #ifdef CONFIG_DRM_PANEL_BRIDGE
+ bool drm_bridge_is_panel(const struct drm_bridge *bridge);
+diff --git a/include/drm/drm_connector.h b/include/drm/drm_connector.h
+index a0cf026..758b879 100644
+--- a/include/drm/drm_connector.h
++++ b/include/drm/drm_connector.h
+@@ -91,6 +91,22 @@ enum drm_connector_status {
+ 	connector_status_unknown = 3,
+ };
+ 
++/**
++ * enum drm_connector_dp_event - additional events sent by the sink /
++ * display together or in replacement of the HPD status changes.
++ */
++enum drm_connector_dp_event {
++	/**
++	 * @DRM_CONNECTOR_NO_EXTRA_STATUS: No additional status reported.
++	 */
++	DRM_CONNECTOR_NO_EXTRA_STATUS,
++	/**
++	 * @DRM_CONNECTOR_DP_IRQ_HPD: DisplayPort Sink has sent the
++	 * IRQ_HPD (either by the HPD short pulse or via the AltMode event).
++	 */
++	DRM_CONNECTOR_DP_IRQ_HPD,
++};
++
+ /**
+  * enum drm_connector_registration_state - userspace registration status for
+  * a &drm_connector
+@@ -1801,7 +1817,8 @@ struct drm_connector_funcs {
+ 	 * has been received from a source outside the display driver / device.
+ 	 */
+ 	void (*oob_hotplug_event)(struct drm_connector *connector,
+-				  enum drm_connector_status status);
++				  enum drm_connector_status status,
++				  enum drm_connector_dp_event event);
+ 
+ 	/**
+ 	 * @debugfs_init:
+@@ -2636,8 +2653,9 @@ drm_connector_is_unregistered(struct drm_connector *connector)
+ 		DRM_CONNECTOR_UNREGISTERED;
+ }
+ 
+-void drm_connector_oob_hotplug_event(struct fwnode_handle *connector_fwnode,
+-				     enum drm_connector_status status);
++void drm_connector_dp_oob_status(struct fwnode_handle *connector_fwnode,
++				 enum drm_connector_status status,
++				 enum drm_connector_dp_event event);
+ enum drm_connector_color_format
+ drm_connector_get_color_format(const struct drm_connector_state *conn_state);
+ const char *drm_get_connector_type_name(unsigned int connector_type);

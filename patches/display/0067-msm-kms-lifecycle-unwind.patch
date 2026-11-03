@@ -1,0 +1,1048 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] drm/msm: unwind KMS initialization and drain snapshot producers
+
+Make each KMS backend undo its completed initialization steps and reserve
+full teardown for a successfully initialized KMS. Preserve the existing
+Uke VRR getter and the Linux 7.3 component/DRM interfaces. Clear released
+hardware pointers and clean up DPU self-refresh helpers before VM release.
+
+Serialize the bounded display fault callback with handler withdrawal.
+Cancel pending commit hrtimers and drain their workers while IRQs and
+mapped display resources remain available. Withdraw the snapshot worker
+under its queue lock and drain outside that lock, so late queue attempts
+cannot use a destroyed worker. Preserve GPU callback dispatch behavior.
+Reset IRQ ownership after freeing it, including post-install failures.
+
+The initialization/unwind changes adapt Dmitry Baryshkov's GPL-2.0-only v3
+series, patches 1-14:
+https://patchew.org/linux/20261024-msm-kms-destroy-fixes-v3-0-66a30120a5ea@oss.qualcomm.com/
+Additional producer synchronization follows the actual Linux 7.3 callers
+and the hrtimer_cancel API. No board timing or address is transferred.
+This does not establish physical acceptance or historical fault causation.
+
+Upstream-Status: Pending [Linux 7.3 adaptation and producer lifetime fixes]
+Signed-off-by: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+---
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
+index f5bb7a0..9ff366c 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
+@@ -17,6 +17,7 @@
+ #include <drm/drm_crtc.h>
+ #include <drm/drm_file.h>
+ #include <drm/drm_framebuffer.h>
++#include <drm/drm_self_refresh_helper.h>
+ #include <drm/drm_vblank.h>
+ #include <drm/drm_writeback.h>
+ 
+@@ -55,7 +56,6 @@
+ bool dpu_use_virtual_planes = true;
+ module_param(dpu_use_virtual_planes, bool, 0);
+ 
+-static int dpu_kms_hw_init(struct msm_kms *kms);
+ static void _dpu_kms_mmu_destroy(struct dpu_kms *dpu_kms);
+ 
+ #ifdef CONFIG_DEBUG_FS
+@@ -923,8 +923,18 @@ static int _dpu_kms_drm_obj_init(struct dpu_kms *dpu_kms)
+ 	return 0;
+ }
+ 
++static void dpu_kms_self_refresh_cleanup(struct dpu_kms *dpu_kms)
++{
++	struct drm_crtc *crtc;
++
++	drm_for_each_crtc(crtc, dpu_kms->dev)
++		drm_self_refresh_helper_cleanup(crtc);
++}
++
+ static void _dpu_kms_hw_destroy(struct dpu_kms *dpu_kms)
+ {
++	dpu_kms_self_refresh_cleanup(dpu_kms);
++
+ 	dpu_kms->hw_intr = NULL;
+ 
+ 	/* safe to call these more than once during shutdown */
+@@ -960,8 +970,7 @@ static void dpu_kms_destroy(struct msm_kms *kms)
+ 
+ 	msm_kms_destroy(&dpu_kms->base);
+ 
+-	if (dpu_kms->rpm_enabled)
+-		pm_runtime_disable(&dpu_kms->pdev->dev);
++	pm_runtime_disable(&dpu_kms->pdev->dev);
+ }
+ 
+ static int dpu_irq_postinstall(struct msm_kms *kms)
+@@ -1111,7 +1120,6 @@ static void dpu_kms_mdp_snapshot(struct msm_disp_state *disp_state, struct msm_k
+ 
+ static const struct msm_kms_funcs kms_funcs = {
+ 	.get_vrr_min_hz = dpu_encoder_uke_vrr_min_hz,
+-	.hw_init         = dpu_kms_hw_init,
+ 	.irq_preinstall  = dpu_core_irq_preinstall,
+ 	.irq_postinstall = dpu_irq_postinstall,
+ 	.irq_uninstall   = dpu_core_irq_uninstall,
+@@ -1179,21 +1187,12 @@ unsigned long dpu_kms_get_clk_rate(struct dpu_kms *dpu_kms, char *clock_name)
+ 
+ #define	DPU_PERF_DEFAULT_MAX_CORE_CLK_RATE	412500000
+ 
+-static int dpu_kms_hw_init(struct msm_kms *kms)
++static int dpu_kms_hw_init(struct dpu_kms *dpu_kms)
+ {
+-	struct dpu_kms *dpu_kms;
+-	struct drm_device *dev;
+-	int rc = -EINVAL;
++	struct drm_device *dev = dpu_kms->dev;
+ 	unsigned long max_core_clk_rate;
+ 	u32 core_rev;
+-
+-	if (!kms) {
+-		DPU_ERROR("invalid kms\n");
+-		return rc;
+-	}
+-
+-	dpu_kms = to_dpu_kms(kms);
+-	dev = dpu_kms->dev;
++	int rc;
+ 
+ 	dev->mode_config.cursor_width = 512;
+ 	dev->mode_config.cursor_height = 512;
+@@ -1205,7 +1204,7 @@ static int dpu_kms_hw_init(struct msm_kms *kms)
+ 
+ 	rc = pm_runtime_resume_and_get(&dpu_kms->pdev->dev);
+ 	if (rc < 0)
+-		goto error;
++		goto err_global_obj_fini;
+ 
+ 	core_rev = readl_relaxed(dpu_kms->mmio + 0x0);
+ 
+@@ -1232,19 +1231,19 @@ static int dpu_kms_hw_init(struct msm_kms *kms)
+ 	if (IS_ERR(dpu_kms->mdss)) {
+ 		rc = PTR_ERR(dpu_kms->mdss);
+ 		DPU_ERROR("failed to get UBWC config data: %d\n", rc);
+-		goto err_pm_put;
++		goto err_mmu_destroy;
+ 	}
+ 
+ 	if (!dpu_kms->mdss) {
+ 		rc = -EINVAL;
+ 		DPU_ERROR("NULL MDSS data\n");
+-		goto err_pm_put;
++		goto err_mmu_destroy;
+ 	}
+ 
+ 	rc = dpu_rm_init(dev, &dpu_kms->rm, dpu_kms->catalog, dpu_kms->mdss, dpu_kms->mmio);
+ 	if (rc) {
+ 		DPU_ERROR("rm init failed: %d\n", rc);
+-		goto err_pm_put;
++		goto err_mmu_destroy;
+ 	}
+ 
+ 	dpu_kms->hw_mdp = dpu_hw_mdptop_init(dev,
+@@ -1254,8 +1253,7 @@ static int dpu_kms_hw_init(struct msm_kms *kms)
+ 	if (IS_ERR(dpu_kms->hw_mdp)) {
+ 		rc = PTR_ERR(dpu_kms->hw_mdp);
+ 		DPU_ERROR("failed to get hw_mdp: %d\n", rc);
+-		dpu_kms->hw_mdp = NULL;
+-		goto err_pm_put;
++		goto err_mmu_destroy;
+ 	}
+ 
+ 	struct dpu_hw_vbif *hw;
+@@ -1265,7 +1263,7 @@ static int dpu_kms_hw_init(struct msm_kms *kms)
+ 	if (IS_ERR(hw)) {
+ 		rc = PTR_ERR(hw);
+ 		DPU_ERROR("failed to init vbif: %d\n", rc);
+-		goto err_pm_put;
++		goto err_mmu_destroy;
+ 	}
+ 
+ 	dpu_kms->hw_vbif = hw;
+@@ -1280,7 +1278,7 @@ static int dpu_kms_hw_init(struct msm_kms *kms)
+ 	rc = dpu_core_perf_init(&dpu_kms->perf, dpu_kms->catalog->perf, max_core_clk_rate);
+ 	if (rc) {
+ 		DPU_ERROR("failed to init perf %d\n", rc);
+-		goto err_pm_put;
++		goto err_mmu_destroy;
+ 	}
+ 
+ 	/*
+@@ -1297,8 +1295,7 @@ static int dpu_kms_hw_init(struct msm_kms *kms)
+ 	if (IS_ERR(dpu_kms->hw_intr)) {
+ 		rc = PTR_ERR(dpu_kms->hw_intr);
+ 		DPU_ERROR("hw_intr init failed: %d\n", rc);
+-		dpu_kms->hw_intr = NULL;
+-		goto err_pm_put;
++		goto err_mmu_destroy;
+ 	}
+ 
+ 	dev->mode_config.min_width = 0;
+@@ -1318,7 +1315,7 @@ static int dpu_kms_hw_init(struct msm_kms *kms)
+ 	rc = _dpu_kms_drm_obj_init(dpu_kms);
+ 	if (rc) {
+ 		DPU_ERROR("modeset init failed: %d\n", rc);
+-		goto err_pm_put;
++		goto err_self_refresh_cleanup;
+ 	}
+ 
+ 	dpu_vbif_init_memtypes(dpu_kms);
+@@ -1327,10 +1324,17 @@ static int dpu_kms_hw_init(struct msm_kms *kms)
+ 
+ 	return 0;
+ 
++err_self_refresh_cleanup:
++	dpu_kms_self_refresh_cleanup(dpu_kms);
++err_mmu_destroy:
++	dpu_kms->hw_intr = NULL;
++	dpu_kms->hw_vbif = NULL;
++	dpu_kms->hw_mdp = NULL;
++	_dpu_kms_mmu_destroy(dpu_kms);
+ err_pm_put:
+ 	pm_runtime_put_sync(&dpu_kms->pdev->dev);
+-error:
+-	_dpu_kms_hw_destroy(dpu_kms);
++err_global_obj_fini:
++	dpu_kms_global_obj_fini(dpu_kms);
+ 
+ 	return rc;
+ }
+@@ -1359,9 +1363,18 @@ static int dpu_kms_init(struct drm_device *ddev)
+ 	dpu_kms->dev = ddev;
+ 
+ 	pm_runtime_enable(&pdev->dev);
+-	dpu_kms->rpm_enabled = true;
++
++	ret = dpu_kms_hw_init(dpu_kms);
++	if (ret)
++		goto err_disable_rpm;
+ 
+ 	return 0;
++
++err_disable_rpm:
++	pm_runtime_disable(&pdev->dev);
++	msm_kms_destroy(&dpu_kms->base);
++
++	return ret;
+ }
+ 
+ static int dpu_kms_mmap_mdp5(struct dpu_kms *dpu_kms)
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.h b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.h
+index e39831a..769b8ce 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.h
+@@ -87,7 +87,6 @@ struct dpu_kms {
+ 	bool has_danger_ctrl;
+ 
+ 	struct platform_device *pdev;
+-	bool rpm_enabled;
+ 
+ 	struct clk_bulk_data *clocks;
+ 	size_t num_clocks;
+diff --git a/drivers/gpu/drm/msm/disp/mdp4/mdp4_kms.c b/drivers/gpu/drm/msm/disp/mdp4/mdp4_kms.c
+index 9b1d198..0668ae7 100644
+--- a/drivers/gpu/drm/msm/disp/mdp4/mdp4_kms.c
++++ b/drivers/gpu/drm/msm/disp/mdp4/mdp4_kms.c
+@@ -15,9 +15,8 @@
+ #include "msm_mmu.h"
+ #include "mdp4_kms.h"
+ 
+-static int mdp4_hw_init(struct msm_kms *kms)
++static void mdp4_hw_init(struct mdp4_kms *mdp4_kms)
+ {
+-	struct mdp4_kms *mdp4_kms = to_mdp4_kms(to_mdp_kms(kms));
+ 	struct drm_device *dev = mdp4_kms->dev;
+ 	u32 dmap_cfg, vg_cfg;
+ 	unsigned long clk;
+@@ -70,8 +69,6 @@ static int mdp4_hw_init(struct msm_kms *kms)
+ 		mdp4_write(mdp4_kms, REG_MDP4_RESET_STATUS, 1);
+ 
+ 	pm_runtime_put_sync(dev->dev);
+-
+-	return 0;
+ }
+ 
+ static void mdp4_enable_commit(struct msm_kms *kms)
+@@ -118,31 +115,35 @@ static long mdp4_round_pixclk(struct msm_kms *kms, unsigned long rate,
+ 	}
+ }
+ 
++static void mdp4_destroy_vm(struct msm_kms *kms)
++{
++	struct msm_mmu *mmu = to_msm_vm(kms->vm)->mmu;
++
++	mmu->funcs->detach(mmu);
++	drm_gpuvm_put(kms->vm);
++	kms->vm = NULL;
++}
++
+ static void mdp4_destroy(struct msm_kms *kms)
+ {
+ 	struct mdp4_kms *mdp4_kms = to_mdp4_kms(to_mdp_kms(kms));
+ 	struct device *dev = mdp4_kms->dev->dev;
+ 
+-	if (mdp4_kms->blank_cursor_iova)
+-		msm_gem_unpin_iova(mdp4_kms->blank_cursor_bo, kms->vm);
++	msm_gem_unpin_iova(mdp4_kms->blank_cursor_bo, kms->vm);
+ 	drm_gem_object_put(mdp4_kms->blank_cursor_bo);
+ 
+-	if (kms->vm) {
+-		struct msm_mmu *mmu = to_msm_vm(kms->vm)->mmu;
++	mdp4_destroy_vm(kms);
+ 
+-		mmu->funcs->detach(mmu);
+-		drm_gpuvm_put(kms->vm);
+-	}
++	pm_runtime_disable(dev);
+ 
+-	if (mdp4_kms->rpm_enabled)
+-		pm_runtime_disable(dev);
++	if (mdp4_kms->vdd)
++		regulator_disable(mdp4_kms->vdd);
+ 
+ 	mdp_kms_destroy(&mdp4_kms->base);
+ }
+ 
+ static const struct mdp_kms_funcs kms_funcs = {
+ 	.base = {
+-		.hw_init         = mdp4_hw_init,
+ 		.irq_preinstall  = mdp4_irq_preinstall,
+ 		.irq_postinstall = mdp4_irq_postinstall,
+ 		.irq_uninstall   = mdp4_irq_uninstall,
+@@ -386,7 +387,7 @@ static int mdp4_kms_init(struct drm_device *dev)
+ {
+ 	struct msm_drm_private *priv = dev->dev_private;
+ 	struct mdp4_kms *mdp4_kms = to_mdp4_kms(to_mdp_kms(priv->kms));
+-	struct msm_kms *kms = NULL;
++	struct msm_kms *kms = priv->kms;
+ 	struct drm_gpuvm *vm;
+ 	int ret;
+ 	u32 major, minor;
+@@ -395,21 +396,19 @@ static int mdp4_kms_init(struct drm_device *dev)
+ 	/* TODO: Chips that aren't apq8064 have a 200 Mhz max_clk */
+ 	max_clk = 266667000;
+ 
++	mdp4_kms->dev = dev;
++
+ 	ret = mdp_kms_init(&mdp4_kms->base, &kms_funcs);
+ 	if (ret) {
+ 		DRM_DEV_ERROR(dev->dev, "failed to init kms\n");
+ 		return ret;
+ 	}
+ 
+-	kms = priv->kms;
+-
+-	mdp4_kms->dev = dev;
+-
+ 	if (mdp4_kms->vdd) {
+ 		ret = regulator_enable(mdp4_kms->vdd);
+ 		if (ret) {
+ 			DRM_DEV_ERROR(dev->dev, "failed to enable regulator vdd: %d\n", ret);
+-			return ret;
++			goto err_kms_destroy;
+ 		}
+ 	}
+ 
+@@ -421,7 +420,7 @@ static int mdp4_kms_init(struct drm_device *dev)
+ 		DRM_DEV_ERROR(dev->dev, "unexpected MDP version: v%d.%d\n",
+ 			      major, minor);
+ 		ret = -ENXIO;
+-		return ret;
++		goto err_disable_vdd;
+ 	}
+ 
+ 	mdp4_kms->rev = minor;
+@@ -430,13 +429,12 @@ static int mdp4_kms_init(struct drm_device *dev)
+ 		if (!mdp4_kms->lut_clk) {
+ 			DRM_DEV_ERROR(dev->dev, "failed to get lut_clk\n");
+ 			ret = -ENODEV;
+-			return ret;
++			goto err_disable_vdd;
+ 		}
+ 		clk_set_rate(mdp4_kms->lut_clk, max_clk);
+ 	}
+ 
+ 	pm_runtime_enable(dev->dev);
+-	mdp4_kms->rpm_enabled = true;
+ 
+ 	/* make sure things are off before attaching iommu (bootloader could
+ 	 * have left things on, in which case we'll start getting faults if
+@@ -452,7 +450,7 @@ static int mdp4_kms_init(struct drm_device *dev)
+ 	vm = msm_kms_init_vm(mdp4_kms->dev, NULL);
+ 	if (IS_ERR(vm)) {
+ 		ret = PTR_ERR(vm);
+-		return ret;
++		goto err_disable_rpm;
+ 	}
+ 
+ 	kms->vm = vm;
+@@ -460,7 +458,7 @@ static int mdp4_kms_init(struct drm_device *dev)
+ 	ret = modeset_init(mdp4_kms);
+ 	if (ret) {
+ 		DRM_DEV_ERROR(dev->dev, "modeset_init failed: %d\n", ret);
+-		return ret;
++		goto err_destroy_vm;
+ 	}
+ 
+ 	mdp4_kms->blank_cursor_bo = msm_gem_new(dev, SZ_16K, MSM_BO_WC | MSM_BO_SCANOUT, NULL);
+@@ -468,14 +466,14 @@ static int mdp4_kms_init(struct drm_device *dev)
+ 		ret = PTR_ERR(mdp4_kms->blank_cursor_bo);
+ 		DRM_DEV_ERROR(dev->dev, "could not allocate blank-cursor bo: %d\n", ret);
+ 		mdp4_kms->blank_cursor_bo = NULL;
+-		return ret;
++		goto err_destroy_vm;
+ 	}
+ 
+ 	ret = msm_gem_get_and_pin_iova(mdp4_kms->blank_cursor_bo, kms->vm,
+ 			&mdp4_kms->blank_cursor_iova);
+ 	if (ret) {
+ 		DRM_DEV_ERROR(dev->dev, "could not pin blank-cursor bo: %d\n", ret);
+-		return ret;
++		goto err_put_cursor;
+ 	}
+ 
+ 	dev->mode_config.min_width = 0;
+@@ -483,7 +481,23 @@ static int mdp4_kms_init(struct drm_device *dev)
+ 	dev->mode_config.max_width = 2048;
+ 	dev->mode_config.max_height = 2048;
+ 
++	mdp4_hw_init(mdp4_kms);
++
+ 	return 0;
++
++err_put_cursor:
++	drm_gem_object_put(mdp4_kms->blank_cursor_bo);
++err_destroy_vm:
++	mdp4_destroy_vm(kms);
++err_disable_rpm:
++	pm_runtime_disable(dev->dev);
++err_disable_vdd:
++	if (mdp4_kms->vdd)
++		regulator_disable(mdp4_kms->vdd);
++err_kms_destroy:
++	mdp_kms_destroy(&mdp4_kms->base);
++
++	return ret;
+ }
+ 
+ static const struct dev_pm_ops mdp4_pm_ops = {
+diff --git a/drivers/gpu/drm/msm/disp/mdp4/mdp4_kms.h b/drivers/gpu/drm/msm/disp/mdp4/mdp4_kms.h
+index 06458d4..9dd829e 100644
+--- a/drivers/gpu/drm/msm/disp/mdp4/mdp4_kms.h
++++ b/drivers/gpu/drm/msm/disp/mdp4/mdp4_kms.h
+@@ -34,8 +34,6 @@ struct mdp4_kms {
+ 
+ 	struct mdp_irq error_handler;
+ 
+-	bool rpm_enabled;
+-
+ 	/* empty/blank cursor bo to use when cursor is "disabled" */
+ 	struct drm_gem_object *blank_cursor_bo;
+ 	uint64_t blank_cursor_iova;
+diff --git a/drivers/gpu/drm/msm/disp/mdp5/mdp5_kms.c b/drivers/gpu/drm/msm/disp/mdp5/mdp5_kms.c
+index 3934cd0..bbf459b 100644
+--- a/drivers/gpu/drm/msm/disp/mdp5/mdp5_kms.c
++++ b/drivers/gpu/drm/msm/disp/mdp5/mdp5_kms.c
+@@ -19,9 +19,8 @@
+ #include "msm_mmu.h"
+ #include "mdp5_kms.h"
+ 
+-static int mdp5_hw_init(struct msm_kms *kms)
++static void mdp5_hw_init(struct mdp5_kms *mdp5_kms)
+ {
+-	struct mdp5_kms *mdp5_kms = to_mdp5_kms(to_mdp_kms(kms));
+ 	struct device *dev = &mdp5_kms->pdev->dev;
+ 	unsigned long flags;
+ 
+@@ -58,8 +57,6 @@ static int mdp5_hw_init(struct msm_kms *kms)
+ 	mdp5_ctlm_hw_reset(mdp5_kms->ctlm);
+ 
+ 	pm_runtime_put_sync(dev);
+-
+-	return 0;
+ }
+ 
+ /* Global/shared object state funcs */
+@@ -198,24 +195,26 @@ static void mdp5_complete_commit(struct msm_kms *kms, unsigned crtc_mask)
+ 
+ static void mdp5_destroy(struct mdp5_kms *mdp5_kms);
+ 
+-static void mdp5_kms_destroy(struct msm_kms *kms)
++static void mdp5_kms_destroy_vm(struct msm_kms *kms)
+ {
+-	struct mdp5_kms *mdp5_kms = to_mdp5_kms(to_mdp_kms(kms));
++	struct msm_mmu *mmu = to_msm_vm(kms->vm)->mmu;
+ 
+-	if (kms->vm) {
+-		struct msm_mmu *mmu = to_msm_vm(kms->vm)->mmu;
++	mmu->funcs->detach(mmu);
++	drm_gpuvm_put(kms->vm);
++	kms->vm = NULL;
++}
+ 
+-		mmu->funcs->detach(mmu);
+-		drm_gpuvm_put(kms->vm);
+-	}
++static void mdp5_kms_destroy(struct msm_kms *kms)
++{
++	struct mdp5_kms *mdp5_kms = to_mdp5_kms(to_mdp_kms(kms));
+ 
++	mdp5_kms_destroy_vm(kms);
+ 	mdp_kms_destroy(&mdp5_kms->base);
+ 	mdp5_destroy(mdp5_kms);
+ }
+ 
+ static const struct mdp_kms_funcs kms_funcs = {
+ 	.base = {
+-		.hw_init         = mdp5_hw_init,
+ 		.irq_preinstall  = mdp5_irq_preinstall,
+ 		.irq_postinstall = mdp5_irq_postinstall,
+ 		.irq_uninstall   = mdp5_irq_uninstall,
+@@ -517,7 +516,7 @@ static int mdp5_kms_init(struct drm_device *dev)
+ 	ret = mdp_kms_init(&mdp5_kms->base, &kms_funcs);
+ 	if (ret) {
+ 		DRM_DEV_ERROR(&pdev->dev, "failed to init kms\n");
+-		return ret;
++		goto err_mdp5_destroy;
+ 	}
+ 
+ 	config = mdp5_cfg_get_config(mdp5_kms->cfg);
+@@ -538,19 +537,18 @@ static int mdp5_kms_init(struct drm_device *dev)
+ 	mdelay(16);
+ 
+ 	vm = msm_kms_init_vm(mdp5_kms->dev, pdev->dev.parent);
++	pm_runtime_put_sync(&pdev->dev);
+ 	if (IS_ERR(vm)) {
+ 		ret = PTR_ERR(vm);
+-		return ret;
++		goto err_kms_destroy;
+ 	}
+ 
+ 	kms->vm = vm;
+ 
+-	pm_runtime_put_sync(&pdev->dev);
+-
+ 	ret = modeset_init(mdp5_kms);
+ 	if (ret) {
+ 		DRM_DEV_ERROR(&pdev->dev, "modeset_init failed: %d\n", ret);
+-		return ret;
++		goto err_destroy_vm;
+ 	}
+ 
+ 	dev->mode_config.min_width = 0;
+@@ -561,15 +559,28 @@ static int mdp5_kms_init(struct drm_device *dev)
+ 	dev->max_vblank_count = 0; /* max_vblank_count is set on each CRTC */
+ 	dev->vblank_disable_immediate = true;
+ 
++	mdp5_hw_init(mdp5_kms);
++
+ 	return 0;
++
++err_destroy_vm:
++	mdp5_kms_destroy_vm(kms);
++err_kms_destroy:
++	mdp_kms_destroy(&mdp5_kms->base);
++err_mdp5_destroy:
++	mdp5_destroy(mdp5_kms);
++
++	return ret;
+ }
+ 
+ static void mdp5_destroy(struct mdp5_kms *mdp5_kms)
+ {
+-	if (mdp5_kms->rpm_enabled)
+-		pm_runtime_disable(&mdp5_kms->pdev->dev);
+-
++	pm_runtime_disable(&mdp5_kms->pdev->dev);
+ 	drm_atomic_private_obj_fini(&mdp5_kms->glob_state);
++
++	mdp5_kms->num_hwpipes = 0;
++	mdp5_kms->num_hwmixers = 0;
++	mdp5_kms->num_intfs = 0;
+ }
+ 
+ static int construct_pipes(struct mdp5_kms *mdp5_kms, int cnt,
+@@ -721,7 +732,6 @@ static int mdp5_init(struct platform_device *pdev, struct drm_device *dev)
+ 	clk_set_rate(mdp5_kms->core_clk, 200000000);
+ 
+ 	pm_runtime_enable(&pdev->dev);
+-	mdp5_kms->rpm_enabled = true;
+ 
+ 	read_mdp_hw_revision(mdp5_kms, &major, &minor);
+ 
+diff --git a/drivers/gpu/drm/msm/disp/mdp5/mdp5_kms.h b/drivers/gpu/drm/msm/disp/mdp5/mdp5_kms.h
+index 7bf2172..c0b163c 100644
+--- a/drivers/gpu/drm/msm/disp/mdp5/mdp5_kms.h
++++ b/drivers/gpu/drm/msm/disp/mdp5/mdp5_kms.h
+@@ -62,8 +62,6 @@ struct mdp5_kms {
+ 	 */
+ 	spinlock_t resource_lock;
+ 
+-	bool rpm_enabled;
+-
+ 	struct mdp_irq error_handler;
+ 
+ 	int enable_count;
+diff --git a/drivers/gpu/drm/msm/disp/msm_disp_snapshot.c b/drivers/gpu/drm/msm/disp/msm_disp_snapshot.c
+index d997716..f919292 100644
+--- a/drivers/gpu/drm/msm/disp/msm_disp_snapshot.c
++++ b/drivers/gpu/drm/msm/disp/msm_disp_snapshot.c
+@@ -82,6 +82,7 @@ void msm_disp_snapshot_state(struct drm_device *drm_dev)
+ {
+ 	struct msm_drm_private *priv;
+ 	struct msm_kms *kms;
++	unsigned long flags;
+ 
+ 	if (!drm_dev) {
+ 		DRM_ERROR("invalid params\n");
+@@ -91,13 +92,17 @@ void msm_disp_snapshot_state(struct drm_device *drm_dev)
+ 	priv = drm_dev->dev_private;
+ 	kms = priv->kms;
+ 
+-	kthread_queue_work(kms->dump_worker, &kms->dump_work);
++	spin_lock_irqsave(&kms->dump_lock, flags);
++	if (kms->dump_worker)
++		kthread_queue_work(kms->dump_worker, &kms->dump_work);
++	spin_unlock_irqrestore(&kms->dump_lock, flags);
+ }
+ 
+ int msm_disp_snapshot_init(struct drm_device *drm_dev)
+ {
+ 	struct msm_drm_private *priv;
+ 	struct msm_kms *kms;
++	int ret;
+ 
+ 	if (!drm_dev) {
+ 		DRM_ERROR("invalid params\n");
+@@ -108,20 +113,32 @@ int msm_disp_snapshot_init(struct drm_device *drm_dev)
+ 	kms = priv->kms;
+ 
+ 	mutex_init(&kms->dump_mutex);
++	spin_lock_init(&kms->dump_lock);
+ 
+ 	kms->dump_worker = kthread_run_worker(0, "%s", "disp_snapshot");
+-	if (IS_ERR(kms->dump_worker))
++	if (IS_ERR(kms->dump_worker)) {
++		ret = PTR_ERR(kms->dump_worker);
+ 		DRM_ERROR("failed to create disp state task\n");
++		goto err_destroy_mutex;
++	}
+ 
+ 	kthread_init_work(&kms->dump_work, _msm_disp_snapshot_work);
+ 
+ 	return 0;
++
++err_destroy_mutex:
++	kms->dump_worker = NULL;
++	mutex_destroy(&kms->dump_mutex);
++
++	return ret;
+ }
+ 
+ void msm_disp_snapshot_destroy(struct drm_device *drm_dev)
+ {
+ 	struct msm_kms *kms;
+ 	struct msm_drm_private *priv;
++	struct kthread_worker *worker;
++	unsigned long flags;
+ 
+ 	if (!drm_dev) {
+ 		DRM_ERROR("invalid params\n");
+@@ -131,8 +148,12 @@ void msm_disp_snapshot_destroy(struct drm_device *drm_dev)
+ 	priv = drm_dev->dev_private;
+ 	kms = priv->kms;
+ 
+-	if (kms->dump_worker)
+-		kthread_destroy_worker(kms->dump_worker);
++	spin_lock_irqsave(&kms->dump_lock, flags);
++	worker = kms->dump_worker;
++	kms->dump_worker = NULL;
++	spin_unlock_irqrestore(&kms->dump_lock, flags);
++	if (worker)
++		kthread_destroy_worker(worker);
+ 
+ 	mutex_destroy(&kms->dump_mutex);
+ }
+diff --git a/drivers/gpu/drm/msm/msm_atomic.c b/drivers/gpu/drm/msm/msm_atomic.c
+index 0b09c93..2ca753b 100644
+--- a/drivers/gpu/drm/msm/msm_atomic.c
++++ b/drivers/gpu/drm/msm/msm_atomic.c
+@@ -141,8 +141,11 @@ int msm_atomic_init_pending_timer(struct msm_pending_timer *timer,
+ 
+ void msm_atomic_destroy_pending_timer(struct msm_pending_timer *timer)
+ {
+-	if (timer->worker)
++	if (timer->worker) {
++		hrtimer_cancel(&timer->work.timer);
+ 		kthread_destroy_worker(timer->worker);
++	}
++	timer->worker = NULL;
+ }
+ 
+ static bool can_do_async(struct drm_atomic_commit *state,
+diff --git a/drivers/gpu/drm/msm/msm_drv.c b/drivers/gpu/drm/msm/msm_drv.c
+index f3d2eaa..9857219 100644
+--- a/drivers/gpu/drm/msm/msm_drv.c
++++ b/drivers/gpu/drm/msm/msm_drv.c
+@@ -159,33 +159,44 @@ static int msm_drm_init(struct device *dev, const struct drm_driver *drv,
+ 
+ 	ret = msm_gem_shrinker_init(ddev);
+ 	if (ret)
+-		goto err_msm_uninit;
++		goto err_unbind;
+ 
+ 	if (priv->kms_init) {
+ 		ret = msm_drm_kms_init(dev, drv);
+ 		if (ret)
+-			goto err_msm_uninit;
++			goto err_shrinker_cleanup;
+ 	}
+ 
+ 	ret = drm_dev_register(ddev, 0);
+ 	if (ret)
+-		goto err_msm_uninit;
++		goto err_kms_uninit;
+ 
+ 	ret = msm_debugfs_late_init(ddev);
+ 	if (ret)
+-		goto err_msm_uninit;
++		goto err_unregister;
+ 
+ 	if (priv->kms_init)
+ 		msm_drm_kms_post_init(dev);
+ 
+ 	return 0;
+ 
+-err_msm_uninit:
+-	msm_drm_uninit(dev, gpu_ops);
+-
+-	return ret;
+-
++err_unregister:
++	drm_dev_unregister(ddev);
++	if (priv->kms_init)
++		msm_drm_kms_unregister(dev);
++	msm_rd_debugfs_cleanup(priv);
++err_kms_uninit:
++	if (priv->kms_init)
++		msm_drm_kms_uninit(dev);
++err_shrinker_cleanup:
++	msm_gem_shrinker_cleanup(ddev);
++err_unbind:
++	if (gpu_ops)
++		gpu_ops->unbind(dev, dev, NULL);
++	else
++		component_unbind_all(dev, ddev);
+ err_put_dev:
++	ddev->dev_private = NULL;
+ 	drm_dev_put(ddev);
+ 
+ 	return ret;
+diff --git a/drivers/gpu/drm/msm/msm_iommu.c b/drivers/gpu/drm/msm/msm_iommu.c
+index da6782f..46f48ed 100644
+--- a/drivers/gpu/drm/msm/msm_iommu.c
++++ b/drivers/gpu/drm/msm/msm_iommu.c
+@@ -662,11 +662,16 @@ static int msm_disp_fault_handler(struct iommu_domain *domain, struct device *de
+ 				  unsigned long iova, int flags, void *arg)
+ {
+ 	struct msm_iommu *iommu = arg;
++	unsigned long irqflags;
++	int ret = -ENOSYS;
+ 
++	/* The display callback only queues work; withdrawal waits for it. */
++	spin_lock_irqsave(&iommu->base.handler_lock, irqflags);
+ 	if (iommu->base.handler)
+-		return iommu->base.handler(iommu->base.arg, iova, flags, NULL);
++		ret = iommu->base.handler(iommu->base.arg, iova, flags, NULL);
++	spin_unlock_irqrestore(&iommu->base.handler_lock, irqflags);
+ 
+-	return -ENOSYS;
++	return ret;
+ }
+ 
+ static void msm_iommu_set_stall(struct msm_mmu *mmu, bool enable)
+diff --git a/drivers/gpu/drm/msm/msm_kms.c b/drivers/gpu/drm/msm/msm_kms.c
+index 33ab303..d1027ea 100644
+--- a/drivers/gpu/drm/msm/msm_kms.c
++++ b/drivers/gpu/drm/msm/msm_kms.c
+@@ -86,6 +86,7 @@ static int msm_irq_install(struct drm_device *dev, unsigned int irq)
+ 	ret = msm_irq_postinstall(dev);
+ 	if (ret) {
+ 		free_irq(irq, dev);
++		kms->irq_requested = false;
+ 		return ret;
+ 	}
+ 
+@@ -98,8 +99,10 @@ static void msm_irq_uninstall(struct drm_device *dev)
+ 	struct msm_kms *kms = priv->kms;
+ 
+ 	kms->funcs->irq_uninstall(kms);
+-	if (kms->irq_requested)
++	if (kms->irq_requested) {
+ 		free_irq(kms->irq, dev);
++		kms->irq_requested = false;
++	}
+ }
+ 
+ struct msm_vblank_work {
+@@ -183,8 +186,6 @@ struct drm_gpuvm *msm_kms_init_vm(struct drm_device *dev, struct device *mdss_de
+ 	struct drm_gpuvm *vm;
+ 	struct msm_mmu *mmu;
+ 	struct device *mdp_dev = dev->dev;
+-	struct msm_drm_private *priv = dev->dev_private;
+-	struct msm_kms *kms = priv->kms;
+ 	struct device *iommu_dev;
+ 
+ 	/*
+@@ -212,8 +213,6 @@ struct drm_gpuvm *msm_kms_init_vm(struct drm_device *dev, struct device *mdss_de
+ 		return vm;
+ 	}
+ 
+-	msm_mmu_set_fault_handler(to_msm_vm(vm)->mmu, kms, msm_kms_fault_handler);
+-
+ 	return vm;
+ }
+ 
+@@ -226,16 +225,30 @@ void msm_drm_kms_unregister(struct device *dev)
+ 	drm_atomic_helper_shutdown(ddev);
+ }
+ 
++static void msm_drm_kms_destroy_event_threads(struct msm_kms *kms)
++{
++	int i;
++
++	for (i = 0; i < MAX_CRTCS; i++) {
++		if (kms->event_thread[i].worker)
++			kthread_destroy_worker(kms->event_thread[i].worker);
++		kms->event_thread[i].worker = NULL;
++	}
++}
++
+ void msm_drm_kms_uninit(struct device *dev)
+ {
+ 	struct platform_device *pdev = to_platform_device(dev);
+ 	struct msm_drm_private *priv = platform_get_drvdata(pdev);
+ 	struct drm_device *ddev = priv->dev;
+ 	struct msm_kms *kms = priv->kms;
+-	int i;
+ 
+ 	BUG_ON(!kms);
+ 
++	msm_mmu_set_fault_handler(to_msm_vm(kms->vm)->mmu, kms, NULL);
++	/* Pending commits may still need IRQs and mapped display resources. */
++	msm_kms_stop_pending_timers(kms);
++
+ 	/* We must cancel and cleanup any pending vblank enable/disable
+ 	 * work before msm_irq_uninstall() to avoid work re-enabling an
+ 	 * irq after uninstall has disabled it.
+@@ -243,20 +256,16 @@ void msm_drm_kms_uninit(struct device *dev)
+ 
+ 	flush_workqueue(kms->wq);
+ 
+-	/* clean up event worker threads */
+-	for (i = 0; i < MAX_CRTCS; i++) {
+-		if (kms->event_thread[i].worker)
+-			kthread_destroy_worker(kms->event_thread[i].worker);
+-	}
++	msm_drm_kms_destroy_event_threads(kms);
+ 
+ 	drm_kms_helper_poll_fini(ddev);
+ 
+-	msm_disp_snapshot_destroy(ddev);
+-
+ 	pm_runtime_get_sync(dev);
+ 	msm_irq_uninstall(ddev);
+ 	pm_runtime_put_sync(dev);
+ 
++	msm_disp_snapshot_destroy(ddev);
++
+ 	if (kms && kms->funcs)
+ 		kms->funcs->destroy(kms);
+ }
+@@ -280,12 +289,6 @@ int msm_drm_kms_init(struct device *dev, const struct drm_driver *drv)
+ 		return ret;
+ 	}
+ 
+-	ret = priv->kms_init(ddev);
+-	if (ret) {
+-		DRM_DEV_ERROR(dev, "failed to load kms\n");
+-		goto err_msm_uninit;
+-	}
+-
+ 	/* Enable normalization of plane zpos */
+ 	ddev->mode_config.normalize_zpos = true;
+ 
+@@ -293,10 +296,10 @@ int msm_drm_kms_init(struct device *dev, const struct drm_driver *drv)
+ 	ddev->mode_config.helper_private = &mode_config_helper_funcs;
+ 
+ 	kms->dev = ddev;
+-	ret = kms->funcs->hw_init(kms);
++	ret = priv->kms_init(ddev);
+ 	if (ret) {
+-		DRM_DEV_ERROR(dev, "kms hw init failed: %d\n", ret);
+-		goto err_msm_uninit;
++		DRM_DEV_ERROR(dev, "failed to load kms\n");
++		goto err_destroy_snapshot;
+ 	}
+ 
+ 	drm_helper_move_panel_connectors_to_head(ddev);
+@@ -312,7 +315,7 @@ int msm_drm_kms_init(struct device *dev, const struct drm_driver *drv)
+ 			ret = PTR_ERR(ev_thread->worker);
+ 			DRM_DEV_ERROR(dev, "failed to create crtc_event kthread\n");
+ 			ev_thread->worker = NULL;
+-			goto err_msm_uninit;
++			goto err_destroy_event_threads;
+ 		}
+ 
+ 		sched_set_fifo(ev_thread->worker->task);
+@@ -321,7 +324,7 @@ int msm_drm_kms_init(struct device *dev, const struct drm_driver *drv)
+ 	ret = drm_vblank_init(ddev, ddev->mode_config.num_crtc);
+ 	if (ret < 0) {
+ 		DRM_DEV_ERROR(dev, "failed to initialize vblank\n");
+-		goto err_msm_uninit;
++		goto err_destroy_event_threads;
+ 	}
+ 
+ 	pm_runtime_get_sync(dev);
+@@ -329,14 +332,21 @@ int msm_drm_kms_init(struct device *dev, const struct drm_driver *drv)
+ 	pm_runtime_put_sync(dev);
+ 	if (ret < 0) {
+ 		DRM_DEV_ERROR(dev, "failed to install IRQ handler\n");
+-		goto err_msm_uninit;
++		goto err_destroy_event_threads;
+ 	}
+ 
+ 	drm_mode_config_reset(ddev);
+ 
++	msm_mmu_set_fault_handler(to_msm_vm(kms->vm)->mmu, kms, msm_kms_fault_handler);
++
+ 	return 0;
+ 
+-err_msm_uninit:
++err_destroy_event_threads:
++	msm_drm_kms_destroy_event_threads(kms);
++	kms->funcs->destroy(kms);
++err_destroy_snapshot:
++	msm_disp_snapshot_destroy(ddev);
++
+ 	return ret;
+ }
+ 
+diff --git a/drivers/gpu/drm/msm/msm_kms.h b/drivers/gpu/drm/msm/msm_kms.h
+index 245611b..86d7271 100644
+--- a/drivers/gpu/drm/msm/msm_kms.h
++++ b/drivers/gpu/drm/msm/msm_kms.h
+@@ -10,6 +10,7 @@
+ 
+ #include <linux/clk.h>
+ #include <linux/regulator/consumer.h>
++#include <linux/spinlock.h>
+ 
+ #include "msm_drv.h"
+ 
+@@ -26,8 +27,6 @@ struct msm_kms_funcs {
+ 	/* Read-only mode admission; zero leaves connector VRR disabled. */
+ 	unsigned int (*get_vrr_min_hz)(struct drm_encoder *encoder,
+ 				     const struct drm_display_mode *mode);
+-	/* hw initialization: */
+-	int (*hw_init)(struct msm_kms *kms);
+ 	/* irq handling: */
+ 	void (*irq_preinstall)(struct msm_kms *kms);
+ 	int (*irq_postinstall)(struct msm_kms *kms);
+@@ -159,6 +158,7 @@ struct msm_kms {
+ 	struct drm_gpuvm *vm;
+ 
+ 	/* disp snapshot support */
++	spinlock_t dump_lock;
+ 	struct kthread_worker *dump_worker;
+ 	struct kthread_work dump_work;
+ 	struct mutex dump_mutex;
+@@ -178,7 +178,8 @@ struct msm_kms {
+ static inline int msm_kms_init(struct msm_kms *kms,
+ 		const struct msm_kms_funcs *funcs)
+ {
+-	unsigned i, ret;
++	unsigned int i;
++	int ret;
+ 
+ 	for (i = 0; i < ARRAY_SIZE(kms->commit_lock); i++)
+ 		mutex_init(&kms->commit_lock[i]);
+@@ -191,22 +192,35 @@ static inline int msm_kms_init(struct msm_kms *kms,
+ 
+ 	for (i = 0; i < ARRAY_SIZE(kms->pending_timers); i++) {
+ 		ret = msm_atomic_init_pending_timer(&kms->pending_timers[i], kms, i);
+-		if (ret) {
+-			return ret;
+-		}
++		if (ret)
++			goto err_destroy_timers;
+ 	}
+ 
+ 	return 0;
++
++err_destroy_timers:
++	while (i--)
++		msm_atomic_destroy_pending_timer(&kms->pending_timers[i]);
++	destroy_workqueue(kms->wq);
++	kms->wq = NULL;
++
++	return ret;
+ }
+ 
+-static inline void msm_kms_destroy(struct msm_kms *kms)
++static inline void msm_kms_stop_pending_timers(struct msm_kms *kms)
+ {
+ 	unsigned i;
+ 
+ 	for (i = 0; i < ARRAY_SIZE(kms->pending_timers); i++)
+ 		msm_atomic_destroy_pending_timer(&kms->pending_timers[i]);
++}
++
++static inline void msm_kms_destroy(struct msm_kms *kms)
++{
++	msm_kms_stop_pending_timers(kms);
+ 
+ 	destroy_workqueue(kms->wq);
++	kms->wq = NULL;
+ }
+ 
+ #define for_each_crtc_mask(dev, crtc, crtc_mask) \
+diff --git a/drivers/gpu/drm/msm/msm_mmu.h b/drivers/gpu/drm/msm/msm_mmu.h
+index 8915662..ad749fd 100644
+--- a/drivers/gpu/drm/msm/msm_mmu.h
++++ b/drivers/gpu/drm/msm/msm_mmu.h
+@@ -8,6 +8,7 @@
+ #define __MSM_MMU_H__
+ 
+ #include <linux/iommu.h>
++#include <linux/spinlock.h>
+ 
+ struct msm_mmu_prealloc;
+ struct msm_mmu;
+@@ -53,6 +54,8 @@ struct msm_mmu_prealloc {
+ struct msm_mmu {
+ 	const struct msm_mmu_funcs *funcs;
+ 	struct device *dev;
++	/* Serialize display fault callbacks with handler withdrawal. */
++	spinlock_t handler_lock;
+ 	int (*handler)(void *arg, unsigned long iova, int flags, void *data);
+ 	void *arg;
+ 	enum msm_mmu_type type;
+@@ -72,6 +75,7 @@ static inline void msm_mmu_init(struct msm_mmu *mmu, struct device *dev,
+ 	mmu->dev = dev;
+ 	mmu->funcs = funcs;
+ 	mmu->type = type;
++	spin_lock_init(&mmu->handler_lock);
+ }
+ 
+ struct msm_mmu *msm_iommu_new(struct device *dev, unsigned long quirks);
+@@ -81,8 +85,12 @@ struct msm_mmu *msm_iommu_disp_new(struct device *dev, unsigned long quirks);
+ static inline void msm_mmu_set_fault_handler(struct msm_mmu *mmu, void *arg,
+ 		int (*handler)(void *arg, unsigned long iova, int flags, void *data))
+ {
++	unsigned long flags;
++
++	spin_lock_irqsave(&mmu->handler_lock, flags);
+ 	mmu->arg = arg;
+ 	mmu->handler = handler;
++	spin_unlock_irqrestore(&mmu->handler_lock, flags);
+ }
+ 
+ struct msm_mmu *msm_iommu_pagetable_create(struct msm_mmu *parent, bool kernel_managed);

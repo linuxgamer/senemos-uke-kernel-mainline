@@ -1,0 +1,608 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] usb: typec: ucsi: bound GLINK packets and quarantine ambiguous sessions
+
+Decode exact ABI sizes before reading the little-endian return code. Preserve firmware errors, serialize pending responses, reject late replies after timeout, and drain work before teardown. No new Uke Type-C profile is enabled. A protocol timeout or service loss needs a new boot session until a wire resynchronization contract is documented.
+
+Release 27 correction: the Uke runtime sends owner 32779/opcode 0x13,
+type 2, length 24. The previous global type-1 check drops completion events
+and SET_NOTIFICATION_ENABLE times out. Dispatch type validation per opcode;
+retain strict reply type, owner, size, receiver and lifecycle boundaries.
+Source: MiCode/Xiaomi_Kernel_OpenSource 5712080a4b0c0b1a879e6d145c601c649ddaddfd
+File: drivers/usb/typec/ucsi/ucsi_glink.c (opcode-dispatched notifications)
+Runtime: Fedora Rawhide, POCO Pad X1, kernel 7.2.10-26, 18 October 2026.
+
+diff --git a/drivers/usb/typec/ucsi/ucsi_glink.c b/drivers/usb/typec/ucsi/ucsi_glink.c
+index 1db0c88..042cdf0 100644
+--- a/drivers/usb/typec/ucsi/ucsi_glink.c
++++ b/drivers/usb/typec/ucsi/ucsi_glink.c
+@@ -12,14 +12,15 @@
+ #include <linux/usb/typec_mux.h>
+ #include <linux/gpio/consumer.h>
+ #include <linux/soc/qcom/pmic_glink.h>
++#include <linux/unaligned.h>
+ #include "ucsi.h"
+ 
+ #define PMIC_GLINK_MAX_PORTS		3
+ 
+-#define UCSI_BUF_V1_SIZE		(UCSI_MESSAGE_OUT + (UCSI_MESSAGE_OUT - UCSI_MESSAGE_IN))
+-#define UCSI_BUF_V2_SIZE		(UCSIv2_MESSAGE_OUT + (UCSIv2_MESSAGE_OUT - UCSI_MESSAGE_IN))
++#include "ucsi_glink_protocol.h"
+ 
+ #define MSG_TYPE_REQ_RESP               1
++#define MSG_TYPE_NOTIFY                 2
+ 
+ #define UC_NOTIFY_RECEIVER_UCSI         0x0
+ #define UC_UCSI_READ_BUF_REQ            0x11
+@@ -68,8 +69,7 @@ struct pmic_glink_ucsi {
+ 	struct pmic_glink_client *client;
+ 
+ 	struct ucsi *ucsi;
+-	struct completion read_ack;
+-	struct completion write_ack;
++	struct completion response;
+ 	struct mutex lock;	/* protects concurrent access to PMIC Glink interface */
+ 
+ 	struct work_struct notify_work;
+@@ -77,41 +77,89 @@ struct pmic_glink_ucsi {
+ 	spinlock_t state_lock;
+ 	bool ucsi_registered;
+ 	bool pd_running;
++	bool stopping;
++	bool quarantined;
++	u32 pending_opcode;
++	int response_error;
++	size_t response_len;
++	u64 service_generation;
++	u64 registered_generation;
+ 
+ 	u8 read_buf[UCSI_BUF_V2_SIZE];
+ };
+ 
++/* No transaction ID exists on the wire: a timeout poisons this instance. */
++static int pmic_glink_ucsi_begin(struct pmic_glink_ucsi *ucsi, u32 opcode)
++{
++	unsigned long flags;
++	int ret = 0;
++
++	spin_lock_irqsave(&ucsi->state_lock, flags);
++	if (ucsi->stopping || !ucsi->pd_running)
++		ret = -ENOTCONN;
++	else if (ucsi->quarantined)
++		ret = -EPIPE;
++	else {
++		reinit_completion(&ucsi->response);
++		ucsi->pending_opcode = opcode;
++		ucsi->response_error = -EINPROGRESS;
++		ucsi->response_len = 0;
++	}
++	spin_unlock_irqrestore(&ucsi->state_lock, flags);
++	return ret;
++}
++
++static int pmic_glink_ucsi_wait(struct pmic_glink_ucsi *ucsi, int send_error)
++{
++	unsigned long flags;
++	unsigned long left = 0;
++	int ret;
++
++	if (!send_error)
++		left = wait_for_completion_timeout(&ucsi->response, 5 * HZ);
++	spin_lock_irqsave(&ucsi->state_lock, flags);
++	ret = send_error ?: ucsi->response_error;
++	if ((!send_error && !left) || ret == -EINPROGRESS)
++		ret = -ETIMEDOUT;
++	if (send_error || ret == -ETIMEDOUT || ret == -EPROTO)
++		ucsi->quarantined = true;
++	ucsi->pending_opcode = 0;
++	spin_unlock_irqrestore(&ucsi->state_lock, flags);
++	return ret;
++}
++
+ static int pmic_glink_ucsi_read(struct ucsi *__ucsi, unsigned int offset,
+ 				void *val, size_t val_len)
+ {
+ 	struct pmic_glink_ucsi *ucsi = ucsi_get_drvdata(__ucsi);
+ 	struct ucsi_read_buf_req_msg req = {};
+-	unsigned long left;
+ 	int ret;
++	unsigned long flags;
+ 
+-	req.hdr.owner = PMIC_GLINK_OWNER_USBC;
+-	req.hdr.type = MSG_TYPE_REQ_RESP;
+-	req.hdr.opcode = UC_UCSI_READ_BUF_REQ;
++	if (offset > sizeof(ucsi->read_buf) || val_len > sizeof(ucsi->read_buf) - offset)
++		return -EINVAL;
+ 
+-	mutex_lock(&ucsi->lock);
+-	memset(ucsi->read_buf, 0, sizeof(ucsi->read_buf));
+-	reinit_completion(&ucsi->read_ack);
++	req.hdr.owner = cpu_to_le32(PMIC_GLINK_OWNER_USBC);
++	req.hdr.type = cpu_to_le32(MSG_TYPE_REQ_RESP);
++	req.hdr.opcode = cpu_to_le32(UC_UCSI_READ_BUF_REQ);
+ 
+-	ret = pmic_glink_send(ucsi->client, &req, sizeof(req));
+-	if (ret < 0) {
+-		dev_err(ucsi->dev, "failed to send UCSI read request: %d\n", ret);
++	mutex_lock(&ucsi->lock);
++	ret = pmic_glink_ucsi_begin(ucsi, UC_UCSI_READ_BUF_REQ);
++	if (ret)
+ 		goto out_unlock;
+-	}
+ 
+-	left = wait_for_completion_timeout(&ucsi->read_ack, 5 * HZ);
+-	if (!left) {
+-		dev_err(ucsi->dev, "timeout waiting for UCSI read response\n");
+-		ret = -ETIMEDOUT;
++	ret = pmic_glink_send(ucsi->client, &req, sizeof(req));
++	ret = pmic_glink_ucsi_wait(ucsi, ret);
++	if (ret)
+ 		goto out_unlock;
+-	}
+-
+-	memcpy(val, &ucsi->read_buf[offset], val_len);
+-	ret = 0;
++	spin_lock_irqsave(&ucsi->state_lock, flags);
++	if (!ucsi->pd_running || ucsi->quarantined || ucsi->stopping)
++		ret = -ENOTCONN;
++	else if (offset > ucsi->response_len || val_len > ucsi->response_len - offset)
++		ret = -EPROTO;
++	else
++		memcpy(val, &ucsi->read_buf[offset], val_len);
++	spin_unlock_irqrestore(&ucsi->state_lock, flags);
+ 
+ out_unlock:
+ 	mutex_unlock(&ucsi->lock);
+@@ -139,13 +187,12 @@ static int pmic_glink_ucsi_locked_write(struct pmic_glink_ucsi *ucsi, unsigned i
+ {
+ 	struct ucsi_write_buf_req_msg req = {};
+ 	size_t req_len, buf_len;
+-	unsigned long left;
+ 	int ret;
+ 	u8 *buf;
+ 
+-	req.hdr.owner = PMIC_GLINK_OWNER_USBC;
+-	req.hdr.type = MSG_TYPE_REQ_RESP;
+-	req.hdr.opcode = UC_UCSI_WRITE_BUF_REQ;
++	req.hdr.owner = cpu_to_le32(PMIC_GLINK_OWNER_USBC);
++	req.hdr.type = cpu_to_le32(MSG_TYPE_REQ_RESP);
++	req.hdr.opcode = cpu_to_le32(UC_UCSI_WRITE_BUF_REQ);
+ 
+ 	if (ucsi->ucsi->version >= UCSI_VERSION_2_0) {
+ 		buf_len = UCSI_BUF_V2_SIZE;
+@@ -159,26 +206,17 @@ static int pmic_glink_ucsi_locked_write(struct pmic_glink_ucsi *ucsi, unsigned i
+ 	}
+ 	req_len = sizeof(struct pmic_glink_hdr) + buf_len + sizeof(u32);
+ 
+-	if (offset + val_len > buf_len)
++	if (offset > buf_len || val_len > buf_len - offset)
+ 		return -EINVAL;
+ 
+ 	memcpy(&buf[offset], val, val_len);
+ 
+-	reinit_completion(&ucsi->write_ack);
+-
+-	ret = pmic_glink_send(ucsi->client, &req, req_len);
+-	if (ret < 0) {
+-		dev_err(ucsi->dev, "failed to send UCSI write request: %d\n", ret);
++	ret = pmic_glink_ucsi_begin(ucsi, UC_UCSI_WRITE_BUF_REQ);
++	if (ret)
+ 		return ret;
+-	}
+ 
+-	left = wait_for_completion_timeout(&ucsi->write_ack, 5 * HZ);
+-	if (!left) {
+-		dev_err(ucsi->dev, "timeout waiting for UCSI write response\n");
+-		return -ETIMEDOUT;
+-	}
+-
+-	return 0;
++	ret = pmic_glink_send(ucsi->client, &req, req_len);
++	return pmic_glink_ucsi_wait(ucsi, ret);
+ }
+ 
+ static int pmic_glink_ucsi_async_control(struct ucsi *__ucsi, u64 command)
+@@ -197,7 +235,7 @@ static void pmic_glink_ucsi_update_connector(struct ucsi_connector *con)
+ {
+ 	struct pmic_glink_ucsi *ucsi = ucsi_get_drvdata(con->ucsi);
+ 
+-	if (con->num > PMIC_GLINK_MAX_PORTS ||
++	if (!con->num || con->num > PMIC_GLINK_MAX_PORTS ||
+ 	    !ucsi->port_orientation[con->num - 1])
+ 		return;
+ 
+@@ -214,11 +252,11 @@ static void pmic_glink_ucsi_connector_status(struct ucsi_connector *con)
+ 		return;
+ 	}
+ 
+-	if (con->num > PMIC_GLINK_MAX_PORTS ||
++	if (!con->num || con->num > PMIC_GLINK_MAX_PORTS ||
+ 	    !ucsi->port_orientation[con->num - 1])
+ 		return;
+ 
+-	orientation = gpiod_get_value(ucsi->port_orientation[con->num - 1]);
++	orientation = gpiod_get_value_cansleep(ucsi->port_orientation[con->num - 1]);
+ 	if (orientation >= 0) {
+ 		typec_set_orientation(con->port,
+ 				      orientation ?
+@@ -238,61 +276,36 @@ static const struct ucsi_operations pmic_glink_ucsi_ops = {
+ 	.connector_status = pmic_glink_ucsi_connector_status,
+ };
+ 
+-static void pmic_glink_ucsi_read_ack(struct pmic_glink_ucsi *ucsi, const void *data, int len)
++static void pmic_glink_ucsi_ack(struct pmic_glink_ucsi *ucsi, u32 opcode,
++                               const void *data, size_t len)
+ {
+-	u32 ret_code, resp_len, buf_len = 0;
+-	u8 *buf;
++	const u8 *payload = (const u8 *)data + sizeof(struct pmic_glink_hdr);
++	u32 fw_error = 0;
++	unsigned long flags;
++	size_t buffer_len = 0;
++	int ret;
+ 
+-	if (ucsi->ucsi->version) {
+-		if (ucsi->ucsi->version >= UCSI_VERSION_2_0) {
+-			buf = ((struct ucsi_read_buf_resp_msg *)data)->buf.v2_buf;
+-			buf_len = UCSI_BUF_V2_SIZE;
+-		} else {
+-			buf = ((struct ucsi_read_buf_resp_msg *)data)->buf.v1_buf;
+-			buf_len = UCSI_BUF_V1_SIZE;
+-		}
+-	} else if (!ucsi->ucsi_registered) {
+-		/*
+-		 * If UCSI version is not known yet because device is not registered, choose buffer
+-		 * size which best fits incoming data
+-		 */
+-		if (len > sizeof(struct pmic_glink_hdr) + UCSI_BUF_V2_SIZE) {
+-			buf = ((struct ucsi_read_buf_resp_msg *)data)->buf.v2_buf;
+-			buf_len = UCSI_BUF_V2_SIZE;
+-		} else {
+-			buf = ((struct ucsi_read_buf_resp_msg *)data)->buf.v1_buf;
+-			buf_len = UCSI_BUF_V1_SIZE;
++	spin_lock_irqsave(&ucsi->state_lock, flags);
++	if (ucsi->stopping || !ucsi->pd_running || ucsi->quarantined ||
++	    ucsi->pending_opcode != opcode || ucsi->response_error != -EINPROGRESS)
++		goto unlock;
++	if (opcode == UC_UCSI_READ_BUF_REQ) {
++		ret = ucsi_glink_decode_read(payload, len - sizeof(struct pmic_glink_hdr),
++					    READ_ONCE(ucsi->ucsi->version), &buffer_len, &fw_error);
++		if (!ret) {
++			memcpy(ucsi->read_buf, payload, buffer_len);
++			ucsi->response_len = buffer_len;
+ 		}
+ 	} else {
+-		dev_err(ucsi->dev, "Device has been registered but UCSI version is still unknown\n");
+-		return;
++		ret = ucsi_glink_decode_write(payload, len - sizeof(struct pmic_glink_hdr),
++					     &fw_error);
+ 	}
+-
+-	resp_len = sizeof(struct pmic_glink_hdr) + buf_len + sizeof(u32);
+-
+-	if (len > resp_len)
+-		return;
+-
+-	/* Ensure that buffer_len leaves space for ret_code to be read back from memory */
+-	if (buf_len > len - sizeof(struct pmic_glink_hdr) - sizeof(u32))
+-		buf_len = len - sizeof(struct pmic_glink_hdr) - sizeof(u32);
+-
+-	memcpy(&ret_code, buf + buf_len, sizeof(u32));
+-	if (ret_code)
+-		return;
+-
+-	memcpy(ucsi->read_buf, buf, buf_len);
+-	complete(&ucsi->read_ack);
+-}
+-
+-static void pmic_glink_ucsi_write_ack(struct pmic_glink_ucsi *ucsi, const void *data, int len)
+-{
+-	const struct ucsi_write_buf_resp_msg *resp = data;
+-
+-	if (resp->ret_code)
+-		return;
+-
+-	complete(&ucsi->write_ack);
++	ucsi->response_error = ret;
++	if (fw_error)
++		dev_err_ratelimited(ucsi->dev, "UCSI firmware returned %#x for %#x\n", fw_error, opcode);
++	complete(&ucsi->response);
++unlock:
++	spin_unlock_irqrestore(&ucsi->state_lock, flags);
+ }
+ 
+ static void pmic_glink_ucsi_notify(struct work_struct *work)
+@@ -314,18 +327,34 @@ static void pmic_glink_ucsi_register(struct work_struct *work)
+ {
+ 	struct pmic_glink_ucsi *ucsi = container_of(work, struct pmic_glink_ucsi, register_work);
+ 	unsigned long flags;
+-	bool pd_running;
+-
+-	spin_lock_irqsave(&ucsi->state_lock, flags);
+-	pd_running = ucsi->pd_running;
+-	spin_unlock_irqrestore(&ucsi->state_lock, flags);
++	u64 generation;
++	bool online;
++	int ret;
+ 
+-	if (!ucsi->ucsi_registered && pd_running) {
+-		ucsi_register(ucsi->ucsi);
+-		ucsi->ucsi_registered = true;
+-	} else if (ucsi->ucsi_registered && !pd_running) {
+-		ucsi_unregister(ucsi->ucsi);
+-		ucsi->ucsi_registered = false;
++	for (;;) {
++		spin_lock_irqsave(&ucsi->state_lock, flags);
++		generation = ucsi->service_generation;
++		online = ucsi->pd_running && !ucsi->stopping && !ucsi->quarantined;
++		spin_unlock_irqrestore(&ucsi->state_lock, flags);
++		if (ucsi->ucsi_registered &&
++		    (!online || generation != ucsi->registered_generation)) {
++			ucsi_unregister(ucsi->ucsi);
++			ucsi->ucsi_registered = false;
++		}
++		if (!ucsi->ucsi_registered && online) {
++			ret = ucsi_register(ucsi->ucsi);
++			if (ret) {
++				dev_err(ucsi->dev, "UCSI registration failed: %d\n", ret);
++				return;
++			}
++			ucsi->registered_generation = generation;
++			ucsi->ucsi_registered = true;
++		}
++		spin_lock_irqsave(&ucsi->state_lock, flags);
++		online = generation == ucsi->service_generation;
++		spin_unlock_irqrestore(&ucsi->state_lock, flags);
++		if (online)
++			return;
+ 	}
+ }
+ 
+@@ -333,16 +362,31 @@ static void pmic_glink_ucsi_callback(const void *data, size_t len, void *priv)
+ {
+ 	struct pmic_glink_ucsi *ucsi = priv;
+ 	const struct pmic_glink_hdr *hdr = data;
++	const struct ucsi_notify_ind_msg *notify = data;
++	unsigned long flags;
++	u32 opcode, type;
+ 
+-	switch (le32_to_cpu(hdr->opcode)) {
++	if (len < sizeof(*hdr) || le32_to_cpu(hdr->owner) != PMIC_GLINK_OWNER_USBC)
++		return;
++	opcode = le32_to_cpu(hdr->opcode);
++	type = le32_to_cpu(hdr->type);
++	switch (opcode) {
+ 	case UC_UCSI_READ_BUF_REQ:
+-		pmic_glink_ucsi_read_ack(ucsi, data, len);
+-		break;
+ 	case UC_UCSI_WRITE_BUF_REQ:
+-		pmic_glink_ucsi_write_ack(ucsi, data, len);
++		if (type != MSG_TYPE_REQ_RESP)
++			return;
++		pmic_glink_ucsi_ack(ucsi, opcode, data, len);
+ 		break;
+ 	case UC_UCSI_USBC_NOTIFY_IND:
+-		schedule_work(&ucsi->notify_work);
++		/* Uke firmware sends asynchronous completion as type 2. */
++		if ((type != MSG_TYPE_REQ_RESP && type != MSG_TYPE_NOTIFY) ||
++		    len != sizeof(*notify) ||
++		    le32_to_cpu(notify->receiver) != UC_NOTIFY_RECEIVER_UCSI)
++			return;
++		spin_lock_irqsave(&ucsi->state_lock, flags);
++		if (ucsi->pd_running && !ucsi->stopping && !ucsi->quarantined)
++			schedule_work(&ucsi->notify_work);
++		spin_unlock_irqrestore(&ucsi->state_lock, flags);
+ 		break;
+ 	}
+ }
+@@ -350,26 +394,51 @@ static void pmic_glink_ucsi_callback(const void *data, size_t len, void *priv)
+ static void pmic_glink_ucsi_pdr_notify(void *priv, int state)
+ {
+ 	struct pmic_glink_ucsi *ucsi = priv;
++	bool online = state == SERVREG_SERVICE_STATE_UP;
+ 	unsigned long flags;
+ 
+ 	spin_lock_irqsave(&ucsi->state_lock, flags);
+-	ucsi->pd_running = (state == SERVREG_SERVICE_STATE_UP);
++	if (!ucsi->stopping) {
++		if (ucsi->pd_running != online)
++			ucsi->service_generation++;
++		if (!online && ucsi->pd_running) {
++			/* No documented drain handshake; require a new boot session. */
++			ucsi->quarantined = true;
++			ucsi->response_error = -ECONNRESET;
++			ucsi->pending_opcode = 0;
++			complete_all(&ucsi->response);
++		}
++		ucsi->pd_running = online;
++		schedule_work(&ucsi->register_work);
++	}
++	spin_unlock_irqrestore(&ucsi->state_lock, flags);
++}
++
++static void pmic_glink_ucsi_stop(struct pmic_glink_ucsi *ucsi)
++{
++	unsigned long flags;
++
++	spin_lock_irqsave(&ucsi->state_lock, flags);
++	ucsi->stopping = true;
++	ucsi->response_error = -ESHUTDOWN;
++	ucsi->pending_opcode = 0;
++	complete_all(&ucsi->response);
+ 	spin_unlock_irqrestore(&ucsi->state_lock, flags);
+-	schedule_work(&ucsi->register_work);
++	/* Neither work item is cancelled while holding its transaction mutex. */
++	disable_work_sync(&ucsi->notify_work);
++	disable_work_sync(&ucsi->register_work);
++	if (ucsi->ucsi_registered) {
++		ucsi_unregister(ucsi->ucsi);
++		ucsi->ucsi_registered = false;
++	}
+ }
+ 
+ static void pmic_glink_ucsi_destroy(void *data)
+ {
+ 	struct pmic_glink_ucsi *ucsi = data;
+ 
+-	/* Drain the work items before ucsi_destroy() frees the ucsi instance */
+-	cancel_work_sync(&ucsi->notify_work);
+-	cancel_work_sync(&ucsi->register_work);
+-
+-	/* Protect to make sure we're not in a middle of a transaction from a glink callback */
+-	mutex_lock(&ucsi->lock);
++	pmic_glink_ucsi_stop(ucsi);
+ 	ucsi_destroy(ucsi->ucsi);
+-	mutex_unlock(&ucsi->lock);
+ }
+ 
+ static unsigned long quirk_sc8180x = UCSI_NO_PARTNER_PDOS;
+@@ -407,8 +476,7 @@ static int pmic_glink_ucsi_probe(struct auxiliary_device *adev,
+ 
+ 	INIT_WORK(&ucsi->notify_work, pmic_glink_ucsi_notify);
+ 	INIT_WORK(&ucsi->register_work, pmic_glink_ucsi_register);
+-	init_completion(&ucsi->read_ack);
+-	init_completion(&ucsi->write_ack);
++	init_completion(&ucsi->response);
+ 	spin_lock_init(&ucsi->state_lock);
+ 	mutex_init(&ucsi->lock);
+ 
+@@ -471,15 +539,7 @@ static void pmic_glink_ucsi_remove(struct auxiliary_device *adev)
+ {
+ 	struct pmic_glink_ucsi *ucsi = dev_get_drvdata(&adev->dev);
+ 
+-	/* Callbacks can queue work until devres releases the client */
+-	disable_work_sync(&ucsi->notify_work);
+-	disable_work_sync(&ucsi->register_work);
+-
+-	/* register_work may have unregistered the instance already */
+-	if (ucsi->ucsi_registered) {
+-		ucsi->ucsi_registered = false;
+-		ucsi_unregister(ucsi->ucsi);
+-	}
++	pmic_glink_ucsi_stop(ucsi);
+ }
+ 
+ static const struct auxiliary_device_id pmic_glink_ucsi_id_table[] = {
+diff --git a/drivers/usb/typec/ucsi/ucsi_glink_protocol.h b/drivers/usb/typec/ucsi/ucsi_glink_protocol.h
+new file mode 100644
+index 0000000..0070b06
+--- /dev/null
++++ b/drivers/usb/typec/ucsi/ucsi_glink_protocol.h
+@@ -0,0 +1,40 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef UCSI_GLINK_PROTOCOL_H
++#define UCSI_GLINK_PROTOCOL_H
++
++#include <linux/errno.h>
++#include <linux/unaligned.h>
++#include "ucsi.h"
++
++#define UCSI_BUF_V1_SIZE (UCSI_MESSAGE_OUT + UCSI_MESSAGE_OUT - UCSI_MESSAGE_IN)
++#define UCSI_BUF_V2_SIZE (UCSIv2_MESSAGE_OUT + UCSIv2_MESSAGE_OUT - UCSI_MESSAGE_IN)
++
++/* Payload excludes pmic_glink_hdr; ret_code follows the complete ABI buffer. */
++static inline int ucsi_glink_decode_read(const void *payload, size_t len,
++					u16 version, size_t *buffer_len, u32 *fw_error)
++{
++	size_t size;
++
++	if (version)
++		size = version >= UCSI_VERSION_2_0 ? UCSI_BUF_V2_SIZE : UCSI_BUF_V1_SIZE;
++	else if (len == UCSI_BUF_V2_SIZE + sizeof(u32))
++		size = UCSI_BUF_V2_SIZE;
++	else
++		size = UCSI_BUF_V1_SIZE;
++	if (len != size + sizeof(u32))
++		return -EPROTO;
++	*fw_error = get_unaligned_le32((const u8 *)payload + size);
++	if (*fw_error)
++		return -EREMOTEIO;
++	*buffer_len = size;
++	return 0;
++}
++
++static inline int ucsi_glink_decode_write(const void *payload, size_t len, u32 *fw_error)
++{
++	if (len != sizeof(u32))
++		return -EPROTO;
++	*fw_error = get_unaligned_le32(payload);
++	return *fw_error ? -EREMOTEIO : 0;
++}
++#endif
+diff --git a/drivers/usb/typec/ucsi/ucsi_glink_test.c b/drivers/usb/typec/ucsi/ucsi_glink_test.c
+new file mode 100644
+index 0000000..82829ca
+--- /dev/null
++++ b/drivers/usb/typec/ucsi/ucsi_glink_test.c
+@@ -0,0 +1,44 @@
++// SPDX-License-Identifier: GPL-2.0-only
++#include <kunit/test.h>
++#include <linux/module.h>
++#include "ucsi_glink_protocol.h"
++
++static void ucsi_glink_packets(struct kunit *test)
++{
++	u8 packet[UCSI_BUF_V2_SIZE + sizeof(u32) + 1] = {};
++	u32 error = 0;
++	size_t size = 0, i;
++
++	for (i = 0; i < UCSI_BUF_V1_SIZE + sizeof(u32); i++)
++		KUNIT_EXPECT_EQ(test, ucsi_glink_decode_read(packet, i, 0, &size, &error), -EPROTO);
++	KUNIT_EXPECT_EQ(test, ucsi_glink_decode_read(packet, UCSI_BUF_V1_SIZE + 4, 0, &size, &error), 0);
++	KUNIT_EXPECT_EQ(test, size, (size_t)UCSI_BUF_V1_SIZE);
++	KUNIT_EXPECT_EQ(test, ucsi_glink_decode_read(packet, UCSI_BUF_V2_SIZE + 4,
++						  UCSI_VERSION_2_0, &size, &error), 0);
++	KUNIT_EXPECT_EQ(test, size, (size_t)UCSI_BUF_V2_SIZE);
++	KUNIT_EXPECT_EQ(test, ucsi_glink_decode_read(packet, sizeof(packet), 0, &size, &error), -EPROTO);
++	KUNIT_EXPECT_EQ(test, ucsi_glink_decode_read(packet, UCSI_BUF_V1_SIZE + 4,
++						  UCSI_VERSION_2_0, &size, &error), -EPROTO);
++	put_unaligned_le32(0x12345678, packet + UCSI_BUF_V1_SIZE);
++	KUNIT_EXPECT_EQ(test, ucsi_glink_decode_read(packet, UCSI_BUF_V1_SIZE + 4, 0, &size, &error), -EREMOTEIO);
++	KUNIT_EXPECT_EQ(test, error, (u32)0x12345678);
++	for (i = 0; i < 4; i++)
++		KUNIT_EXPECT_EQ(test, ucsi_glink_decode_write(packet, i, &error), -EPROTO);
++	put_unaligned_le32(0x12345678, packet);
++	KUNIT_EXPECT_EQ(test, ucsi_glink_decode_write(packet, 4, &error), -EREMOTEIO);
++	KUNIT_EXPECT_EQ(test, error, (u32)0x12345678);
++	KUNIT_EXPECT_EQ(test, ucsi_glink_decode_write(packet, 5, &error), -EPROTO);
++	put_unaligned_le32(0, packet);
++	KUNIT_EXPECT_EQ(test, ucsi_glink_decode_write(packet, 4, &error), 0);
++}
++
++static struct kunit_case ucsi_glink_cases[] = {
++	KUNIT_CASE(ucsi_glink_packets),
++	{}
++};
++static struct kunit_suite ucsi_glink_suite = {
++	.name = "ucsi-glink-protocol",
++	.test_cases = ucsi_glink_cases,
++};
++kunit_test_suite(ucsi_glink_suite);
++MODULE_LICENSE("GPL");
+diff --git a/drivers/usb/typec/ucsi/Kconfig b/drivers/usb/typec/ucsi/Kconfig
+index 87dd992..2e59464 100644
+--- a/drivers/usb/typec/ucsi/Kconfig
++++ b/drivers/usb/typec/ucsi/Kconfig
+@@ -104,4 +104,11 @@ config UCSI_HUAWEI_GAOKUN
+ 	  To compile the driver as a module, choose M here: the module will be
+ 	  called ucsi_huawei_gaokun.
+ 
++config UCSI_GLINK_KUNIT_TEST
++	tristate "UCSI GLINK packet decoder tests" if !KUNIT_ALL_TESTS
++	depends on KUNIT
++	default KUNIT_ALL_TESTS
++	help
++	  Exercise exact packet sizes, ABI buffers and little-endian firmware errors.
++
+ endif
+diff --git a/drivers/usb/typec/ucsi/Makefile b/drivers/usb/typec/ucsi/Makefile
+index c7e38bf..51a50fa 100644
+--- a/drivers/usb/typec/ucsi/Makefile
++++ b/drivers/usb/typec/ucsi/Makefile
+@@ -25,6 +25,7 @@ obj-$(CONFIG_UCSI_ACPI)			+= ucsi_acpi.o
+ obj-$(CONFIG_UCSI_CCG)			+= ucsi_ccg.o
+ obj-$(CONFIG_UCSI_STM32G0)		+= ucsi_stm32g0.o
+ obj-$(CONFIG_UCSI_PMIC_GLINK)		+= ucsi_glink.o
++obj-$(CONFIG_UCSI_GLINK_KUNIT_TEST)	+= ucsi_glink_test.o
+ obj-$(CONFIG_CROS_EC_UCSI)		+= cros_ec_ucsi.o
+ obj-$(CONFIG_UCSI_LENOVO_YOGA_C630)	+= ucsi_yoga_c630.o
+ obj-$(CONFIG_UCSI_HUAWEI_GAOKUN)	+= ucsi_huawei_gaokun.o

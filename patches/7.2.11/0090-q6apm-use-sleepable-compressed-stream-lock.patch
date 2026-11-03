@@ -1,0 +1,89 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: qcom: use a sleepable compressed stream lock
+
+The compressed callback and copy path hold an IRQ-disabling spinlock
+while submitting commands that allocate with GFP_KERNEL and take the
+graph mutex. Use a mutex for this process-context stream state lock,
+including its pointer/ack readers and both initialization paths. GPR
+callbacks run in the receive workqueue; the native PCM topology already
+uses non-atomic links. No IRQ handler acquires this lock.
+
+This corrects lock context only. It does not qualify compressed decoder
+routing, transport recovery or physical audio. Existing accounting and
+command behavior are retained.
+
+---
+--- a/sound/soc/qcom/qdsp6/q6apm-dai.c
++++ b/sound/soc/qcom/qdsp6/q6apm-dai.c
+@@ -9,7 +9,7 @@
+ #include <linux/slab.h>
+ #include <sound/soc.h>
+ #include <sound/soc-dapm.h>
+-#include <linux/spinlock.h>
++#include <linux/mutex.h>
+ #include <sound/pcm.h>
+ #include <asm/div64.h>
+ #include <asm/dma.h>
+@@ -79,7 +79,7 @@
+ 	bool next_track;
+ 	enum stream_state state;
+ 	struct q6apm_graph *graph;
+-	spinlock_t lock;
++	struct mutex lock;
+ 	bool notify_on_drain;
+ };
+ 
+@@ -164,7 +164,7 @@
+ 	uint32_t bytes_written, bytes_to_write;
+ 	bool is_last_buffer = false;
+ 
+-	guard(spinlock_irqsave)(&prtd->lock);
++	guard(mutex)(&prtd->lock);
+ 	switch (opcode) {
+ 	case APM_CLIENT_EVENT_CMD_EOS_DONE:
+ 		if (prtd->notify_on_drain) {
+@@ -387,7 +387,7 @@
+ 	if (prtd == NULL)
+ 		return -ENOMEM;
+ 
+-	spin_lock_init(&prtd->lock);
++	mutex_init(&prtd->lock);
+ 	prtd->substream = substream;
+ 	prtd->graph = q6apm_graph_open(dev, event_handler, prtd, graph_id, substream->stream);
+ 	if (IS_ERR(prtd->graph)) {
+@@ -689,7 +689,7 @@
+ 		prtd->phys = prtd->dma_buffer.addr | (pdata->sid << 32);
+ 
+ 	snd_compr_set_runtime_buffer(stream, &prtd->dma_buffer);
+-	spin_lock_init(&prtd->lock);
++	mutex_init(&prtd->lock);
+ 
+ 	q6apm_enable_compress_module(dev, prtd->graph, true);
+ 	return 0;
+@@ -754,7 +754,7 @@
+ 	struct q6apm_dai_rtd *prtd = runtime->private_data;
+ 	uint64_t temp_copied_total;
+ 
+-	guard(spinlock_irqsave)(&prtd->lock);
++	guard(mutex)(&prtd->lock);
+ 	tstamp->copied_total = prtd->copied_total;
+ 	temp_copied_total = tstamp->copied_total;
+ 	tstamp->byte_offset = do_div(temp_copied_total, prtd->pcm_size);
+@@ -801,7 +801,7 @@
+ 	struct snd_compr_runtime *runtime = stream->runtime;
+ 	struct q6apm_dai_rtd *prtd = runtime->private_data;
+ 
+-	guard(spinlock_irqsave)(&prtd->lock);
++	guard(mutex)(&prtd->lock);
+ 	prtd->bytes_received += count;
+ 
+ 	return count;
+@@ -961,7 +961,7 @@
+ 			return -EFAULT;
+ 	}
+ 
+-	guard(spinlock_irqsave)(&prtd->lock);
++	guard(mutex)(&prtd->lock);
+ 	bytes_in_flight = prtd->bytes_received - prtd->copied_total;
+ 
+ 	if (prtd->next_track) {

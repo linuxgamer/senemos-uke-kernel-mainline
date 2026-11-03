@@ -1,0 +1,37 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] drm/sysfb: clip copied source damage to the destination viewport
+
+The damage iterator rounds fractional source coordinates outward. A 3200-pixel
+scanout can therefore receive a 3201-pixel damage rectangle. atomic_update
+intersects that rectangle with the destination but passes the original damage
+to the blitter, writing beyond the mapped framebuffer on the last row.
+
+Translate damage to destination coordinates before intersecting, then translate
+the clipped area back for the source read. This also preserves integer panning.
+Observed on Uke during a KWin overview transition with a firmware framebuffer.
+The direct trace ends in memcpy_toio through drm_fb_xrgb8888_to_argb8888.
+
+--- a/drivers/gpu/drm/sysfb/drm_sysfb_modeset.c
++++ b/drivers/gpu/drm/sysfb/drm_sysfb_modeset.c
+@@ -353,12 +353,19 @@ void drm_sysfb_plane_helper_atomic_update(struct drm_plane *plane, struct drm_atomic_commit *state)
+ 	drm_atomic_for_each_plane_damage(&iter, &damage) {
+ 		struct iosys_map dst = sysfb->fb_addr;
+ 		struct drm_rect dst_clip = plane_state->dst;
++		struct drm_rect src_clip = damage;
++		int dx = plane_state->dst.x1 - (plane_state->src.x1 >> 16);
++		int dy = plane_state->dst.y1 - (plane_state->src.y1 >> 16);
+ 
+-		if (!drm_rect_intersect(&dst_clip, &damage))
++		drm_rect_translate(&src_clip, dx, dy);
++		if (!drm_rect_intersect(&dst_clip, &src_clip))
+ 			continue;
+ 
++		src_clip = dst_clip;
++		drm_rect_translate(&src_clip, -dx, -dy);
++
+ 		iosys_map_incr(&dst, drm_fb_clip_offset(dst_pitch, dst_format, &dst_clip));
+-		blit_to_crtc(&dst, &dst_pitch, shadow_plane_state->data, fb, &damage,
++		blit_to_crtc(&dst, &dst_pitch, shadow_plane_state->data, fb, &src_clip,
+ 			     &shadow_plane_state->fmtcnv_state);
+ 	}
+ 

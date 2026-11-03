@@ -1,0 +1,131 @@
+From: Senemos Uke contributors
+Subject: [PATCH] interconnect: qcom: retain Cliffs UFS data and configuration paths
+
+Extend the admitted USB/I2C subset with the two OEM UFS endpoints rather than
+making ufs-qcom accept missing interconnect providers. Preserve the original
+Cliffs graph, width and CN0 BCM membership; the OEM UFS master has no QoS box.
+No board node, regulator, SMMU policy or storage acceptance is enabled here.
+
+Source: MiCode/Xiaomi_Kernel_OpenSource
+Commit: 5712080a4b0c0b1a879e6d145c601c649ddaddfd
+Files: drivers/interconnect/qcom/cliffs.c,
+       include/dt-bindings/interconnect/qcom,cliffs.h
+Reference: linuxgamer/uke-fedora fb447ef8b8f9987a6183a04839a5c2dae7944934
+           docs/Known-Issues.md (incomplete NoC diagnosis, not ported code)
+License: GPL-2.0-only
+
+--- a/drivers/interconnect/qcom/qnoc-cliffs-usb.c
++++ b/drivers/interconnect/qcom/qnoc-cliffs-usb.c
+@@ -2,7 +2,7 @@
+ /*
+  * Copyright (c) 2023-2024, Qualcomm Innovation Center, Inc. All rights reserved.
+  *
+- * USB and WCD I2C paths from Xiaomi public Cliffs interconnect topology.
++ * USB, UFS and WCD I2C paths from Xiaomi public Cliffs interconnect topology.
+  * Preserve original edges, QoS and HLOS BCM membership on the retained paths.
+  * Adapted from the Uke v6.12 donor to the v7.2 pointer-link provider API.
+  */
+@@ -22,9 +22,11 @@
+ #define MASTER_SNOC_SF_MEM_NOC	27
+ #define MASTER_CNOC_CFG	32
+ #define MASTER_QUP_CORE_0	36
++#define MASTER_UFS_MEM	48
+ #define MASTER_USB3_0	49
+ #define SLAVE_EBI1	512
+ #define SLAVE_QUP_0	540
++#define SLAVE_UFS_MEM_CFG	546
+ #define SLAVE_USB3_0	547
+ #define SLAVE_A1NOC_SNOC	551
+ #define SLAVE_GEM_NOC_CNOC	553
+@@ -41,6 +43,7 @@
+ 
+ static struct qcom_icc_node qhm_qup0;
+ static struct qcom_icc_node xm_usb3_0;
++static struct qcom_icc_node xm_ufs_mem;
+ static struct qcom_icc_node qup0_core_master;
+ static struct qcom_icc_node qsm_cfg;
+ static struct qcom_icc_node qnm_gemnoc_cnoc;
+@@ -52,6 +55,7 @@
+ static struct qcom_icc_node qup0_core_slave;
+ static struct qcom_icc_node qhs_qup0;
+ static struct qcom_icc_node qhs_usb3_0;
++static struct qcom_icc_node qhs_ufs_mem_cfg;
+ static struct qcom_icc_node qss_cfg;
+ static struct qcom_icc_node qns_gem_noc_cnoc;
+ static struct qcom_icc_node qns_llcc;
+@@ -92,6 +96,15 @@
+ 	.link_nodes = { &qns_a1noc_snoc },
+ };
+ 
++/* Xiaomi Cliffs has no per-master QoS box for this UFS path. */
++static struct qcom_icc_node xm_ufs_mem = {
++	.name = "xm_ufs_mem",
++	.channels = 1,
++	.buswidth = 16,
++	.num_links = 1,
++	.link_nodes = { &qns_a1noc_snoc },
++};
++
+ static struct qcom_icc_node qup0_core_master = {
+ 	.name = "qup0_core_master",
+ 	.channels = 1,
+@@ -104,8 +117,8 @@
+ 	.name = "qsm_cfg",
+ 	.channels = 1,
+ 	.buswidth = 4,
+-	.num_links = 2,
+-	.link_nodes = { &qhs_qup0, &qhs_usb3_0 },
++	.num_links = 3,
++	.link_nodes = { &qhs_qup0, &qhs_usb3_0, &qhs_ufs_mem_cfg },
+ };
+ 
+ static struct qcom_icc_node qnm_gemnoc_cnoc = {
+@@ -186,6 +199,13 @@
+ 	.num_links = 0,
+ };
+ 
++static struct qcom_icc_node qhs_ufs_mem_cfg = {
++	.name = "qhs_ufs_mem_cfg",
++	.channels = 1,
++	.buswidth = 4,
++	.num_links = 0,
++};
++
+ static struct qcom_icc_node qss_cfg = {
+ 	.name = "qss_cfg",
+ 	.channels = 1,
+@@ -237,8 +257,9 @@
+ 	.name = "CN0",
+ 	.enable_mask = 0x1,
+ 	.keepalive = true,
+-	.num_nodes = 4,
+-	.nodes = { &qsm_cfg, &qhs_usb3_0, &qnm_gemnoc_cnoc, &qss_cfg },
++	.num_nodes = 5,
++	.nodes = { &qsm_cfg, &qhs_usb3_0, &qhs_ufs_mem_cfg,
++		   &qnm_gemnoc_cnoc, &qss_cfg },
+ };
+ 
+ static struct qcom_icc_bcm bcm_cn1 = {
+@@ -291,6 +312,7 @@
+ 
+ static struct qcom_icc_node * const aggre1_noc_nodes[] = {
+ 	[MASTER_QUP_0] = &qhm_qup0,
++	[MASTER_UFS_MEM] = &xm_ufs_mem,
+ 	[MASTER_USB3_0] = &xm_usb3_0,
+ 	[SLAVE_A1NOC_SNOC] = &qns_a1noc_snoc,
+ };
+@@ -322,6 +344,7 @@
+ static struct qcom_icc_node * const cnoc_cfg_nodes[] = {
+ 	[MASTER_CNOC_CFG] = &qsm_cfg,
+ 	[SLAVE_QUP_0] = &qhs_qup0,
++	[SLAVE_UFS_MEM_CFG] = &qhs_ufs_mem_cfg,
+ 	[SLAVE_USB3_0] = &qhs_usb3_0,
+ };
+ 
+@@ -432,5 +455,5 @@
+ };
+ module_platform_driver(cliffs_usb_driver);
+ 
+-MODULE_DESCRIPTION("Xiaomi Uke USB Cliffs interconnect paths");
++MODULE_DESCRIPTION("Xiaomi Uke USB and UFS Cliffs interconnect paths");
+ MODULE_LICENSE("GPL");

@@ -1,14 +1,399 @@
 {
   "schema_version": 1,
-  "date": "2026-10-18",
+  "date": "2026-11-01",
   "source_date_epoch": 1792058622,
-  "source_origin": "Project boot producer 4eb69e5, integrated with the current native display and sensor profile",
+  "source_origin": "Combined source inventory: retained main watchdog, updater and power safeguards with O82 default-off CABC/native color, audio topology, startup, LMH policy-ready and optional storage encryption changes. No combined kernel build or device acceptance; pinned historical producers remain separate.",
   "firmware_included": false,
   "device_private_data_included": false,
+  "python_target_payload": false,
   "source_assets": [
     {
+      "path": "manifests/kms57-parent-files.sha256",
+      "sha256": "a35acd82660a48375071b40e22ad3d7ad73352f6de990fcfd33bdd1aad01711f"
+    },
+    {
+      "path": "manifests/retirement58-parent-files.sha256",
+      "sha256": "d90e6f4d71f1754640bc7f50648d1d1fd9f61e4382c95fdb5c4d412b650c8a3f"
+    },
+    {
+      "path": "manifests/retirement60-parent-files.sha256",
+      "sha256": "e9d0d78f438f4bd79b62a8bc7c5848c714b2dd89dbf7d1f2599ae5569fd9eb40"
+    },
+    {
+      "path": "packaging/native/README.md",
+      "sha256": "29d8fc862f3fbc10c0e3a8886409c5bd3be6af938a083421fbdd46f162ff80e3"
+    },
+    {
+      "path": "packaging/native/audio-profile",
+      "sha256": "27176f29dece83b5b990357f4b0116717d1024addf43e32b33a14945d268c1d0"
+    },
+    {
       "path": "packaging/native/native.config",
-      "sha256": "df532cff3362eed56fd9c8cba4cbf96a8dd8f9f3ea96b13725df201795ff1ff5"
+      "sha256": "5a75325dc895b9515428a2231583c90f08cf8187d6fc74de2f1e0c129cc119ed"
+    },
+    {
+      "path": "packaging/native/prepare.sh",
+      "sha256": "86537a35c1ea416685c26b0e17e0d85f4c55f1b161441f5644c04664985bdce0"
+    },
+    {
+      "path": "patches/boot/0005-uke-root-selector.patch",
+      "sha256": "8ce4ca41cef4ec0b6dc075d490d761e2633a275b0e167590ba2dc7ada066dca4"
+    },
+    {
+      "path": "patches/boot/0008-uke-platform-profile.patch",
+      "sha256": "b972d3f24681607feadf84ca8a41530932390d8e40691d998b150cbb28d64546"
+    },
+    {
+      "path": "patches/boot/0016-wcd939x-channel-switches.patch",
+      "sha256": "a1535075d5a250c722d16e9ae7c7bfca1441a92c359a19e3bfefc90fb4e37975"
+    },
+    {
+      "path": "patches/boot/0017-wcd939x-provider-errors.patch",
+      "sha256": "f0b8c2368b52263a9be3f63042085e6fc0c0081488c24b6f03cd2677f2d035c3"
+    },
+    {
+      "path": "patches/boot/0018-wcd939x-coordinated-reset.patch",
+      "sha256": "5610df6ae41c127bf07e1c1431dab0d04793f766217358189f440f7bebe0d246"
+    },
+    {
+      "path": "patches/boot/0019-sm7675-lpass-pinctrl.patch",
+      "sha256": "8623e8e7683b18f36b69758c5e7707fde60fb2725d650466482091cadbc865fb"
+    },
+    {
+      "path": "patches/boot/0020-soundwire-probe-errors.patch",
+      "sha256": "876c5dba4c9c50cd5b73cd75c2c532919f7025dfdd82dd9af8ac27d15cb91637"
+    },
+    {
+      "path": "patches/boot/0021-bwmon-preserve-applied-vote-on-error.patch",
+      "sha256": "df71a33b601ea099cd03bd269e0ee020baec02de61b424e7100ed9b7966d4c53"
+    },
+    {
+      "path": "patches/boot/0022-mdt-admit-geometry-and-metadata.patch",
+      "sha256": "f2e863aadf89d2c4ef72c86ab2a2afd7e40992856c4a958ef49d39ea90a98e62"
+    },
+    {
+      "path": "patches/boot/0023-fastrpc-own-coherent-dma-handle.patch",
+      "sha256": "d0a2956fc9ad90ef4e4c765d0b5a4cba3f6116cf6d762856492c1c7214fda988"
+    },
+    {
+      "path": "patches/boot/0024-rproc-retry-transport-stop.patch",
+      "sha256": "6a26a0583014710971787da64653556c730b10df476efe22b047d6ecac232180"
+    },
+    {
+      "path": "patches/boot/0025-cliffs-nsp-crypto-suppliers.patch",
+      "sha256": "e399e4d8464b5fbbaaaa7390a2f855f97ca5b9972bf963a097cd671c9b2523fe"
+    },
+    {
+      "path": "patches/boot/0026-cliffs-proxy-and-pas-stop-ownership.patch",
+      "sha256": "6bb8742c2bab2e2c1c5bb3b4eb8d4c52a945034fd03b60f01f3c111a73277dd5"
+    },
+    {
+      "path": "patches/boot/0027-remoteproc-early-stop.patch",
+      "sha256": "74f89a8228b62906833d3ee640f090b0b3b41ad99b4abae3c526b85f026833c9"
+    },
+    {
+      "path": "patches/boot/0028-cliffs-proxy-per-rail-ownership.patch",
+      "sha256": "2e92813312db2ae041941e8983845a554194a93fa3508bcdc998722cc22dbb1d"
+    },
+    {
+      "path": "patches/boot/0029-sm7675-bwmon-byte-units-and-read-recovery.patch",
+      "sha256": "a54329db153d525015c1de4f82ecab61189bf9da99b7849c4a807ead3ffe02bf"
+    },
+    {
+      "path": "patches/boot/0030-osm-l3-admit-clocks-lut-and-graph.patch",
+      "sha256": "3c14ca70b5a528f74c9692d6af22e17d71e5e3c98696e6e480672bf957d99bbd"
+    },
+    {
+      "path": "patches/boot/0031-opp-restore-bandwidth-and-retry-incomplete-votes.patch",
+      "sha256": "40e7f401bf5e31b59b77c1a503c12c438b5b33583fe5ba79ae775a626ff40419"
+    },
+    {
+      "path": "patches/boot/0032-sm7675-paired-cpu-l3-bandwidth.patch",
+      "sha256": "967c24f799749d12e90b6c57c913f08c6ef322bdeec8f3a856e9bd3af5c1686d"
+    },
+    {
+      "path": "patches/boot/0033-uke-nfc-regulator-resource.patch",
+      "sha256": "1c858d146f1728233ba1920c96a970307e9b289a875d6f0c11d4c3af3b3e22bb"
+    },
+    {
+      "path": "patches/boot/0034-sm7675-l3-bound-initial-icc-floor.patch",
+      "sha256": "b9a3a8e1b40fda12b85da54e9cc37c42d1e2d73586e9bf70bdba03101afb3040"
+    },
+    {
+      "path": "patches/boot/0035-qcom-bcl-hwmon-binding.patch",
+      "sha256": "55c2d8d84eabc9331b8f7fed40c66608c46d1da209952052a181c54378b3a409"
+    },
+    {
+      "path": "patches/boot/0036-qcom-bcl-hwmon-driver.patch",
+      "sha256": "2416cd2939a40903fc290b21320f1400cf1919be4f9c52948754081243a01a5c"
+    },
+    {
+      "path": "patches/boot/0037-bcl-report-unavailable-voltage.patch",
+      "sha256": "2af801b711340dadfa4702ed7561954e324fd6fb52ae4f87705c201307e443ef"
+    },
+    {
+      "path": "patches/boot/0038-hwmon-emergency-attributes.patch",
+      "sha256": "83159db1819abb6be1d52fbf6f26b9ff0b02be0a7c5c3c1139d92d158d61cc67"
+    },
+    {
+      "path": "patches/boot/0039-bcl-alarm-wake-lifetime.patch",
+      "sha256": "f5c97e32b6101a1a3e0894770290f59f1ffcc55cdd76f8976767a02ed239012c"
+    },
+    {
+      "path": "patches/boot/0040-uke-pm7550ba-bcl-admission.patch",
+      "sha256": "3dded44d4067a7b1c5f889fbb0cda8807220ee6dbaca8cc3062c8317fa854c2c"
+    },
+    {
+      "path": "patches/boot/0042-bcl-report-empty-current.patch",
+      "sha256": "1f510eb8b1ef471d6f77924d36f04e76b02bfe2db179f28a71b848830f621fa8"
+    },
+    {
+      "path": "patches/boot/0043-uke-pm8010-firmware-population.patch",
+      "sha256": "77eb8b1d8e719df55035ee1ebb92078cef6c3eb796d810d9a66cd539abc449a2"
+    },
+    {
+      "path": "patches/boot/0043-wcd939x-micbias-errors.patch",
+      "sha256": "d1163060bfabcae546e6ebe6ddb390da016c1a6dac6a5d9bfc666c2facaccd5a"
+    },
+    {
+      "path": "patches/boot/0044-uke-microphone-bob-supply.patch",
+      "sha256": "1c13893c068ee2bda37795b2813a2a66d78b767cca1d8541f457a23289af4dff"
+    },
+    {
+      "path": "patches/boot/0045-gunyah-arm-bounded-boot-watchdog.patch",
+      "sha256": "6bdf38e6bdafa853e0779eaf01d09a15014bf6cff970c8367fe7f19b82dfe370"
+    },
+    {
+      "path": "patches/boot/0045-wcd939x-uke-supply-order.patch",
+      "sha256": "20bf635e05979a3cc397c653eb95ca2c18903a24e28362115f7b775c9fb87693"
+    },
+    {
+      "path": "patches/boot/0046-wcd939x-chip-identification-errors.patch",
+      "sha256": "d8db53edd89df4b2875336dc6480bec8e62d5ef2a673213e6e674b42bea0b8c7"
+    },
+    {
+      "path": "patches/boot/0047-wcd939x-uke-reset-required.patch",
+      "sha256": "742fde1ada6c988772af1b4f396da491386f30045ba2af312b57d35e3ff18a9f"
+    },
+    {
+      "path": "patches/boot/0048-uke-soundwire-machine-dependency.patch",
+      "sha256": "933be7f4be49c89f1f0fcea4c92f0caa79cf86c0657997fb80a2252bff781930"
+    },
+    {
+      "path": "patches/boot/0049-wcd939x-io-errors.patch",
+      "sha256": "f4e7fd11bf8396db12fa0e53dd4cdb8659820c9e1862d9be1a1762bf83973148"
+    },
+    {
+      "path": "patches/boot/0050-soundwire-resume-clock-error.patch",
+      "sha256": "75aa7c7a3ba8d95478bb56af1f0c94a0974c2e44893579940ea5bf676437d6f2"
+    },
+    {
+      "path": "patches/boot/0051-cpufreq-preserve-boost-state-on-error.patch",
+      "sha256": "346967803f13f56147b2da3e99d21f9588260809d5a07581e5f89713c447399b"
+    },
+    {
+      "path": "patches/boot/0052-scmi-protocol-negotiation-opt-out.patch",
+      "sha256": "ca122e655b1e0248c9205aeb61eaf5c3809ac7a2bef67d1475037506bddce4cc"
+    },
+    {
+      "path": "patches/boot/0053-q6apm-uke-mono-capture.patch",
+      "sha256": "d57dcc4dbad1e48563476cb5216e5dc74db64edf478406134f82f8ac7204faae"
+    },
+    {
+      "path": "patches/boot/0054-audioreach-read-completion-v2-layout.patch",
+      "sha256": "afafe82aa4b676c005360c1fd85af971d2587ed14f573a3c9d78c7e0cb0ecfc7"
+    },
+    {
+      "path": "patches/boot/0055-cpufreq-lmh-policy-lifecycle.patch",
+      "sha256": "f78d5c342e2b8239196974c9b575ffe6e88899854fed7da731d5d4aed269ff0f"
+    },
+    {
+      "path": "patches/boot/0055-lpass-tx-macro-multichannel-state.patch",
+      "sha256": "550abc57b6b942e0e4704cb5d963fbc29ca25335dec77badd3faddbec05cf5e7"
+    },
+    {
+      "path": "patches/boot/0056-q6apm-uke-raw-microphone-channel-map.patch",
+      "sha256": "631d04a6efccbad63e1584b339e78d45daff9af158e74b1de4b7b432686cd98f"
+    },
+    {
+      "path": "patches/boot/0057-llcc-optional-window.patch",
+      "sha256": "cb975d74c33ef76b823d39ba897ce3f354b0a2c7e3ad33eec1b67598f8805ecf"
+    },
+    {
+      "path": "patches/boot/0058-fs19xx-current-workqueue.patch",
+      "sha256": "730e4f6ef94e28f908ba8f96c84ae16b996756e6206d29a56336fea6acfc4cd4"
+    },
+    {
+      "path": "patches/boot/0059-lpass-sort-reg-defaults.patch",
+      "sha256": "faf3d5648e51c7098909e3d08b07536a022bcabda6f04f72cf0cdb26b82c8e64"
+    },
+    {
+      "path": "patches/boot/0060-cpufreq-lmh-ready-lifecycle.patch",
+      "sha256": "c4077a97a3bc4ea38d4259c8505d6873d419a91b377ec85a26afe95587aa91c8"
+    },
+    {
+      "path": "patches/display/0057-uke-displayport-eld-notification.patch",
+      "sha256": "9de41e6e9ed819c411f61b58b4b1c0c4edb274d65c8155c25f0cbfab4bc6add1"
+    },
+    {
+      "path": "patches/display/0065-msm-framebuffer-pin-state.patch",
+      "sha256": "f253a2e174b48cb3142f2b9b2bd94c224d44cbc90595a02efccfe9df61798a7a"
+    },
+    {
+      "path": "patches/display/0066-msm-dpu-reservation-ownership.patch",
+      "sha256": "c28dbab277b3906c4849c2d2a49d477da1a2f7373d30972597aea63ecd093cf8"
+    },
+    {
+      "path": "patches/display/0067-msm-kms-lifecycle-unwind.patch",
+      "sha256": "4988793a1c1786d482211b3f3b88c46d158d070f94f683ad263951b15465336a"
+    },
+    {
+      "path": "patches/display/0068-msm-scanout-retirement.patch",
+      "sha256": "4aebef3ba5e0532a1c4e5184972163816f6689404b7b3ce283750a2db7ec5d49"
+    },
+    {
+      "path": "patches/display/0069-o82-requested-vrr-floor.patch",
+      "sha256": "1b285cca8d3bdc039cebefddea3ba36540bee7980e0feae86bb149cb5e48a2a7"
+    },
+    {
+      "path": "patches/display/0070-o82-adaptive-backlight.patch",
+      "sha256": "18708547a231a9782611c5a7041400ee01cbe682ac2ece5f67f4d20c4aaab937"
+    },
+    {
+      "path": "src/audio/POCO-Pad-X1-Microphone-Capture.conf",
+      "sha256": "f95b4118a3def618655d877c70d76fb12149ebfc36e634f78825ceb41971a128"
+    },
+    {
+      "path": "src/audio/POCO-Pad-X1.conf",
+      "sha256": "6008c22d4a2f380d30683c38f9ef4c924651771b819a2ca0cfd456f52f43de87"
+    },
+    {
+      "path": "src/audio/desktop/LICENSE",
+      "sha256": "6d5638a97949e3de3b964b6f71bf0f27645500275bb202d91eaa93ff5b98a704"
+    },
+    {
+      "path": "src/audio/desktop/README.md",
+      "sha256": "d328b803d5d572ca1773f680fa6dcfb89f7740b4ce4248f73681071525950e6d"
+    },
+    {
+      "path": "src/audio/desktop/array-ucm2/DP-ELD.conf",
+      "sha256": "ea3f70b17be4f26d82eb7cd4707088afd0930c73fac2eb9e1683278cd9765984"
+    },
+    {
+      "path": "src/audio/desktop/array-ucm2/DP-HiFi.conf",
+      "sha256": "b6cf3b0ef181e09c417617064b301017a1a2576db36e646557107248b9606009"
+    },
+    {
+      "path": "src/audio/desktop/array-ucm2/Microphone-Controls.conf",
+      "sha256": "58949bbd0b9c5d1915792add3b503c895168ea5fcf50add1be85b4c6ef83e6b1"
+    },
+    {
+      "path": "src/audio/desktop/array-ucm2/Microphone-HiFi.conf",
+      "sha256": "05c675bfd927d289d955a0ef2c981ec9ad8e375118b1211a987205d97369713f"
+    },
+    {
+      "path": "src/audio/desktop/array-ucm2/POCO-Pad-X1-HDMI.conf",
+      "sha256": "61e1d93acdfbd2547a29e214a3c6ab53f808d8f82dfc617fe4f8298e015d91e5"
+    },
+    {
+      "path": "src/audio/desktop/array-ucm2/POCO-Pad-X1.conf",
+      "sha256": "8be93de527e2d77dd10dc4a5ba6c5c7abaa93e3386c2eceea5bede3b434e0ce3"
+    },
+    {
+      "path": "src/audio/desktop/array-ucm2/Speaker-ELD.conf",
+      "sha256": "d6dad53b7886e50d79a53d43af3b43aea6fea6698b4c1cbe3ec31d4fcac728bf"
+    },
+    {
+      "path": "src/audio/desktop/array-ucm2/Speaker-HiFi.conf",
+      "sha256": "7c49434779fd2c00b1ad25d4459fe2bef80521ece3871ae20a58152b524b9461"
+    },
+    {
+      "path": "src/audio/desktop/array-ucm2/Speaker-PCM.conf",
+      "sha256": "5b3a7164e7774f6077cb8f571e0f9108189e86be96bb67581cc75225b8ce33f3"
+    },
+    {
+      "path": "src/audio/desktop/install-policy.sh",
+      "sha256": "3e1574fd3176947973783397ce5a0e6963f5f7cd43987ab2cda77a6f5fad217e"
+    },
+    {
+      "path": "src/audio/desktop/legacy-ucm2/DP-ELD.conf",
+      "sha256": "976a3c39d506a1a1164444941ec8289b5e38af87a9460232d7ecfc4d2c0b04c7"
+    },
+    {
+      "path": "src/audio/desktop/legacy-ucm2/DP-HiFi.conf",
+      "sha256": "b6cf3b0ef181e09c417617064b301017a1a2576db36e646557107248b9606009"
+    },
+    {
+      "path": "src/audio/desktop/legacy-ucm2/Microphone-Controls.conf",
+      "sha256": "58949bbd0b9c5d1915792add3b503c895168ea5fcf50add1be85b4c6ef83e6b1"
+    },
+    {
+      "path": "src/audio/desktop/legacy-ucm2/Microphone-HiFi.conf",
+      "sha256": "3f2874ea7ec2b33fae1f8cbdeef14e781d90b8bea5abd7aa1c4ea337a9b9dc90"
+    },
+    {
+      "path": "src/audio/desktop/legacy-ucm2/POCO-Pad-X1-HDMI.conf",
+      "sha256": "5cf290a029abb969c5ee09a85d4bb956ecdc3b72914478e1020909e665140a61"
+    },
+    {
+      "path": "src/audio/desktop/legacy-ucm2/POCO-Pad-X1.conf",
+      "sha256": "83613fefc029621f1c49eb8677a2e4cb7063e2c488b3971945348917664525bb"
+    },
+    {
+      "path": "src/audio/desktop/legacy-ucm2/Speaker-ELD.conf",
+      "sha256": "d6dad53b7886e50d79a53d43af3b43aea6fea6698b4c1cbe3ec31d4fcac728bf"
+    },
+    {
+      "path": "src/audio/desktop/legacy-ucm2/Speaker-HiFi.conf",
+      "sha256": "9393b19923ded796fd54d638a3dc355148049ea2912b235716ef8b035aa5cce5"
+    },
+    {
+      "path": "src/audio/desktop/legacy-ucm2/Speaker-PCM.conf",
+      "sha256": "5b3a7164e7774f6077cb8f571e0f9108189e86be96bb67581cc75225b8ce33f3"
+    },
+    {
+      "path": "src/audio/desktop/microphone-layout.json",
+      "sha256": "9736dc923acbe00b97008f90479902111c78d64766382377feb4d31c5e4ff77f"
+    },
+    {
+      "path": "src/audio/desktop/model-names.conf",
+      "sha256": "524193c9ac5da31609095f3b48af4999bcb0fbc37a5d8263edc67adfa1aa2e19"
+    },
+    {
+      "path": "src/audio/desktop/tests/audio-policy.cpp",
+      "sha256": "aaa6cbfc32f19b80845739d268cd410c5c4e73e9d70967750fd16c52567ae474"
+    },
+    {
+      "path": "src/audio/desktop/wireplumber/75-uke-thp-not-camera.conf",
+      "sha256": "6e4b00b0c409f733aeb01058a159d28058e4bc9a04a34c9431a62594fd026f35"
+    },
+    {
+      "path": "src/audio/desktop/wireplumber/80-uke-microphone-array.conf",
+      "sha256": "699cf71e340dde4f9a3115b4153bf402ba5b8b00ea4ff90ac225dd0da22bade9"
+    },
+    {
+      "path": "src/audio/sm7675-uke-audio-providers.dtsi",
+      "sha256": "b7002b6f3945db914bdb291be5fd84dccf65b31fb82c1075d3c88952dfb0617c"
+    },
+    {
+      "path": "src/audio/sm7675-uke-microphone-audio.dtsi",
+      "sha256": "4c67e02d8de88d1d125c5c1c6b3ebd0a21d294010598838b751eadad4c265b80"
+    },
+    {
+      "path": "src/audio/uke-audio-card.c",
+      "sha256": "3641b0d72f09b1e92ff63335fab32baa4e00aca0b283db4ad21a307eca6d2564"
+    },
+    {
+      "path": "src/audio/uke-dp-eld.h",
+      "sha256": "d7e9ced5d46cb4bfb06dd568466a5746f58a00778d8ce4be26309045e295e940"
+    },
+    {
+      "path": "src/audio/uke-microphone-gain.h",
+      "sha256": "0a240d6c27b00c0ea548adf7664c16b9879729135a122454aac7f5e4a9afe748"
+    },
+    {
+      "path": "src/audio/xiaomi,uke-microphone-gain.yaml",
+      "sha256": "7be538f696f79c114f2e140b3cbb72d8288dd2fc2558db8b690cd916771718f8"
     },
     {
       "path": "src/audit/check-target-privacy.sh",
@@ -16,23 +401,27 @@
     },
     {
       "path": "src/boot/boot-image.cpp",
-      "sha256": "72b9f4962707b1338cdc99bc5cb9041802aac3919e56805eb57ba14baed69330"
+      "sha256": "13cb6a40a5e11234e5f349260f266e66c48699d68dcfcf6742d47e69bc9bf0fb"
     },
     {
       "path": "src/boot/boot-status.cpp",
-      "sha256": "bd6586e5acd7a4b78a436f437d15d59c840318eedf46ddba4f4a478ef1aa4aa2"
+      "sha256": "ab071b245e2c67931bf2164854b5fd9455919bf62889ca4f8b392b31d9583102"
     },
     {
       "path": "src/boot/build-payload.sh",
-      "sha256": "61b8acf0009d1c5fb2149a05ac92bd2bd6039cd36b7e656821890bbaa07a9eba"
+      "sha256": "74d881576dff36897ffb3fee5e2e478b445491f2ae57e0c8711be2867641a736"
+    },
+    {
+      "path": "src/boot/check-root-capability.sh",
+      "sha256": "049a6f8c449e136bdb03088f726ba070f7642688cf184b618affc7b67b8bca27"
     },
     {
       "path": "src/boot/dracut/module-setup.sh",
-      "sha256": "2eee54db21a95c0dd3825666e5a7fbdf613f3cc9094c73d1e507e7137ccb0442"
+      "sha256": "16323e93a1e201d531a949b49f47d76d19a3624a2a863c4cb0e6df381aa63174"
     },
     {
       "path": "src/boot/dracut/root-guard.sh",
-      "sha256": "548ddc31cfb7f3d5862ee29b13bd3910b0e723aa8dad915ddcf158c556fe82db"
+      "sha256": "36164c87aaf1734248f57c6fbdb8dec7c5d2768526b2551ad3dfc1477e7f83d4"
     },
     {
       "path": "src/boot/dracut/uke-cdc-acm.service",
@@ -47,16 +436,28 @@
       "sha256": "2277a5a61ce7b330d7e0d9d03f9b2de190561efa5dad7966d1225dd8881db058"
     },
     {
+      "path": "src/boot/dracut/uke-initrd-deadline.service",
+      "sha256": "77338311fac076dc3e4a98a727ec060368e440d4e2aacaf4a15cf621b3f27078"
+    },
+    {
       "path": "src/boot/dracut/uke-initrd-screen.service",
       "sha256": "f7afe389be42b8213c49fe06983a216a43aac86e6e93ed77175c82b8290608cc"
     },
     {
       "path": "src/boot/dracut/uke-root-guard.service",
-      "sha256": "212c5a8be087e6a8f798b83838267cd8cf130a4468b9086aa5422c75c919f83c"
+      "sha256": "f5cfc874f76963518588ecdd7bf3ba85b389b5c07fc4d43ae4d82ffddda68903"
+    },
+    {
+      "path": "src/boot/dracut/uke-usb-network",
+      "sha256": "1bc170168cfbd6c82cc7e9019f31f0ec385b7400ad685a75b384c2162529c344"
+    },
+    {
+      "path": "src/boot/dracut/uke-userdata-grow.service",
+      "sha256": "650a6db2a3ea31bae3c8f07fe190df46d6fef97b9006b3b7b7203d9ad620f483"
     },
     {
       "path": "src/boot/early-modules.list",
-      "sha256": "131016c9be6c19cccfa6b5361b9ee8c5edc79c7ecffba849fecae4a26cbfbfd6"
+      "sha256": "17ae751bfb30c3b2ec9d10e7ab37deeb53b5231793cf5733ceb438438c23a6a6"
     },
     {
       "path": "src/boot/licenses/builder-MIT",
@@ -68,19 +469,11 @@
     },
     {
       "path": "src/boot/make-initramfs-base.sh",
-      "sha256": "18f2e532ff5660fb9c60fd4da34dd2e133791bef0bc4e32d25371e13b68d0af4"
+      "sha256": "fbdce0627490d62743a0b39869839e0e64441079e03d421f76fce487afad62ae"
     },
     {
-      "path": "tests/boot-image-contract.sh",
-      "sha256": "06cd230930a348dc17b1088409b8fed187971ea59d9f9b3b1809a89049dbf541"
-    },
-    {
-      "path": "tests/target-privacy-contract.sh",
-      "sha256": "c44de51c157afc233915075d31d5458707cdb0b2edb75ae9f90c580c7ff1b637"
-    },
-    {
-      "path": "src/boot/dracut/uke-usb-network",
-      "sha256": "1bc170168cfbd6c82cc7e9019f31f0ec385b7400ad685a75b384c2162529c344"
+      "path": "src/boot/make-initramfs-cpio.sh",
+      "sha256": "7d6ea987cdc9114512d7300f7a935363fc35737d98f4814748ac73efd558214b"
     },
     {
       "path": "src/boot/offline-switch-root.cpp",
@@ -95,12 +488,631 @@
       "sha256": "a237d32ebb451c8abcaeebea2531a95ed8b93126274b20911ab07ae487e01766"
     },
     {
-      "path": "tests/offline-boot-contract.sh",
-      "sha256": "5fbad47d511aff9cad2a04e3e93040a34469250b6e9b584ba31b85281d6d3dad"
+      "path": "src/boot/prepare-abl-source.sh",
+      "sha256": "81366be6bd66dd4bcf41da68074a6a90ebe318c766c444f1ab44fa0bd86a8e30"
+    },
+    {
+      "path": "src/boot/uke-abl.c",
+      "sha256": "d2f6ac36261f6374d03e2775564a24a3df3ea6072aadbed208f8c54b7726a3da"
+    },
+    {
+      "path": "src/boot/uke-bwmon.h",
+      "sha256": "8146c7a265c6a005db2469cec1a96211ab8253560c33559db209c803a6db5343"
+    },
+    {
+      "path": "src/boot/uke-clock-debug.h",
+      "sha256": "4ad3b02863856cd46430daf832c6f3cfdc7b9997b40c3a5c7d80e86ca444340f"
+    },
+    {
+      "path": "src/boot/uke-cpu-bwmon.h",
+      "sha256": "9ce426cdc8a714134fd5de76629cb883e6d630d21e0e842fe86cbeab34055ebd"
+    },
+    {
+      "path": "src/boot/uke-root-selector.h",
+      "sha256": "d2c2471495f45d9ab33b480003a250447ffa07d0e0dd6ac64ae3d451d8e50dc7"
+    },
+    {
+      "path": "src/boot/userdata-grow.cpp",
+      "sha256": "f82fedb5234fe8139e6d5c70127a26732844c673e279828bdc06923d95da243e"
+    },
+    {
+      "path": "src/boot/userdata-grow.hpp",
+      "sha256": "83fc0c69059dd818a2c8c9047ab4192a0514fccdd2d7bf04e7a427bfe8ea5efd"
+    },
+    {
+      "path": "src/display/dpu_o82_profiles.c",
+      "sha256": "65c963c6b2d63ecd1cbc76a1d7f58a8f5528c5b02fdc14eac67837d964f4b4c8"
+    },
+    {
+      "path": "src/display/dpu_o82_profiles.h",
+      "sha256": "53ef42517cbdad323069927efbef703359e797210aeb34b635f23c4a256ae489"
+    },
+    {
+      "path": "src/display/dpu_o82_regdma.c",
+      "sha256": "baa48492b21e5b21c27656cc342e86a66df9607bb1f4eb251ca63280194f4b72"
+    },
+    {
+      "path": "src/display/dpu_o82_regdma.h",
+      "sha256": "076ae17346d8d8e1e1b67f476183052aa2ecb2d601a5541369da018a22e3b1c3"
+    },
+    {
+      "path": "src/display/o82-color-firmware.h",
+      "sha256": "7cac536f24d45d5cba4a299d4a730a8036c6e20a313b09b333f5a4f804733131"
+    },
+    {
+      "path": "src/display/o82-color-profile.cpp",
+      "sha256": "d1d7a30aa09e6c100e06adf971fe8ef43b0c0d0ca0d4854ce9b5ac25d5b59211"
+    },
+    {
+      "path": "src/display/o82-regdma.h",
+      "sha256": "6c16856cd0041aa091162910aebf4076e721b35ba4bf0205b6b315de01a52077"
+    },
+    {
+      "path": "src/display/panel-xiaomi-o82.c",
+      "sha256": "a74433c2fc70b680e08a20ec701b02a3a6fb674e1fb0b9c77acbb6165812fe2d"
+    },
+    {
+      "path": "src/display/sm7675-uke-native-display-oem-modes.dtso",
+      "sha256": "a9e7e1c226346ecb3c14c4bf3883fb4ca2de7427f0a474710d0e488e2b323005"
+    },
+    {
+      "path": "src/display/uke-abl-native.h",
+      "sha256": "65970f0702b421c0e4409efd7020b8ba758664cc58f21f746af2b3786556dd8c"
+    },
+    {
+      "path": "src/display/uke-o82-hdr-format.h",
+      "sha256": "537bca8c0c82946754ee334a0bd47187fe341c65e2f9c655188062a5c8ded8e8"
+    },
+    {
+      "path": "src/input/Makefile",
+      "sha256": "b8b5340e23ac427ae8be137e550e98ff0c9282388bdede147034a94b91d42bb5"
+    },
+    {
+      "path": "src/input/README.md",
+      "sha256": "e8e425bf9921c170694d6b6706523f9637b3831b74bac93186ecc40bd29d2b0c"
+    },
+    {
+      "path": "src/input/nt36532-uke-matrix.c",
+      "sha256": "7af80173cfa13bb2bdf9f7bc57279f3576b5c19996518f92cb9fe7da1431f75b"
+    },
+    {
+      "path": "src/input/nt36532-uke-matrix.h",
+      "sha256": "98b1e20e3944cf8b6b99b4c9acb64d8a8d43617d33f2956d258d45f99e562019"
+    },
+    {
+      "path": "src/input/nt36532-uke-protocol.c",
+      "sha256": "a6b7f99b8a226c54f36dea8c58ab0176bf44012086c6908e005e97ab1703e6e3"
+    },
+    {
+      "path": "src/input/nt36532-uke-protocol.h",
+      "sha256": "8c0aeddb7feaa9191b0e2409e43a05772ec320140ecd7c5ff95400281e982de5"
+    },
+    {
+      "path": "src/input/nt36532-uke-spi.c",
+      "sha256": "c68ae90d832e9b880fbf28840bedea56648df57afea262eea059e402c18af851"
+    },
+    {
+      "path": "src/input/prepare-source.sh",
+      "sha256": "7fd928c26f2ff7434d8e4d67c96c4f7fd6d496ccca0b760aeec61960d414bccd"
+    },
+    {
+      "path": "src/input/sm7675-uke-thp.dtsi",
+      "sha256": "7d0bc48e73f732d924712949f36e4ff945bf7a55f6a9c37b2e0bbf43a85af7b1"
+    },
+    {
+      "path": "src/performance/prepare-source.sh",
+      "sha256": "dc1658ba1e7656ea4e271c0dacd58e795a6ce75f699480e3e598f62daeec06fc"
+    },
+    {
+      "path": "src/performance/qcom,sm7675-llcc-pmu.yaml",
+      "sha256": "7008a81745db7adb1b1d3ff85377ae105902cdea90074eb3eeabdd3e5c537582"
+    },
+    {
+      "path": "src/performance/qcom-sm7675-llcc-pmu.c",
+      "sha256": "72f300e99161f07b78081ce3e4d530b2ebde2f43a9bb81b4509bbacfc31bf97a"
+    },
+    {
+      "path": "src/power/prepare-cpucp-observe.sh",
+      "sha256": "deb2d631f5481574d43288a421ac6a6eb82cf08ffae1426872039b7c194ff42d"
+    },
+    {
+      "path": "src/power/uke-cpucp-observe.c",
+      "sha256": "9421e566eb706788884011d465929bf550387f55000152675b46ad6a2465d907"
+    },
+    {
+      "path": "src/power/uke-platform-profile.c",
+      "sha256": "f56f75f74eeacc2c0b3694feeeef034bab4a0ac62939ffe70fcb493df35bcc4e"
+    },
+    {
+      "path": "src/power/uke-pm8010.h",
+      "sha256": "71c187985b08947607016f071da15f11e312e6438484273b62390a4212cec68f"
+    },
+    {
+      "path": "tests/audio-eld-contract.sh",
+      "sha256": "e4c3089baf755d87dc56dca0ff053bbc714aaba0a6a82814b925cc4dc591f3b0"
+    },
+    {
+      "path": "tests/audio-fs19xx-lifecycle-contract.sh",
+      "sha256": "0bbdecbf33d551b0041492e96d51ba29fe5235d3fe49bff95036e1319cfe14ef"
+    },
+    {
+      "path": "tests/audio-graph-response-contract.sh",
+      "sha256": "0c2ccb90141bba4b3a2a39d8aa52b3d9ba57cb2ec89b1075629c0699a4d7fc73"
+    },
+    {
+      "path": "tests/audio-providers-fdt-contract.sh",
+      "sha256": "2748fd60ca07e6c2c5670b5874647c071610068f171bf16e29a5a7af5de0c85b"
+    },
+    {
+      "path": "tests/audio-services-fdt-contract.sh",
+      "sha256": "87480c018e8b4b3888752e73923fe46bc093385ab239c83ce3cd9c0e55d37967"
+    },
+    {
+      "path": "tests/bcl-alarm-lifetime-contract.sh",
+      "sha256": "a861b7489696991a27afd89d2266f99da9bf14575ebeba7a7402aa1a872ae4d0"
+    },
+    {
+      "path": "tests/bcl-hwmon-contract.sh",
+      "sha256": "b33397defa3512f6db2aac70793baaf111c63889bdc486c5872b761bc8be3675"
+    },
+    {
+      "path": "tests/bcl-uke-admission-contract.sh",
+      "sha256": "225443df083ee22afb4b8c35d2d2161333a96349070382913a0e4fb02117c49e"
+    },
+    {
+      "path": "tests/boot-image-contract.sh",
+      "sha256": "2306956da540e1da1de770ede3fcf39bbed6c4c754e11e593e8b29ac889ddc4f"
+    },
+    {
+      "path": "tests/bwmon-counter-contract.sh",
+      "sha256": "1003d4f7cfa4710327e757606c522f20df177e69006863d58290f3ddae2d6d35"
+    },
+    {
+      "path": "tests/bwmon-dt-contract.sh",
+      "sha256": "994a1ab84effdfbf1943464a3b1d6ec046fcdc0c990c07bec75fce34a4da510c"
+    },
+    {
+      "path": "tests/bwmon-vote-error-contract.sh",
+      "sha256": "5bf684032cb3aa5466265e412c60add4cea9fb0d8795acf6ef352267965c860b"
+    },
+    {
+      "path": "tests/clock-debug-fdt-contract.sh",
+      "sha256": "5948924e9e6c6351d2155b559745cba8ebe3e5b8c30f66bf27dda1f1701c567d"
+    },
+    {
+      "path": "tests/copr-source-guards-contract.sh",
+      "sha256": "95c36e274069a1beb773eb2d9425c32396aedde6b3b97bed32c213c5adca8209"
+    },
+    {
+      "path": "tests/cpu-bwmon-dt-contract.sh",
+      "sha256": "e0e67961bce89cf85bc4cfaec94b753d9b28409a553a73df6fffec9373dedf80"
+    },
+    {
+      "path": "tests/cpufreq-boost-error-contract.sh",
+      "sha256": "5253ffca630e6136242bd9af5941eb14d79cfd31ef410e12124ee81843e72ae2"
+    },
+    {
+      "path": "tests/cpufreq-lmh-lifecycle-contract.sh",
+      "sha256": "dc140c2fdf3649be1214898d322ae13ef23fd510dc2d10090ec9df9bbbf46f7d"
+    },
+    {
+      "path": "tests/dp-eld-notification-contract.sh",
+      "sha256": "253fbb43d19fab14cd4d147c50f2fe26800c73dc6ea1c3c4703d13928c993eef"
+    },
+    {
+      "path": "tests/dpu-reservation-contract.sh",
+      "sha256": "c3bb8396ba174a38a22e96055bd09469a9af31627b116780bbe9f813cd63be06"
+    },
+    {
+      "path": "tests/dpu-video-timing-contract.sh",
+      "sha256": "07ec8430e807e924da9875359f7b6bf8e453094493c9457c34e37c322d85a9d4"
+    },
+    {
+      "path": "tests/dsi-color-depth-contract.sh",
+      "sha256": "24c42d3d64d086383b0ab851450416d2aec6144aca1e2d4ced9d1979b323afed"
+    },
+    {
+      "path": "tests/dsi-connector-state-contract.sh",
+      "sha256": "50e04f8ad0aa40dd06288ad4de177ab4346a31b0d550bd3db812af73bec0c256"
     },
     {
       "path": "tests/early-modules-contract.sh",
       "sha256": "d52454b1a84a82b5d5e6a67aa412663b3c1b8b57307e6ae0c7db0bcf321f7e89"
+    },
+    {
+      "path": "tests/fastrpc-buffer-lifetime-contract.sh",
+      "sha256": "e78154962c1fb71bf3b7ddeafdc04d254ad86a0b0db6d83e40560e3331563793"
+    },
+    {
+      "path": "tests/gunyah-boot-watchdog-contract.sh",
+      "sha256": "95b824eaccc0c5d97cacb4c4f45c6d4ff2aca2a6c8e91e742541bb86b2875a90"
+    },
+    {
+      "path": "tests/initramfs-cpio-contract.sh",
+      "sha256": "6fe97da1c7b654ede8da0126a28ca95214f046e9c0e85ea868f3b9efed839911"
+    },
+    {
+      "path": "tests/kernel-audio-policy-contract.sh",
+      "sha256": "d3ae15078fd29764ae86fe99e41d27f63c188857c89126c21871113ca1b68748"
+    },
+    {
+      "path": "tests/kernel-hardening-config-contract.sh",
+      "sha256": "226e0f37b887624bbf6e8569eb06a926ac81e24f04d8d5d99332bfcb6f9e7eda"
+    },
+    {
+      "path": "tests/l3-provider-contract.sh",
+      "sha256": "ab4c70ce62c1b3c200861834008f0dcf15f299eb6b49aa00a20afcb8da00f836"
+    },
+    {
+      "path": "tests/llcc-live-check.cpp",
+      "sha256": "5be86d78af80c8f73f3646ee3e8d839983ad444430c90bfec200ad0995edd886"
+    },
+    {
+      "path": "tests/llcc-pmu-contract.sh",
+      "sha256": "229c520e944a10363c1133b37a8c4ace5c0e1078a99107fc9f72521196729672"
+    },
+    {
+      "path": "tests/llcc-sm7675-contract.sh",
+      "sha256": "c95e97fa92b8c716b57a328c43c21bb63ed3a2b02056a4c8c87ce6ce38112758"
+    },
+    {
+      "path": "tests/lpass-sm7675-pins-contract.sh",
+      "sha256": "14ce5d810b7780c36f66dfd06b2bdaa1c92339456f69a2f0544760d9dc851af7"
+    },
+    {
+      "path": "tests/lpass-tx-multichannel-contract.sh",
+      "sha256": "1a5094c56b5b87dcd1591221319c39a6bda48c57e6f4acf060ae8ebeb0331c74"
+    },
+    {
+      "path": "tests/mainline-boot-status-contract.sh",
+      "sha256": "30261481f37fe7932601cb046549db00a71fa397c4f2d39ed46b4a30500927ab"
+    },
+    {
+      "path": "tests/mainline-package-contract.sh",
+      "sha256": "94e0ea19e11e3949c0d720d9aa6fb955ba0117222d595442da93d52e80415033"
+    },
+    {
+      "path": "tests/mdt-memory-admission-contract.sh",
+      "sha256": "feda80b257802a75e228be57029d895db7a8731b9634f7794292425f7047614a"
+    },
+    {
+      "path": "tests/mdt-metadata-contract.sh",
+      "sha256": "f3095cf439af9ef3edfd99bc356c6e1c75f786a3a7174520574f3d4633e91337"
+    },
+    {
+      "path": "tests/memlat-scmi-live-probe.c",
+      "sha256": "8c200da7ef8aca230588f390fa09812ab1ea1baae6c264fb7ce503cac5a039b7"
+    },
+    {
+      "path": "tests/memlat-scmi-probe-contract.sh",
+      "sha256": "335b8e97ae06c996dbbf73f15bbbca56dd05d10c91d118da61d7a8c6588c752f"
+    },
+    {
+      "path": "tests/microphone-audio-card-contract.sh",
+      "sha256": "d43980b50a8160274c35ac678861372c7a979370311d40489a6bb152c5f4f97b"
+    },
+    {
+      "path": "tests/microphone-audio-fdt-contract.sh",
+      "sha256": "2ba853db063f762ca88f6327e3bcded5352f711ca0823b80ae30f4f426996ab7"
+    },
+    {
+      "path": "tests/microphone-audio-topology-contract.sh",
+      "sha256": "7a514e02776c4a8a18f0e2c3e5d1f81f4c4bd0703878489371392892b1c19b77"
+    },
+    {
+      "path": "tests/microphone-channel-map-contract.sh",
+      "sha256": "b55ba7b92b5f9a57743785a7e4409ca6c1ad9e7fd1b43657b573d4760352ee48"
+    },
+    {
+      "path": "tests/microphone-gain-contract.sh",
+      "sha256": "701542a3569d52a8ab41c0f68721954c694d15251a7aac1cac3a652f112d75f5"
+    },
+    {
+      "path": "tests/microphone-pcm-limits-contract.sh",
+      "sha256": "99757d25d30869b798fc553bd99d464642e55740e22da9ec0006872c97189cc0"
+    },
+    {
+      "path": "tests/module-compress-contract.sh",
+      "sha256": "b95d9152f048be0fe2984e82eafe6ffb5aa4ca16e8d09855b1c166e29e74c947"
+    },
+    {
+      "path": "tests/msm-framebuffer-pin-contract.sh",
+      "sha256": "bffcc388a25987eb15218ae5bd87419e1c1c1710f7d476c7ac2cf795975ab81e"
+    },
+    {
+      "path": "tests/msm-kms-alternate-build.sh",
+      "sha256": "79bc932fcbb1a85665ab736f3631317de77c6608cd1d5c1ce6c8536bec5dbca4"
+    },
+    {
+      "path": "tests/msm-kms-lifecycle-contract.sh",
+      "sha256": "f24cca3e21e98f5f60fb1a9862595f185619d5b6e9b9c575a12852e0a01f8cf7"
+    },
+    {
+      "path": "tests/msm-kms-unwind-contract.sh",
+      "sha256": "f021010a8ad562e241886af554e1fcde207f7b1133ce4ee0d0229e5a2fc92314"
+    },
+    {
+      "path": "tests/msm-retirement-contract.sh",
+      "sha256": "f52666fdbba8a48430e1e05ec2a92e166cf896562dcb9f69330ee28432a632e4"
+    },
+    {
+      "path": "tests/msm-retirement-proof-contract.sh",
+      "sha256": "060ac6b7469c32125359bf8ca86f7c0c649a5c8d909d160239e5c565f1146f62"
+    },
+    {
+      "path": "tests/msm-writeback-contract.sh",
+      "sha256": "c7caabb9a0c5f07defa1d881fa30a59229ecf35d3efeec9dd81702fef1ab481c"
+    },
+    {
+      "path": "tests/native-firewall-contract.sh",
+      "sha256": "93ea93aa78a770f552635d4bf0a1470885a3af2954b067d55634e7ed7926ddd5"
+    },
+    {
+      "path": "tests/o82-abm-contract.sh",
+      "sha256": "e012f422074174f88e3ee4a32e220eaff7ed3837d076b1667af4c894ef426a6c"
+    },
+    {
+      "path": "tests/o82-avr-contract.sh",
+      "sha256": "d84a5845ff6c40d4daf9f929738bc47b071a742e66a53620c8788b1cf599c465"
+    },
+    {
+      "path": "tests/o82-hdr-edid-contract.cpp",
+      "sha256": "2204f9b34b592a275617a918bdb9b7d7b4ec8d88f618aba02346123ade803cc9"
+    },
+    {
+      "path": "tests/o82-panel-contract.sh",
+      "sha256": "bff7c858cfe63d96480130d378e9b0ee3121e92ae936eeb96bfa6dfbfde92b07"
+    },
+    {
+      "path": "tests/o82-profile-loader-contract.c",
+      "sha256": "3fca21eb7de8a41bcf908bdf0114c3eb60e659e6ffa92ef5899c21e4b316fb68"
+    },
+    {
+      "path": "tests/o82-profile-loader-contract.sh",
+      "sha256": "e9519ff2db8acea96c7f41c4973f41d968bca04935211793ae4534010a8cb6f8"
+    },
+    {
+      "path": "tests/o82-regdma-transport-contract.c",
+      "sha256": "c1932a846898898e4e3b84b28e7e7237535fc0d38e02766d415e2be56915a755"
+    },
+    {
+      "path": "tests/o82-regdma-transport-contract.sh",
+      "sha256": "b6c12a978f51e0a249d5d2735eb14d03c1cf058729f530b1d184eb9c66ee7dd0"
+    },
+    {
+      "path": "tests/o82-vrr-floor-contract.sh",
+      "sha256": "069e2243a736829818b50bb663dfcd6231951393419511a192897e908665d8bf"
+    },
+    {
+      "path": "tests/offline-boot-contract.sh",
+      "sha256": "5fbad47d511aff9cad2a04e3e93040a34469250b6e9b584ba31b85281d6d3dad"
+    },
+    {
+      "path": "tests/opp-bandwidth-transaction-contract.sh",
+      "sha256": "3801b8412de1f1e39c80cbb44300ba01f1eea8cbaa4a3c66d550db2e6668dfd8"
+    },
+    {
+      "path": "tests/pas-stop-ownership-contract.sh",
+      "sha256": "8e32dfbe3a32226e9eeca289564258ed628da0ac145a0e637a5d00304b91abd2"
+    },
+    {
+      "path": "tests/platform-profile-contract.sh",
+      "sha256": "e63153ca83baffdc13b265aa603951ce7f46352566bb6c7c93c88c8c9f62cf08"
+    },
+    {
+      "path": "tests/platform-profile-framework-contract.sh",
+      "sha256": "ac4c44198d017300cdc355ce06d236ae45796bedc001f6a410013939f4bc1f26"
+    },
+    {
+      "path": "tests/pm8010-population-contract.sh",
+      "sha256": "514b6340db247b32c3732bd8106b131527d55ed4e8a63fd07d4815aad73eef20"
+    },
+    {
+      "path": "tests/qup-interconnect-contract.sh",
+      "sha256": "f10aaf70286f94afc85674dc1f2678d02413045c344b5673cad0c991944a6621"
+    },
+    {
+      "path": "tests/root-selector-contract.cpp",
+      "sha256": "cc2ba3cc80e2e9c1af407a2917694ffd0a861bc4605e339d190f8f5fa5ffcc00"
+    },
+    {
+      "path": "tests/root-selector-note-contract.sh",
+      "sha256": "a82d80bc3165190c4581c286559c85c910f5aef0a941b8d5f16f455e91d33ef1"
+    },
+    {
+      "path": "tests/rproc-early-stop-contract.sh",
+      "sha256": "559bea4dc8ac0b19bda431a75445a8d398580debf2a5a0bcd8de09d3596bb665"
+    },
+    {
+      "path": "tests/rproc-edge-stop-contract.sh",
+      "sha256": "747512977ba90239fee3bd27783f170274379ec9b17523820091b89af281b162"
+    },
+    {
+      "path": "tests/scmi-no-negotiation-contract.sh",
+      "sha256": "16ca1437d16685b71ade3914006e40556a3250b681024f6522585255023fc73a"
+    },
+    {
+      "path": "tests/soundwire-probe-error-contract.sh",
+      "sha256": "bdac3d6387804b23095dcf4c81cef5a80d4783ffcd3302ce2080ed92a0da1d82"
+    },
+    {
+      "path": "tests/soundwire-resume-clock-contract.sh",
+      "sha256": "8d59ed86588b439ddc7e888abfe1394bad0cf918b6b70d5547f4e722944cff5d"
+    },
+    {
+      "path": "tests/speaker-audio-fdt-contract.sh",
+      "sha256": "4f9b747b1ad02b2b0bc3f84fcaea1d99339e61ab21f47ad160ad02e0f7be30ec"
+    },
+    {
+      "path": "tests/storage-crypto-contract.sh",
+      "sha256": "fe9aed87d24578d423ba21e3be6259ce933428c0dd34f4bde63a3bdf22de4ba5"
+    },
+    {
+      "path": "tests/storage-crypto-negative-contract.sh",
+      "sha256": "e494851d0a62f757cd1251f8bdaf4dd2ce016f7e43b33b1f04f8b055ea0c3d2d"
+    },
+    {
+      "path": "tests/sysmon-stop-preparation-contract.sh",
+      "sha256": "84cd035fdfb9740b0f33e4e986896bb445e204cd2d13cef4f484543616d9382e"
+    },
+    {
+      "path": "tests/target-privacy-contract.sh",
+      "sha256": "c44de51c157afc233915075d31d5458707cdb0b2edb75ae9f90c580c7ff1b637"
+    },
+    {
+      "path": "tests/touch-dt-contract.sh",
+      "sha256": "8173cce009fafb9868bd6124df6e3f6e9dcba52523f256ac9a5619a05aa2d5af"
+    },
+    {
+      "path": "tests/touch-matrix.c",
+      "sha256": "9a63bf773954a4f1105b08e3be0d218540c34e4485131936dbfb40592b865929"
+    },
+    {
+      "path": "tests/touch-protocol-contract.sh",
+      "sha256": "3e62e261353e52f819168e43a1706dc10fa252d95787657e3003379b994e2d84"
+    },
+    {
+      "path": "tests/touch-publish.c",
+      "sha256": "3e32401480b9bc8bf6aab14c1185f0477deb3f655c00554a0b3c0e45366462ff"
+    },
+    {
+      "path": "tests/touch-transport-contract.sh",
+      "sha256": "ef55d62ae2d3286c010f4e2725861c293d3988dff4aafd207211537f6c62dac1"
+    },
+    {
+      "path": "tests/touch-transport.c",
+      "sha256": "85517289da7a9dca187562d33b67a415f2fe27a2cfa8cac2259078ba5309d8aa"
+    },
+    {
+      "path": "tests/uke-build-scope-contract.sh",
+      "sha256": "90bb7330e52227b17c5e1f2c6b75e079744e062805c381e2510878806ab9f75b"
+    },
+    {
+      "path": "tests/uke-rpmh-resource-contract.sh",
+      "sha256": "d23a55bab65b970c9637b32abec20a6d0476b5f5c5fe3a051d43d0c33a142a48"
+    },
+    {
+      "path": "tests/usb-typec-fdt-check.cpp",
+      "sha256": "68e325e38739ebce77a9f73fa0ce8aef63de562367d2423eb8d563560779b1f3"
+    },
+    {
+      "path": "tests/usbss-kconfig-contract.sh",
+      "sha256": "32e1d242b63d3b00a6d23c7a2742ac925adc6a4f4b7bdb943554669912fa5bcb"
+    },
+    {
+      "path": "tests/usbss-reset-lifetime-contract.sh",
+      "sha256": "e2073e29cb9c8685f7ceb16a32abffb2c67d48c1970c856cc4e27e1856ebfb62"
+    },
+    {
+      "path": "tests/userdata-grow-contract.sh",
+      "sha256": "9f4a95f8e5be8f78941b77c7663c5cd7e4a05b2d3c71babd029d2b9325683730"
+    },
+    {
+      "path": "tests/wcd939x-channel-switch-contract.sh",
+      "sha256": "1b6cba29e6c36a121327d7d57ad39db9144cd39766d0f0bce9e9a00eb8266bb6"
+    },
+    {
+      "path": "tests/wcd939x-chip-info-contract.sh",
+      "sha256": "83861bfd35e7f9876d45a420cd3d6ab5143c825fd9edcb8511d306252fa05aef"
+    },
+    {
+      "path": "tests/wcd939x-io-contract.sh",
+      "sha256": "f36ba5f550976b7568b28b77225a34f6f8605e6acf933c357f20b3b4741b9c28"
+    },
+    {
+      "path": "tests/wcd939x-micbias-contract.sh",
+      "sha256": "a9b0fd8c69f8e7c1bcf478250dcdbcbd9fd60075730299150b80d8d52b32c740"
+    },
+    {
+      "path": "tests/wcd939x-probe-error-contract.sh",
+      "sha256": "fcfdbbc4cdf05d5117139244a695435d03da7f4d19089917158eb7e70d629ce9"
+    },
+    {
+      "path": "tests/wcd939x-reset-consumer-contract.sh",
+      "sha256": "d50f14ae40f33b6bad65644ca550b8d11842b0c399d500e801804794d97cfe1b"
+    },
+    {
+      "path": "tests/wcd939x-reset-contract.sh",
+      "sha256": "f64abd0ecb81f35ddb56b1a0bf38f96e510be9339cedff82df7e57334e56792a"
+    },
+    {
+      "path": "tests/wcd939x-supply-order-contract.sh",
+      "sha256": "a5c1dfdcc39e9572ac3c6ecad669b38ed0df264de36e508fb04dc082e0f4b916"
+    },
+    {
+      "path": "tests/wlan-power-contract.sh",
+      "sha256": "c2dbfe20a8926b3653cc76c46597c67742e71fa7f0afb42f97d8adaf69baa08d"
+    },
+    {
+      "path": "tests/wpss-proxy-contract.sh",
+      "sha256": "08886938fb787dd9a7e30cc0c20ac1c3873eac5ee5e9411e33027ef35a097061"
+    },
+    {
+      "path": "src/display/generate-native-panels.sh",
+      "sha256": "d7cea1079a2ddbbc36a2a220a7fb412351d5283c2c6d3bc3c9d5e1b140378b60"
+    },
+    {
+      "path": "patches/display/0071-o82-panel-variants.patch",
+      "sha256": "40e21c06f71845244d160710ebbf54e22a554bb267834468d827c7b38596c162"
+    },
+    {
+      "path": "tests/o82-selector-contract.sh",
+      "sha256": "e4561e99d11ed9548377c3ac4c7336a15f83fb7aa69c9ad32d14fa45645dd7ff"
+    },
+    {
+      "path": "tests/o82-on-batch-contract.sh",
+      "sha256": "a28f49cdbaeffc98cee5faaf8d29809dd539ef9471a2dbc4a2bc3664ca0c1e57"
+    },
+    {
+      "path": "tests/o82-variants-contract.sh",
+      "sha256": "e494ce2d29e65b099f0f660d3186cdc0ea91ad0ffcc6d51746e80d1246a26cf0"
+    },
+    {
+      "path": "tests/o82-variants-dt-contract.sh",
+      "sha256": "86a1a68e68b05578d43917e9938c325ff5e3b37cc20cfcaf6380457fdb7c47a0"
+    },
+    {
+      "path": "src/display/prepare-native-abl-source.sh",
+      "sha256": "714d3a5586dc073aa898aec4019333a5f066cda860c87ce6a5725d564eac0caa"
+    },
+    {
+      "path": "patches/display/0002-arm64-uke-native-abl-entry.patch",
+      "sha256": "a10d7eaef0bd425d277048324f49394cd4b5b6c6800d6475004cd7a0484db74d"
+    },
+    {
+      "path": "tests/touch-config-map.cpp",
+      "sha256": "78f1afc692bc84ecdbf9cc5a6aa916db8acfa7862aa99ba32e76bb6d7dfab8c7"
+    },
+    {
+      "path": "tests/touch-variant-assets.sh",
+      "sha256": "8d032f535ba86c6161720be53ac74c741144b23a51d0a34a98594e798e1cfd65"
     }
-  ]
+  ],
+  "root_selector_capability": {
+    "format": "elfnote-v2",
+    "name": "UKE",
+    "type": "0x554b4501",
+    "descriptor": "root-selector-v2;userdata=f2fs,ext4,xfs,btrfs;slot=a,b;vrr-min=0,30",
+    "manifest_value": "uke-elfnote-v2",
+    "policy_changed": true,
+    "physical_vrr_qualified": false
+  },
+  "userdata_expansion": {
+    "stage": "initrd_before_sysroot_mount",
+    "filesystem": "f2fs",
+    "root_partlabel": "userdata",
+    "filesystem_label": "UKE_LINUX",
+    "partition_table_writes": false,
+    "formatting": false,
+    "power_guard": "Packaged updater checks headroom before staging; no post-root battery RPC dependency in initrd",
+    "hardware_tested": false,
+    "one_time_completion": "Persistent F2FS block count; completed oneshot remains active and subsequent boots skip fsck/resize"
+  },
+  "native_platform_profile": {
+    "interface": "platform-profile",
+    "provider": "uke-qos",
+    "original_ppd_version": "0.30",
+    "tablet_tested": false,
+    "backend_retired": false
+  }
 }

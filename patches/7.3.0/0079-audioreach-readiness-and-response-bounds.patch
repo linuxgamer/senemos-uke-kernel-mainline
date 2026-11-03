@@ -1,0 +1,226 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: qcom: bound GPR responses and qualify APM readiness
+
+Do not query during APM probe before APR installs its callback. Publish the
+readiness provider only after successful component/child setup, serialize the
+readiness accessor with removal, reject stale state-query tokens under a spinlock
+and propagate request failures rather than returning a cached state. Bound
+response payloads before parsing and reject invalid GPR header lengths.
+
+Protocol: MiCode audio 8eb0eccbc4027ae4a4987e4bced03a4381039714,
+dsp/spf-core.c, dsp/audio_prm.c and include/dsp/audio_prm.h. Linux retains
+upstream licensing. Full graph/DMA/PDR callback teardown remains open; this
+patch does not qualify an audio stream or amplifier.
+
+--- a/drivers/soc/qcom/apr.c
++++ b/drivers/soc/qcom/apr.c
+@@ -265,19 +265,22 @@
+ {
+ 	uint16_t hdr_size, ver;
+ 	struct pkt_router_svc *svc = NULL;
+-	struct gpr_resp_pkt resp;
++	struct gpr_resp_pkt resp = {};
+ 	struct gpr_hdr *hdr;
+ 	unsigned long flags;
+ 	void *buf = abuf->buf;
+ 	int len = abuf->len;
+ 
++	if (len < (int)sizeof(*hdr))
++		return -EINVAL;
++
+ 	hdr = buf;
+ 	ver = hdr->version;
+ 	if (ver > GPR_PKT_VER + 1)
+ 		return -EINVAL;
+ 
+ 	hdr_size = hdr->hdr_size;
+-	if (hdr_size < GPR_PKT_HEADER_WORD_SIZE) {
++	if (hdr_size < GPR_PKT_HEADER_WORD_SIZE || hdr_size * 4 > len) {
+ 		dev_err(gpr->dev, "GPR: Wrong hdr size:%d\n", hdr_size);
+ 		return -EINVAL;
+ 	}
+--- a/sound/soc/qcom/qdsp6/q6apm.c
++++ b/sound/soc/qcom/qdsp6/q6apm.c
+@@ -28,6 +28,8 @@
+ #define APM_GRAPH_MGMT_PSIZE(p, n) ALIGN(struct_size(p, sub_graph_id_list, n), 8)
+ 
+ static struct q6apm *g_apm;
++static DEFINE_MUTEX(g_apm_lock);
++static atomic_t apm_state_token = ATOMIC_INIT(0);
+ 
+ int q6apm_send_cmd_sync(struct q6apm *apm, const struct gpr_pkt *pkt,
+ 			uint32_t rsp_opcode)
+@@ -144,20 +146,42 @@
+ {
+ 	struct gpr_pkt *pkt __free(kfree) = audioreach_alloc_apm_cmd_pkt(0,
+ 								APM_CMD_GET_SPF_STATE, 0);
++	u32 token;
++	unsigned long flags;
++	int ret, state;
++
+ 	if (IS_ERR(pkt))
+ 		return PTR_ERR(pkt);
+ 
+-	q6apm_send_cmd_sync(apm, pkt, APM_CMD_RSP_GET_SPF_STATE);
++	token = atomic_inc_return(&apm_state_token);
++	if (!token)
++		token = atomic_inc_return(&apm_state_token);
++	pkt->hdr.token = token;
++	spin_lock_irqsave(&apm->state_lock, flags);
++	apm->state_token = token;
++	apm->state = 0;
++	spin_unlock_irqrestore(&apm->state_lock, flags);
++	ret = q6apm_send_cmd_sync(apm, pkt, APM_CMD_RSP_GET_SPF_STATE);
++	spin_lock_irqsave(&apm->state_lock, flags);
++	apm->state_token = 0;
++	state = apm->state;
++	spin_unlock_irqrestore(&apm->state_lock, flags);
++	if (ret < 0)
++		return ret;
+ 
+-	return apm->state;
++	return state;
+ }
+ 
+ bool q6apm_is_adsp_ready(void)
+ {
+-	if (g_apm)
+-		return q6apm_get_apm_state(g_apm);
++	bool ready = false;
++
++	mutex_lock(&g_apm_lock);
++	if (g_apm && READ_ONCE(g_apm->gdev->svc.callback))
++		ready = q6apm_get_apm_state(g_apm) == 1;
++	mutex_unlock(&g_apm_lock);
+ 
+-	return false;
++	return ready;
+ }
+ EXPORT_SYMBOL_GPL(q6apm_is_adsp_ready);
+ 
+@@ -639,6 +663,8 @@
+ 			graph->cb(client_event, hdr->token, data->payload, graph->priv);
+ 		break;
+ 	case GPR_BASIC_RSP_RESULT:
++		if (!data->payload || data->payload_size < (int)sizeof(*result))
++			return -EINVAL;
+ 		switch (result->opcode) {
+ 		case APM_CMD_SHARED_MEM_MAP_REGIONS:
+ 		case DATA_CMD_WR_SH_MEM_EP_MEDIA_FORMAT:
+@@ -869,6 +895,7 @@
+ 	dev_set_drvdata(dev, apm);
+ 
+ 	mutex_init(&apm->lock);
++	spin_lock_init(&apm->state_lock);
+ 	apm->dev = dev;
+ 	apm->gdev = gdev;
+ 	init_waitqueue_head(&apm->wait);
+@@ -881,10 +908,6 @@
+ 
+ 	idr_init(&apm->modules_idr);
+ 
+-	g_apm = apm;
+-
+-	q6apm_get_apm_state(apm);
+-
+ 	ret = snd_soc_register_component(dev, &q6apm_audio_component, NULL, 0);
+ 	if (ret < 0) {
+ 		dev_err(dev, "failed to register q6apm: %d\n", ret);
+@@ -892,14 +915,35 @@
+ 	}
+ 
+ 	ret = of_platform_populate(dev->of_node, NULL, NULL, dev);
+-	if (ret)
+-		snd_soc_unregister_component(dev);
++	if (ret) {
++		of_platform_depopulate(dev);
++		goto unregister_component;
++	}
++
++	/* APR installs the receive callback only after this probe returns. */
++	mutex_lock(&g_apm_lock);
++	if (g_apm)
++		ret = -EBUSY;
++	else
++		g_apm = apm;
++	mutex_unlock(&g_apm_lock);
++	if (!ret)
++		return 0;
++
++	of_platform_depopulate(dev);
++unregister_component:
++	snd_soc_unregister_component(dev);
+ 
+ 	return ret;
+ }
+ 
+ static void apm_remove(gpr_device_t *gdev)
+ {
++	mutex_lock(&g_apm_lock);
++	if (g_apm == dev_get_drvdata(&gdev->dev))
++		g_apm = NULL;
++	mutex_unlock(&g_apm_lock);
++
+ 	of_platform_depopulate(&gdev->dev);
+ 	snd_soc_unregister_component(&gdev->dev);
+ }
+@@ -922,17 +966,28 @@
+ 	struct device *dev = &gdev->dev;
+ 	struct gpr_ibasic_rsp_result_t *result;
+ 	const struct gpr_hdr *hdr = &data->hdr;
++	unsigned long flags;
+ 	int graph_id, is_pos_buf;
+ 
+ 	result = data->payload;
+ 
+ 	switch (hdr->opcode) {
+ 	case APM_CMD_RSP_GET_SPF_STATE:
++		if (!data->payload || data->payload_size != sizeof(u32))
++			return -EINVAL;
++		if (result->opcode > 1)
++			return -EINVAL;
++		spin_lock_irqsave(&apm->state_lock, flags);
++		if (!hdr->token || hdr->token != apm->state_token) {
++			spin_unlock_irqrestore(&apm->state_lock, flags);
++			return 0;
++		}
+ 		apm->result.opcode = hdr->opcode;
+ 		apm->result.status = 0;
+ 		/* First word of result it state */
+ 		apm->state = result->opcode;
+ 		wake_up(&apm->wait);
++		spin_unlock_irqrestore(&apm->state_lock, flags);
+ 		break;
+ 	case GPR_BASIC_RSP_RESULT:
+ 		switch (result->opcode) {
+@@ -970,6 +1025,8 @@
+ 		}
+ 		break;
+ 	case APM_CMD_RSP_SHARED_MEM_MAP_REGIONS:
++		if (!data->payload || data->payload_size < (int)sizeof(*rsp))
++			return -EINVAL;
+ 		apm->result.opcode = hdr->opcode;
+ 		apm->result.status = 0;
+ 		rsp = data->payload;
+--- a/sound/soc/qcom/qdsp6/q6apm.h
++++ b/sound/soc/qcom/qdsp6/q6apm.h
+@@ -61,6 +61,8 @@
+ 	struct mutex cmd_lock;
+ 	struct mutex lock;
+ 	uint32_t state;
++	u32 state_token;
++	spinlock_t state_lock;
+ 
+ 	struct list_head widget_list;
+ 	struct idr graph_idr;
+--- a/sound/soc/qcom/qdsp6/q6prm.c
++++ b/sound/soc/qcom/qdsp6/q6prm.c
+@@ -185,6 +185,8 @@
+ 	switch (hdr->opcode) {
+ 	case PRM_CMD_RSP_REQUEST_HW_RSC:
+ 	case PRM_CMD_RSP_RELEASE_HW_RSC:
++		if (!data->payload || data->payload_size < (int)sizeof(*result))
++			return -EINVAL;
+ 		result = data->payload;
+ 		prm->result.opcode = hdr->opcode;
+ 		prm->result.status = result->status;

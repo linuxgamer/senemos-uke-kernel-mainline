@@ -16,7 +16,10 @@ cat > "$work/check.cpp" <<'CPP'
 #define DRM_BRIDGE_ATTACH_NO_CONNECTOR 1
 struct drm_connector;
 struct drm_connector_state { unsigned max_requested_bpc=0, max_bpc=0; } state;
-struct drm_connector_funcs { void (*reset)(drm_connector *); };
+struct drm_connector_funcs {
+    void (*reset)(drm_connector *);
+    drm_connector_state *(*atomic_create_state)(drm_connector *);
+};
 struct drm_connector { drm_connector_state *state; drm_connector_funcs *funcs; };
 struct drm_panel {} panel;
 struct device {} device;
@@ -28,8 +31,11 @@ struct msm_dsi { drm_device *dev; int id; } dsi{&drm,0};
 int resets=0,properties=0,vrr_properties=0,property_error=0,vrr_error=0;
 int add_error=0,attach_error=0;
 bool allocation_failure=false;
-void reset(drm_connector *c) { ++resets; if(!allocation_failure)c->state=&state; }
-drm_connector_funcs funcs{reset};
+drm_connector_state *create_state(drm_connector *) {
+    ++resets;
+    return allocation_failure ? reinterpret_cast<drm_connector_state *>(static_cast<intptr_t>(-ENOMEM)) : &state;
+}
+drm_connector_funcs funcs{nullptr,create_state};
 drm_connector connector{nullptr,&funcs},*bridge_result=&connector;
 drm_panel *selected_panel=&panel;
 drm_panel *dsi_mgr_o82_panel(msm_dsi *) { return selected_panel; }
@@ -47,7 +53,14 @@ int drm_connector_attach_max_bpc_property(drm_connector *c,int min,int max) {
 int drm_connector_attach_vrr_capable_property(drm_connector *) {
     ++vrr_properties;return vrr_error;
 }
+int abm_properties=0,abm_error=0;
+int drm_connector_attach_abm_property(drm_connector *) {++abm_properties;return abm_error;}
 CPP
+if grep -q 'ret = drm_connector_attach_abm_property(connector);' "$manager"; then
+    printf '#define HAS_ABM 1\n' >> "$work/check.cpp"
+else
+    printf '#define HAS_ABM 0\n' >> "$work/check.cpp"
+fi
 awk '/^int msm_dsi_manager_connector_init\(/ {emit=1} emit {print} emit && /^}/ {exit}' "$manager" >> "$work/check.cpp"
 cat >> "$work/check.cpp" <<'CPP'
 int main() {
@@ -75,6 +88,12 @@ int main() {
     add_error=0; attach_error=-EIO;
     assert(msm_dsi_manager_connector_init(&dsi,&encoder)==-EIO);
     assert(properties==3 && vrr_properties==2);
+    if(HAS_ABM) {
+        add_error=attach_error=vrr_error=0;abm_error=-ENOMEM;
+        const int before=abm_properties;
+        assert(msm_dsi_manager_connector_init(&dsi,&encoder)==-ENOMEM);
+        assert(abm_properties==before+1);
+    }
     puts("Actual O82 fixed 10-bpc capability, foreign panel and failure boundaries: passed");
 }
 CPP

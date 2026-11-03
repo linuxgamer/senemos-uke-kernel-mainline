@@ -1,0 +1,38 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] Drain Uke battery requests before marking the transport asleep
+
+An in-flight request owns battmgr->lock until its matching reply is consumed.
+Suspend must wait for that owner while the GLINK parent is still awake.
+Aborting it first needlessly latches the conservative desynchronization guard
+and leaves every battery query returning EPIPE after resume. Preserve that
+guard for real delivery ambiguity and refuse an inconsistent pending owner.
+
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -2464,18 +2464,19 @@
+ 
+ 	if (battmgr->variant != QCOM_BATTMGR_UKE)
+ 		return 0;
++	/* Drain the current RPC while GLINK is awake, before blocking new requests. */
++	cancel_work_sync(&battmgr->enable_work);
++	mutex_lock(&battmgr->lock);
+ 	spin_lock_irqsave(&tx->lock, flags);
++	if (tx->pending) {
++		spin_unlock_irqrestore(&tx->lock, flags);
++		mutex_unlock(&battmgr->lock);
++		return -EBUSY;
++	}
+ 	tx->suspended = true;
+ 	battmgr->control.invalidation_ns = ktime_get_boottime_ns();
+ 	tx->generation++;
+-	if (tx->pending) {
+-		battmgr->error = -EHOSTDOWN;
+-		tx->desynced = true;
+-		complete(&battmgr->ack);
+-	}
+ 	spin_unlock_irqrestore(&tx->lock, flags);
+-	cancel_work_sync(&battmgr->enable_work);
+-	mutex_lock(&battmgr->lock);
+ 	mutex_unlock(&battmgr->lock);
+ 	return 0;
+ }

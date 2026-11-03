@@ -1,0 +1,107 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] iommu: arm-smmu-qcom: admit exact Uke video streams and ACTLR
+
+Require Uke, the boot SMMU, native SM7675 Iris and the unmasked 1940/1947
+pair. Match both exact OEM ACTLR rules and verify 0x103 on a new S1 context.
+Use the pixel/nonpixel DMA pool intersection beginning at 0x25800000.
+Preserve existing display/USB delegation and reject foreign/secure streams.
+
+OEM evidence: MiCode DT 94c84aeb, msm-arm-smmu-cliffs.dtsi, checked against
+the live 7.3.0-3 handoff. Shared-domain physical acceptance remains pending.
+
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
+@@ -854,6 +854,7 @@
+ }
+ 
+ #include "uke-display-smmu.c"
++#include "uke-video-smmu.c"
+ 
+ static int qcom_uke_smmu_alloc_context_bank(struct arm_smmu_domain *domain,
+ 		struct arm_smmu_device *smmu, struct device *dev, int start)
+@@ -862,6 +863,11 @@
+ 	const __be32 *actlr;
+ 	int len, i, j;
+ 
++	if (qcom_uke_video_domain(smmu, dev)) {
++		if (!qcom_uke_video_actlr_matches(smmu))
++			return -EINVAL;
++		return __arm_smmu_alloc_bitmap(smmu->context_map, start, smmu->num_context_banks);
++	}
+ 	if (qcom_uke_display_domain(smmu, dev)) {
+ 		if (!qcom_uke_display_actlr_matches(smmu))
+ 			return -EINVAL;
+@@ -899,7 +905,7 @@
+ }
+ 
+ static const struct arm_smmu_impl qcom_uke_smmu_impl = {
+-	.init_context = qcom_uke_display_init_context,
++	.init_context = qcom_uke_init_context,
+ 	.def_domain_type = qcom_uke_smmu_def_domain_type,
+ 	.cfg_probe = qcom_uke_smmu_cfg_probe,
+ 	.alloc_context_bank = qcom_uke_smmu_alloc_context_bank,
+--- /dev/null
++++ b/drivers/iommu/arm/arm-smmu/uke-video-smmu.c
+@@ -0,0 +1,62 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/* Uke OEM 94c84aeb, msm-arm-smmu-cliffs.dtsi and the observed handoff table. */
++static bool qcom_uke_video_domain(struct arm_smmu_device *smmu, struct device *dev)
++{
++	struct iommu_fwspec *spec = dev_iommu_fwspec_get(dev);
++
++	return of_machine_is_compatible("xiaomi,uke") &&
++		of_device_is_compatible(smmu->dev->of_node, "qcom,sm7675-boot-smmu") &&
++		of_device_is_compatible(dev->of_node, "qcom,sm7675-iris") &&
++		spec && spec->num_ids == 2 &&
++		((spec->ids[0] == 0x1940 && spec->ids[1] == 0x1947) ||
++		 (spec->ids[0] == 0x1947 && spec->ids[1] == 0x1940));
++}
++
++static bool qcom_uke_video_actlr_matches(struct arm_smmu_device *smmu)
++{
++	const __be32 *rules;
++	u32 found = 0;
++	int i, j, len;
++	const u32 ids[] = { 0x1940, 0x1947 };
++
++	rules = of_get_property(smmu->dev->of_node, "qcom,actlr", &len);
++	if (!rules || len % (3 * sizeof(u32)))
++		return false;
++	for (i = 0; i < len / sizeof(u32); i += 3) {
++		u32 id = be32_to_cpu(rules[i]);
++		u32 mask = be32_to_cpu(rules[i + 1]);
++		u32 value = be32_to_cpu(rules[i + 2]);
++
++		for (j = 0; j < ARRAY_SIZE(ids); j++) {
++			if ((ids[j] ^ id) & ~mask)
++				continue;
++			if (id != ids[j] || mask || value != 0x103)
++				return false;
++			found |= BIT(j);
++		}
++	}
++
++	return found == GENMASK(1, 0);
++}
++
++static int qcom_uke_init_context(struct arm_smmu_domain *domain,
++				 struct io_pgtable_cfg *cfg, struct device *dev)
++{
++	struct arm_smmu_device *smmu = domain->smmu;
++	u32 value;
++
++	if (!qcom_uke_video_domain(smmu, dev))
++		return qcom_uke_display_init_context(domain, cfg, dev);
++	if (domain->stage != ARM_SMMU_DOMAIN_S1 || cfg->ias < 32)
++		return -EOPNOTSUPP;
++	if (!qcom_uke_video_actlr_matches(smmu))
++		return -EINVAL;
++	arm_smmu_cb_write(smmu, domain->cfg.cbndx, ARM_SMMU_CB_ACTLR, 0x103);
++	value = arm_smmu_cb_read(smmu, domain->cfg.cbndx, ARM_SMMU_CB_ACTLR);
++	if (value != 0x103)
++		return dev_err_probe(dev, -EACCES, "video ACTLR write did not stick\n");
++
++	/* Intersection of OEM pixel and nonpixel DMA pools; MMIO maps remain above it. */
++	domain->domain.geometry.aperture_start = 0x25800000;
++	return 0;
++}

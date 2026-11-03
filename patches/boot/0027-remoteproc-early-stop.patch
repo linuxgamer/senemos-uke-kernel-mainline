@@ -1,0 +1,131 @@
+From: Uke Linux contributors <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] remoteproc: prepare target shutdown before client removal
+
+Add an optional retryable preparation callback before subdevice removal.
+Failure keeps the clients and resource table available for a controlled retry.
+Targets without this callback retain their existing behavior.
+
+Expose the existing Sysmon graceful shutdown preparation and retain its real
+ACK across the later stop callback. Reset the request state at the next boot,
+so the early target halt cannot cause a second request to a stopped DSP.
+The remoteproc lock serializes these preparation and stop callbacks.
+
+This is a project API extension against signed Linux 7.3; no equivalent hook
+was found in the pinned Uke OEM/OnePlus comparisons. Retain upstream GPL
+attribution. This does not qualify forced remove or exported-buffer teardown.
+
+--- a/include/linux/remoteproc.h
++++ b/include/linux/remoteproc.h
+@@ -88,6 +88,8 @@
+  * @panic:	optional callback to react to system panic, core will delay
+  *		panic at least the returned number of milliseconds
+  * @coredump:	  collect firmware dump after the subsystem is shutdown
++ * @prepare_stop: optional quiesce before subdevice removal; errors retain
++ *                clients and resources. Must tolerate retries after partial stop.
+  */
+ struct rproc_ops {
+ 	int (*prepare)(struct rproc *rproc);
+@@ -110,6 +112,7 @@
+ 	u64 (*get_boot_addr)(struct rproc *rproc, const struct firmware *fw);
+ 	unsigned long (*panic)(struct rproc *rproc);
+ 	void (*coredump)(struct rproc *rproc);
++	int (*prepare_stop)(struct rproc *rproc);
+ };
+ 
+ /**
+--- a/drivers/remoteproc/remoteproc_core.c
++++ b/drivers/remoteproc/remoteproc_core.c
+@@ -1713,6 +1713,14 @@
+ 	if (!rproc->ops->stop)
+ 		return -EINVAL;
+ 
++	if (rproc->ops->prepare_stop) {
++		ret = rproc->ops->prepare_stop(rproc);
++		if (ret) {
++			dev_err(dev, "can't prepare remote processor stop: %d\n", ret);
++			return ret;
++		}
++	}
++
+ 	/* Stop any subdevices for the remote processor */
+ 	rproc_stop_subdevices(rproc, crashed);
+ 
+--- a/drivers/remoteproc/qcom_sysmon.c
++++ b/drivers/remoteproc/qcom_sysmon.c
+@@ -45,6 +45,7 @@
+ 
+ 	bool ssr_ack;
+ 	bool shutdown_acked;
++	bool shutdown_requested;
+ 
+ 	struct qmi_handle qmi;
+ 	struct sockaddr_qrtr ssctl;
+@@ -476,6 +477,9 @@
+ 		.ssr_event = SSCTL_SSR_EVENT_BEFORE_POWERUP
+ 	};
+ 
++	sysmon->shutdown_requested = false;
++	sysmon->shutdown_acked = false;
++
+ 	mutex_lock(&sysmon->state_lock);
+ 	sysmon->state = SSCTL_SSR_EVENT_BEFORE_POWERUP;
+ 	blocking_notifier_call_chain(&sysmon_notifiers, 0, (void *)&event);
+@@ -531,13 +535,15 @@
+ 	return 0;
+ }
+ 
+-static void sysmon_stop(struct rproc_subdev *subdev, bool crashed)
++void qcom_sysmon_prepare_shutdown(struct qcom_sysmon *sysmon, bool crashed)
+ {
+-	struct qcom_sysmon *sysmon = container_of(subdev, struct qcom_sysmon, subdev);
+-	struct sysmon_event event = {
+-		.subsys_name = sysmon->name,
+-		.ssr_event = SSCTL_SSR_EVENT_BEFORE_SHUTDOWN
+-	};
++	struct sysmon_event event;
++
++	if (!sysmon || sysmon->shutdown_requested)
++		return;
++	sysmon->shutdown_requested = true;
++	event.subsys_name = sysmon->name;
++	event.ssr_event = SSCTL_SSR_EVENT_BEFORE_SHUTDOWN;
+ 
+ 	sysmon->shutdown_acked = false;
+ 
+@@ -561,6 +567,15 @@
+ 		sysmon->shutdown_acked = sysmon_request_shutdown(sysmon);
+ }
+ 
++EXPORT_SYMBOL_GPL(qcom_sysmon_prepare_shutdown);
++
++static void sysmon_stop(struct rproc_subdev *subdev, bool crashed)
++{
++	struct qcom_sysmon *sysmon = container_of(subdev, struct qcom_sysmon, subdev);
++
++	qcom_sysmon_prepare_shutdown(sysmon, crashed);
++}
++
+ static void sysmon_unprepare(struct rproc_subdev *subdev)
+ {
+ 	struct qcom_sysmon *sysmon = container_of(subdev, struct qcom_sysmon,
+--- a/drivers/remoteproc/qcom_common.h
++++ b/drivers/remoteproc/qcom_common.h
+@@ -67,6 +67,7 @@
+ 					   const char *name,
+ 					   int ssctl_instance);
+ void qcom_remove_sysmon_subdev(struct qcom_sysmon *sysmon);
++void qcom_sysmon_prepare_shutdown(struct qcom_sysmon *sysmon, bool crashed);
+ bool qcom_sysmon_shutdown_acked(struct qcom_sysmon *sysmon);
+ bool qcom_sysmon_shutdown_irq_state(struct qcom_sysmon *sysmon);
+ #else
+@@ -81,6 +82,10 @@
+ {
+ }
+ 
++static inline void qcom_sysmon_prepare_shutdown(struct qcom_sysmon *sysmon, bool crashed)
++{
++}
++
+ static inline bool qcom_sysmon_shutdown_acked(struct qcom_sysmon *sysmon)
+ {
+ 	return false;

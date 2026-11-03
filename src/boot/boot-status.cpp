@@ -8,12 +8,13 @@
 #include <thread>
 namespace fs = std::filesystem;
 namespace {
-bool selected_kernel(const std::string& release) {
+bool selected_kernel(const std::string& input) {
+    const auto release = input.size() > 4 && input.compare(input.size() - 4, 4, "-kvm") == 0 ? input.substr(0, input.size() - 4) : input;
     const auto dash = release.find('-');
-    if (release.size() < 128 && release.rfind("7.2.", 0) == 0 && dash > 4 && dash != std::string::npos) {
+    if (release.size() < 128 && (release.rfind("7.2.", 0) == 0 || release.rfind("7.3.", 0) == 0) && dash > 4 && dash != std::string::npos) {
         const auto patch = release.substr(4, dash - 4);
         const auto revision = release.substr(dash + 1);
-        if (!revision.empty() && patch.front() != '0' && revision.front() != '0' &&
+        if (!revision.empty() && ((release.rfind("7.3.", 0) == 0 && patch == "0") || patch.front() != '0') && revision.front() != '0' &&
             patch.find_first_not_of("0123456789") == std::string::npos &&
             revision.find_first_not_of("0123456789") == std::string::npos) return true;
     }
@@ -126,8 +127,7 @@ int main(int argc, char** argv) {
             const auto end = cmdline.find_first_of(" \t\r\n", begin);
             const auto argument = cmdline.substr(begin, end - begin);
             if (argument == "root=LABEL=UKE_LINUX" || argument == "root=PARTLABEL=linux" ||
-                argument == "root=PARTLABEL=userdata" ||
-                argument == "root=PARTLABEL=uke_linux") root_selected = true;
+                argument == "root=PARTLABEL=uke_linux" || argument == "root=PARTLABEL=userdata") root_selected = true;
             else if (argument.rfind("root=", 0) == 0) root_selected = false;
             if (end == std::string::npos) break;
             begin = end + 1;

@@ -1,0 +1,279 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH 2/3] soc: qcom: describe Cliffs7 LLCC policy and resources
+
+Translate the exact Cliffs7 policy to native LLCC use-case names.
+Require the OEM bank/broadcast windows, four hardware banks and the v5
+register family before configuration writes. Keep EDAC disabled until
+its access and interrupt contract is qualified. No board activation.
+
+Policy: MiCode/Xiaomi_Kernel_OpenSource uke-v-oss
+5712080a4b0c0b1a879e6d145c601c649ddaddfd, drivers/soc/qcom/llcc-qcom.c.
+DT: MiCode/kernel_devicetree uke-v-oss
+94c84aeb9e517dbde546fc732033c184094c8e57, qcom/cliffs{,7}.dtsi.
+Same-SoC policy: OnePlusOSS/android_kernel_oneplus_sm7675
+fc892483f1d61f245924681eb5abd563564d9cba; table matches the Uke policy.
+Source/build checks do not establish cache hits, speed or lifecycle.
+
+Signed-off-by: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+---
+--- a/drivers/soc/qcom/llcc-qcom.c
++++ b/drivers/soc/qcom/llcc-qcom.c
+@@ -2415,6 +2415,157 @@
+ 	},
+ };
+ 
++/*
++ * Cliffs7 policy: MiCode uke-v-oss 5712080a4b0c; not generic Cliffs.
++ * Copyright (c) 2017-2021, The Linux Foundation.
++ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc.
++ */
++static const struct llcc_slice_config sm7675_data[] = {
++	{
++		.usecase_id = LLCC_CPUSS,
++		.slice_id = 1,
++		.max_cap = 3200,
++		.bonus_ways = 0x3FFF,
++		.activate_on_init = 1,
++	},
++	{
++		.usecase_id = LLCC_VIDSC0,
++		.slice_id = 2,
++		.max_cap = 128,
++		.priority = 3,
++		.fixed_size = 1,
++		.bonus_ways = 0x3FFF,
++	},
++	{
++		.usecase_id = LLCC_AUDIO,
++		.slice_id = 6,
++		.max_cap = 256,
++		.priority = 1,
++		.fixed_size = 1,
++		.bonus_ways = 0x3FFF,
++	},
++	{
++		.usecase_id = LLCC_MDMHPGRW,
++		.slice_id = 25,
++		.max_cap = 1024,
++		.priority = 3,
++		.bonus_ways = 0x3FFF,
++	},
++	{
++		.usecase_id = LLCC_GPUHTW,
++		.slice_id = 11,
++		.max_cap = 256,
++		.priority = 1,
++		.fixed_size = 1,
++		.bonus_ways = 0x3FFF,
++	},
++	{
++		.usecase_id = LLCC_GPU,
++		.slice_id = 9,
++		.max_cap = 3200,
++		.priority = 1,
++		.bonus_ways = 0x3FFF,
++		.write_scid_en = 1,
++		.write_scid_cacheable_en = 1,
++	},
++	{
++		.usecase_id = LLCC_MMUHWT,
++		.slice_id = 18,
++		.max_cap = 512,
++		.priority = 1,
++		.fixed_size = 1,
++		.bonus_ways = 0x3FFF,
++		.activate_on_init = 1,
++	},
++	{
++		.usecase_id = LLCC_DISP,
++		.slice_id = 16,
++		.max_cap = 3584,
++		.priority = 1,
++		.fixed_size = 1,
++		.bonus_ways = 0x3FFF,
++		.cache_mode = 2,
++	},
++	{
++		.usecase_id = LLCC_MDMHPFX,
++		.slice_id = 24,
++		.max_cap = 1024,
++		.priority = 3,
++		.fixed_size = 1,
++		.bonus_ways = 0x3FFF,
++	},
++	{
++		.usecase_id = LLCC_MDMPNG,
++		.slice_id = 27,
++		.max_cap = 256,
++		.priority = 3,
++		.fixed_size = 1,
++		.bonus_ways = 0x3FFF,
++	},
++	{
++		.usecase_id = LLCC_MODPE,
++		.slice_id = 29,
++		.max_cap = 64,
++		.priority = 1,
++		.fixed_size = 1,
++		.bonus_ways = 0x3C00,
++		.alloc_oneway_en = 1,
++	},
++	{
++		.usecase_id = LLCC_WRCACHE,
++		.slice_id = 31,
++		.max_cap = 512,
++		.priority = 1,
++		.fixed_size = 1,
++		.bonus_ways = 0x3FFF,
++		.activate_on_init = 1,
++	},
++	{
++		.usecase_id = LLCC_CAMEXP0,
++		.slice_id = 4,
++		.max_cap = 256,
++		.priority = 3,
++		.fixed_size = 1,
++		.bonus_ways = 0xF,
++	},
++	{
++		.usecase_id = LLCC_CAMEXP1,
++		.slice_id = 7,
++		.max_cap = 1536,
++		.priority = 2,
++		.fixed_size = 1,
++		.bonus_ways = 0x3FF0,
++		.cache_mode = 2,
++	},
++	{
++		.usecase_id = LLCC_LCPDARE,
++		.slice_id = 30,
++		.max_cap = 128,
++		.priority = 3,
++		.fixed_size = 1,
++		.bonus_ways = 0x3FFF,
++		.activate_on_init = 1,
++		.alloc_oneway_en = 1,
++	},
++	{
++		.usecase_id = LLCC_AENPU,
++		.slice_id = 3,
++		.max_cap = 2048,
++		.priority = 1,
++		.fixed_size = 1,
++		.bonus_ways = 0x3FFF,
++		.cache_mode = 2,
++	},
++	{
++		.usecase_id = LLCC_ISLAND1,
++		.slice_id = 12,
++		.max_cap = 2048,
++		.priority = 7,
++		.fixed_size = 1,
++		.res_ways = 0xFF,
++	},
++};
++
+ static const struct llcc_slice_config sm8150_data[] =  {
+ 	{
+ 		.usecase_id = LLCC_CPUSS,
+@@ -4638,6 +4789,16 @@
+ 	},
+ };
+ 
++static const struct qcom_llcc_config sm7675_cfg[] = {
++	{
++		.sct_data = sm7675_data,
++		.size = ARRAY_SIZE(sm7675_data),
++		.reg_offset = llcc_v2_1_reg_offset,
++		/* The Cliffs7 EDAC register and interrupt contract is not admitted. */
++		.no_edac = true,
++	},
++};
++
+ static const struct qcom_llcc_config sm8650_cfg[] = {
+ 	{
+ 		.sct_data       = sm8650_data,
+@@ -4787,6 +4948,11 @@
+ 	.num_config	= ARRAY_SIZE(sm8550_cfg),
+ };
+ 
++static const struct qcom_sct_config sm7675_cfgs = {
++	.llcc_config = sm7675_cfg,
++	.num_config = ARRAY_SIZE(sm7675_cfg),
++};
++
+ static const struct qcom_sct_config sm8650_cfgs = {
+ 	.llcc_config	= sm8650_cfg,
+ 	.num_config	= ARRAY_SIZE(sm8650_cfg),
+@@ -5466,6 +5632,22 @@
+ 	return devm_regmap_init_mmio(&pdev->dev, base, &llcc_regmap_config);
+ }
+ 
++static int qcom_llcc_sm7675_resources(struct platform_device *pdev)
++{
++	struct resource *res;
++	int i;
++
++	/* OEM Cliffs7 has four 2 MiB banks followed by the broadcast window. */
++	for (i = 0; i < 5; i++) {
++		res = platform_get_resource(pdev, IORESOURCE_MEM, i);
++		if (!res || res->start != 0x25000000 + i * SZ_2M ||
++		    resource_size(res) != SZ_2M)
++			return -EINVAL;
++	}
++
++	return platform_get_resource(pdev, IORESOURCE_MEM, 5) ? -EINVAL : 0;
++}
++
+ static int qcom_llcc_probe(struct platform_device *pdev)
+ {
+ 	u32 num_banks;
+@@ -5477,10 +5659,17 @@
+ 	u8 cfg_index;
+ 	u32 version;
+ 	struct regmap *regmap;
++	bool sm7675 = of_device_is_compatible(dev->of_node, "qcom,sm7675-llcc");
+ 
+ 	if (!IS_ERR(drv_data))
+ 		return -EBUSY;
+ 
++	if (sm7675) {
++		ret = qcom_llcc_sm7675_resources(pdev);
++		if (ret)
++			return dev_err_probe(dev, ret, "Invalid Cliffs7 LLCC windows\n");
++	}
++
+ 	drv_data = devm_kzalloc(dev, sizeof(*drv_data), GFP_KERNEL);
+ 	if (!drv_data) {
+ 		ret = -ENOMEM;
+@@ -5515,6 +5704,11 @@
+ 		num_banks >>= LLCC_LB_CNT_SHIFT;
+ 	}
+ 
++	if (sm7675 && num_banks != 4) {
++		ret = -EINVAL;
++		goto err;
++	}
++
+ 	drv_data->num_banks = num_banks;
+ 
+ 	drv_data->regmaps = devm_kcalloc(dev, num_banks, sizeof(*drv_data->regmaps), GFP_KERNEL);
+@@ -5553,6 +5747,10 @@
+ 		goto err;
+ 
+ 	drv_data->version = version;
++	if (sm7675 && (version < 0x05000000 || version >= LLCC_VERSION_6_0_0_0)) {
++		ret = -ENODEV;
++		goto err;
++	}
+ 
+ 	/* Applicable only when drv_data->version >= 4.1 */
+ 	if (drv_data->version >= LLCC_VERSION_4_1_0_0) {
+@@ -5639,6 +5837,7 @@
+ 	{ .compatible = "qcom,sm8350-llcc", .data = &sm8350_cfgs },
+ 	{ .compatible = "qcom,sm8450-llcc", .data = &sm8450_cfgs },
+ 	{ .compatible = "qcom,sm8550-llcc", .data = &sm8550_cfgs },
++	{ .compatible = "qcom,sm7675-llcc", .data = &sm7675_cfgs },
+ 	{ .compatible = "qcom,sm8650-llcc", .data = &sm8650_cfgs },
+ 	{ .compatible = "qcom,sm8750-llcc", .data = &sm8750_cfgs },
+ 	{ .compatible = "qcom,x1e80100-llcc", .data = &x1e80100_cfgs },

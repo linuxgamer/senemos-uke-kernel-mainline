@@ -40,6 +40,8 @@ static u64 per_request_ns;
 static u64 ktime_get_boottime_ns(void) { return clock_ns; }
 static u32 qcom_battmgr_uke_generation(struct qcom_battmgr *b) { return b->transaction.generation; }
 static int qcom_battmgr_uke_control_check(struct qcom_battmgr *b) { (void)b; return lease?0:-EACCES; }
+static int protection_error;
+static int qcom_battmgr_uke_protection_guard(struct qcom_battmgr *b) { (void)b;return protection_error; }
 static int qcom_battmgr_request_property(struct qcom_battmgr *b, unsigned opcode, unsigned property, int value) {
  assert(!value); requests++; clock_ns+=per_request_ns;
  if(requests==change_at) b->transaction.generation++;
@@ -56,6 +58,7 @@ static void initialize(struct qcom_battmgr *b) {
  *b=(struct qcom_battmgr){.transaction.generation=7,.status={.health=1,.current_now=500000,.voltage_now=4000000,.temperature=250},.info.present=true,
  .usb={.online=true,.usb_type=1},.control={.usb_type=1,.current_abs_max_ua=2000000,.voltage_min_uv=3000000,.voltage_max_uv=4500000,.temperature_min=100,.temperature_max=400}};
  clock_ns=2*NSEC_PER_SEC; lease=true; requests=fail_at=change_at=0; per_request_ns=0;
+ protection_error=0;
 }
 int main(void) {
  struct qcom_battmgr b; initialize(&b);
@@ -78,6 +81,7 @@ int main(void) {
  initialize(&b); per_request_ns=NSEC_PER_SEC;
  assert(qcom_battmgr_uke_control_guard(&b)==-ESTALE && !b.control.measurement_ns);
  initialize(&b); lease=false; assert(qcom_battmgr_uke_control_guard(&b)==-EACCES && !requests);
+ initialize(&b); protection_error=-EACCES;assert(qcom_battmgr_uke_control_guard(&b)==-EACCES&&!b.control.measurement_ns);
 }
 C
 } > "$work/guard.c"

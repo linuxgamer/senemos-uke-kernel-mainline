@@ -1,0 +1,79 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: wcd939x: verify microphone bias before codec setup
+
+Do not continue codec setup after a failed bias-voltage
+update. Check all four voltage fields through uncached reads so a
+cached requested value cannot hide a failed hardware write. Preserve
+the existing enable bits.
+
+Program the fields after SoundWire initialization and runtime
+resume, when the register interface is accessible. Return the first
+error and release the runtime-PM reference before allocating codec
+controls or setting up I/O.  No regulator voltage, board route,
+microphone enable or calibration changes.
+
+---
+diff --git a/sound/soc/codecs/wcd939x.c b/sound/soc/codecs/wcd939x.c
+--- a/sound/soc/codecs/wcd939x.c
++++ b/sound/soc/codecs/wcd939x.c
+@@ -2882,16 +2882,29 @@
+ 	{"EAR", NULL, "EAR PGA"},
+ };
+ 
+-static void wcd939x_set_micbias_data(struct device *dev, struct wcd939x_priv *wcd939x)
++static int wcd939x_set_micbias_data(struct device *dev, struct wcd939x_priv *wcd939x)
+ {
+-	regmap_update_bits(wcd939x->regmap, WCD939X_ANA_MICB1,
+-			   WCD939X_MICB_VOUT_CTL, wcd939x->common.micb_vout[0]);
+-	regmap_update_bits(wcd939x->regmap, WCD939X_ANA_MICB2,
+-			   WCD939X_MICB_VOUT_CTL, wcd939x->common.micb_vout[1]);
+-	regmap_update_bits(wcd939x->regmap, WCD939X_ANA_MICB3,
+-			   WCD939X_MICB_VOUT_CTL, wcd939x->common.micb_vout[2]);
+-	regmap_update_bits(wcd939x->regmap, WCD939X_ANA_MICB4,
+-			   WCD939X_MICB_VOUT_CTL, wcd939x->common.micb_vout[3]);
++	static const unsigned int micbias_regs[] = {
++		WCD939X_ANA_MICB1, WCD939X_ANA_MICB2,
++		WCD939X_ANA_MICB3, WCD939X_ANA_MICB4,
++	};
++	unsigned int i, value;
++	int ret;
++
++	for (i = 0; i < ARRAY_SIZE(micbias_regs); i++) {
++		ret = regmap_update_bits(wcd939x->regmap, micbias_regs[i],
++					 WCD939X_MICB_VOUT_CTL, wcd939x->common.micb_vout[i]);
++		if (ret)
++			return dev_err_probe(dev, ret, "Failed to set microphone bias\n");
++		/* A cached value cannot verify the voltage field on the codec. */
++		ret = regmap_read_bypassed(wcd939x->regmap, micbias_regs[i], &value);
++		if (ret)
++			return dev_err_probe(dev, ret, "Failed to read microphone bias\n");
++		if ((value & WCD939X_MICB_VOUT_CTL) != wcd939x->common.micb_vout[i])
++			return dev_err_probe(dev, -EIO, "Microphone bias readback mismatch\n");
++	}
++
++	return 0;
+ }
+ 
+ static irqreturn_t wcd939x_wd_handle_irq(int irq, void *data)
+@@ -2985,6 +2998,12 @@
+ 							WCD939X_DIGITAL_EFUSE_REG_0,
+ 							WCD939X_EFUSE_REG_0_WCD939X_ID);
+ 
++	ret = wcd939x_set_micbias_data(dev, wcd939x);
++	if (ret) {
++		pm_runtime_put(dev);
++		return ret;
++	}
++
+ 	wcd939x->clsh_info = wcd_clsh_ctrl_alloc(component, WCD939X);
+ 	if (IS_ERR(wcd939x->clsh_info)) {
+ 		pm_runtime_put(dev);
+@@ -3397,8 +3416,6 @@
+ 	wcd939x->sdw_priv[AIF1_PB]->slave_irq = wcd939x->virq;
+ 	wcd939x->sdw_priv[AIF1_CAP]->slave_irq = wcd939x->virq;
+ 
+-	wcd939x_set_micbias_data(dev, wcd939x);
+-
+ 	/* Check WCD9395 version */
+ 	regmap_read(wcd939x->regmap, WCD939X_DIGITAL_CHIP_ID1, &id1);
+ 	regmap_read(wcd939x->regmap, WCD939X_EAR_STATUS_REG_1, &status1);

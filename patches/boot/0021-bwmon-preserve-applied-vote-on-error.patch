@@ -1,0 +1,32 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] soc: qcom: icc-bwmon: keep applied bandwidth after failed OPP
+
+The OPP/interconnect transaction can fail. Keep current_kbps at the last
+successful value so a later IRQ can retry the unchanged target, and report
+the error with a rate limit. Preserve threshold rearming and OPP reference
+cleanup. This does not qualify hardware demand voting or timer/IRQ retries.
+
+--- a/drivers/soc/qcom/icc-bwmon.c
++++ b/drivers/soc/qcom/icc-bwmon.c
+@@ -648,6 +648,7 @@
+ 	unsigned int irq_enable = 0;
+ 	struct dev_pm_opp *opp, *target_opp;
+ 	unsigned int bw_kbps, up_kbps, down_kbps, meas_kbps;
++	int ret;
+ 
+ 	bw_kbps = bwmon->target_kbps;
+ 	meas_kbps = bwmon->target_kbps;
+@@ -689,8 +690,11 @@
+ 	if (bwmon->target_kbps == bwmon->current_kbps)
+ 		goto out;
+ 
+-	dev_pm_opp_set_opp(bwmon->dev, target_opp);
+-	bwmon->current_kbps = bwmon->target_kbps;
++	ret = dev_pm_opp_set_opp(bwmon->dev, target_opp);
++	if (ret)
++		dev_err_ratelimited(bwmon->dev, "Failed to set bandwidth OPP: %d\n", ret);
++	else
++		bwmon->current_kbps = bwmon->target_kbps;
+ 
+ out:
+ 	dev_pm_opp_put(target_opp);

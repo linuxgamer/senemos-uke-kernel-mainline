@@ -53,7 +53,7 @@ struct o82_panel {
     struct mipi_dsi_device *dsi[2];
     struct mutex lock;
     const struct o82_profile *profiles,*active;
-    bool oem_refresh_modes,trial_60_120_only,trial_all_rates,prepared,removing;
+    bool oem_refresh_modes,prepared,removing;
     atomic64_t touch_state;
 };
 static struct o82_panel *current;
@@ -87,6 +87,8 @@ int main(void) {
     current=&ctx;
     assert(!o82_dfps_ops.check(NULL,NULL,NULL));
     assert(o82_dfps_ops.apply(NULL,NULL,NULL,false)==-EINVAL);
+    for(unsigned int supplier=0;supplier<2;supplier++) {
+    ctx.profiles=supplier ? o82_36_02_0a_profiles:o82_42_02_0b_profiles;
     for(size_t i=0;i<ARRAY_SIZE(o82_modes);i++)for(size_t j=0;j<ARRAY_SIZE(o82_modes);j++) {
         const struct drm_display_mode *old=&o82_modes[i].mode,*target=&o82_modes[j].mode;
         const struct o82_profile *original=&ctx.profiles[o82_modes[i].group];
@@ -110,6 +112,7 @@ int main(void) {
             assert(o82_dfps_ops.apply(&ctx.panel,old,target,true)==-ETIMEDOUT && ctx.active==original);
         }
     }
+    }
     const struct drm_display_mode *old=&o82_modes[5].mode,*target=&o82_modes[6].mode;
     for(unsigned int bad=0;bad<8;bad++) {
         struct drm_display_mode altered=*target;
@@ -122,7 +125,7 @@ int main(void) {
         case 2:ctx.removing=true;break;
         case 3:ctx.touch_state.value=4;break;
         case 4:ctx.active=&ctx.profiles[1];break;
-        case 5:ctx.profiles=o82_36_02_0a_profiles;break;
+        case 5:ctx.profiles=NULL;break;
         case 6:altered.clock++;break;
         case 7:old=NULL;break;
         }
@@ -131,32 +134,9 @@ int main(void) {
         assert(o82_dfps_ops.apply(&ctx.panel,old,&altered,false)==-EAGAIN);
         assert(!pen_calls && !tp_calls && !ctx.lock.locked);
     }
-    ctx.profiles=o82_36_02_0a_profiles;
-    ctx.trial_60_120_only=true;
-    ctx.oem_refresh_modes=ctx.prepared=true;
-    ctx.removing=false;ctx.touch_state.value=5;
-    for(size_t i=3;i<=5;i+=2)for(size_t j=3;j<=5;j+=2) {
-        const struct drm_display_mode *old=&o82_modes[i].mode,*target=&o82_modes[j].mode;
-        ctx.active=&ctx.profiles[0];target_group=0;pen_calls=tp_calls=0;
-        assert(o82_dfps_ops.check(&ctx.panel,old,target)==(i!=j));
-        if(i==j) continue;
-        assert(o82_dfps_ops.apply(&ctx.panel,old,target,true)==0);
-        assert(o82_dfps_ops.apply(&ctx.panel,old,target,false)==0);
-        assert(tp_calls==1 && !ctx.lock.locked);
-    }
-    ctx.active=&ctx.profiles[0];
-    assert(!o82_dfps_ops.check(&ctx.panel,&o82_modes[3].mode,&o82_modes[6].mode));
-    ctx.trial_all_rates=true;
-    for(size_t i=0;i<ARRAY_SIZE(o82_modes);i++)for(size_t j=0;j<ARRAY_SIZE(o82_modes);j++) {
-        ctx.active=&ctx.profiles[o82_modes[i].group];
-        assert(o82_dfps_ops.check(&ctx.panel,&o82_modes[i].mode,&o82_modes[j].mode)==(i!=j));
-    }
-    ctx.trial_all_rates=false;
-    ctx.trial_60_120_only=false;
-    assert(!o82_dfps_ops.check(&ctx.panel,&o82_modes[3].mode,&o82_modes[5].mode));
 }
 C
 "${CC:-cc}" -std=gnu11 -O2 -Wall -Wextra -Werror -Wno-sign-compare \
     -fsanitize=undefined -fsanitize-undefined-trap-on-error -I"$work" "$work/check.c" -o "$work/check"
 "$work/check"
-printf 'Actual O82 DFPS callbacks: 42 transitions, exact OEM pen/TP batches, scope/readiness rejection and failure-state preservation passed\n'
+printf 'Actual O82 DFPS callbacks: 42 transitions per supplier, exact OEM pen/TP batches, scope/readiness rejection and failure-state preservation passed\n'

@@ -1,0 +1,91 @@
+From: Uke Linux contributors <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] remoteproc: qcom: track each Cliffs proxy enable reference
+
+Linux 7.3 regulator_bulk_enable() ignores failed rollback disables, while
+regulator_bulk_disable() only logs a failed rollback enable. A single bulk
+success flag cannot represent the resulting partial set of owned references.
+
+Use the existing per-rail voltage/load ledger for enable references too.
+Release each reference explicitly and retain its votes if disable fails.
+Retries skip completed releases and never duplicate an owned enable. Keep
+the original enable error and the cleanup result separately. Bulk acquisition
+and the generic genpd path stay unchanged; no new CDSP match is enabled.
+
+Compared with signed Linux 7.3 drivers/regulator/core.c and the earlier
+project proxy prototype 52bbf80. Retain upstream Linux/Qualcomm GPL attribution.
+Host fault injection does not establish physical rail or startup acceptance.
+
+--- a/drivers/remoteproc/qcom_q6v5_pas.c
++++ b/drivers/remoteproc/qcom_q6v5_pas.c
+@@ -101,7 +101,7 @@
+ 	struct regulator_bulk_data proxy_regs[3];
+ 	u8 proxy_voltage_mask;
+ 	u8 proxy_load_mask;
+-	bool proxy_regs_enabled;
++	u8 proxy_enable_mask;
+ 	int proxy_error;
+ 	enum qcom_pas_stop_phase stop_phase;
+ 
+@@ -196,6 +196,17 @@
+ 	while (count--) {
+ 		int ret;
+ 
++		if (pas->proxy_enable_mask & BIT(count)) {
++			ret = regulator_disable(pas->proxy_regs[count].consumer);
++			if (ret) {
++				if (!error)
++					error = ret;
++				dev_err(pas->dev, "failed to disable %s proxy: %d\n",
++					pas->proxy_regs[count].supply, ret);
++				continue;
++			}
++			pas->proxy_enable_mask &= ~BIT(count);
++		}
+ 		if (pas->proxy_voltage_mask & BIT(count)) {
+ 			ret = regulator_set_voltage(pas->proxy_regs[count].consumer, 0, INT_MAX);
+ 			if (ret) {
+@@ -231,7 +242,7 @@
+ 	int i;
+ 
+ 	if (pas->proxy_regulator_level) {
+-		if (pas->proxy_regs_enabled) {
++		if (pas->proxy_enable_mask == BIT(pas->proxy_regulator_count) - 1) {
+ 			pas->proxy_error = 0;
+ 			return 0;
+ 		}
+@@ -249,10 +260,14 @@
+ 				goto unvote_proxy;
+ 			pas->proxy_voltage_mask |= BIT(rail);
+ 		}
+-		ret = regulator_bulk_enable(pas->proxy_regulator_count, pas->proxy_regs);
+-		if (ret)
+-			goto unvote_proxy;
+-		pas->proxy_regs_enabled = true;
++		for (rail = 0; rail < pas->proxy_regulator_count; rail++) {
++			if (pas->proxy_enable_mask & BIT(rail))
++				continue;
++			ret = regulator_enable(pas->proxy_regs[rail].consumer);
++			if (ret)
++				goto unvote_proxy;
++			pas->proxy_enable_mask |= BIT(rail);
++		}
+ 		pas->proxy_error = 0;
+ 		return 0;
+ 	}
+@@ -288,16 +303,6 @@
+ 	int i;
+ 
+ 	if (pas->proxy_regulator_level) {
+-		if (pas->proxy_regs_enabled) {
+-			int ret = regulator_bulk_disable(pas->proxy_regulator_count, pas->proxy_regs);
+-
+-			if (ret) {
+-				dev_err(pas->dev, "failed to disable proxy regulators: %d\n", ret);
+-				pas->proxy_error = ret;
+-				return ret;
+-			}
+-			pas->proxy_regs_enabled = false;
+-		}
+ 		pas->proxy_error = qcom_pas_proxy_unvote(pas, pas->proxy_regulator_count);
+ 		return pas->proxy_error;
+ 	}

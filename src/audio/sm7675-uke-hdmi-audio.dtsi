@@ -1,0 +1,28 @@
+/* SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause */
+#include <dt-bindings/sound/qcom,q6dsp-lpass-ports.h>
+
+&uke_q6apm_dais {
+	/* Exact Uke audio-ion stream identities; never use identity DMA. */
+	iommus = <&apps_smmu 0x1001 0x80>, <&apps_smmu 0x1061 0>;
+	dma-coherent;
+	xiaomi,hdmi-only;
+	status = "okay";
+};
+
+&uke_q6apm_bedais {
+	status = "okay";
+};
+
+&{/} {
+	sound-uke {
+		compatible = "xiaomi,uke-hdmi-audio-card";
+		model = "POCO-Pad-X1-HDMI";
+
+		hdmi-dai-link {
+			link-name = "DISPLAY_PORT_RX_0";
+			cpu { sound-dai = <&uke_q6apm_bedais DISPLAY_PORT_RX_0>; };
+			codec { sound-dai = <&uke_dp>; };
+			platform { sound-dai = <&uke_q6apm>; };
+		};
+	};
+};

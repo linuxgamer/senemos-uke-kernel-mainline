@@ -1,0 +1,63 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: qcom: preserve APM unmap result and buffer type
+
+The unmap callback reports the outer basic-response opcode instead of
+UNMAP_REGIONS, so the synchronous waiter cannot complete. It also drops
+firmware errors and clears the data handle even for a failed position
+buffer unmap. Carry the existing map-type token bit through unmap,
+preserve the returned opcode/status, and clear only the selected handle
+on firmware success. Ignore a reply for a missing graph.
+
+This uses the native AudioReach map token contract in audioreach.h and
+q6apm.c. The reviewed upstream snapshot retains the old unmap path.
+Uke OEM audio 8eb0eccb and same-SoC OnePlus 1138e00f use a
+different audio graph/memory integration and supply no drop-in native
+fix. No OEM code, board value or firmware selector is copied.
+
+Caller-side DMA error recovery, stale graph-token reuse and graph lifetime
+remain separate. No stream, firmware service or audio profile is enabled.
+
+---
+--- a/sound/soc/qcom/qdsp6/q6apm.c
++++ b/sound/soc/qcom/qdsp6/q6apm.c
+@@ -350,8 +350,9 @@
+ 	struct q6apm *apm = dev_get_drvdata(dev->parent);
+ 	struct audioreach_graph_info *info;
+ 	uint32_t mem_map_handle;
++	uint32_t pos_mask = is_pos_buf ? APM_MMAP_TOKEN_MAP_TYPE_POS_BUF : 0;
+ 	struct gpr_pkt *pkt __free(kfree) = audioreach_alloc_apm_cmd_pkt(sizeof(*cmd),
+-						APM_CMD_SHARED_MEM_UNMAP_REGIONS, graph_id);
++					APM_CMD_SHARED_MEM_UNMAP_REGIONS, graph_id | pos_mask);
+ 	if (IS_ERR(pkt))
+ 		return PTR_ERR(pkt);
+ 
+@@ -1020,17 +1021,18 @@
+ 			wake_up(&apm->wait);
+ 			break;
+ 		case APM_CMD_SHARED_MEM_UNMAP_REGIONS:
+-			apm->result.opcode = hdr->opcode;
+-			apm->result.status = 0;
+-			rsp = data->payload;
+-
+-			info = idr_find(&apm->graph_info_idr, hdr->token);
+-			if (info)
+-				info->mem_map_handle = 0;
+-			else
+-				dev_err(dev, "Error (%d) Processing 0x%08x cmd\n", result->status,
+-					result->opcode);
+-
++			graph_id = hdr->token & APM_MMAP_TOKEN_GID_MASK;
++			is_pos_buf = hdr->token & APM_MMAP_TOKEN_MAP_TYPE_POS_BUF;
++			info = idr_find(&apm->graph_info_idr, graph_id);
++			if (!info)
++				break;
++			if (!result->status) {
++				if (is_pos_buf)
++					info->pos_buf_mem_map_handle = 0;
++				else
++					info->mem_map_handle = 0;
++			}
++			apm->result = *result;
+ 			wake_up(&apm->wait);
+ 			break;
+ 		default:

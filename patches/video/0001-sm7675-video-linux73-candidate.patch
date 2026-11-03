@@ -1,0 +1,778 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] media: qcom: rebase dormant Cliffs Iris33 and VIDEOCC on Linux 7.3
+
+Rebase the six source-only Iris candidates from 67c9ee7a. Preserve the
+existing upstream platforms, use the 7.3 gen2 firmware descriptor, and
+adapt the negative VIDEOCC OPP binding condition. Attribution: Qualcomm,
+Alexandr Zubtsov, MiCode 5712080a and OnePlus SM7675 1138e00f.
+
+No consumer DT or Iris match is enabled. Firmware memory and split IOMMU
+ownership, controller retention and physical acceptance remain open.
+
+diff -ruN --no-dereference a/Documentation/devicetree/bindings/clock/qcom,sm8450-videocc.yaml b/Documentation/devicetree/bindings/clock/qcom,sm8450-videocc.yaml
+--- a/Documentation/devicetree/bindings/clock/qcom,sm8450-videocc.yaml	2026-10-25 11:56:14.151607975 +0300
++++ b/Documentation/devicetree/bindings/clock/qcom,sm8450-videocc.yaml	2026-10-25 11:57:17.237873714 +0300
+@@ -19,6 +19,7 @@
+     include/dt-bindings/clock/qcom,hawi-videocc.h
+     include/dt-bindings/clock/qcom,kaanapali-videocc.h
+     include/dt-bindings/clock/qcom,maili-videocc.h
++    include/dt-bindings/clock/qcom,sm7675-videocc.h
+     include/dt-bindings/clock/qcom,sm8450-videocc.h
+     include/dt-bindings/clock/qcom,sm8650-videocc.h
+     include/dt-bindings/clock/qcom,sm8750-videocc.h
+@@ -31,6 +32,7 @@
+       - qcom,hawi-videocc
+       - qcom,kaanapali-videocc
+       - qcom,maili-videocc
++      - qcom,sm7675-videocc
+       - qcom,sm8450-videocc
+       - qcom,sm8475-videocc
+       - qcom,sm8550-videocc
+@@ -58,10 +60,15 @@
+       - description: MMCX performance point
+       - description: MXC performance point
+ 
++  vdd_mm-supply:
++    description: Aggregated MMCX voltage-corner regulator for SM7675
++
++  vdd_mxc-supply:
++    description: Aggregated MXC voltage-corner regulator for SM7675
++
+ required:
+   - compatible
+   - clocks
+-  - power-domains
+   - '#power-domain-cells'
+ 
+ allOf:
+@@ -72,12 +79,31 @@
+           not:
+             contains:
+               enum:
++                - qcom,sm7675-videocc
+                 - qcom,sm8475-videocc
+                 - qcom,sm8650-videocc
+     then:
+       required:
+         - required-opps
+ 
++  - if:
++      properties:
++        compatible:
++          const: qcom,sm7675-videocc
++    then:
++      required:
++        - vdd_mm-supply
++        - vdd_mxc-supply
++      properties:
++        power-domains: false
++        required-opps: false
++    else:
++      required:
++        - power-domains
++      properties:
++        vdd_mm-supply: false
++        vdd_mxc-supply: false
++
+ unevaluatedProperties: false
+ 
+ examples:
+diff -ruN --no-dereference a/drivers/clk/qcom/uke-videocc-votes.c b/drivers/clk/qcom/uke-videocc-votes.c
+--- a/drivers/clk/qcom/uke-videocc-votes.c	1970-01-01 02:00:00.000000000 +0200
++++ b/drivers/clk/qcom/uke-videocc-votes.c	2026-10-25 11:57:17.275873874 +0300
+@@ -0,0 +1,119 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc.
++ * Cliffs tables from MiCode 5712080a, videocc-pineapple.c.
++ * Include in videocc-sm8550.c; use the existing regulator aggregator.
++ */
++#include "vdd-level.h"
++
++static DEFINE_VDD_REGULATORS(uke_video_mm, VDD_HIGH + 1, 1, vdd_corner);
++static DEFINE_VDD_REGULATORS(uke_video_mxc, VDD_HIGH + 1, 1, vdd_corner);
++static struct clk_vdd_class *uke_video_regulators[] = {
++	&uke_video_mm, &uke_video_mxc,
++};
++static unsigned long uke_video_pll_rates[VDD_NUM] = {
++	[VDD_LOWER_D1] = 615000000, [VDD_LOW] = 1100000000,
++	[VDD_LOW_L1] = 1600000000, [VDD_NOMINAL] = 2000000000,
++};
++static unsigned long uke_video_mvs0_rates[VDD_NUM] = {
++	[VDD_LOWER_D1] = 576000000, [VDD_LOWER] = 720000000,
++	[VDD_LOW] = 1014000000, [VDD_LOW_L1] = 1098000000,
++	[VDD_NOMINAL] = 1332000000, [VDD_HIGH] = 1600000000,
++};
++static unsigned long uke_video_mvs1_rates[VDD_NUM] = {
++	[VDD_LOWER_D1] = 840000000, [VDD_LOWER] = 1050000000,
++	[VDD_LOW] = 1350000000, [VDD_LOW_L1] = 1500000000,
++	[VDD_NOMINAL] = 1650000000,
++};
++static struct clk_ops uke_video_pll_ops, uke_video_rcg_ops;
++static struct clk_init_data uke_video_inits[4];
++static bool uke_video_proxy_active;
++
++static int uke_video_pll_prepare(struct clk_hw *hw)
++{
++	int ret = clk_prepare_regmap(hw);
++
++	if (ret)
++		return ret;
++	ret = clk_alpha_pll_lucid_evo_ops.prepare(hw);
++	if (ret)
++		clk_unprepare_regmap(hw);
++	return ret;
++}
++
++static void uke_video_add_votes(struct clk_regmap *clock, unsigned long *rates,
++				const struct clk_ops *ops, bool pll, unsigned int index)
++{
++	clock->vdd_data = (struct clk_vdd_class_data) {
++		.num_rate_max = VDD_NUM, .rate_max = rates,
++	};
++	if (pll) {
++		clock->vdd_data.vdd_class = &uke_video_mxc;
++	} else {
++		clock->vdd_data.vdd_classes = uke_video_regulators;
++		clock->vdd_data.num_vdd_classes = ARRAY_SIZE(uke_video_regulators);
++	}
++	uke_video_inits[index] = *clock->hw.init;
++	uke_video_inits[index].ops = ops;
++	clock->hw.init = &uke_video_inits[index];
++}
++
++static void uke_video_voltage_release(void *data)
++{
++	if (uke_video_proxy_active) {
++		if (clk_vdd_proxy_unvote(data, &video_cc_sm7675_desc))
++			return;
++		uke_video_proxy_active = false;
++	}
++	clk_regulator_deinit(&video_cc_sm7675_desc);
++}
++
++static int uke_video_voltage_init(struct device *dev)
++{
++	int ret;
++
++	uke_video_mm.class_name = "vdd_mm";
++	uke_video_mxc.class_name = "vdd_mxc";
++	uke_video_mm.regulator_names[0] = "vdd_mm";
++	uke_video_mxc.regulator_names[0] = "vdd_mxc";
++	uke_video_pll_ops = clk_alpha_pll_lucid_evo_ops;
++	uke_video_rcg_ops = clk_rcg2_shared_ops;
++	uke_video_pll_ops.prepare = uke_video_pll_prepare;
++	uke_video_rcg_ops.prepare = clk_prepare_regmap;
++	uke_video_pll_ops.unprepare = clk_unprepare_regmap;
++	uke_video_rcg_ops.unprepare = clk_unprepare_regmap;
++	uke_video_pll_ops.pre_rate_change = clk_pre_change_regmap;
++	uke_video_rcg_ops.pre_rate_change = clk_pre_change_regmap;
++	uke_video_pll_ops.post_rate_change = clk_post_change_regmap;
++	uke_video_rcg_ops.post_rate_change = clk_post_change_regmap;
++	uke_video_add_votes(&video_cc_pll0.clkr, uke_video_pll_rates,
++			    &uke_video_pll_ops, true, 0);
++	uke_video_add_votes(&video_cc_pll1.clkr, uke_video_pll_rates,
++			    &uke_video_pll_ops, true, 1);
++	uke_video_add_votes(&video_cc_mvs0_clk_src.clkr, uke_video_mvs0_rates,
++			    &uke_video_rcg_ops, false, 2);
++	uke_video_add_votes(&video_cc_mvs1_clk_src.clkr, uke_video_mvs1_rates,
++			    &uke_video_rcg_ops, false, 3);
++	video_cc_sm7675_desc.clk_regulators = uke_video_regulators;
++	video_cc_sm7675_desc.num_clk_regulators = ARRAY_SIZE(uke_video_regulators);
++	ret = clk_regulator_init(dev, &video_cc_sm7675_desc);
++	if (ret)
++		return ret;
++	ret = devm_add_action_or_reset(dev, uke_video_voltage_release, dev);
++	if (ret)
++		return ret;
++	ret = clk_vdd_proxy_vote(dev, &video_cc_sm7675_desc);
++	if (!ret)
++		uke_video_proxy_active = true;
++	return ret;
++}
++
++static void uke_video_sync_state(struct device *dev)
++{
++	if (!of_device_is_compatible(dev->of_node, "qcom,sm7675-videocc"))
++		return;
++	if (clk_sync_state(dev))
++		return;
++	if (uke_video_proxy_active && !clk_vdd_proxy_unvote(dev, &video_cc_sm7675_desc))
++		uke_video_proxy_active = false;
++}
+diff -ruN --no-dereference a/drivers/clk/qcom/videocc-sm8550.c b/drivers/clk/qcom/videocc-sm8550.c
+--- a/drivers/clk/qcom/videocc-sm8550.c	2026-10-25 11:56:14.180608097 +0300
++++ b/drivers/clk/qcom/videocc-sm8550.c	2026-10-25 11:56:14.327810072 +0300
+@@ -1,6 +1,7 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ /*
+  * Copyright (c) 2023-2024, Qualcomm Innovation Center, Inc. All rights reserved.
++ * SM7675 variant adapted from Alexandr Zubtsov's Palawan support.
+  */
+ 
+ #include <linux/clk-provider.h>
+@@ -8,7 +9,7 @@
+ #include <linux/platform_device.h>
+ #include <linux/regmap.h>
+ 
+-#include <dt-bindings/clock/qcom,sm8650-videocc.h>
++#include <dt-bindings/clock/qcom,sm7675-videocc.h>
+ 
+ #include "clk-alpha-pll.h"
+ #include "clk-branch.h"
+@@ -144,6 +145,18 @@
+ 	{ }
+ };
+ 
++static const struct freq_tbl ftbl_video_cc_mvs0_clk_src_sm7675[] = {
++	F(576000000, P_VIDEO_CC_PLL0_OUT_MAIN, 1, 0, 0),
++	F(633000000, P_VIDEO_CC_PLL0_OUT_MAIN, 1, 0, 0),
++	F(720000000, P_VIDEO_CC_PLL0_OUT_MAIN, 1, 0, 0),
++	F(1014000000, P_VIDEO_CC_PLL0_OUT_MAIN, 1, 0, 0),
++	F(1098000000, P_VIDEO_CC_PLL0_OUT_MAIN, 1, 0, 0),
++	F(1113000000, P_VIDEO_CC_PLL0_OUT_MAIN, 1, 0, 0),
++	F(1332000000, P_VIDEO_CC_PLL0_OUT_MAIN, 1, 0, 0),
++	F(1600000000, P_VIDEO_CC_PLL0_OUT_MAIN, 1, 0, 0),
++	{ }
++};
++
+ static const struct freq_tbl ftbl_video_cc_mvs0_clk_src_x1e80100[] = {
+ 	F(576000000, P_VIDEO_CC_PLL0_OUT_MAIN, 1, 0, 0),
+ 	F(720000000, P_VIDEO_CC_PLL0_OUT_MAIN, 1, 0, 0),
+@@ -530,6 +543,18 @@
+ 	[VIDEO_CC_XO_CLK_ARES] = { .reg = 0x8124, .bit = 2, .udelay = 100 },
+ };
+ 
++static const struct qcom_reset_map video_cc_sm7675_resets[] = {
++	[CVP_VIDEO_CC_INTERFACE_BCR] = { 0x80f0 },
++	[CVP_VIDEO_CC_MVS0_BCR] = { 0x80a0 },
++	[CVP_VIDEO_CC_MVS0C_BCR] = { 0x8048 },
++	[CVP_VIDEO_CC_MVS1_BCR] = { 0x80c8 },
++	[CVP_VIDEO_CC_MVS1C_BCR] = { 0x8074 },
++	[VIDEO_CC_MVS0C_CLK_ARES] = { .reg = 0x8064, .bit = 2, .udelay = 1000 },
++	[VIDEO_CC_MVS1C_CLK_ARES] = { .reg = 0x8090, .bit = 2, .udelay = 1000 },
++	[VIDEO_CC_XO_CLK_ARES] = { .reg = 0x8124, .bit = 2, .udelay = 100 },
++	[VIDEO_CC_MVS0_CLK_ARES] = { .reg = 0x80b8, .bit = 2, .udelay = 400 },
++};
++
+ static struct clk_alpha_pll *video_cc_sm8550_plls[] = {
+ 	&video_cc_pll0,
+ 	&video_cc_pll1,
+@@ -574,7 +599,22 @@
+ 	.driver_data = &video_cc_sm8550_driver_data,
+ };
+ 
++static struct qcom_cc_desc video_cc_sm7675_desc = {
++	.config = &video_cc_sm8550_regmap_config,
++	.clks = video_cc_sm8550_clocks,
++	.num_clks = ARRAY_SIZE(video_cc_sm8550_clocks),
++	.resets = video_cc_sm7675_resets,
++	.num_resets = ARRAY_SIZE(video_cc_sm7675_resets),
++	.gdscs = video_cc_sm8550_gdscs,
++	.num_gdscs = ARRAY_SIZE(video_cc_sm8550_gdscs),
++	.use_rpm = true,
++	.driver_data = &video_cc_sm8550_driver_data,
++};
++
++#include "uke-videocc-votes.c"
++
+ static const struct of_device_id video_cc_sm8550_match_table[] = {
++	{ .compatible = "qcom,sm7675-videocc" },
+ 	{ .compatible = "qcom,sm8550-videocc" },
+ 	{ .compatible = "qcom,sm8650-videocc" },
+ 	{ .compatible = "qcom,x1e80100-videocc" },
+@@ -584,6 +624,9 @@
+ 
+ static int video_cc_sm8550_probe(struct platform_device *pdev)
+ {
++	bool is_sm7675 = of_device_is_compatible(pdev->dev.of_node, "qcom,sm7675-videocc");
++	int ret;
++
+ 	if (of_device_is_compatible(pdev->dev.of_node, "qcom,x1e80100-videocc")) {
+ 		video_cc_pll0_config.l = 0x1e;
+ 		video_cc_pll0_config.alpha = 0x0000;
+@@ -593,25 +636,50 @@
+ 		video_cc_mvs1_clk_src.freq_tbl = ftbl_video_cc_mvs1_clk_src_x1e80100;
+ 	}
+ 
+-	if (of_device_is_compatible(pdev->dev.of_node, "qcom,sm8650-videocc")) {
++	if (is_sm7675 || of_device_is_compatible(pdev->dev.of_node, "qcom,sm8650-videocc")) {
+ 		video_cc_pll0_config.l = 0x1e;
+-		video_cc_pll0_config.alpha = 0xa000;
++		video_cc_pll0_config.alpha = is_sm7675 ? 0x0 : 0xa000;
+ 		video_cc_pll1_config.l = 0x2b;
+ 		video_cc_pll1_config.alpha = 0xc000;
+-		video_cc_mvs0_clk_src.freq_tbl = ftbl_video_cc_mvs0_clk_src_sm8650;
+-		video_cc_mvs1_clk_src.freq_tbl = ftbl_video_cc_mvs1_clk_src_sm8650;
++		video_cc_mvs0_clk_src.freq_tbl = is_sm7675 ?
++			ftbl_video_cc_mvs0_clk_src_sm7675 : ftbl_video_cc_mvs0_clk_src_sm8650;
++		video_cc_mvs1_clk_src.freq_tbl = is_sm7675 ?
++			ftbl_video_cc_mvs1_clk_src_x1e80100 : ftbl_video_cc_mvs1_clk_src_sm8650;
+ 		video_cc_sm8550_clocks[VIDEO_CC_MVS0_SHIFT_CLK] = &video_cc_mvs0_shift_clk.clkr;
+ 		video_cc_sm8550_clocks[VIDEO_CC_MVS0C_SHIFT_CLK] = &video_cc_mvs0c_shift_clk.clkr;
+ 		video_cc_sm8550_clocks[VIDEO_CC_MVS1_SHIFT_CLK] = &video_cc_mvs1_shift_clk.clkr;
+ 		video_cc_sm8550_clocks[VIDEO_CC_MVS1C_SHIFT_CLK] = &video_cc_mvs1c_shift_clk.clkr;
+ 		video_cc_sm8550_clocks[VIDEO_CC_XO_CLK_SRC] = &video_cc_xo_clk_src.clkr;
+ 
+-		video_cc_sm8550_driver_data.clk_cbcrs = video_cc_sm8650_critical_cbcrs;
+-		video_cc_sm8550_driver_data.num_clk_cbcrs =
+-							ARRAY_SIZE(video_cc_sm8650_critical_cbcrs);
++		if (is_sm7675) {
++			/* Cliffs sleep is at 0x8140; 0x8150 is the MVS1C shift branch. */
++			video_cc_mvs0_shift_clk.halt_reg = 0x8144;
++			video_cc_mvs0_shift_clk.hwcg_reg = 0x8144;
++			video_cc_mvs0_shift_clk.clkr.enable_reg = 0x8144;
++			video_cc_mvs0c_shift_clk.halt_reg = 0x8148;
++			video_cc_mvs0c_shift_clk.hwcg_reg = 0x8148;
++			video_cc_mvs0c_shift_clk.clkr.enable_reg = 0x8148;
++			video_cc_mvs1_shift_clk.halt_reg = 0x814c;
++			video_cc_mvs1_shift_clk.hwcg_reg = 0x814c;
++			video_cc_mvs1_shift_clk.clkr.enable_reg = 0x814c;
++			video_cc_mvs1c_shift_clk.halt_reg = 0x8150;
++			video_cc_mvs1c_shift_clk.hwcg_reg = 0x8150;
++			video_cc_mvs1c_shift_clk.clkr.enable_reg = 0x8150;
++		} else {
++			video_cc_sm8550_driver_data.clk_cbcrs = video_cc_sm8650_critical_cbcrs;
++			video_cc_sm8550_driver_data.num_clk_cbcrs =
++				ARRAY_SIZE(video_cc_sm8650_critical_cbcrs);
++		}
++	}
++
++	if (is_sm7675) {
++		ret = uke_video_voltage_init(&pdev->dev);
++		if (ret)
++			return dev_err_probe(&pdev->dev, ret,
++					     "VIDEOCC voltage votes unavailable\n");
+ 	}
+ 
+-	return qcom_cc_probe(pdev, &video_cc_sm8550_desc);
++	return qcom_cc_probe(pdev, is_sm7675 ? &video_cc_sm7675_desc : &video_cc_sm8550_desc);
+ }
+ 
+ static struct platform_driver video_cc_sm8550_driver = {
+@@ -619,6 +687,7 @@
+ 	.driver = {
+ 		.name = "video_cc-sm8550",
+ 		.of_match_table = video_cc_sm8550_match_table,
++		.sync_state = uke_video_sync_state,
+ 	},
+ };
+ 
+diff -ruN --no-dereference a/drivers/media/platform/qcom/iris/iris_hfi_common.c b/drivers/media/platform/qcom/iris/iris_hfi_common.c
+--- a/drivers/media/platform/qcom/iris/iris_hfi_common.c	2026-10-25 11:56:14.192608147 +0300
++++ b/drivers/media/platform/qcom/iris/iris_hfi_common.c	2026-10-25 11:56:14.322539621 +0300
+@@ -176,5 +176,5 @@
+ error:
+ 	dev_err(core->dev, "failed to resume\n");
+ 
+-	return -EBUSY;
++	return ret;
+ }
+diff -ruN --no-dereference a/drivers/media/platform/qcom/iris/iris_platform_common.h b/drivers/media/platform/qcom/iris/iris_platform_common.h
+--- a/drivers/media/platform/qcom/iris/iris_platform_common.h	2026-10-25 11:56:14.200608181 +0300
++++ b/drivers/media/platform/qcom/iris/iris_platform_common.h	2026-10-25 11:56:14.303608615 +0300
+@@ -60,6 +60,7 @@
+ extern const struct iris_platform_data sm8250_data;
+ extern const struct iris_platform_data sm8550_data;
+ extern const struct iris_platform_data sm8650_data;
++extern const struct iris_platform_data sm7675_data;
+ extern const struct iris_platform_data sm8750_data;
+ extern const struct iris_platform_data x1p42100_data;
+ 
+diff -ruN --no-dereference a/drivers/media/platform/qcom/iris/iris_platform_sm7675.h b/drivers/media/platform/qcom/iris/iris_platform_sm7675.h
+--- a/drivers/media/platform/qcom/iris/iris_platform_sm7675.h	1970-01-01 02:00:00.000000000 +0200
++++ b/drivers/media/platform/qcom/iris/iris_platform_sm7675.h	2026-10-25 11:56:14.304806762 +0300
+@@ -0,0 +1,25 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/* Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. */
++#ifndef __IRIS_PLATFORM_SM7675_H__
++#define __IRIS_PLATFORM_SM7675_H__
++
++/* Native startup names: GCC AXI reset and MVS0C clock ARES, not OEM IDs. */
++static const char * const sm7675_clk_reset_table[] = { "bus", "core" };
++static const char * const sm7675_controller_reset_table[] = { "xo" };
++
++/* Common non-AV1 decoder limits across the inspected Cliffs SKU tables. */
++static struct platform_inst_caps platform_inst_cap_sm7675 = {
++	.min_frame_width = 96,
++	.max_frame_width = 4096,
++	.min_frame_height = 96,
++	.max_frame_height = 4096,
++	.max_mbpf = (4096 * 2160) / 256,
++	.mb_cycles_vsp = 60,
++	.mb_cycles_vpp = 200,
++	.mb_cycles_fw = 489583,
++	.mb_cycles_fw_vpp = 66234,
++	.max_frame_rate = 180,
++	.max_operating_rate = 180,
++};
++
++#endif
+diff -ruN --no-dereference a/drivers/media/platform/qcom/iris/iris_platform_vpu3x.c b/drivers/media/platform/qcom/iris/iris_platform_vpu3x.c
+--- a/drivers/media/platform/qcom/iris/iris_platform_vpu3x.c	2026-10-25 11:56:14.210608223 +0300
++++ b/drivers/media/platform/qcom/iris/iris_platform_vpu3x.c	2026-10-25 11:57:17.238873718 +0300
+@@ -13,6 +13,7 @@
+ #include "iris_vpu_common.h"
+ 
+ #include "iris_platform_qcs8300.h"
++#include "iris_platform_sm7675.h"
+ #include "iris_platform_sm8550.h"
+ #include "iris_platform_sm8650.h"
+ #include "iris_platform_sm8750.h"
+@@ -42,6 +43,12 @@
+ 	.fwname = "qcom/vpu/vpu33_p4.mbn",
+ };
+ 
++static const struct iris_firmware_desc iris_vpu33_2p_gen2_desc = {
++	.firmware_data = &iris_hfi_gen2_data,
++	.get_vpu_buffer_size = iris_vpu33_buf_size,
++	.fwname = "qcom/uke/vpu30_2v.mbn",
++};
++
+ static const struct iris_firmware_desc iris_vpu35_p4_gen2_desc = {
+ 	.firmware_data = &iris_hfi_gen2_data,
+ 	.get_vpu_buffer_size = iris_vpu33_buf_size,
+@@ -55,6 +62,12 @@
+ 	[IRIS_FMT_AV1] = V4L2_PIX_FMT_AV1,
+ };
+ 
++static const u32 iris_fmts_sm7675_dec[] = {
++	[IRIS_FMT_H264] = V4L2_PIX_FMT_H264,
++	[IRIS_FMT_HEVC] = V4L2_PIX_FMT_HEVC,
++	[IRIS_FMT_VP9] = V4L2_PIX_FMT_VP9,
++};
++
+ static const struct icc_info iris_icc_info_vpu3x[] = {
+ 	{ "cpu-cfg",    1000, 1000     },
+ 	{ "video-mem",  1000, 15000000 },
+@@ -184,6 +197,36 @@
+ 	.max_core_mbps = ((7680 * 4320) / 256) * 60,
+ };
+ 
++/* Dormant until firmware mapping, providers and controller retention are closed. */
++const struct iris_platform_data sm7675_data = {
++	.firmware_desc_gen2 = &iris_vpu33_2p_gen2_desc,
++	.vpu_ops = &iris_vpu33_2p_ops,
++	.icc_tbl = iris_icc_info_vpu3x,
++	.icc_tbl_size = ARRAY_SIZE(iris_icc_info_vpu3x),
++	.clk_rst_tbl = sm7675_clk_reset_table,
++	.clk_rst_tbl_size = ARRAY_SIZE(sm7675_clk_reset_table),
++	.controller_rst_tbl = sm7675_controller_reset_table,
++	.controller_rst_tbl_size = ARRAY_SIZE(sm7675_controller_reset_table),
++	.bw_tbl_dec = iris_bw_table_dec_vpu3x,
++	.bw_tbl_dec_size = ARRAY_SIZE(iris_bw_table_dec_vpu3x),
++	.pmdomain_tbl = iris_pmdomain_table_vpu3x,
++	.pmdomain_tbl_size = ARRAY_SIZE(iris_pmdomain_table_vpu3x),
++	/* Voltage corners are owned by VIDEOCC's existing regulator aggregator. */
++	.clk_tbl = sm8550_clk_table,
++	.clk_tbl_size = ARRAY_SIZE(sm8550_clk_table),
++	.opp_clk_tbl = iris_opp_clk_table_vpu3x,
++	.dma_mask = 0xe0000000 - 1,
++	.inst_iris_fmts = iris_fmts_sm7675_dec,
++	.inst_iris_fmts_size = ARRAY_SIZE(iris_fmts_sm7675_dec),
++	.inst_caps = &platform_inst_cap_sm7675,
++	.tz_cp_config_data = tz_cp_config_vpu3,
++	.tz_cp_config_data_size = ARRAY_SIZE(tz_cp_config_vpu3),
++	.num_vpp_pipe = 2,
++	.max_session_count = 16,
++	.max_core_mbpf = 104448,
++	.max_core_mbps = 2203200,
++};
++
+ const struct iris_platform_data sm8750_data = {
+ 	.firmware_desc_gen2 = &iris_vpu35_p4_gen2_desc,
+ 	.vpu_ops = &iris_vpu35_ops,
+diff -ruN --no-dereference a/drivers/media/platform/qcom/iris/iris_probe.c b/drivers/media/platform/qcom/iris/iris_probe.c
+--- a/drivers/media/platform/qcom/iris/iris_probe.c	2026-10-25 11:56:14.220608265 +0300
++++ b/drivers/media/platform/qcom/iris/iris_probe.c	2026-10-25 11:56:14.328608720 +0300
+@@ -64,7 +64,10 @@
+ 	if (ret < 0)
+ 		return ret;
+ 
+-	ret =  devm_pm_domain_attach_list(core->dev, &iris_opp_pd_data, &core->opp_pmdomain_tbl);
++	ret = 0;
++	if (iris_opp_pd_data.num_pd_names)
++		ret = devm_pm_domain_attach_list(core->dev, &iris_opp_pd_data,
++						&core->opp_pmdomain_tbl);
+ 	/* backwards compatibility for incomplete ABI SM8250 */
+ 	if (ret == -ENODEV &&
+ 	    of_device_is_compatible(core->dev->of_node, "qcom,sm8250-venus")) {
+diff -ruN --no-dereference a/drivers/media/platform/qcom/iris/iris_resources.c b/drivers/media/platform/qcom/iris/iris_resources.c
+--- a/drivers/media/platform/qcom/iris/iris_resources.c	2026-10-25 11:56:14.230608307 +0300
++++ b/drivers/media/platform/qcom/iris/iris_resources.c	2026-10-25 11:56:14.322012101 +0300
+@@ -37,12 +37,15 @@
+ 
+ 			core->icc_tbl[i].avg_bw = bw_kbps;
+ 
+-			core->power.icc_bw = bw_kbps;
+ 			break;
+ 		}
+ 	}
+ 
+-	return icc_bulk_set_bw(core->icc_count, core->icc_tbl);
++	ret = icc_bulk_set_bw(core->icc_count, core->icc_tbl);
++	/* A failed bulk vote can be partial; force the next request to retry. */
++	core->power.icc_bw = ret ? 0 : bw_kbps;
++
++	return ret;
+ }
+ 
+ int iris_unset_icc_bw(struct iris_core *core)
+diff -ruN --no-dereference a/drivers/media/platform/qcom/iris/iris_vpu33_2p.h b/drivers/media/platform/qcom/iris/iris_vpu33_2p.h
+--- a/drivers/media/platform/qcom/iris/iris_vpu33_2p.h	1970-01-01 02:00:00.000000000 +0200
++++ b/drivers/media/platform/qcom/iris/iris_vpu33_2p.h	2026-10-25 11:56:14.307032641 +0300
+@@ -0,0 +1,49 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/* Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. */
++#ifndef __IRIS_VPU33_2P_H__
++#define __IRIS_VPU33_2P_H__
++
++#include <linux/io.h>
++
++#define IRIS33_2P_NOC_MAINCTL	0x13508
++#define IRIS33_2P_NOC_ERRCLR	0x13518
++#define IRIS33_2P_NOC_FAULTINEN	0x13240
++#define IRIS33_2P_NOC_SENSE0_LO	0x13300
++#define IRIS33_2P_NOC_SENSE0_HI	0x13304
++#define IRIS33_2P_NOC_SENSE1_HI	0x1330c
++#define IRIS33_2P_NOC_SENSE2_LO	0x13310
++#define IRIS33_2P_DMA_SPARE3	0x087b8
++
++/* Caller holds the XO reset and has enabled controller/hardware clocks. */
++static inline void iris_vpu33_2p_noc_init(u8 __iomem *base)
++{
++	writel(1, base + IRIS33_2P_NOC_ERRCLR);
++	writel(3, base + IRIS33_2P_NOC_MAINCTL);
++	writel(1, base + IRIS33_2P_NOC_FAULTINEN);
++}
++
++static inline void iris_vpu33_2p_write_presets(u8 __iomem *base)
++{
++	u32 value = readl(base + 0xb0088);
++
++	writel(value & ~0x11, base + 0xb0088);
++	writel(0x33332222, base + 0x10830);
++	writel(0x44444444, base + 0x10834);
++	writel(0x00001022, base + 0x10838);
++	writel(0x99, base + 0xa013c);
++	iris_vpu33_2p_noc_init(base);
++}
++
++static inline u32 iris_vpu33_2p_noc_busy(u8 __iomem *base)
++{
++	u32 busy;
++
++	busy = readl(base + IRIS33_2P_NOC_SENSE0_LO) & 0x00008000;
++	busy |= readl(base + IRIS33_2P_NOC_SENSE0_HI) & 0x00000800;
++	busy |= readl(base + IRIS33_2P_NOC_SENSE1_HI) & 0x00800000;
++	busy |= readl(base + IRIS33_2P_NOC_SENSE2_LO) & 0x00002000;
++
++	return busy;
++}
++
++#endif
+diff -ruN --no-dereference a/drivers/media/platform/qcom/iris/iris_vpu3x.c b/drivers/media/platform/qcom/iris/iris_vpu3x.c
+--- a/drivers/media/platform/qcom/iris/iris_vpu3x.c	2026-10-25 11:56:14.237608337 +0300
++++ b/drivers/media/platform/qcom/iris/iris_vpu3x.c	2026-10-25 11:56:14.307608632 +0300
+@@ -5,11 +5,13 @@
+  */
+ 
+ #include <linux/iopoll.h>
++#include <linux/pm_domain.h>
+ #include <linux/reset.h>
+ 
+ #include "iris_instance.h"
+ #include "iris_vpu_common.h"
+ #include "iris_vpu_register_defines.h"
++#include "iris_vpu33_2p.h"
+ 
+ #define AON_WRAPPER_MVP_NOC_CORE_SW_RESET	(AON_BASE_OFFS + 0x18)
+ #define SW_RESET				BIT(0)
+@@ -134,6 +136,84 @@
+ 	iris_vpu_power_off_hw(core);
+ }
+ 
++static int iris_vpu33_2p_quiesce(struct iris_core *core)
++{
++	u32 value, i, count, busy;
++	void __iomem *control = core->reg_base + AON_WRAPPER_MVP_NOC_LPI_CONTROL;
++
++	value = readl(core->reg_base + WRAPPER_CORE_CLOCK_CONFIG);
++	if (value)
++		writel(CORE_CLK_RUN, core->reg_base + WRAPPER_CORE_CLOCK_CONFIG);
++
++	value = readl(core->reg_base + IRIS33_2P_DMA_SPARE3);
++	writel(value | BIT(0), core->reg_base + IRIS33_2P_DMA_SPARE3);
++
++	for (i = 0; i < 2; i++) {
++		int ret;
++
++		ret = readl_poll_timeout(core->reg_base + VCODEC_SS_IDLE_STATUSN + 4 * i,
++					value, value & BIT(22), 2000, 20000);
++		if (ret)
++			return ret;
++	}
++
++	for (count = 0; count < 1000; count++) {
++		value = readl(control);
++		writel(value | REQ_POWER_DOWN_PREP, control);
++		usleep_range(10, 20);
++		value = readl(core->reg_base + AON_WRAPPER_MVP_NOC_LPI_STATUS);
++		if ((value & NOC_LPI_STATUS_DONE) ||
++		    !(value & (NOC_LPI_STATUS_DENY | NOC_LPI_STATUS_ACTIVE)))
++			break;
++		value = readl(control);
++		writel(value & ~REQ_POWER_DOWN_PREP, control);
++		usleep_range(10, 20);
++	}
++	value = readl(control);
++	writel(value & ~REQ_POWER_DOWN_PREP, control);
++	if (count == 1000)
++		return -ETIMEDOUT;
++
++	for (count = 0; count < 101; count++) {
++		busy = iris_vpu33_2p_noc_busy(core->reg_base);
++		usleep_range(10, 20);
++		if (!busy)
++			break;
++	}
++	if (count == 101)
++		return -ETIMEDOUT;
++
++	writel(CORE_BRIDGE_SW_RESET | CORE_BRIDGE_HW_RESET_DISABLE,
++	       core->reg_base + CPU_CS_AHB_BRIDGE_SYNC_RESET);
++	writel(CORE_BRIDGE_HW_RESET_DISABLE, core->reg_base + CPU_CS_AHB_BRIDGE_SYNC_RESET);
++	writel(0, core->reg_base + CPU_CS_AHB_BRIDGE_SYNC_RESET);
++
++	return 0;
++}
++
++static void iris_vpu33_2p_power_off_hardware(struct iris_core *core)
++{
++	int ret;
++
++	if (iris_vpu3x_hw_power_collapsed(core))
++		goto disable_power;
++
++	ret = dev_pm_genpd_set_hwmode(core->pmdomain_tbl->pd_devs[IRIS_HW_POWER_DOMAIN], false);
++	if (!ret)
++		ret = iris_vpu33_2p_quiesce(core);
++	if (ret)
++		dev_err(core->dev, "Iris33 2P quiesce failed: %d\n", ret);
++
++disable_power:
++	/* Keep the native forced-shutdown policy; runtime fault handling is unqualified. */
++	iris_vpu_power_off_hw(core);
++}
++
++static void iris_vpu33_2p_set_preset_registers(struct iris_core *core)
++{
++	iris_vpu33_2p_write_presets(core->reg_base);
++}
++
+ static int iris_vpu33_power_off_controller(struct iris_core *core)
+ {
+ 	u32 xo_rst_tbl_size = core->iris_platform_data->controller_rst_tbl_size;
+@@ -271,6 +351,16 @@
+ 	.calc_freq = iris_vpu3x_vpu4x_calculate_frequency,
+ 	.set_hwmode = iris_vpu_set_hwmode,
+ };
++
++const struct vpu_ops iris_vpu33_2p_ops = {
++	.power_off_hw = iris_vpu33_2p_power_off_hardware,
++	.power_on_hw = iris_vpu_power_on_hw,
++	.power_off_controller = iris_vpu33_power_off_controller,
++	.power_on_controller = iris_vpu_power_on_controller,
++	.set_preset_registers = iris_vpu33_2p_set_preset_registers,
++	.calc_freq = iris_vpu3x_vpu4x_calculate_frequency,
++	.set_hwmode = iris_vpu_set_hwmode,
++};
+ 
+ const struct vpu_ops iris_vpu35_ops = {
+ 	.power_off_hw = iris_vpu35_power_off_hw,
+diff -ruN --no-dereference a/drivers/media/platform/qcom/iris/iris_vpu_common.c b/drivers/media/platform/qcom/iris/iris_vpu_common.c
+--- a/drivers/media/platform/qcom/iris/iris_vpu_common.c	2026-10-25 11:56:14.247608379 +0300
++++ b/drivers/media/platform/qcom/iris/iris_vpu_common.c	2026-10-25 11:56:14.322279597 +0300
+@@ -80,12 +80,14 @@
+ 	writel(ctrl_init, core->reg_base + CTRL_INIT);
+ 	writel(0x1, core->reg_base + CPU_CS_SCIACMDARG3);
+ 
+-	while (!ctrl_status && count < max_tries) {
++	while (count < max_tries) {
+ 		ctrl_status = readl(core->reg_base + CTRL_STATUS);
+-		if ((ctrl_status & CTRL_ERROR_STATUS__M) == 0x4) {
+-			dev_err(core->dev, "invalid setting for uc_region\n");
+-			break;
++		if (ctrl_status & CTRL_ERROR_STATUS__M) {
++			dev_err(core->dev, "firmware boot failed: status %#x\n", ctrl_status);
++			return -EIO;
+ 		}
++		if (ctrl_status & BIT(0))
++			break;
+ 
+ 		usleep_range(50, 100);
+ 		count++;
+@@ -481,7 +483,9 @@
+ 	freq = core->power.clk_freq ? core->power.clk_freq :
+ 				      (u32)ULONG_MAX;
+ 
+-	iris_opp_set_rate(core->dev, freq);
++	ret = iris_opp_set_rate(core->dev, freq);
++	if (ret)
++		goto err_power_off_hw;
+ 
+ 	iris_vpu_set_preset_registers(core);
+ 
+@@ -491,6 +495,8 @@
+ 
+ 	return 0;
+ 
++err_power_off_hw:
++	core->iris_platform_data->vpu_ops->power_off_hw(core);
+ err_power_off_ctrl:
+ 	core->iris_platform_data->vpu_ops->power_off_controller(core);
+ err_unvote_icc:
+@@ -503,5 +509,10 @@
+ 
+ void iris_vpu_set_preset_registers(struct iris_core *core)
+ {
++	if (core->iris_platform_data->vpu_ops->set_preset_registers) {
++		core->iris_platform_data->vpu_ops->set_preset_registers(core);
++		return;
++	}
++
+ 	writel(0x0, core->reg_base + 0xb0088);
+ }
+diff -ruN --no-dereference a/drivers/media/platform/qcom/iris/iris_vpu_common.h b/drivers/media/platform/qcom/iris/iris_vpu_common.h
+--- a/drivers/media/platform/qcom/iris/iris_vpu_common.h	2026-10-25 11:56:14.253608404 +0300
++++ b/drivers/media/platform/qcom/iris/iris_vpu_common.h	2026-10-25 11:56:14.311107529 +0300
+@@ -11,6 +11,7 @@
+ extern const struct vpu_ops iris_vpu2_ops;
+ extern const struct vpu_ops iris_vpu3_ops;
+ extern const struct vpu_ops iris_vpu33_ops;
++extern const struct vpu_ops iris_vpu33_2p_ops;
+ extern const struct vpu_ops iris_vpu35_ops;
+ extern const struct vpu_ops iris_vpu4x_ops;
+ 
+@@ -20,6 +21,7 @@
+ 	int (*power_off_controller)(struct iris_core *core);
+ 	int (*power_on_controller)(struct iris_core *core);
+ 	void (*program_bootup_registers)(struct iris_core *core);
++	void (*set_preset_registers)(struct iris_core *core);
+ 	u64 (*calc_freq)(struct iris_inst *inst, size_t data_size);
+ 	int (*set_hwmode)(struct iris_core *core);
+ };
+diff -ruN --no-dereference a/include/dt-bindings/clock/qcom,sm7675-videocc.h b/include/dt-bindings/clock/qcom,sm7675-videocc.h
+--- a/include/dt-bindings/clock/qcom,sm7675-videocc.h	1970-01-01 02:00:00.000000000 +0200
++++ b/include/dt-bindings/clock/qcom,sm7675-videocc.h	2026-10-25 11:56:14.299341101 +0300
+@@ -0,0 +1,10 @@
++/* SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause) */
++#ifndef _DT_BINDINGS_CLK_QCOM_VIDEO_CC_SM7675_H
++#define _DT_BINDINGS_CLK_QCOM_VIDEO_CC_SM7675_H
++
++#include "qcom,sm8650-videocc.h"
++
++/* Additional Cliffs VCODEC clock reset; not the OEM numeric reset ABI. */
++#define VIDEO_CC_MVS0_CLK_ARES					8
++
++#endif

@@ -38,6 +38,8 @@ static Blob fixture() {
         if(id==0x744) assert(!fdt_setprop_u32(b.data(),child,"qcom,scale-fn-type",23));
     }
     add(b.data(),0,"thermal-zones");
+    n=add(b.data(),0,"pmic-glink");
+    assert(!fdt_setprop_string(b.data(),n,"compatible","xiaomi,uke-pmic-glink"));
     for (unsigned i=0;i<10;i++) {
         n=add(b.data(),fdt_path_offset(b.data(),"/thermal-zones"),zones[i]);
         fdt32_t sensor[]={cpu_to_fdt32(0x12),cpu_to_fdt32(thermistors[i])};
@@ -108,6 +110,8 @@ int main(int argc,char **argv) {
         std::ifstream input(argv[1],std::ios::binary);
         Blob raw{std::istreambuf_iterator<char>(input),{}}; assert(!raw.empty());
         Blob expanded(raw.size()+65536); assert(!fdt_open_into(raw.data(),expanded.data(),expanded.size()));
+        int endpoint=add(expanded.data(),0,"pmic-glink");
+        assert(!fdt_setprop_string(expanded.data(),endpoint,"compatible","xiaomi,uke-pmic-glink"));
         assert(!uke_cpu_thermal_test(expanded.data()));
         assert(!uke_pmic_adc_test(expanded.data()));
         std::puts("Exact OEM CPU thermal and PMIC graph admitted");
@@ -137,7 +141,23 @@ int main(int argc,char **argv) {
         auto io=static_cast<const fdt32_t *>(fdt_getprop(b.data(),sensor,"io-channels",&bytes));
         assert(io && bytes==8 && fdt32_to_cpu(io[0])==0x12 && fdt32_to_cpu(io[1])==thermistors[i]);
         assert(!fdt_getprop(b.data(),sensor,"temperature-lookup-table",nullptr));
+        auto delay=static_cast<const fdt32_t *>(fdt_getprop(b.data(),zone,"polling-delay",&bytes));
+        assert(delay && bytes==4 && fdt32_to_cpu(*delay)==((i==5 || i>=8)?1000U:0U));
+        if(i==5 || i>=8) {
+            delay=static_cast<const fdt32_t *>(fdt_getprop(b.data(),zone,"polling-delay-passive",&bytes));
+            assert(delay && bytes==4 && fdt32_to_cpu(*delay)==1000);
+        }
     }
+    int endpoint=fdt_path_offset(b.data(),"/pmic-glink");
+    channels=static_cast<const fdt32_t *>(fdt_getprop(b.data(),endpoint,"io-channels",&bytes));
+    assert(channels && bytes==24);
+    for(unsigned i=0;i<3;i++) {
+        const unsigned expected[]={0x749,0x747,0x14d};
+        assert(fdt32_to_cpu(channels[2*i])==0x12 && fdt32_to_cpu(channels[2*i+1])==expected[i]);
+    }
+    assert(fdt_stringlist_count(b.data(),endpoint,"io-channel-names")==3);
+    b=base; assert(!fdt_del_node(b.data(),fdt_path_offset(b.data(),"/pmic-glink")));
+    assert(uke_pmic_adc_test(b.data())<0);
     for (unsigned bad=0;bad<6;bad++) {
         b=base; adc=fdt_path_offset(b.data(),adc_path);
         int first=fdt_first_subnode(b.data(),adc), second=fdt_next_subnode(b.data(),first);

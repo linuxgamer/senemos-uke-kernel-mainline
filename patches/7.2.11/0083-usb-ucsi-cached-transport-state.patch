@@ -1,0 +1,170 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] usb: typec: ucsi: expose cached GLINK request results
+
+Retain the latest attempted request, decoded reply status and completion
+timestamps. Expose these with service generations and quarantine through
+a read-only driver attribute. Reading sends no GLINK command and changes
+no PPM, role, power or PHY state. Local event timestamps do not establish
+fresh connector state, electrical measurements or DP link training.
+
+Based on the existing Uke GLINK lifecycle patch and Linux Type-C/UCSI
+interfaces. Preserve the existing GPL and Qualcomm/Linaro attribution.
+
+diff --git a/drivers/usb/typec/ucsi/ucsi_glink.c b/drivers/usb/typec/ucsi/ucsi_glink.c
+--- a/drivers/usb/typec/ucsi/ucsi_glink.c
++++ b/drivers/usb/typec/ucsi/ucsi_glink.c
+@@ -13,6 +13,7 @@
+ #include <linux/gpio/consumer.h>
+ #include <linux/soc/qcom/pmic_glink.h>
+ #include <linux/unaligned.h>
++#include <linux/ktime.h>
+ #include "ucsi.h"
+ 
+ #define PMIC_GLINK_MAX_PORTS		3
+@@ -84,6 +85,11 @@
+ 	size_t response_len;
+ 	u64 service_generation;
+ 	u64 registered_generation;
++	u64 instance_ns, request_ns, completed_ns, reply_ns, notification_ns;
++	u64 request_generation;
++	u32 request_opcode, firmware_error;
++	int result_error;
++	bool firmware_error_known;
+ 
+ 	u8 read_buf[UCSI_BUF_V2_SIZE];
+ };
+@@ -105,6 +111,14 @@
+ 		ucsi->response_error = -EINPROGRESS;
+ 		ucsi->response_len = 0;
+ 	}
++	ucsi->request_ns = ktime_get_boottime_ns();
++	ucsi->request_generation = ucsi->service_generation;
++	ucsi->request_opcode = opcode;
++	ucsi->completed_ns = ret ? ucsi->request_ns : 0;
++	ucsi->reply_ns = 0;
++	ucsi->firmware_error = 0;
++	ucsi->firmware_error_known = false;
++	ucsi->result_error = ret ?: -EINPROGRESS;
+ 	spin_unlock_irqrestore(&ucsi->state_lock, flags);
+ 	return ret;
+ }
+@@ -123,6 +137,8 @@
+ 		ret = -ETIMEDOUT;
+ 	if (send_error || ret == -ETIMEDOUT || ret == -EPROTO)
+ 		ucsi->quarantined = true;
++	ucsi->result_error = ret;
++	ucsi->completed_ns = ktime_get_boottime_ns();
+ 	ucsi->pending_opcode = 0;
+ 	spin_unlock_irqrestore(&ucsi->state_lock, flags);
+ 	return ret;
+@@ -301,6 +317,9 @@
+ 					     &fw_error);
+ 	}
+ 	ucsi->response_error = ret;
++	ucsi->reply_ns = ktime_get_boottime_ns();
++	ucsi->firmware_error = fw_error;
++	ucsi->firmware_error_known = !ret || ret == -EREMOTEIO;
+ 	if (fw_error)
+ 		dev_err_ratelimited(ucsi->dev, "UCSI firmware returned %#x for %#x\n", fw_error, opcode);
+ 	complete(&ucsi->response);
+@@ -384,8 +403,10 @@
+ 		    le32_to_cpu(notify->receiver) != UC_NOTIFY_RECEIVER_UCSI)
+ 			return;
+ 		spin_lock_irqsave(&ucsi->state_lock, flags);
+-		if (ucsi->pd_running && !ucsi->stopping && !ucsi->quarantined)
++		if (ucsi->pd_running && !ucsi->stopping && !ucsi->quarantined) {
++			ucsi->notification_ns = ktime_get_boottime_ns();
+ 			schedule_work(&ucsi->notify_work);
++		}
+ 		spin_unlock_irqrestore(&ucsi->state_lock, flags);
+ 		break;
+ 	}
+@@ -479,6 +500,7 @@
+ 	init_completion(&ucsi->response);
+ 	spin_lock_init(&ucsi->state_lock);
+ 	mutex_init(&ucsi->lock);
++	ucsi->instance_ns = ktime_get_boottime_ns();
+ 
+ 	ucsi->ucsi = ucsi_create(dev, &pmic_glink_ucsi_ops);
+ 	if (IS_ERR(ucsi->ucsi))
+@@ -548,11 +570,37 @@
+ };
+ MODULE_DEVICE_TABLE(auxiliary, pmic_glink_ucsi_id_table);
+ 
++/* Cached transport events only: this read neither sends GLINK nor resets PPM. */
++static ssize_t uke_transport_state_show(struct device *dev,
++				      struct device_attribute *attr, char *buf)
++{
++	struct pmic_glink_ucsi *ucsi = dev_get_drvdata(dev);
++	unsigned long flags;
++	ssize_t bytes;
++
++	spin_lock_irqsave(&ucsi->state_lock, flags);
++	bytes = sysfs_emit(buf,
++		"version=1 instance_boottime_ns=%llu observed_boottime_ns=%llu service_generation=%llu online=%u stopping=%u quarantined=%u pending_opcode=%u request_opcode=%u request_generation=%llu request_boottime_ns=%llu completed_boottime_ns=%llu result_errno=%d reply_boottime_ns=%llu firmware_error_known=%u firmware_error=%u notification_boottime_ns=%llu\n",
++		ucsi->instance_ns, ktime_get_boottime_ns(), ucsi->service_generation,
++		ucsi->pd_running, ucsi->stopping, ucsi->quarantined, ucsi->pending_opcode,
++		ucsi->request_opcode, ucsi->request_generation, ucsi->request_ns,
++		ucsi->completed_ns, ucsi->result_error, ucsi->reply_ns,
++		ucsi->firmware_error_known, ucsi->firmware_error, ucsi->notification_ns);
++	spin_unlock_irqrestore(&ucsi->state_lock, flags);
++	return bytes;
++}
++static DEVICE_ATTR_RO(uke_transport_state);
++static struct attribute *pmic_glink_ucsi_attrs[] = {
++	&dev_attr_uke_transport_state.attr, NULL,
++};
++ATTRIBUTE_GROUPS(pmic_glink_ucsi);
++
+ static struct auxiliary_driver pmic_glink_ucsi_driver = {
+ 	.name = "pmic_glink_ucsi",
+ 	.probe = pmic_glink_ucsi_probe,
+ 	.remove = pmic_glink_ucsi_remove,
+ 	.id_table = pmic_glink_ucsi_id_table,
++	.driver = { .dev_groups = pmic_glink_ucsi_groups },
+ };
+ 
+ module_auxiliary_driver(pmic_glink_ucsi_driver);
+
+diff --git a/Documentation/ABI/testing/sysfs-driver-ucsi-glink-uke b/Documentation/ABI/testing/sysfs-driver-ucsi-glink-uke
+new file mode 100644
+--- /dev/null
++++ b/Documentation/ABI/testing/sysfs-driver-ucsi-glink-uke
+@@ -0,0 +1,37 @@
++What:           /sys/bus/auxiliary/devices/pmic_glink.ucsi.*/uke_transport_state
++Date:           October 2026
++KernelVersion:  7.2.11
++Contact:        Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
++Description:
++                Read-only, versioned, space-separated key=value transport cache.
++                Reading sends no GLINK request and changes no PPM, Type-C role,
++                power or PHY state. All timestamps are nanoseconds on the local
++                CLOCK_BOOTTIME timeline. Zero timestamps mean no recorded event.
++
++                version: cache format, currently 1.
++                instance_boottime_ns: local driver-instance creation time.
++                observed_boottime_ns: time of this cached read.
++                service_generation: local count of GLINK service transitions.
++                online: GLINK service availability, not connector presence.
++                stopping: driver teardown has begun.
++                quarantined: existing transport quarantine is latched.
++                pending_opcode: outstanding transport opcode, or zero.
++                request_opcode: most recent attempted transport opcode.
++                request_generation: service generation at that attempt.
++                request_boottime_ns: local request-attempt time.
++                completed_boottime_ns: local completion or refusal time.
++                result_errno: most recent attempt's local result; -EINPROGRESS
++                        while its result is outstanding. Zero alone is not a
++                        result without a nonzero completion timestamp.
++                reply_boottime_ns: arrival time of a matching reply, including
++                        a malformed matching frame rejected by the decoder.
++                firmware_error_known: whether that reply has a decoded status.
++                firmware_error: raw status; ignore when firmware_error_known=0.
++                notification_boottime_ns: last accepted UCSI notification time.
++
++                These are local transport observations, not firmware sample
++                timestamps, transaction IDs, fresh connector/PD contract state,
++                electrical measurements, DP link training or display acceptance.
++                A service-generation change invalidates assumptions about an
++                older request result. The existing quarantine policy is unchanged.
++Users:          Uke Control private USB/DisplayPort diagnostics

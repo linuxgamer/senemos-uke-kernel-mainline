@@ -1,0 +1,67 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: qcom: handle APM readiness and PRM basic error replies
+
+Firmware can return a GPR basic error instead of a service-specific
+response. The PRM callback ignores it, so a rejected clock/core request
+waits five seconds and returns ETIMEDOUT instead of the DSP error path in
+the common synchronous helper. Handle bounded basic request/release
+errors. Also bound APM basic replies before reading them and connect
+readiness errors to the active nonzero state-query token. A zero-status
+basic ACK still waits for the specific resource or readiness response.
+
+Compared with MiCode audio 8eb0eccbc4027ae4a4987e4bced03a4381039714,
+dsp/audio_prm.c and dsp/spf-core.c, and OnePlus SM7675 modules
+1138e00fee63582a0cc6a53af3286621786827b7,
+vendor/qcom/opensource/audio-kernel/dsp/audio_prm.c and dsp/spf-core.c.
+Preserve the upstream GPL-2.0 implementation; no OEM code or board
+settings are copied. PRM transaction correlation and graph/DMA lifecycle
+remain open.
+This does not qualify firmware compatibility or enable an audio profile,
+PCM stream or amplifier.
+
+---
+--- a/sound/soc/qcom/qdsp6/q6apm.c
++++ b/sound/soc/qcom/qdsp6/q6apm.c
+@@ -990,7 +990,20 @@
+ 		spin_unlock_irqrestore(&apm->state_lock, flags);
+ 		break;
+ 	case GPR_BASIC_RSP_RESULT:
++		if (!data->payload || data->payload_size < (int)sizeof(*result))
++			return -EINVAL;
+ 		switch (result->opcode) {
++		case APM_CMD_GET_SPF_STATE:
++			if (!result->status)
++				break;
++			spin_lock_irqsave(&apm->state_lock, flags);
++			if (hdr->token && hdr->token == apm->state_token) {
++				apm->result = *result;
++				apm->state = 0;
++				wake_up(&apm->wait);
++			}
++			spin_unlock_irqrestore(&apm->state_lock, flags);
++			break;
+ 		case APM_CMD_SHARED_MEM_MAP_REGIONS:
+ 		case APM_CMD_GRAPH_START:
+ 		case APM_CMD_GRAPH_OPEN:
+--- a/sound/soc/qcom/qdsp6/q6prm.c
++++ b/sound/soc/qcom/qdsp6/q6prm.c
+@@ -183,6 +183,19 @@
+ 	const struct gpr_hdr *hdr = &data->hdr;
+ 
+ 	switch (hdr->opcode) {
++	case GPR_BASIC_RSP_RESULT:
++		if (!data->payload || data->payload_size < (int)sizeof(*result))
++			return -EINVAL;
++		result = data->payload;
++		if (result->opcode != PRM_CMD_REQUEST_HW_RSC &&
++		    result->opcode != PRM_CMD_RELEASE_HW_RSC)
++			break;
++		/* A successful ACK does not replace the resource response. */
++		if (!result->status)
++			break;
++		prm->result = *result;
++		wake_up(&prm->wait);
++		break;
+ 	case PRM_CMD_RSP_REQUEST_HW_RSC:
+ 	case PRM_CMD_RSP_RELEASE_HW_RSC:
+ 		if (!data->payload || data->payload_size < (int)sizeof(*result))

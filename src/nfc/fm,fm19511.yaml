@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/nfc/fm,fm19511.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: POCO Pad X1 FM19511 I2C NFC tag
+
+maintainers:
+  - MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+
+description: |
+  Retains the MiCode Uke tag compatible. This is a tag transport, not an NCI
+  controller or a reader. The board identity initcall enables the device only
+  for the admitted POCO SKU. Probe modifies volatile configuration only.
+
+properties:
+  compatible:
+    const: fm,fm19511
+  reg:
+    maxItems: 1
+  model: true
+  interrupts:
+    maxItems: 1
+  vdd-supply: true
+  qcom,ntag-vdd-supply:
+    deprecated: true
+  qcom,ntag-vdd-voltage:
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    description: Legacy minimum and maximum supply voltage in microvolts.
+    deprecated: true
+  qcom,ntag-vdd-current:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description: Legacy supply load in microamps.
+    deprecated: true
+  qcom,ntag-irq:
+    $ref: /schemas/types.yaml#/definitions/phandle-array
+    description: Legacy interrupt GPIO; the native driver uses interrupts.
+    deprecated: true
+  interrupt-names:
+    const: ntag_irq
+
+required: [compatible, reg, interrupts, vdd-supply]
+additionalProperties: false

@@ -1,0 +1,30 @@
+Subject: [PATCH] power: supply: qcom_battmgr: retain reported Uke zero cycles
+
+A successful firmware report of zero cycles is a representable counter, not
+an absent reading. Do not group CYCLE_COUNT with positive-only capacity and
+voltage fields. Keep negative/sentinel and oversized values unavailable.
+
+Uke OEM 5712080a4b0c0b1a879e6d145c601c649ddaddfd, same-SoC Nord4 and shared
+Peridot/upstream wrappers return the reported counter without rejecting zero.
+Retain GPL-2.0-only Linux Foundation/Linaro/Qualcomm attribution. This change
+does not qualify the firmware's counter semantics, health or pack lifetime.
+
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -1871,6 +1871,8 @@
+ 		return value <= 10000 ? 0 : -ENODATA;
+ 	case BATT_SOH:
+ 		return value <= 100 ? 0 : -ENODATA;
++	case BATT_CYCLE_COUNT:
++		return value <= INT_MAX ? 0 : -ENODATA;
+ 	case BATT_TEMP:
+ 		return (s32)value == INT_MIN || (s32)value == INT_MAX ? -ENODATA : 0;
+ 	case BATT_VOLT_OCV:
+@@ -1878,7 +1880,6 @@
+ 	case BATT_VOLT_MAX:
+ 	case BATT_CHG_FULL_DESIGN:
+ 	case BATT_CHG_FULL:
+-	case BATT_CYCLE_COUNT:
+ 	case BATT_TTF_AVG:
+ 	case BATT_TTE_AVG:
+ 	case BATT_RESISTANCE:

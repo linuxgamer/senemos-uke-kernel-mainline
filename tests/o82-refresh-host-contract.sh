@@ -49,7 +49,7 @@ using u8=uint8_t;using u32=uint32_t;
 #define DSI_TOTAL_V_TOTAL(v) ((v)<<16)
 #define pr_err(...) ((void)0)
 #define DBG(...) ((void)0)
-struct device_node {bool pb=true,tm=false,refresh=true,initial=false,trial=false;};
+struct device_node {bool pb=true,refresh=true,initial=false,pa=false;};
 struct device {device_node *of_node;};
 struct platform_device {device dev;};
 struct msm_dsi_cfg {unsigned int io_offset=DSI_6G_REG_SHIFT;};
@@ -87,14 +87,13 @@ static device_node *of_graph_get_remote_node(device_node *node,int port,int endp
 }
 static void of_node_put(device_node *node) {assert(node==remote);++node_puts;}
 static bool of_device_is_compatible(device_node *node,const char *name) {
-    if(!std::strcmp(name,"xiaomi,o82-42-02-0b"))return node&&node->pb&&!node->tm;
-    assert(!std::strcmp(name,"xiaomi,o82-36-02-0a"));return node&&node->pb&&node->tm;
+    if(!std::strcmp(name,"xiaomi,o82-36-02-0a"))return node&&node->pa;
+    assert(!std::strcmp(name,"xiaomi,o82-42-02-0b"));return node&&node->pb;
 }
 static bool of_property_read_bool(device_node *node,const char *name) {
     if(!node)return false;
     if(!std::strcmp(name,"xiaomi,oem-refresh-modes"))return node->refresh;
-    if(!std::strcmp(name,"xiaomi,initial-120hz-only"))return node->initial;
-    assert(!std::strcmp(name,"xiaomi,o82-36-60-120-trial"));return node->trial;
+    assert(!std::strcmp(name,"xiaomi,initial-120hz-only"));return node->initial;
 }
 static unsigned int drm_mode_vrefresh(const drm_display_mode *mode) {
     return (static_cast<uint64_t>(mode->clock)*1000+mode->htotal*mode->vtotal/2)/
@@ -126,6 +125,7 @@ int main() {
     msm_dsi_host h{};
     auto reset=[&] {
         uke=sm7675=true;panel_node={};remote=&panel_node;
+        panel_node.pb=O82_PANEL_VARIANT==42;panel_node.pa=O82_PANEL_VARIANT==36;
         cfg={};handler={&cfg};dsc={};mode=o82_modes[6].mode;
         h={};h.base.owner=&h;h.pdev=&p;h.mode=&mode;h.cfg_hnd=&handler;h.dsc=&dsc;
         assert(node_gets==node_puts);node_gets=node_puts=0;
@@ -179,7 +179,7 @@ int main() {
         case 17:dsc.slice_width=400;break;
         case 18:dsc.slice_height=12;break;
         case 19:remote=nullptr;break;
-        case 20:panel_node.pb=false;break;
+        case 20:panel_node.pb=panel_node.pa=false;break;
         case 21:panel_node.refresh=false;break;
         case 22:mode.clock++;break;
         case 23:mode.flags=2;break;
@@ -194,13 +194,10 @@ int main() {
         assert(node_gets==node_puts);
     }
     reset();assert(!dsi_uke_o82_refresh_modes(&h,nullptr));
-    reset();panel_node.tm=panel_node.trial=true;mode=o82_modes[3].mode;
-    assert(dsi_uke_o82_refresh_modes(&h,&mode));
-    panel_node.trial=false;
-    assert(!dsi_uke_o82_refresh_modes(&h,&mode));
     h.mode=nullptr;assert(!dsi_uke_o82_powered_profile(&h));
     /* The original initial120 profile remains independent of the new flag. */
     reset();mode=o82_modes[5].mode;panel_node.refresh=false;panel_node.initial=true;
+    panel_node.pb=true;panel_node.pa=false;
     assert(!dsi_uke_o82_refresh_modes(&h,&mode));
     assert(dsi_uke_o82_powered_profile(&h));
     dsi_calc_pclk(&h,true);
@@ -208,7 +205,7 @@ int main() {
     assert(node_gets==node_puts);
 }
 CPP
-"${CXX:-g++}" -std=c++20 -O2 -Wall -Wextra -Werror -fsanitize=undefined \
+"${CXX:-g++}" -DO82_PANEL_VARIANT="${O82_PANEL_VARIANT:-42}" -std=c++20 -O2 -Wall -Wextra -Werror -fsanitize=undefined \
     -fsanitize-undefined-trap-on-error -I"$work" "$work/check.cpp" -o "$work/check"
 "$work/check"
 printf 'Actual O82 refresh host helpers: seven modes/both links preserve accepted120 clocks; total, scope/DSC/profile refusals, power/quarantine admission, generic clocks and DT references passed\n'

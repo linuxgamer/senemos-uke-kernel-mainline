@@ -1,0 +1,18 @@
+[Unit]
+Description=Expand the provisioned Uke F2FS root before mounting it
+DefaultDependencies=no
+Requires=uke-root-guard.service
+After=uke-root-guard.service
+Before=sysroot.mount
+ConditionKernelCommandLine=root=PARTLABEL=userdata
+ConditionPathExists=/run/uke-userdata-f2fs-root
+OnFailure=emergency.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/uke-userdata-grow /dev/disk/by-partlabel/userdata
+# Do not kill a filesystem metadata operation in progress.
+TimeoutStartSec=infinity
+RemainAfterExit=yes
+StandardOutput=journal+console
+StandardError=journal+console

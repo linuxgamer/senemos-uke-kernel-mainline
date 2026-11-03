@@ -1,0 +1,97 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: qcom: register Uke frontends with closed streams
+
+Expose the native APM frontend interfaces without enabling any physical
+backend. Refuse PCM and compressed opens before graph allocation: ASoC
+component open runs before the machine startup callback. The separate
+Uke card source is installed by native-profile preparation.
+Skip PCM construction and teardown mapping for the registration profile too.
+
+Linux ASoC sources retain their existing GPL notices. No OEM tuning,
+board-specific donor setting or calibration payload is imported.
+
+--- a/sound/soc/qcom/Kconfig
++++ b/sound/soc/qcom/Kconfig
+@@ -195,6 +195,15 @@
+ 	  SM8250 SoC-based systems.
+ 	  Say Y if you want to use audio device on this SoCs.
+ 
++config SND_SOC_UKE
++	tristate "Uke AudioReach card registration"
++	depends on QCOM_APR && OF
++	select SND_SOC_QDSP6_APM
++	select SND_SOC_QDSP6_APM_DAI
++	help
++	  Register the Uke AudioReach frontends with streams disabled until
++	  physical codec, amplifier and protection paths are qualified.
++
+ config SND_SOC_SC8280XP
+ 	tristate "SoC Machine driver for SC8280XP boards"
+ 	depends on QCOM_APR && SOUNDWIRE
+--- a/sound/soc/qcom/Makefile
++++ b/sound/soc/qcom/Makefile
+@@ -38,6 +38,7 @@
+ obj-$(CONFIG_SND_SOC_SC7180) += snd-soc-sc7180.o
+ obj-$(CONFIG_SND_SOC_SC7280) += snd-soc-sc7280.o
+ obj-$(CONFIG_SND_SOC_SC8280XP) += snd-soc-sc8280xp.o
++obj-$(CONFIG_SND_SOC_UKE) += uke-audio-card.o
+ obj-$(CONFIG_SND_SOC_SDM845) += snd-soc-sdm845.o
+ obj-$(CONFIG_SND_SOC_SM8250) += snd-soc-sm8250.o
+ obj-$(CONFIG_SND_SOC_QCOM_COMMON) += snd-soc-qcom-common.o
+--- a/sound/soc/qcom/qdsp6/q6apm-dai.c
++++ b/sound/soc/qcom/qdsp6/q6apm-dai.c
+@@ -364,6 +364,13 @@
+ 	return ret;
+ }
+ 
++static bool q6apm_registration_only(struct snd_soc_component *component)
++{
++	return of_machine_is_compatible("xiaomi,uke") &&
++		of_property_read_bool(component->dev->of_node,
++				      "xiaomi,registration-only");
++}
++
+ static int q6apm_dai_open(struct snd_soc_component *component,
+ 			  struct snd_pcm_substream *substream)
+ {
+@@ -375,6 +382,10 @@
+ 	struct q6apm_dai_rtd *prtd;
+ 	int graph_id, ret;
+ 
++	/* ASoC component open precedes machine startup; refuse before DSP/DMA. */
++	if (q6apm_registration_only(component))
++		return -EACCES;
++
+ 	graph_id = cpu_dai->driver->id;
+ 
+ 	pdata = snd_soc_component_get_drvdata(component);
+@@ -583,6 +594,9 @@
+ 	bool is_push_pull;
+ 	struct snd_pcm_substream *substream = NULL;
+ 
++	if (q6apm_registration_only(component))
++		return 0;
++
+ 	graph_id = cpu_dai->driver->id;
+ 
+ 	/* Note: DSP backend dais are uni-directional ONLY(either playback or capture) */
+@@ -637,6 +651,9 @@
+ {
+ 	struct snd_pcm_substream *substream;
+ 
++	if (q6apm_registration_only(component))
++		return;
++
+ 	substream = pcm->streams[SNDRV_PCM_STREAM_CAPTURE].substream;
+ 	if (substream)
+ 		q6apm_dai_memory_unmap(component, substream);
+@@ -658,6 +675,9 @@
+ 	int ret, size;
+ 	int graph_id;
+ 
++	if (q6apm_registration_only(component))
++		return -EACCES;
++
+ 	graph_id = cpu_dai->driver->id;
+ 	pdata = snd_soc_component_get_drvdata(component);
+ 	if (!pdata)

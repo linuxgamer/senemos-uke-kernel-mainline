@@ -1,0 +1,80 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] drm: simpledrm: honor the optional Uke backlight link
+
+The firmware scanout can go black while both Uke LED banks remain lit.
+Use the optional DT backlight phandle and standard backlight enable/disable
+helpers on CRTC transitions, preserving the selected brightness. A missing
+link leaves existing firmware boards unchanged; an unavailable provider
+correctly defers probe. Report I/O failure and keep paired-driver rollback.
+No panel-bias, PWM/current, DSI timing or panel power sequencing is changed.
+
+--- a/drivers/gpu/drm/sysfb/simpledrm.c
++++ b/drivers/gpu/drm/sysfb/simpledrm.c
+@@ -1,6 +1,7 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ 
+ #include <linux/aperture.h>
++#include <linux/backlight.h>
+ #include <linux/clk.h>
+ #include <linux/minmax.h>
+ #include <linux/of_address.h>
+@@ -251,6 +252,7 @@
+ #endif
+ 
+ 	/* modesetting */
++	struct backlight_device *backlight;
+ 	u32 formats[DRM_SYSFB_PLANE_NFORMATS(1)];
+ 	struct drm_plane primary_plane;
+ 	struct drm_crtc crtc;
+@@ -588,8 +590,30 @@
+ 	.destroy = drm_plane_cleanup,
+ };
+ 
++static void simpledrm_crtc_atomic_enable(struct drm_crtc *crtc,
++					struct drm_atomic_commit *state)
++{
++	struct simpledrm_device *sdev = container_of(crtc, struct simpledrm_device, crtc);
++	int ret = backlight_enable(sdev->backlight);
++
++	if (ret)
++		drm_err(crtc->dev, "failed to enable backlight: %d\n", ret);
++}
++
++static void simpledrm_crtc_atomic_disable(struct drm_crtc *crtc,
++					 struct drm_atomic_commit *state)
++{
++	struct simpledrm_device *sdev = container_of(crtc, struct simpledrm_device, crtc);
++	int ret = backlight_disable(sdev->backlight);
++
++	if (ret)
++		drm_err(crtc->dev, "failed to disable backlight: %d\n", ret);
++}
++
+ static const struct drm_crtc_helper_funcs simpledrm_crtc_helper_funcs = {
+ 	DRM_SYSFB_CRTC_HELPER_FUNCS,
++	.atomic_enable = simpledrm_crtc_atomic_enable,
++	.atomic_disable = simpledrm_crtc_atomic_disable,
+ };
+ 
+ static const struct drm_crtc_funcs simpledrm_crtc_funcs = {
+@@ -645,6 +669,10 @@
+ 	sysfb = &sdev->sysfb;
+ 	dev = &sysfb->dev;
+ 	platform_set_drvdata(pdev, sdev);
++	/* Optional DT link preserves the selected level across display blanking. */
++	sdev->backlight = devm_of_find_backlight(&pdev->dev);
++	if (IS_ERR(sdev->backlight))
++		return ERR_CAST(sdev->backlight);
+ 
+ 	/*
+ 	 * Hardware settings
+--- a/drivers/video/backlight/ktz8866.c
++++ b/drivers/video/backlight/ktz8866.c
+@@ -217,6 +217,7 @@
+ }
+ 
+ static const struct backlight_ops ktz8866_uke_backlight_ops = {
++	.options = BL_CORE_SUSPENDRESUME,
+ 	.update_status = ktz8866_uke_update_status,
+ 	.get_brightness = ktz8866_uke_get_brightness,
+ };

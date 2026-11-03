@@ -71,10 +71,20 @@ awk '/^static const struct pmic_glink_data pmic_glink_uke_data/ {emit=1}
     "$kernel/drivers/soc/qcom/pmic_glink.c" | sed '/^MODULE_DEVICE_TABLE/d'
 cat <<'C'
 static struct qcom_battmgr_property_request sent;
-static int requests, request_result, request_fail_at;
+static struct qcom_battmgr_property_request last_set;
+static int requests, set_requests, request_result, request_fail_at, readback_result, generation_change_at;
+static unsigned int readback_limit=500000;
 static int qcom_battmgr_request(struct qcom_battmgr *b, void *p, size_t n) {
  assert(b && n==sizeof(sent)); memcpy(&sent,p,n); requests++;
- return requests==request_fail_at ? -ETIMEDOUT : request_result;
+ if(sent.hdr.opcode==BATTMGR_USB_PROPERTY_SET) { set_requests++; last_set=sent; }
+ if(requests==request_fail_at) return -ETIMEDOUT;
+ if(request_result) return request_result;
+ if(sent.hdr.opcode==BATTMGR_USB_PROPERTY_GET && sent.property==USB_INPUT_CURR_LIMIT) {
+  if(readback_result) return readback_result;
+  b->usb.current_limit=readback_limit;
+ }
+ if(requests==generation_change_at) b->transaction.generation++;
+ return 0;
 }
 static bool uke_root;
 static const struct of_device_id *match_result;
@@ -93,7 +103,7 @@ struct usb_gadget { struct dwc3 *dwc; };
 static int scheduled, legacy;
 static struct dwc3 *gadget_to_dwc(struct usb_gadget *g) { return g->dwc; }
 #define WRITE_ONCE(x, v) ((x)=(v))
-static void *system_wq;
+static void *system_percpu_wq;
 static void mod_delayed_work(void *q, struct delayed_work *w, unsigned int delay) { (void)q; (void)w; assert(delay==0); scheduled++; }
 static int usb_phy_set_power(struct usb_phy *p, unsigned int mA) { (void)p; (void)mA; legacy++; return 42; }
 static const struct of_device_id qcom_battmgr_of_variants[]={{0}};
@@ -198,6 +208,12 @@ int main(void) {
  reply(&b,BATTMGR_BAT_PROPERTY_GET,9,(uint32_t)-500000,0); assert(b.status.current_now==-500000);
  b.variant=QCOM_BATTMGR_UKE;
  reply(&b,BATTMGR_BAT_PROPERTY_GET,4,1250,0); assert(b.status.percent==12);
+ /* Cycle zero is a reported count, not a transport-unavailable sentinel. */
+ reply(&b,BATTMGR_BAT_PROPERTY_GET,16,7,0); assert(!b.error && b.info.cycle_count==7);
+ reply(&b,BATTMGR_BAT_PROPERTY_GET,16,0,0); assert(!b.error && !b.info.cycle_count);
+ reply(&b,BATTMGR_BAT_PROPERTY_GET,16,INT_MAX,0); assert(!b.error && b.info.cycle_count==INT_MAX);
+ reply(&b,BATTMGR_BAT_PROPERTY_GET,16,UINT_MAX,0); assert(b.error==-ENODATA && b.info.cycle_count==INT_MAX);
+ reply(&b,BATTMGR_BAT_PROPERTY_GET,16,0,EPERM); assert(b.error==-EREMOTEIO && b.info.cycle_count==INT_MAX);
  reply(&b,BATTMGR_BAT_PROPERTY_GET,12,1000000,0); assert(b.error==-ENODATA && (int)b.status.temperature==-50);
  reply(&b,BATTMGR_BAT_PROPERTY_GET,28,9,0); assert(b.error==-ENODATA);
  reply(&b,BATTMGR_BAT_PROPERTY_GET,13,1000,EPERM); assert(b.error==-EREMOTEIO && (int)b.status.temperature==-50);
@@ -211,6 +227,9 @@ int main(void) {
  assert(b.error==-ENODATA && b.ack.done==0);
  reply(&b,BATTMGR_USB_PROPERTY_GET,0,1,0); assert(b.usb.online);
  reply(&b,BATTMGR_USB_PROPERTY_GET,0,2,0); assert(b.error==-ENODATA && b.usb.online);
+ reply(&b,BATTMGR_USB_PROPERTY_GET,USB_MOISTURE_EN,1,0);assert(!b.error&&b.usb.moisture_enabled==1);
+ reply(&b,BATTMGR_USB_PROPERTY_GET,USB_MOISTURE_STATUS,1,0);assert(!b.error&&b.usb.moisture_status==1);
+ reply(&b,BATTMGR_USB_PROPERTY_GET,USB_MOISTURE_STATUS,2,0);assert(b.error==-ENODATA&&b.usb.moisture_status==1);
  b.transaction.receipt_ns=42; b.transaction.generation=7;
  b.transaction.firmware_generation=2; b.transaction.source_generation=3;
  for (u32 raw=0;raw<=8;raw++) {
@@ -223,15 +242,69 @@ int main(void) {
   assert(!b.error && b.usb.usb_type==POWER_SUPPLY_USB_TYPE_UNKNOWN && b.usb.type_raw==ambiguous[i]);
   assert(b.usb.type_received_ns==42 && b.usb.type_generation==7 && b.usb.type_firmware==2 && b.usb.type_source==3);
  }
- /* Wire7 remains separate; this fixture never changes the requested ABI. */
+ /* Wire7 independently confirms the adapter; it never replaces wire6. */
+ reply(&b,BATTMGR_USB_PROPERTY_GET,USB_ADAP_TYPE,POWER_SUPPLY_USB_TYPE_SDP,0);
+ assert(!b.error && b.usb.adapter_type==POWER_SUPPLY_USB_TYPE_SDP && b.usb.usb_type==POWER_SUPPLY_USB_TYPE_UNKNOWN);
+ {
+  const u32 reported[]={0,9,128,129,130,131,132,UINT32_MAX};
+  for(unsigned i=0;i<ARRAY_SIZE(reported);i++){
+   reply(&b,BATTMGR_USB_PROPERTY_GET,UKE_USB_REAL_TYPE,reported[i],0);
+   assert(!b.error&&b.usb.real_type==reported[i]);
+  }
+  reply(&b,BATTMGR_USB_PROPERTY_GET,UKE_USB_REAL_TYPE,130,EIO);
+  assert(b.error==-EREMOTEIO&&b.usb.real_type==UINT32_MAX);
+  b.variant=QCOM_BATTMGR_SM8350;
+  reply(&b,BATTMGR_USB_PROPERTY_GET,UKE_USB_REAL_TYPE,130,0);
+  assert(b.error==-EOPNOTSUPP&&b.usb.real_type==UINT32_MAX);
+  b.variant=QCOM_BATTMGR_UKE;
+ }
  struct power_supply usb={.drvdata=&b};
  union power_supply_propval budget={.intval=500000};
  assert(qcom_battmgr_usb_is_writeable(&usb,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT));
  before=requests;
  assert(qcom_battmgr_usb_set_property(&usb,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,&budget)==-EAGAIN && requests==before);
  b.service_up=true; b.usb.usb_type=POWER_SUPPLY_USB_TYPE_SDP; b.usb.current_max=500000;
+ /* Reproduce SET0 ACK followed by a retained 500mA limit. */
+ int set_before=set_requests;
+ before=requests;
+ b.usb.current_limit=500000; budget.intval=0;
+ assert(qcom_battmgr_usb_set_property(&usb,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,&budget)==-EREMOTEIO);
+ assert(requests==before+6 && set_requests==set_before+1 && last_set.value==0);
+ budget.intval=500000; before=requests;
  assert(qcom_battmgr_usb_set_property(&usb,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,&budget)==0);
- assert(requests==before+4 && sent.hdr.opcode==BATTMGR_USB_PROPERTY_SET && sent.property==5 && sent.value==500000);
+ assert(requests==before+6 && last_set.property==5 && last_set.value==500000);
+ assert(sent.hdr.opcode==BATTMGR_USB_PROPERTY_GET && sent.property==5);
+ readback_limit=100000;
+ assert(!qcom_battmgr_usb_set_property(&usb,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,&budget));
+ readback_limit=0; budget.intval=0;
+ assert(!qcom_battmgr_usb_set_property(&usb,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,&budget));
+ readback_limit=500000; budget.intval=500000;
+ before=requests; set_before=set_requests; request_fail_at=before+6;
+ assert(qcom_battmgr_usb_set_property(&usb,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,&budget)==-EREMOTEIO);
+ assert(requests==before+6 && set_requests==set_before+1); request_fail_at=0;
+ before=requests; set_before=set_requests; readback_result=-EAGAIN;
+ assert(qcom_battmgr_usb_set_property(&usb,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,&budget)==-EREMOTEIO);
+ assert(requests==before+6 && set_requests==set_before+1); readback_result=0;
+ before=requests; set_before=set_requests; generation_change_at=before+6;
+ assert(qcom_battmgr_usb_set_property(&usb,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,&budget)==-EREMOTEIO);
+ assert(requests==before+6 && set_requests==set_before+1); generation_change_at=0;
+ before=requests; set_before=set_requests; generation_change_at=before+4;
+ assert(qcom_battmgr_usb_set_property(&usb,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,&budget)==-EAGAIN);
+ assert(requests==before+4 && set_requests==set_before); generation_change_at=0;
+ before=requests; set_before=set_requests; request_fail_at=before+5;
+ assert(qcom_battmgr_usb_set_property(&usb,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,&budget)==-ETIMEDOUT);
+ assert(requests==before+5 && set_requests==set_before+1); request_fail_at=0;
+ const u32 adapters[]={0,2,3,6,8,UINT_MAX};
+ for (unsigned i=0;i<ARRAY_SIZE(adapters);i++) {
+  reply(&b,BATTMGR_USB_PROPERTY_GET,USB_ADAP_TYPE,adapters[i],0);
+  before=requests;
+  assert(qcom_battmgr_usb_set_property(&usb,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,&budget)==(adapters[i]?-EINVAL:-EAGAIN));
+  assert(requests==before+4 && sent.hdr.opcode==BATTMGR_USB_PROPERTY_GET && sent.property==USB_CURR_MAX);
+ }
+ reply(&b,BATTMGR_USB_PROPERTY_GET,USB_ADAP_TYPE,POWER_SUPPLY_USB_TYPE_SDP,0);
+ before=requests; request_fail_at=before+3;
+ assert(qcom_battmgr_usb_set_property(&usb,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,&budget)==-ETIMEDOUT);
+ assert(requests==before+3 && sent.property==USB_ADAP_TYPE && !b.lock.unused);request_fail_at=0;
  for (int invalid=0;invalid<3;invalid++) {
   before=requests; budget.intval=invalid==0?-1:invalid==1?500001:1000000;
   assert(qcom_battmgr_usb_set_property(&usb,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,&budget)==-EINVAL && requests==before);
@@ -240,16 +313,16 @@ int main(void) {
  assert(qcom_battmgr_usb_set_property(&usb,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,&budget)==-EINVAL);
  b.usb.current_max=500000; b.usb.online=false;
  before=requests;
- assert(qcom_battmgr_usb_set_property(&usb,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,&budget)==-EAGAIN && requests==before+3);
+ assert(qcom_battmgr_usb_set_property(&usb,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,&budget)==-EAGAIN && requests==before+4);
  b.usb.online=true; b.usb.usb_type=POWER_SUPPLY_USB_TYPE_UNKNOWN;
  before=requests;
- assert(qcom_battmgr_usb_set_property(&usb,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,&budget)==-EAGAIN && requests==before+3);
+ assert(qcom_battmgr_usb_set_property(&usb,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,&budget)==-EAGAIN && requests==before+4);
  b.usb.usb_type=POWER_SUPPLY_USB_TYPE_SDP; b.usb.current_max=0;
  before=requests;
- assert(qcom_battmgr_usb_set_property(&usb,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,&budget)==-EAGAIN && requests==before+3);
+ assert(qcom_battmgr_usb_set_property(&usb,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,&budget)==-EAGAIN && requests==before+4);
  b.usb.current_max=500000; b.usb.usb_type=POWER_SUPPLY_USB_TYPE_PD;
  before=requests;
- assert(qcom_battmgr_usb_set_property(&usb,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,&budget)==-EINVAL && requests==before+3);
+ assert(qcom_battmgr_usb_set_property(&usb,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,&budget)==-EINVAL && requests==before+4);
  b.usb.usb_type=POWER_SUPPLY_USB_TYPE_UNKNOWN;
  assert(qcom_battmgr_usb_set_property(&usb,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,&budget)==-EAGAIN);
  b.usb.usb_type=POWER_SUPPLY_USB_TYPE_SDP; request_result=-ETIMEDOUT;
@@ -292,4 +365,4 @@ C
 } > "$work/check.c"
 "${CC:-cc}" -std=gnu11 -O2 -Wall -Wextra -Werror "$work/check.c" -o "$work/check"
 "$work/check"
-echo 'Uke battery: OEM request/reply IDs, signed temperature/current, model shape, errors and unchanged non-Uke/USB paths passed; charging hardware is unverified'
+echo 'Uke battery: OEM IDs, signed readings, retained SDP budget, terminal post-SET errors and unchanged foreign paths passed; charging hardware is unverified'

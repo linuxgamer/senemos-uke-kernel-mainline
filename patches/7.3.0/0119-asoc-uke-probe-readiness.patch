@@ -1,0 +1,40 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: admit shared-memory widgets and defer unavailable Uke amps
+
+The strict widget callback exposes the buffer loader's missing shared-memory
+endpoint cases. Both endpoints need common module parsing but have no hardware
+interface tokens. Accept them without suppressing unknown-module or parser errors.
+
+An amplifier that NACKs at boot must not become a permanently disabled component.
+Defer transient bus failures so driver-core supplier progress can retry detection.
+Keep reset asserted, reject unsupported chip families and retain preset, gain,
+PLL and thermal gates. No calibration or persistent device data is changed.
+
+--- a/sound/soc/codecs/fs19xx.c
++++ b/sound/soc/codecs/fs19xx.c
+@@ -988,8 +988,10 @@
+ 		return dev_err_probe(dev, -EINVAL, "reset-gpios must be GPIO_ACTIVE_LOW\n");
+ 
+ 	ret = fs19xx_detect(fs19xx, &chipid);
+-	if (ret == -EPROBE_DEFER)
+-		return ret;
++	if (ret == -EPROBE_DEFER || ret == -ENXIO || ret == -EAGAIN ||
++	    ret == -ETIMEDOUT)
++		return dev_err_probe(dev, -EPROBE_DEFER,
++				     "amplifier bus not ready\n");
+ 	if (ret) {
+ 		/*
+ 		 * Keep the component so the sound card (and HDMI) still binds; this
+--- a/sound/soc/qcom/qdsp6/topology.c
++++ b/sound/soc/qcom/qdsp6/topology.c
+@@ -963,6 +963,10 @@
+ 	mod_array = audioreach_get_module_array(&tplg_w->priv);
+ 
+ 	switch (mod->module_id) {
++	case MODULE_ID_WR_SHARED_MEM_EP:
++	case MODULE_ID_RD_SHARED_MEM_EP:
++		/* Shared-memory endpoints have no hardware-interface tokens. */
++		break;
+ 	case MODULE_ID_CODEC_DMA_SINK:
+ 	case MODULE_ID_CODEC_DMA_SOURCE:
+ 		audioreach_widget_dma_module_load(mod, mod_array);

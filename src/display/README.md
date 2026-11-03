@@ -1,13 +1,17 @@
 # SM7675 native display candidate
 
-25 October 2026: an O82-36 / TM tablet booted the native 60/120 Hz KDE image
-with touch on Linux 7.2.11-31. The owner observed 120 Hz and switching to 60
-Hz and back; touch and brightness control remained available. Linux 7.2.11-32
-selects native display by the stock panel identifier and offers the exact OEM
-30, 48, 50, 60, 90, 120 and 144 Hz fixed modes by default. The five newly
-exposed rates, long-running frame pacing and suspend/resume are not yet tested
-on this tablet. The 60/120 boot image remains the recovery control; adaptive
-VRR is separate.
+2 November 2026: [O82 supplier selection](../../docs/O82-PANEL-VARIANTS.md)
+embeds separate O82-36/O82-42 DT overlays and preserves each supplier's ON
+commands. Targeted source fixtures pass; O82-36 hardware validation is pending.
+
+The O82 panel registration is retained until reboot. Ordinary module removal
+and manual sysfs bind/unbind are disabled because live removal on kernel
+`7.2.12-22` produced late GEM and repeated KMS teardown faults. Shutdown and
+failed-probe cleanup remain available. This contains the administrative trigger;
+it does not qualify general MSM hot-unplug or forced module removal. USB-C DP
+hotplug does not require removing the internal panel. Source and host regression
+results are recorded in `docs/lessons/2026-10-24-UKE-JUO-USB-DP.md` in the
+canonical documentation repository; tablet validation remains pending.
 
 Updated on 17 October 2026. This directory contains a Linux 7.2.9/7.2.10 source
 candidate for the Xiaomi Pad 7 O82 panel and SM7675 primary display pipeline.

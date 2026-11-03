@@ -1,0 +1,83 @@
+From: Uke Linux contributors
+Subject: [PATCH] scsi: ufs: qcom: map the admitted Cliffs MCQ regions separately
+
+Derive queue configuration from QCFGPTR while retaining the exact OEM operation
+and vendor-status windows. Bound the queue array between the ICE/HWKM and
+vendor regions. Release partial mappings before the core falls back to SDB.
+Keep other controllers on their existing MCQ mapping and IRQ/ESI paths.
+
+Source: MiCode/Xiaomi_Kernel_OpenSource
+Commit: 5712080a4b0c0b1a879e6d145c601c649ddaddfd
+Files: drivers/ufs/host/ufs-qcom.c, drivers/ufs/host/ufs-qcom.h
+Source: MiCode/kernel_devicetree
+Commit: 94c84aeb9e517dbde546fc732033c184094c8e57
+File: qcom/cliffs.dtsi
+License: GPL-2.0-only (driver); DT declarations used as board evidence
+
+--- a/drivers/ufs/host/ufs-qcom.c
++++ b/drivers/ufs/host/ufs-qcom.c
+@@ -2296,11 +2296,16 @@
+ 	hba->clk_scaling.suspend_on_no_request = true;
+ }
+ 
++#include "ufs-qcom-uke.h"
++
+ static int ufs_qcom_mcq_config_resource(struct ufs_hba *hba)
+ {
+ 	struct platform_device *pdev = to_platform_device(hba->dev);
+ 	struct resource *res;
+ 
++	if (of_machine_is_compatible("xiaomi,uke"))
++		return ufs_qcom_uke_mcq_config_resource(hba);
++
+ 	/* Map the MCQ configuration region */
+ 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "mcq");
+ 	if (!res) {
+@@ -2320,10 +2325,21 @@
+ 
+ static int ufs_qcom_op_runtime_config(struct ufs_hba *hba)
+ {
++	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
+ 	struct ufshcd_mcq_opr_info_t *opr;
+ 	int i;
+ 	u32 doorbell_offsets[OPR_MAX];
+ 
++	if (host->mcq_uke_sqd) {
++		for (i = 0; i < OPR_MAX; i++) {
++			opr = &hba->mcq_opr[i];
++			opr->offset = host->mcq_uke_opr_offset + 0x40 * i;
++			opr->stride = UFS_QCOM_MCQ_STRIDE;
++			opr->base = host->mcq_uke_sqd + 0x40 * i;
++		}
++		return 0;
++	}
++
+ 	/*
+ 	 * Configure doorbell address offsets in MCQ configuration registers.
+ 	 * These values are offsets relative to mmio_base (UFS_HCI_BASE).
+@@ -2372,6 +2388,13 @@
+ static int ufs_qcom_get_outstanding_cqs(struct ufs_hba *hba,
+ 					unsigned long *ocqs)
+ {
++	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
++
++	if (host->mcq_uke_vs) {
++		*ocqs = readl(host->mcq_uke_vs + 0x8);
++		return 0;
++	}
++
+ 	/* Read from MCQ vendor-specific register in MCQ region */
+ 	*ocqs = readl(hba->mcq_base + UFS_MEM_CQIS_VS);
+ 
+--- a/drivers/ufs/host/ufs-qcom.h
++++ b/drivers/ufs/host/ufs-qcom.h
+@@ -359,6 +359,9 @@
+ 	u32 phy_gear;
+ 
+ 	bool esi_enabled;
++	void __iomem *mcq_uke_sqd;
++	void __iomem *mcq_uke_vs;
++	u32 mcq_uke_opr_offset;
+ 
+ 	u32 saved_tx_eq_g1_setting;
+ 	u32 boot_spare_cfg;

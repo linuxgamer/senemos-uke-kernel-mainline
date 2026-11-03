@@ -1,0 +1,49 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] watchdog: gunyah: arm a bounded opt-in boot watchdog
+
+An unaccepted Uke A/B trial must reset if userspace never opens the watchdog.
+Keep the upstream default and use the watchdog core's finite open_timeout
+only for the explicitly selected boot-reset profile. Register the running
+hardware state so the core services it until userspace takes ownership.
+
+Based on upstream c03c1a14507dfaf8b856c2608f9ac216021fc222. The Gunyah
+SMCCC interface and 32-second maximum remain unchanged. A failure before
+this probe still requires independent firmware watchdog qualification.
+
+--- a/drivers/watchdog/gunyah_wdt.c
++++ b/drivers/watchdog/gunyah_wdt.c
+@@ -10,6 +10,10 @@
+ #include <linux/platform_device.h>
+ #include <linux/watchdog.h>
+ 
++static bool boot_enabled;
++module_param(boot_enabled, bool, 0444);
++MODULE_PARM_DESC(boot_enabled, "Arm the watchdog before userspace opens it");
++
+ #define GUNYAH_WDT_SMCCC_CALL_VAL(func_id) \
+ 	ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL, ARM_SMCCC_SMC_32,\
+ 			   ARM_SMCCC_OWNER_VENDOR_HYP, func_id)
+@@ -194,11 +198,21 @@ static int gunyah_wdt_probe(struct platform_device *pdev)
+ 	wdd->min_timeout = 1; /* seconds */
+ 	wdd->timeout = wdd->max_timeout;
+ 
+-	gunyah_wdt_stop(wdd);
++	if (boot_enabled) {
++		ret = gunyah_wdt_start(wdd);
++		if (ret)
++			return dev_err_probe(dev, ret, "boot watchdog start failed\n");
++		set_bit(WDOG_HW_RUNNING, &wdd->status);
++	} else {
++		gunyah_wdt_stop(wdd);
++	}
+ 	platform_set_drvdata(pdev, wdd);
+ 	watchdog_set_restart_priority(wdd, 0);
+ 
+-	return devm_watchdog_register_device(dev, wdd);
++	ret = devm_watchdog_register_device(dev, wdd);
++	if (ret && boot_enabled)
++		gunyah_wdt_stop(wdd);
++	return ret;
+ }
+ 
+ static void gunyah_wdt_remove(struct platform_device *pdev)

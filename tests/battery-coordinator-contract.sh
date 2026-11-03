@@ -22,7 +22,7 @@ typedef uint32_t __le32; typedef uint16_t __le16; typedef uint8_t u8;
 typedef pthread_mutex_t spinlock_t;
 struct mutex { pthread_mutex_t lock; };
 struct completion { pthread_mutex_t lock; pthread_cond_t ready; int done; };
-struct device { int unused; }; struct power_supply { int unused; };
+struct device { void *data; }; struct power_supply { int unused; };
 struct work_struct { int unused; }; struct pmic_glink_client { int unused; };
 #define HZ 1000
 #define NSEC_PER_SEC 1000000000ULL
@@ -54,7 +54,17 @@ static unsigned long jiffies;
 #define container_of(p,t,m) ((t *)((char *)(p)-offsetof(t,m)))
 #define SERVREG_SERVICE_STATE_UP 1
 #define SERVREG_SERVICE_STATE_DOWN 0
-static void mutex_lock(struct mutex *m) { assert(!pthread_mutex_lock(&m->lock)); }
+static _Thread_local bool pm_thread;
+static pthread_mutex_t gate = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t gate_changed = PTHREAD_COND_INITIALIZER;
+static bool request_blocked, release_request, pm_lock_attempted;
+static void mutex_lock(struct mutex *m) {
+ if(pm_thread) {
+  pthread_mutex_lock(&gate); pm_lock_attempted=true;
+  pthread_cond_broadcast(&gate_changed); pthread_mutex_unlock(&gate);
+ }
+ assert(!pthread_mutex_lock(&m->lock));
+}
 static void mutex_unlock(struct mutex *m) { assert(!pthread_mutex_unlock(&m->lock)); }
 static void reinit_completion(struct completion *c) { pthread_mutex_lock(&c->lock); c->done=0; pthread_mutex_unlock(&c->lock); }
 static void complete(struct completion *c) { pthread_mutex_lock(&c->lock); c->done++; pthread_cond_broadcast(&c->ready); pthread_mutex_unlock(&c->lock); }
@@ -69,6 +79,8 @@ static unsigned long wait_for_completion_timeout(struct completion *c, unsigned 
 }
 static uint64_t ktime_get_boottime_ns(void) { return 42; }
 static void schedule_work(struct work_struct *w) { (void)w; }
+static void cancel_work_sync(struct work_struct *w) { (void)w; }
+static void *dev_get_drvdata(struct device *dev) { return dev->data; }
 C
 awk '/^#define PMIC_GLINK_/ {print}
  /^struct pmic_glink_hdr/ {emit=1} emit {print} emit && /^};/ {emit=0}' "$kernel/include/linux/soc/qcom/pmic_glink.h"
@@ -101,6 +113,12 @@ static int pmic_glink_send(struct pmic_glink_client *client, void *data, size_t 
  if(mode==1) return 0; /* Timeout: no reply. */
  if(mode==7) return -EIO; /* Delivery is ambiguous, including for SET. */
  if(mode==2) { qcom_battmgr_pdr_notify(active,SERVREG_SERVICE_STATE_DOWN); return 0; }
+ if(mode==13) {
+  pthread_mutex_lock(&gate); request_blocked=true;
+  pthread_cond_broadcast(&gate_changed);
+  while(!release_request) pthread_cond_wait(&gate_changed,&gate);
+  pthread_mutex_unlock(&gate);
+ }
  struct qcom_battmgr_message r={.hdr=q->hdr}; r.intval.property=q->property; r.intval.value=123;
  if(mode==3) r.intval.result=EPERM;
  const size_t size=sizeof(r.hdr)+sizeof(r.intval);
@@ -124,7 +142,7 @@ static int pmic_glink_send(struct pmic_glink_client *client, void *data, size_t 
  return 0;
 }
 C
-for name in uke_control_live uke_generation uke_battery_property uke_request request uke_callback enable_worker pdr_notify; do
+for name in uke_control_live uke_generation uke_battery_property uke_request request uke_callback enable_worker pdr_notify suspend resume; do
  awk -v name="qcom_battmgr_$name" '$0 ~ "^static (int|void|u32|bool) " name "\\(" {emit=1}
  emit {print} emit && /^}/ {exit}' "$source"
 done
@@ -136,11 +154,13 @@ static void initialize(struct qcom_battmgr *b) {
  active=b; mode=0;
 }
 static int get(struct qcom_battmgr *b, unsigned opcode) {
- struct qcom_battmgr_property_request q={.hdr={.owner=PMIC_GLINK_OWNER_BATTMGR,.type=PMIC_GLINK_REQ_RESP,.opcode=opcode},.property=13};
+ struct qcom_battmgr_property_request q={.hdr={.owner=PMIC_GLINK_OWNER_BATTMGR,.type=PMIC_GLINK_REQ_RESP,.opcode=opcode},.property=opcode==BATTMGR_USB_PROPERTY_SET?USB_INPUT_CURR_LIMIT:13};
  mutex_lock(&b->lock); int ret=qcom_battmgr_uke_request(b,&q,sizeof(q)); mutex_unlock(&b->lock); return ret;
 }
 static void *reader(void *arg) { for(int i=0;i<20;i++)assert(!get(arg,BATTMGR_BAT_PROPERTY_GET)); return NULL; }
 static void *enabler(void *arg) { struct qcom_battmgr *b=arg; for(int i=0;i<20;i++)qcom_battmgr_enable_worker(&b->enable_work); return NULL; }
+static void *pending_reader(void *arg) { assert(!get(arg,BATTMGR_BAT_PROPERTY_GET)); return NULL; }
+static void *suspender(void *arg) { pm_thread=true; assert(!qcom_battmgr_suspend(arg)); return NULL; }
 int main(void) {
  struct qcom_battmgr b; initialize(&b);
  assert(!get(&b,BATTMGR_BAT_PROPERTY_GET) && b.status.current_now==123);
@@ -164,6 +184,40 @@ int main(void) {
  assert(get(&e,BATTMGR_BAT_PROPERTY_GET)==-EHOSTDOWN);
  e.transaction.suspended=false; e.transaction.removing=true;
  assert(get(&e,BATTMGR_BAT_PROPERTY_GET)==-ENODEV);
+ struct qcom_battmgr sleep; initialize(&sleep); mode=13;
+ struct device dev={.data=&sleep}; pthread_t reading, suspending;
+ assert(!pthread_create(&reading,NULL,pending_reader,&sleep));
+ pthread_mutex_lock(&gate);
+ while(!request_blocked) pthread_cond_wait(&gate_changed,&gate);
+ pthread_mutex_unlock(&gate);
+ assert(!pthread_create(&suspending,NULL,suspender,&dev));
+ pthread_mutex_lock(&gate);
+ while(!pm_lock_attempted) pthread_cond_wait(&gate_changed,&gate);
+ pthread_mutex_unlock(&gate);
+ pthread_mutex_lock(&sleep.transaction.lock);
+ assert(sleep.transaction.pending && !sleep.transaction.suspended &&
+        !sleep.transaction.desynced && sleep.transaction.generation==0);
+ pthread_mutex_unlock(&sleep.transaction.lock);
+ pthread_mutex_lock(&gate); release_request=true;
+ pthread_cond_broadcast(&gate_changed); pthread_mutex_unlock(&gate);
+ assert(!pthread_join(reading,NULL)); assert(!pthread_join(suspending,NULL));
+ assert(sleep.transaction.suspended && !sleep.transaction.pending &&
+        !sleep.transaction.desynced && sleep.transaction.generation==1);
+ before=sends; assert(get(&sleep,BATTMGR_BAT_PROPERTY_GET)==-EHOSTDOWN && sends==before);
+ assert(!qcom_battmgr_resume(&dev)); mode=0;
+ assert(!get(&sleep,BATTMGR_BAT_PROPERTY_GET));
+ struct qcom_battmgr inconsistent; initialize(&inconsistent);
+ inconsistent.transaction.pending=true; struct device baddev={.data=&inconsistent};
+ assert(qcom_battmgr_suspend(&baddev)==-EBUSY);
+ assert(inconsistent.transaction.pending && !inconsistent.transaction.suspended &&
+        !inconsistent.transaction.desynced && !inconsistent.transaction.generation);
+ dev.data=&c; assert(!qcom_battmgr_suspend(&dev)); assert(!qcom_battmgr_resume(&dev));
+ before=sends; assert(get(&c,BATTMGR_BAT_PROPERTY_GET)==-EPIPE && sends==before);
+ struct qcom_battmgr other; initialize(&other); other.variant=QCOM_BATTMGR_SM8550;
+ other.transaction.pending=true; dev.data=&other;
+ assert(!qcom_battmgr_suspend(&dev)); assert(!qcom_battmgr_resume(&dev));
+ assert(other.transaction.pending && !other.transaction.suspended &&
+        !other.transaction.generation && !other.transaction.desynced);
  struct qcom_battmgr f; initialize(&f);
  pthread_t readers[3]; assert(!pthread_create(&readers[0],NULL,reader,&f));
  assert(!pthread_create(&readers[1],NULL,reader,&f)); assert(!pthread_create(&readers[2],NULL,enabler,&f));
@@ -173,6 +227,11 @@ int main(void) {
  before=sends; assert(get(&g,BATTMGR_USB_PROPERTY_SET)==-EPIPE && sends==before);
  struct qcom_battmgr h; initialize(&h); mode=8;
  assert(!get(&h,BATTMGR_USB_PROPERTY_SET));
+ struct qcom_battmgr_property_request budget={.hdr={.owner=PMIC_GLINK_OWNER_BATTMGR,.type=PMIC_GLINK_REQ_RESP,.opcode=BATTMGR_USB_PROPERTY_SET},.property=USB_INPUT_CURR_LIMIT,.value=500000};
+ h.protection.wet_latched=true;before=sends;
+ mutex_lock(&h.lock);
+ assert(qcom_battmgr_uke_request(&h,&budget,sizeof(budget))==-EACCES&&sends==before);
+ mutex_unlock(&h.lock);h.protection.wet_latched=false;
  /* An ACK is not effective-current readback; it must not mutate GET data. */
  assert(!h.status.current_now);
  assert(!get(&h,BATTMGR_BAT_PROPERTY_GET) && h.status.current_now==123);
@@ -186,6 +245,8 @@ int main(void) {
  assert(qcom_battmgr_uke_generation(&h)==request_generation+10000u);
  assert(!get(&h,BATTMGR_BAT_PROPERTY_GET));
  before=sends;
+ assert(get(&h,UKE_INPUT_SUSPEND_GET)==-EACCES && sends==before);
+ assert(get(&h,UKE_INPUT_SUSPEND_SET)==-EACCES && sends==before);
  assert(get(&h,0x31)==(IS_ENABLED(CONFIG_BATTERY_QCOM_BATTMGR_UKE_THRESHOLDS)?-EACCES:-EOPNOTSUPP) && sends==before);
 #if CONFIG_BATTERY_QCOM_BATTMGR_UKE_THRESHOLDS
  struct qcom_battmgr pre; initialize(&pre);
@@ -259,6 +320,21 @@ int main(void) {
  set.value=500; set.property=10; assert(qcom_battmgr_uke_request(&ctrl,&set,sizeof(set))==-EOPNOTSUPP && sends==before);
  set.property=25; set.value=1; assert(qcom_battmgr_uke_request(&ctrl,&set,sizeof(set))==-EOPNOTSUPP && sends==before);
  ctrl.control.may_enable=true; assert(!qcom_battmgr_uke_request(&ctrl,&set,sizeof(set)));
+ struct qcom_battmgr_property_request protection={.hdr={.owner=PMIC_GLINK_OWNER_BATTMGR,.type=PMIC_GLINK_REQ_RESP,.opcode=BATTMGR_USB_PROPERTY_SET},.property=USB_MOISTURE_EN,.value=1};
+ before=sends;assert(qcom_battmgr_uke_request(&ctrl,&protection,sizeof(protection))==-EACCES&&sends==before);
+ ctrl.control.moisture_enabling=true;ctrl.control.moisture_generation=ctrl.transaction.generation;
+ assert(!qcom_battmgr_uke_request(&ctrl,&protection,sizeof(protection)));
+ before=sends;protection.value=0;assert(qcom_battmgr_uke_request(&ctrl,&protection,sizeof(protection))==-EACCES&&sends==before);
+ protection.value=1;protection.hdr.owner++;assert(qcom_battmgr_uke_request(&ctrl,&protection,sizeof(protection))==-EACCES&&sends==before);
+ protection.hdr.owner--;ctrl.control.moisture_enabling=false;
+ protection.hdr.opcode=UKE_INPUT_SUSPEND_SET;protection.property=UKE_INPUT_SUSPEND_PROPERTY;
+ assert(qcom_battmgr_uke_request(&ctrl,&protection,sizeof(protection))==-EACCES&&sends==before);
+ ctrl.control.safety_request=true;assert(!qcom_battmgr_uke_request(&ctrl,&protection,sizeof(protection)));
+ before=sends;protection.value=2;assert(qcom_battmgr_uke_request(&ctrl,&protection,sizeof(protection))==-EACCES&&sends==before);
+ protection.value=1;protection.property++;assert(qcom_battmgr_uke_request(&ctrl,&protection,sizeof(protection))==-EACCES&&sends==before);
+ protection.property--;protection.hdr.opcode=UKE_INPUT_SUSPEND_GET;
+ assert(qcom_battmgr_uke_request(&ctrl,&protection,sizeof(protection))==-ENODATA); // Synthetic 123 is not boolean.
+ ctrl.control.safety_request=false;
  ctrl.control.invalidation_ns=42; before=sends;
  assert(qcom_battmgr_uke_request(&ctrl,&set,sizeof(set))==-EACCES && sends==before);
  ctrl.control.invalidation_ns=0; ctrl.control.measurement_generation++;
@@ -282,4 +358,4 @@ control=${UKE_TEST_CONTROL:-0}
     -DCONFIG_BATTERY_QCOM_BATTMGR_UKE_THRESHOLDS="$control" \
     -DCONFIG_BATTERY_QCOM_BATTMGR_UKE_CURRENT="$control" "$work/coordinator.c" -o "$work/coordinator"
 "$work/coordinator"
-printf '%s\n' 'Actual Uke request matching, error, late reply, generation, PDR and concurrent enable/read contract passed; no physical result'
+printf '%s\n' 'Actual Uke request matching, error, late reply, generation, PDR, concurrent enable/read and suspend-drain contract passed; no physical result'

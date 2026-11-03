@@ -1,0 +1,61 @@
+From: Uke platform maintainers
+Subject: [PATCH] wifi: ath11k: preserve OEM Uke rail order and partial cleanup
+
+Bulk enable runs asynchronously. Follow the OEM ICNSS forward sequence,
+then release in reverse order. Retain the enabled prefix on cleanup failure
+so retry never double-votes an already enabled rail.
+
+--- a/drivers/net/wireless/ath/ath11k/ahb.c
++++ b/drivers/net/wireless/ath/ath11k/ahb.c
+@@ -430,13 +430,14 @@
+ 	struct ath11k_ahb *ab_ahb = ath11k_ahb_priv(ab);
+ 	int ret;
+ 
+-	if (!ab_ahb->uke_supplies_enabled)
+-		return;
+-	ret = regulator_bulk_disable(ARRAY_SIZE(ab_ahb->uke_regs), ab_ahb->uke_regs);
+-	if (ret)
+-		ath11k_err(ab, "failed to release Uke WLAN RF supplies: %d\n", ret);
+-	else
+-		ab_ahb->uke_supplies_enabled = false;
++	while (ab_ahb->num_uke_regs_enabled) {
++		ret = regulator_disable(ab_ahb->uke_regs[ab_ahb->num_uke_regs_enabled - 1].consumer);
++		if (ret) {
++			ath11k_err(ab, "failed to release Uke WLAN RF supplies: %d\n", ret);
++			return;
++		}
++		ab_ahb->num_uke_regs_enabled--;
++	}
+ }
+ 
+ static int ath11k_ahb_power_up(struct ath11k_base *ab)
+@@ -444,11 +445,14 @@
+ 	struct ath11k_ahb *ab_ahb = ath11k_ahb_priv(ab);
+ 	int ret;
+ 
+-	if (ab_ahb->uke_supplies && !ab_ahb->uke_supplies_enabled) {
+-		ret = regulator_bulk_enable(ARRAY_SIZE(ab_ahb->uke_regs), ab_ahb->uke_regs);
+-		if (ret)
++	/* OEM ICNSS enables CX/MX, XO, then RFA; bulk enable runs in parallel. */
++	while (ab_ahb->uke_supplies && ab_ahb->num_uke_regs_enabled < ARRAY_SIZE(ab_ahb->uke_regs)) {
++		ret = regulator_enable(ab_ahb->uke_regs[ab_ahb->num_uke_regs_enabled].consumer);
++		if (ret) {
++			ath11k_ahb_uke_regulators_off(ab);
+ 			return ret;
+-		ab_ahb->uke_supplies_enabled = true;
++		}
++		ab_ahb->num_uke_regs_enabled++;
+ 	}
+ 	ret = rproc_boot(ab_ahb->tgt_rproc);
+ 	if (ret) {
+--- a/drivers/net/wireless/ath/ath11k/ahb.h
++++ b/drivers/net/wireless/ath/ath11k/ahb.h
+@@ -26,7 +26,7 @@
+ 	struct rproc *tgt_rproc;
+ 	struct regulator_bulk_data uke_regs[3];
+ 	bool uke_supplies;
+-	bool uke_supplies_enabled;
++	int num_uke_regs_enabled;
+ 	struct {
+ 		struct device *dev;
+ 		struct iommu_domain *iommu_domain;

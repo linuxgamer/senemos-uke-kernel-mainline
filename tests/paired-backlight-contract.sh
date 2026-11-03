@@ -11,7 +11,6 @@ trap 'rm -r -- "$work"' EXIT
 #include <cerrno>
 #include <cstring>
 #include <initializer_list>
-using u64 = unsigned long long;
 #define BIT(n) (1U << (n))
 #define MAX_BRIGHTNESS 2047U
 #define BL_LEVEL_MAX 2047U
@@ -100,13 +99,9 @@ int main() {
     unsigned int previous=0;
     for (unsigned int level=0;level<=MAX_BRIGHTNESS;level++) {
         unsigned int code=ktz8866_uke_code(level);
+        assert(code==static_cast<unsigned int>(mi_bl_level_remap[level*1535/2047]));
         assert(code>=previous && code<=1952); previous=code;
-        assert(!level ? code==0 : code>=444);
     }
-    assert(ktz8866_uke_code(MAX_BRIGHTNESS)==1952);
-    const unsigned int low_step=ktz8866_uke_code(205)-ktz8866_uke_code(102);
-    const unsigned int high_step=ktz8866_uke_code(2047)-ktz8866_uke_code(1945);
-    assert(low_step*4>=high_step*3 && low_step*4<=high_step*5);
     assert(ktz8866_uke_level(0)==0 && ktz8866_uke_level(1953)==-ERANGE);
     i2c_client clients[2]; regmap maps[2];
     ktz8866 secondary{&clients[1],&maps[1],nullptr,{}};
@@ -116,7 +111,7 @@ int main() {
         reset(maps); bl.props.brightness=level;
         assert(ktz8866_uke_update_status(&bl)==0);
         const auto effective=level<21 ? 21 : level;
-        const auto expected=ktz8866_uke_code(effective);
+        const auto expected=static_cast<unsigned int>(mi_bl_level_remap[effective*1535/2047]);
         assert(bl.props.brightness==effective);
         for (int i=0;i<2;i++)
             assert((maps[i].regs[BL_BRT_MSB]<<3 | (maps[i].regs[BL_BRT_LSB]&7))==expected);
@@ -124,8 +119,7 @@ int main() {
         assert(actual>=0 && ktz8866_uke_code(actual)==expected);
     }
     // The inverse reports the top of an OEM quantization plateau, not a changed code.
-    assert(ktz8866_uke_code(ktz8866_uke_level(ktz8866_uke_code(819)))==
-           ktz8866_uke_code(819));
+    assert(ktz8866_uke_level(ktz8866_uke_code(819))==821);
     for (unsigned int level : {0U,1U,2U,7U,8U,128U,512U,1024U,1535U,2047U}) {
         reset(maps); bl.props.brightness=level;
         regmap original[2]; std::memcpy(original,maps,sizeof(maps));
@@ -158,8 +152,7 @@ int main() {
     assert(ktz8866_uke_update_status(&bl)==0 && ktz8866_uke_get_brightness(&bl)==0);
     assert(!(maps[0].regs[BL_EN]&BL_EN_BIT) && !(maps[1].regs[BL_EN]&BL_EN_BIT) && bl.props.brightness==102);
     bl.blank=false;
-    assert(ktz8866_uke_update_status(&bl)==0 &&
-           ktz8866_uke_code(ktz8866_uke_get_brightness(&bl))==ktz8866_uke_code(102));
+    assert(ktz8866_uke_update_status(&bl)==0 && ktz8866_uke_get_brightness(&bl)==102);
     reset(maps); bl.props.brightness=2048; assert(ktz8866_uke_update_status(&bl)==-EINVAL && operations==0);
     reset(maps); maps[0].regs[BL_EN]|=BIT(7); bl.props.brightness=100;
     assert(ktz8866_uke_update_status(&bl)==-EBUSY && writes==0);
@@ -206,4 +199,4 @@ CPP
 } > "$work/check.cpp"
 g++ -std=c++20 -O2 -Wall -Wextra -Werror "$work/check.cpp" -o "$work/check"
 "$work/check"
-printf 'Pinned OEM normal codes, all 2048 paired levels, user curve and I/O/readback/rollback faults: passed\n'
+printf 'Exact OEM normal mapping, all 2048 paired levels, non-linear API and I/O/readback/rollback faults: passed\n'

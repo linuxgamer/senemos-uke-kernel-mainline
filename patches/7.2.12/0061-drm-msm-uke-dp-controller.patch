@@ -1,0 +1,58 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] drm/msm/dp: describe the Uke primary DisplayPort controller
+
+The OEM Cliffs controller starts at 0x0af54000, uses MDSS interrupt 12
+and enables widebus. Its mainline resource description matches the
+SM8650 descriptor; use an explicit SM7675 compatible, without claiming
+SM8650 link rates, DSC, MST or physical Uke acceptance. The separate
+QMP profile and native DPU catalog supply the remaining source pieces.
+An admitted final Type-C graph and firmware route are still required.
+
+Source: MiCode display DT 4a3e1c391130237c5e8c2b250d1c94f3e25b9b11
+Files: display/cliffs-sde.dtsi, display/uke-sde-display.dtsi
+License: GPL-2.0-only
+
+diff --git a/drivers/gpu/drm/msm/dp/dp_display.c b/drivers/gpu/drm/msm/dp/dp_display.c
+index 22eade1..b714480 100644
+--- a/drivers/gpu/drm/msm/dp/dp_display.c
++++ b/drivers/gpu/drm/msm/dp/dp_display.c
+@@ -172,6 +172,7 @@ static const struct of_device_id msm_dp_dt_match[] = {
+ 	{ .compatible = "qcom,sc8280xp-edp", .data = &msm_dp_desc_sc8280xp },
+ 	{ .compatible = "qcom,sdm845-dp", .data = &msm_dp_desc_sdm845 },
+ 	{ .compatible = "qcom,sm8350-dp", .data = &msm_dp_desc_sc7180 },
++	{ .compatible = "qcom,sm7675-dp", .data = &msm_dp_desc_sm8650 },
+ 	{ .compatible = "qcom,sm8650-dp", .data = &msm_dp_desc_sm8650 },
+ 	{ .compatible = "qcom,x1e80100-dp", .data = &msm_dp_desc_x1e80100 },
+ 	{}
+diff --git a/Documentation/devicetree/bindings/display/msm/dp-controller.yaml b/Documentation/devicetree/bindings/display/msm/dp-controller.yaml
+index 094a638..4d9e25e 100644
+--- a/Documentation/devicetree/bindings/display/msm/dp-controller.yaml
++++ b/Documentation/devicetree/bindings/display/msm/dp-controller.yaml
+@@ -29,6 +29,7 @@ properties:
+           - qcom,sc8280xp-edp
+           - qcom,sdm845-dp
+           - qcom,sm8350-dp
++          - qcom,sm7675-dp
+           - qcom,sm8650-dp
+           - qcom,x1e80100-dp
+ 
+diff --git a/Documentation/devicetree/bindings/phy/qcom,sc8280xp-qmp-usb43dp-phy.yaml b/Documentation/devicetree/bindings/phy/qcom,sc8280xp-qmp-usb43dp-phy.yaml
+index 4eff923..ab25d3d 100644
+--- a/Documentation/devicetree/bindings/phy/qcom,sc8280xp-qmp-usb43dp-phy.yaml
++++ b/Documentation/devicetree/bindings/phy/qcom,sc8280xp-qmp-usb43dp-phy.yaml
+@@ -37,6 +37,7 @@ properties:
+           - qcom,sm8250-qmp-usb3-dp-phy
+           - qcom,sm8350-qmp-usb3-dp-phy
+           - qcom,sm8450-qmp-usb3-dp-phy
++          - qcom,sm7675-qmp-usb3-dp-phy
+           - qcom,sm8550-qmp-usb3-dp-phy
+           - qcom,sm8650-qmp-usb3-dp-phy
+           - qcom,sm8750-qmp-usb3-dp-phy
+@@ -212,6 +213,7 @@ allOf:
+               - qcom,sar2130p-qmp-usb3-dp-phy
+               - qcom,sc8280xp-qmp-usb43dp-phy
+               - qcom,sm6350-qmp-usb3-dp-phy
++              - qcom,sm7675-qmp-usb3-dp-phy
+               - qcom,sm8550-qmp-usb3-dp-phy
+               - qcom,sm8650-qmp-usb3-dp-phy
+               - qcom,sm8750-qmp-usb3-dp-phy

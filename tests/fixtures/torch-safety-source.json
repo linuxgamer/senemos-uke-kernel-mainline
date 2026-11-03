@@ -1,0 +1,6 @@
+{
+  "repository": "https://github.com/torvalds/linux",
+  "commit": "c03c1a14507dfaf8b856c2608f9ac216021fc222",
+  "path": "drivers/leds/flash/leds-qcom-flash.c",
+  "sha256": "770ba6ed706184e3017ebee3c06784569ad7f13a0f20326c6fa7fc56607ef4e0"
+}

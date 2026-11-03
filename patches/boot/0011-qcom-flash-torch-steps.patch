@@ -1,0 +1,34 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] leds: qcom-flash: expose real brightness steps for torch-only LEDs
+
+Keep the configured current ceiling and the flash-capable LED ABI. Torch-only
+class devices expose their 5 mA per-channel steps, rounding the ceiling down.
+
+--- a/drivers/leds/flash/leds-qcom-flash.c
++++ b/drivers/leds/flash/leds-qcom-flash.c
+@@ -586,7 +586,7 @@
+ {
+ 	struct led_classdev_flash *fled_cdev = lcdev_to_flcdev(led_cdev);
+ 	struct qcom_flash_led *led = flcdev_to_qcom_fled(fled_cdev);
+-	u32 current_ma = brightness * led->max_torch_current_ma / LED_FULL;
++	u32 current_ma = brightness * led->max_torch_current_ma / led_cdev->max_brightness;
+ 	bool enable = !!brightness;
+ 	int rc;
+ 
+@@ -819,6 +819,16 @@
+ 		flash->ops = &qcom_flash_ops;
+ 	}
+ 
++	if (!(flash->led_cdev.flags & LED_DEV_CAP_FLASH)) {
++		/* Expose real torch current steps instead of 255 repeated levels. */
++		flash->led_cdev.max_brightness = led->max_torch_current_ma * UA_PER_MA /
++						(TORCH_IRES_UA * led->chan_count);
++		if (!flash->led_cdev.max_brightness)
++			return -EINVAL;
++		led->max_torch_current_ma = flash->led_cdev.max_brightness *
++					TORCH_IRES_UA * led->chan_count / UA_PER_MA;
++	}
++
+ 	flash->led_cdev.brightness_set_blocking = qcom_flash_led_brightness_set;
+ 
+ 	init_data.fwnode = node;

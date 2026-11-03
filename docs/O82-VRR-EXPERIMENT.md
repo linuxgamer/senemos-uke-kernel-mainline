@@ -1,5 +1,28 @@
 # O82 video AVR experiment
 
+1 November 2026. Release 112 preserves an explicitly requested 30 Hz floor
+instead of silently raising it to 90 Hz. A 144 Hz OEM base therefore admits
+the requested 30-144 Hz software range. Unsupported floors are refused without
+changing the previous value; zero still disables the experiment. Touch delivery,
+flicker and physical refresh cadence remain unqualified below the earlier trial
+floor. A deliberately black first frame now completes the panel/touch restoration
+transaction; read and backlight-enable errors still fail that transaction.
+Release111 stopped before compilation because patch0069 lacked trailing context.
+
+Original KDE's saved DSI policy is now Automatic. DSI remains disabled and the
+running release110 still normalizes the boot request to 90 Hz. The requested
+30-144 Hz range therefore requires separate activation of the new
+kernel; a saved desktop policy does not establish physical cadence.
+
+COPR11239643 completed the full AArch64 kernel and package checks, including
+the requested-floor parser, all seven OEM panel modes and the first-frame
+failure cases. All 822 module signatures and negative signature controls passed;
+MDP4/MDP5 compile checks preserved shipped artifacts. Six downloaded RPMs verify
+with matching `7.3.1-112.fc46` identities and the exact source-composition marker.
+The candidate is not installed or activated. The source-storage USB/Btrfs failure
+remains unresolved; boot/rollback and physical cadence/touch acceptance remain
+separate requirements.
+
 18 October 2026. This source path is an **unqualified receiver experiment**
 for Uke SM7675, the native OEM PB/42 profile, dual DSI and DSC. It defaults to
 off. There is no physically qualified VRR range. Release 17 adds an explicitly

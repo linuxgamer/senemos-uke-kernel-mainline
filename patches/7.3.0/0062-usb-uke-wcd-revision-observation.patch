@@ -1,0 +1,82 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] usb: uke: expose the cached WCD routing revision
+
+Read the same CHIP_ID1 revision field used by the exact Uke OEM driver
+once after the existing peripheral route has been initialized. Expose the
+cached result as a read-only silicon_revision attribute. Preserve rescue
+operation on a read error and report unknown; never change routing,
+protection bits or firmware ownership based on an unqualified identity.
+
+Source: MiCode/Xiaomi_Kernel_OpenSource 5712080a4b0c0b1a879e6d145c601c649ddaddfd
+Files: drivers/soc/qcom/wcd939x-i2c.c and wcd-usbss-registers.h
+License: GPL-2.0-only
+
+diff --git a/drivers/usb/common/wcd939x-usb-uke.c b/drivers/usb/common/wcd939x-usb-uke.c
+index cbfa0c1..b952897 100644
+--- a/drivers/usb/common/wcd939x-usb-uke.c
++++ b/drivers/usb/common/wcd939x-usb-uke.c
+@@ -17,6 +17,7 @@
+ #include <linux/of.h>
+ #include <linux/pinctrl/consumer.h>
+ #include <linux/regmap.h>
++#include <linux/sysfs.h>
+ #include <linux/regulator/consumer.h>
+ 
+ #define WCD_USBSS_DP_DN_MISC1			0x20
+@@ -44,9 +45,12 @@
+ #define WCD_USBSS_FSM_OVERRIDE			0x63
+ #define WCD_USBSS_DP_EN			0x1e
+ #define WCD_USBSS_DN_EN			0x21
++#define WCD_USBSS_CHIP_ID1			0x439
+ #define WCD_USBSS_MAX_REGISTER			0x4c1
+ 
+ struct wcd939x_usb_uke {
++	unsigned int silicon_revision;
++	bool silicon_revision_valid;
+ 	struct regulator *supply;
+ 	struct gpio_desc *reset;
+ 	struct regmap *regmap;
+@@ -54,6 +58,23 @@ struct wcd939x_usb_uke {
+ 	struct pinctrl_state *active;
+ };
+ 
++/* Cached only: reading this attribute issues no I2C operation or route change. */
++static ssize_t silicon_revision_show(struct device *dev,
++                                    struct device_attribute *attr, char *buf)
++{
++	struct wcd939x_usb_uke *wcd = dev_get_drvdata(dev);
++
++	if (!wcd->silicon_revision_valid)
++		return sysfs_emit(buf, "unknown\n");
++	return sysfs_emit(buf, "0x%02x\n", wcd->silicon_revision);
++}
++static DEVICE_ATTR_RO(silicon_revision);
++static struct attribute *wcd939x_usb_uke_attrs[] = {
++	&dev_attr_silicon_revision.attr,
++	NULL,
++};
++ATTRIBUTE_GROUPS(wcd939x_usb_uke);
++
+ static const struct regmap_range_cfg wcd939x_usb_uke_ranges[] = {
+ 	{
+ 		.range_min = 0,
+@@ -190,6 +211,11 @@ static int wcd939x_usb_uke_probe(struct i2c_client *client)
+ 		goto disable_supply;
+ 	}
+ 
++	/* OEM uses CHIP_ID1 for its 1.x/2.0 routing distinction; never guess on read failure. */
++	ret = regmap_read(wcd->regmap, WCD_USBSS_CHIP_ID1, &wcd->silicon_revision);
++	wcd->silicon_revision_valid = !ret;
++	if (ret)
++		dev_warn(dev, "WCD silicon revision unavailable: %d\n", ret);
+ 	i2c_set_clientdata(client, wcd);
+ 	return 0;
+ 
+@@ -219,6 +245,7 @@ static struct i2c_driver wcd939x_usb_uke_driver = {
+ 	.driver = {
+ 		.name = "wcd939x-usb-uke",
+ 		.of_match_table = wcd939x_usb_uke_of_match,
++		.dev_groups = wcd939x_usb_uke_groups,
+ 	},
+ 	.probe = wcd939x_usb_uke_probe,
+ 	.remove = wcd939x_usb_uke_remove,

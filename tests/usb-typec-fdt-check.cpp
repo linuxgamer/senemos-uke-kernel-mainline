@@ -183,8 +183,10 @@ static void check_graph(const Bytes &dt) {
     need(fdt_path_offset(dt.data(), (usb + "/port").c_str()) == -FDT_ERR_NOTFOUND, "Inherited USB single port retained");
     exact(dt, usb, "phys", {handle(dt,hs),q,QMP_USB43DP_USB3_PHY}); strings(dt,usb,"phy-names",{"usb2-phy","usb3-phy"});
     exact(dt,usb,"iommus",{handle(dt,symbol(dt,"apps_smmu")),0x40,0});
-    exact(dt,usb,"interconnects",{handle(dt,symbol(dt,"aggre1_noc")),49,handle(dt,symbol(dt,"mc_virt")),512,
-        handle(dt,symbol(dt,"gem_noc")),2,handle(dt,symbol(dt,"cnoc_cfg")),547});
+    exact(dt,symbol(dt,"mc_virt"),"#interconnect-cells",{2});
+    exact(dt,symbol(dt,"gem_noc"),"#interconnect-cells",{2});
+    exact(dt,usb,"interconnects",{handle(dt,symbol(dt,"aggre1_noc")),49,handle(dt,symbol(dt,"mc_virt")),512,0,
+        handle(dt,symbol(dt,"gem_noc")),2,0,handle(dt,symbol(dt,"cnoc_cfg")),547});
     const auto core_gdsc=symbol(dt,"gcc_usb30_prim_gdsc");
     exact(dt,usb,"gdsc-supply",{handle(dt,core_gdsc)}); compatible(dt,core_gdsc,"qcom,sm7675-usb-gdsc");
     exact(dt,core_gdsc,"reg",{0x139004,8}); exact(dt,core_gdsc,"qcom,clock-controller",{g});
@@ -279,9 +281,14 @@ int main(int argc,char **argv) {
         for(int i=0;i<fdt_num_mem_rsv(input.data());i++) {uint64_t a,as,b,bs;
             need(!fdt_get_mem_rsv(input.data(),i,&a,&as) && !fdt_get_mem_rsv(full.data(),i,&b,&bs) && a==b && as==bs,"Reserve map changed");}
         need(prop(input,node(input,"/chosen"),"bootargs")==prop(full,node(full,"/chosen"),"bootargs"),"Panel selector/boot arguments changed");
-        need(!has(full,"/chosen","stdout-path"),"Native output retained firmware stdout");
         const auto fb=prop(adapted,node(adapted,"/chosen"),"stdout-path"); need(!fb.empty() && fb.back()==0,"Invalid adapted framebuffer path");
-        text(full,reinterpret_cast<const char *>(fb.data()),"status","disabled");
+        need(prop(full,node(full,"/chosen"),"stdout-path")==fb,"Early framebuffer stdout changed");
+        const std::string framebuffer(reinterpret_cast<const char *>(fb.data()));
+        text(full,framebuffer,"status","okay");
+        need(!has(full,framebuffer,"backlight"),"Early framebuffer owns native backlight");
+        for(const char *name : {"compatible","reg","width","height","stride","format","panel"})
+            need(prop(adapted,node(adapted,framebuffer),name)==prop(full,node(full,framebuffer),name),"Early framebuffer metadata changed");
+        need(has(full,"/reserved-memory/splash_region","no-map"),"Splash reservation lost no-map");
         for(const char *name : {"dsi@ae94000","dsi@ae96000","phy@ae95000","phy@ae97000"}) same_display(baseline,full,mdss+"/"+name);
         for(const char *name : {"port@0","port@1"}) same_display(baseline,full,mdss+"/display-controller@ae01000/ports/"+name);
         for(const char *name : {"vddio-supply","vsp-supply","vsn-supply","backlight","reset-gpios"})

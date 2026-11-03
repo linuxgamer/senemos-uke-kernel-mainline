@@ -11,8 +11,14 @@ jq '.releases[0].source="https://example.invalid/linux-7.3.tar.xz"' "$work/relea
 if release_fields "$work/foreign.json" 2>/dev/null; then exit 1; fi
 jq '.releases += [.releases[0]]' "$work/release.json" > "$work/duplicate.json"
 if release_fields "$work/duplicate.json" 2>/dev/null; then exit 1; fi
-jq '.latest_stable.version="7.3/../../foreign"' "$work/release.json" > "$work/path.json"
+jq '.releases[0].version="7.3/../../foreign"' "$work/release.json" > "$work/path.json"
 if release_fields "$work/path.json" 2>/dev/null; then exit 1; fi
+jq '.latest_stable.version="7.2.12" | .releases += [{moniker:"stable",version:"7.2.12"},{moniker:"mainline",version:"7.4-rc1"}]' "$work/release.json" > "$work/other-series.json"
+[[ $(release_fields "$work/other-series.json" | cut -f1) == 7.3 ]]
+jq '.releases += [.releases[0] | .version="7.3.1" | .moniker="stable" | .source="https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.3.1.tar.xz" | .pgp="https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.3.1.tar.sign"]' "$work/release.json" > "$work/point-release.json"
+[[ $(release_fields "$work/point-release.json" | cut -f1) == 7.3.1 ]]
+jq '.releases=[]' "$work/release.json" > "$work/absent.json"
+if release_fields "$work/absent.json" 2>/dev/null; then exit 1; fi
 for invalid in '0' '-1' '1792365298.5' '"1792365298"' '999999999999999'; do
     jq --argjson epoch "$invalid" '.releases[0].released.timestamp=$epoch' "$work/release.json" > "$work/epoch.json"
     if release_fields "$work/epoch.json" 2>/dev/null; then exit 1; fi
@@ -44,7 +50,7 @@ jq '.items += [.items[0]|.id=43|.state="failed"]' "$work/builds.json" > "$work/l
 mkdir -p "$work/source/packaging" "$work/bin"
 cat > "$work/source/packaging/senemos-uke-linux-kernel-mainline.spec" <<'SPEC'
 Name: source-fixture
-Version: 7.2.11
+Version: 7.3.0
 Release: 16%{?dist}
 Summary: Source query fixture
 License: MIT
@@ -56,9 +62,10 @@ cp "$work/source/packaging/senemos-uke-linux-kernel-mainline.spec" "$work/source
 real_rpmspec=$(command -v rpmspec)
 printf '#!/usr/bin/env bash\nexec %q --define %q --define %q "$@"\n' "$real_rpmspec" 'dist .fc44' 'dist %{nil}' > "$work/bin/rpmspec"
 chmod 755 "$work/bin/rpmspec"
-jq '.latest_stable.version="7.2.11" | .releases[0].version="7.2.11" |
- .releases[0].source="https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.2.11.tar.xz" |
- .releases[0].pgp="https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.2.11.tar.sign"' "$work/release.json" > "$work/current-release.json"
-[[ $(cd "$work/source"; PATH="$work/bin:$PATH" prepare_metadata singleboot 7.2.11-16) == unchanged$'\t'7.2.11-16 ]]
-[[ $(cd "$work/source"; PATH="$work/bin:$PATH" prepare_common "$work/current-release.json") == unchanged$'\t'7.2.11-16 ]]
+cp "$work/release.json" "$work/current-release.json"
+[[ $(cd "$work/source"; PATH="$work/bin:$PATH" prepare_metadata singleboot 7.3.0-16) == unchanged$'\t'7.3.0-16 ]]
+[[ $(cd "$work/source"; PATH="$work/bin:$PATH" prepare_common "$work/current-release.json") == unchanged$'\t'7.3.0-16 ]]
+sed -i 's/^Version: .*/Version: 7.2.12/' "$work/source/packaging/senemos-uke-linux-kernel-mainline.spec"
+if (cd "$work/source"; PATH="$work/bin:$PATH" prepare_common "$work/current-release.json") 2>/dev/null; then exit 1; fi
+[[ ! -d $work/source/referances ]]
 echo 'Exact release, timestamp, version, package, repository, architecture and newest-build selection passed'

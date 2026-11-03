@@ -1,0 +1,110 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] dt-bindings: media: describe the native Cliffs Iris graph
+
+Require two VIDEOCC-owned GDSCs, two IOMMU streams and four ordered
+reset resources. Keep SM8650's three-reset and RPMh-domain ABI. The
+Uke VIDEOCC aggregator owns its regulator votes.
+
+---
+
+--- a/Documentation/devicetree/bindings/media/qcom,sm8550-iris.yaml
++++ b/Documentation/devicetree/bindings/media/qcom,sm8550-iris.yaml
+@@ -24,6 +24,7 @@
+           - const: qcom,sm8550-iris
+       - enum:
+           - qcom,qcs8300-iris
++          - qcom,sm7675-iris
+           - qcom,sm8550-iris
+           - qcom,sm8650-iris
+           - qcom,x1p42100-iris
+@@ -32,9 +33,11 @@
+     maxItems: 1
+ 
+   power-domains:
++    minItems: 2
+     maxItems: 4
+ 
+   power-domain-names:
++    minItems: 2
+     items:
+       - const: venus
+       - const: vcodec0
+@@ -69,7 +72,7 @@
+ 
+   resets:
+     minItems: 1
+-    maxItems: 3
++    maxItems: 4
+ 
+   reset-names:
+     minItems: 1
+@@ -77,6 +80,7 @@
+       - const: bus
+       - const: xo
+       - const: core
++      - const: vcodec
+ 
+   iommus:
+     maxItems: 2
+@@ -105,8 +109,41 @@
+   - if:
+       properties:
+         compatible:
+-          enum:
+-            - qcom,sm8650-iris
++          contains:
++            const: qcom,sm7675-iris
++    then:
++      properties:
++        power-domains:
++          maxItems: 2
++        power-domain-names:
++          maxItems: 2
++        iommus:
++          minItems: 2
++        resets:
++          minItems: 4
++        reset-names:
++          minItems: 4
++      required:
++        - reg
++        - power-domains
++        - clocks
++        - clock-names
++        - interrupts
++        - memory-region
++        - operating-points-v2
++    else:
++      properties:
++        power-domains:
++          minItems: 4
++        power-domain-names:
++          minItems: 4
++  - if:
++      properties:
++        compatible:
++          contains:
++            enum:
++              - qcom,sm7675-iris
++              - qcom,sm8650-iris
+     then:
+       properties:
+         resets:
+@@ -122,6 +159,17 @@
+   - if:
+       properties:
+         compatible:
++          contains:
++            const: qcom,sm8650-iris
++    then:
++      properties:
++        resets:
++          maxItems: 3
++        reset-names:
++          maxItems: 3
++  - if:
++      properties:
++        compatible:
+           enum:
+             - qcom,x1p42100-iris
+     then:

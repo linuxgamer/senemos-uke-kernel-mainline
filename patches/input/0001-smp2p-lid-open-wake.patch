@@ -1,0 +1,142 @@
+From: Uke Linux maintainers
+Subject: [PATCH] input: retain selective lid-open dispatch during s2idle
+
+Keep the paired SMEM ownership and default SMP2P wake policy. The Uke lid
+consumer reports a wake event only for a valid open transition. Its selected
+parent dispatches during s2idle without waking on every ADSP notification.
+Deep-suspend wake remains unqualified.
+
+--- a/drivers/soc/qcom/smp2p.c
++++ b/drivers/soc/qcom/smp2p.c
+@@ -15,6 +15,7 @@
+ #include <linux/module.h>
+ #include <linux/platform_device.h>
+ #include <linux/pm_wakeirq.h>
++#include <linux/property.h>
+ #include <linux/regmap.h>
+ #include <linux/seq_file.h>
+ #include <linux/soc/qcom/smem.h>
+@@ -721,7 +722,9 @@
+ 
+ 	ret = devm_request_threaded_irq(&pdev->dev, irq,
+ 					NULL, qcom_smp2p_intr,
+-					IRQF_ONESHOT,
++					IRQF_ONESHOT |
++					(device_property_read_bool(&pdev->dev, "qcom,selective-wakeup") ?
++					 IRQF_NO_SUSPEND : 0),
+ 					NULL, (void *)smp2p);
+ 	if (ret) {
+ 		dev_err(&pdev->dev, "failed to request interrupt\n");
+@@ -737,6 +740,9 @@
+ 	 * do not have proper autosleep feature may want to handle it with
+ 	 * other wakeup events (e.g. Power button) instead waking up immediately.
+ 	 */
++	/* Selected nested consumers report validated s2idle wake events themselves. */
++	if (device_property_read_bool(&pdev->dev, "qcom,selective-wakeup"))
++		return 0;
+ 	device_set_wakeup_capable(&pdev->dev, true);
+ 
+ 	ret = dev_pm_set_wake_irq(&pdev->dev, irq);
+--- a/drivers/input/misc/qcom-smp2p-switch.c
++++ b/drivers/input/misc/qcom-smp2p-switch.c
+@@ -6,10 +6,13 @@
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
++#include <linux/pm.h>
++#include <linux/pm_wakeup.h>
+ #include <linux/property.h>
+ #include <linux/slab.h>
+ 
+ struct smp2p_switch {
++	struct device *dev;
+ 	struct input_dev *input;
+ 	unsigned int code;
+ 	int open_irq;
+@@ -39,12 +42,27 @@
+ 	int state = smp2p_switch_read(sw);
+ 
+ 	if (state >= 0) {
++		if (irq == sw->open_irq && !state && device_may_wakeup(sw->dev))
++			pm_wakeup_event(sw->dev, 500);
+ 		input_report_switch(sw->input, sw->code, state);
+ 		input_sync(sw->input);
+ 	}
+ 	return IRQ_HANDLED;
+ }
+ 
++static void smp2p_switch_wake_cleanup(void *data)
++{
++	device_init_wakeup(data, false);
++}
++
++static int smp2p_switch_resume(struct device *dev)
++{
++	smp2p_switch_irq(0, dev_get_drvdata(dev));
++	return 0;
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(smp2p_switch_pm_ops, NULL, smp2p_switch_resume);
++
+ static int smp2p_switch_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+@@ -55,9 +73,12 @@
+ 	sw = devm_kzalloc(dev, sizeof(*sw), GFP_KERNEL);
+ 	if (!sw)
+ 		return -ENOMEM;
++	sw->dev = dev;
+ 	ret = device_property_read_u32(dev, "linux,code", &sw->code);
+ 	if (ret || sw->code > SW_MAX)
+ 		return dev_err_probe(dev, -EINVAL, "Invalid switch code\n");
++	if (device_property_present(dev, "wakeup-source") && sw->code != SW_LID)
++		return dev_err_probe(dev, -EINVAL, "Only lid-open wake is supported\n");
+ 	sw->open_irq = platform_get_irq_byname(pdev, "open");
+ 	if (sw->open_irq < 0)
+ 		return sw->open_irq;
+@@ -77,8 +98,19 @@
+ 	ret = input_register_device(sw->input);
+ 	if (ret)
+ 		return ret;
++	platform_set_drvdata(pdev, sw);
++	if (device_property_present(dev, "wakeup-source")) {
++		ret = device_init_wakeup(dev, true);
++		if (ret)
++			return ret;
++		ret = devm_add_action_or_reset(dev, smp2p_switch_wake_cleanup, dev);
++		if (ret)
++			return ret;
++	}
+ 	ret = devm_request_threaded_irq(dev, sw->open_irq, NULL, smp2p_switch_irq,
+-			IRQF_ONESHOT | IRQF_TRIGGER_RISING, label, sw);
++			IRQF_ONESHOT | IRQF_TRIGGER_RISING |
++			(device_property_present(dev, "wakeup-source") ? IRQF_NO_SUSPEND : 0),
++			label, sw);
+ 	if (ret)
+ 		return dev_err_probe(dev, ret, "Cannot request open event\n");
+ 	ret = devm_request_threaded_irq(dev, sw->closed_irq, NULL, smp2p_switch_irq,
+@@ -100,6 +132,7 @@
+ 	.driver = {
+ 		.name = "qcom-smp2p-switch",
+ 		.of_match_table = smp2p_switch_of_match,
++		.pm = pm_sleep_ptr(&smp2p_switch_pm_ops),
+ 	},
+ };
+ module_platform_driver(smp2p_switch_driver);
+--- a/Documentation/devicetree/bindings/soc/qcom/qcom,smp2p.yaml
++++ b/Documentation/devicetree/bindings/soc/qcom/qcom,smp2p.yaml
+@@ -59,6 +59,14 @@
+     description:
+       Two identifiers of the inbound and outbound smem items used for this edge.
+ 
++  qcom,selective-wakeup:
++    type: boolean
++    description:
++      Keep the parent interrupt dispatching during suspend-to-idle without
++      unconditionally waking the system. Wake-capable nested consumers must
++      keep their selected interrupt active and report validated wake events.
++      This does not provide wake from deep system suspend.
++
+ patternProperties:
+   "^master-kernel|slave-kernel|ipa-ap-to-modem|ipa-modem-to-ap|wlan-ap-to-wpss|wlan-wpss-to-ap$":
+     type: object

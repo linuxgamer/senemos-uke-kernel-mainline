@@ -1,0 +1,14 @@
+/* SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause */
+/* Frontend registration only; retain disabled backends and physical buses. */
+&uke_q6apm_dais {
+	status = "okay";
+	xiaomi,registration-only;
+};
+
+&{/} {
+	uke_audio_card: sound-uke {
+		compatible = "xiaomi,uke-audio-card";
+		model = "POCO-Pad-X1-AudioReach";
+		aux-devs = <&uke_q6apm_dais>, <&uke_q6apm>;
+	};
+};

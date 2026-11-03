@@ -1,0 +1,17 @@
+[Unit]
+Description=Bound an uncompleted Uke boot-reset initramfs
+DefaultDependencies=no
+ConditionKernelCommandLine=root=PARTLABEL=userdata
+ConditionKernelCommandLine=senemos.boot_reset=1
+IgnoreOnIsolate=yes
+Conflicts=shutdown.target initrd-switch-root.target
+Before=shutdown.target initrd-switch-root.target
+FailureAction=reboot-force
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/sleep infinity
+RuntimeMaxSec=180
+TimeoutStopSec=3
+StandardOutput=journal+console
+StandardError=journal+console

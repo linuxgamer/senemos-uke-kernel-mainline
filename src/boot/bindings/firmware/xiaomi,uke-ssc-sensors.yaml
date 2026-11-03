@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/firmware/xiaomi,uke-ssc-sensors.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Xiaomi Uke firmware-owned sensor descriptions
+
+maintainers:
+  - MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+
+description: |
+  These sensors belong to the Qualcomm SSC firmware and are discovered by SUID.
+  This map supplies names to native diagnostics. Model candidates are registry
+  evidence, not probed part numbers. It does not instantiate direct I2C/SPI
+  clients, select calibration, or override the SSC discovery result.
+
+properties:
+  compatible:
+    const: xiaomi,uke-ssc-sensors
+  remoteproc:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: ADSP remote processor that owns the sensor firmware.
+
+patternProperties:
+  '^(accelerometer|gyroscope|magnetometer|front-light|rear-light|color-temperature|proximity|flicker|sar)$':
+    type: object
+    properties:
+      compatible:
+        const: xiaomi,uke-ssc-sensor
+      label: true
+      qcom,ssc-datatype:
+        $ref: /schemas/types.yaml#/definitions/string
+        enum: [accel, gyro, mag, ambient_light, ambient_light_back, cct_front, proximity, flicker, sar]
+        description: SSC datatype used by the native discovery client.
+      xiaomi,model-candidates:
+        $ref: /schemas/types.yaml#/definitions/string-array
+        description: Alternative registry model names; no fitted identity claim.
+    required: [compatible, label, 'qcom,ssc-datatype', 'xiaomi,model-candidates']
+    additionalProperties: false
+
+required: [compatible, remoteproc]
+additionalProperties: false

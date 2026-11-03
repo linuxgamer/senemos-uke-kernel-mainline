@@ -1,0 +1,6011 @@
+diff --git a/drivers/regulator/Kconfig b/drivers/regulator/Kconfig
+index a54a549196fe..3f076ac71baf 100644
+--- a/drivers/regulator/Kconfig
++++ b/drivers/regulator/Kconfig
+@@ -1890,3 +1890,14 @@ config REGULATOR_QCOM_LABIBB
+ 	  for LCD display panel.
+ 
+ endif
++
++config REGULATOR_QCOM_RPMH_UKE
++	bool "Xiaomi Uke RPMh ARC/VRM regulators"
++	depends on QCOM_RPMH_UKE && OF
++	select REGULATOR_PROXY_CONSUMER
++	help
++	  Support the downstream ARC/VRM resource and active/sleep voter
++	  bindings in the Uke device tree.
++
++config REGULATOR_PROXY_CONSUMER
++	bool
+diff --git a/drivers/regulator/Makefile b/drivers/regulator/Makefile
+index 134eee274dbf..7c6dc25da359 100644
+--- a/drivers/regulator/Makefile
++++ b/drivers/regulator/Makefile
+@@ -219,3 +219,6 @@ obj-$(CONFIG_REGULATOR_WM8400) += wm8400-regulator.o
+ obj-$(CONFIG_REGULATOR_WM8994) += wm8994-regulator.o
+ 
+ ccflags-$(CONFIG_REGULATOR_DEBUG) += -DDEBUG
++
++obj-$(CONFIG_REGULATOR_QCOM_RPMH_UKE) += qcom-rpmh-regulator-uke.o
++obj-$(CONFIG_REGULATOR_PROXY_CONSUMER) += qcom-proxy-consumer-uke.o
+diff --git a/drivers/regulator/qcom-proxy-consumer-uke.c b/drivers/regulator/qcom-proxy-consumer-uke.c
+new file mode 100644
+index 000000000000..3c44845672d4
+--- /dev/null
++++ b/drivers/regulator/qcom-proxy-consumer-uke.c
+@@ -0,0 +1,399 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Copyright (c) 2019, The Linux Foundation. All rights reserved.
++ */
++
++#define pr_fmt(fmt) "%s: " fmt, __func__
++
++#include <linux/bitops.h>
++#include <linux/device.h>
++#include <linux/err.h>
++#include <linux/kernel.h>
++#include <linux/list.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/of.h>
++#include <linux/slab.h>
++#include <linux/regulator/consumer.h>
++#include <linux/regulator/proxy-consumer.h>
++
++struct proxy_consumer {
++	struct list_head	list;
++	struct regulator	*reg;
++	struct device		*dev;
++	bool			enable;
++	int			min_uV;
++	int			max_uV;
++	u32			current_uA;
++};
++
++static DEFINE_MUTEX(proxy_consumer_list_lock);
++static LIST_HEAD(proxy_consumer_list);
++static bool proxy_consumers_removed;
++
++/**
++ * regulator_proxy_consumer_add() - conditionally add a proxy consumer for the
++ *				    specified regulator and set its boot time
++ *				    parameters
++ * @dev:		Device pointer of the regulator
++ * @node:		Device node pointer of the regulator
++ *
++ * This function calls regulator_get() after first checking if any proxy
++ * consumer properties are present in the 'node' device node.  After that, the
++ * voltage, minimum current, and/or the enable state will be set based upon the
++ * device node property values.
++ *
++ * Returns a valid pointer on successfully proxy voting, NULL if no proxy voting
++ * is needed, or an ERR_PTR(errno) if an error occurred.
++ */
++static struct proxy_consumer *regulator_proxy_consumer_add(struct device *dev,
++						       struct device_node *node)
++{
++	struct proxy_consumer *consumer = NULL;
++	const char *reg_name = "";
++	const char *supply_name;
++	u32 voltage[2] = {0};
++	int ret;
++
++	if (!dev || !node) {
++		pr_err("dev or node is NULL\n");
++		return ERR_PTR(-EINVAL);
++	}
++
++	/* Return immediately if no proxy consumer properties are specified. */
++	if (!of_find_property(node, "qcom,proxy-consumer-enable", NULL)
++	    && !of_find_property(node, "qcom,proxy-consumer-voltage", NULL)
++	    && !of_find_property(node, "qcom,proxy-consumer-current", NULL))
++		return NULL;
++
++	mutex_lock(&proxy_consumer_list_lock);
++
++	/* Do not register new consumers if they cannot be removed later. */
++	if (proxy_consumers_removed) {
++		ret = -EPERM;
++		goto unlock_list;
++	}
++
++	if (node->name)
++		reg_name = node->name;
++
++	consumer = kzalloc(sizeof(*consumer), GFP_KERNEL);
++	if (!consumer) {
++		ret = -ENOMEM;
++		goto unlock_list;
++	}
++
++	consumer->dev = dev;
++	consumer->enable
++		= of_property_read_bool(node, "qcom,proxy-consumer-enable");
++	of_property_read_u32(node, "qcom,proxy-consumer-current",
++				&consumer->current_uA);
++	ret = of_property_read_u32_array(node, "qcom,proxy-consumer-voltage",
++					voltage, 2);
++	if (!ret) {
++		consumer->min_uV = voltage[0];
++		consumer->max_uV = voltage[1];
++	}
++
++	dev_dbg(dev, "proxy consumer request: enable=%d, voltage_range=[%d, %d] uV, min_current=%d uA\n",
++		consumer->enable, consumer->min_uV, consumer->max_uV,
++		consumer->current_uA);
++
++	supply_name = "proxy";
++	of_property_read_string(node, "qcom,proxy-consumer-name", &supply_name);
++
++	consumer->reg = regulator_get(dev, supply_name);
++	if (IS_ERR_OR_NULL(consumer->reg)) {
++		ret = PTR_ERR(consumer->reg);
++		pr_err("regulator_get(%s) failed for %s, ret=%d\n", supply_name,
++			reg_name, ret);
++		goto free_consumer;
++	}
++
++	if (consumer->max_uV > 0 && consumer->min_uV <= consumer->max_uV) {
++		ret = regulator_set_voltage(consumer->reg, consumer->min_uV,
++						consumer->max_uV);
++		if (ret) {
++			pr_err("regulator_set_voltage %s failed, ret=%d\n",
++				reg_name, ret);
++			goto free_regulator;
++		}
++	}
++
++	if (consumer->current_uA > 0) {
++		ret = regulator_set_load(consumer->reg, consumer->current_uA);
++		if (ret < 0) {
++			pr_err("regulator_set_load %s failed, ret=%d\n",
++				reg_name, ret);
++			goto remove_voltage;
++		}
++	}
++
++	if (consumer->enable) {
++		ret = regulator_enable(consumer->reg);
++		if (ret) {
++			pr_err("regulator_enable %s failed, ret=%d\n", reg_name,
++				ret);
++			goto remove_current;
++		}
++	}
++
++	list_add(&consumer->list, &proxy_consumer_list);
++	mutex_unlock(&proxy_consumer_list_lock);
++
++	return consumer;
++
++remove_current:
++	regulator_set_load(consumer->reg, 0);
++remove_voltage:
++	regulator_set_voltage(consumer->reg, 0, INT_MAX);
++free_regulator:
++	regulator_put(consumer->reg);
++free_consumer:
++	kfree(consumer);
++unlock_list:
++	mutex_unlock(&proxy_consumer_list_lock);
++
++	return ERR_PTR(ret);
++}
++
++/**
++ * regulator_proxy_consumer_register() - conditionally register a proxy consumer
++ *		 for the specified regulator and set its boot time parameters
++ * @dev:		Device pointer of the regulator
++ * @node:		Device node pointer of the regulator
++ *
++ * This function calls regulator_get() after first checking if any proxy
++ * consumer properties are present in the 'node' device node.  After that, the
++ * voltage, minimum current, and/or the enable state will be set based upon the
++ * device node property values.
++ *
++ * Returns 0 on successfully proxy voting or if no proxy voting is needed, or an
++ * errno if an error occurred.
++ */
++int regulator_proxy_consumer_register(struct device *dev,
++				      struct device_node *node)
++{
++	struct proxy_consumer *consumer;
++
++	consumer = regulator_proxy_consumer_add(dev, node);
++
++	return PTR_ERR_OR_ZERO(consumer);
++}
++EXPORT_SYMBOL(regulator_proxy_consumer_register);
++
++/* proxy_consumer_list_lock must be held by caller. */
++static int regulator_proxy_consumer_remove(struct proxy_consumer *consumer)
++{
++	int ret = 0;
++
++	if (consumer->enable) {
++		ret = regulator_disable(consumer->reg);
++		if (ret)
++			pr_err("regulator_disable failed, ret=%d\n", ret);
++	}
++
++	if (consumer->current_uA > 0) {
++		ret = regulator_set_load(consumer->reg, 0);
++		if (ret < 0)
++			pr_err("regulator_set_load failed, ret=%d\n",
++				ret);
++	}
++
++	if (consumer->max_uV > 0 && consumer->min_uV <= consumer->max_uV) {
++		ret = regulator_set_voltage(consumer->reg, 0, INT_MAX);
++		if (ret)
++			pr_err("regulator_set_voltage failed, ret=%d\n", ret);
++	}
++
++	regulator_put(consumer->reg);
++	list_del(&consumer->list);
++	kfree(consumer);
++
++	return ret;
++}
++
++/**
++ * regulator_proxy_consumer_unregister() - unregister the proxy consumers of a
++ *					   device and remove their boot time
++ *					   requests
++ * @dev:		Device pointer of the regulator
++ *
++ * This function removes all requests made by the proxy consumers of regulators
++ * in dev which where issued in regulator_proxy_consumer_register() and then
++ * frees the consumers' resources.
++ *
++ * Returns 0 on success or an errno on failure.
++ */
++void regulator_proxy_consumer_unregister(struct device *dev)
++{
++	struct proxy_consumer *consumer, *temp;
++
++	if (IS_ERR_OR_NULL(dev)) {
++		pr_err("invalid device pointer\n");
++		return;
++	}
++
++	mutex_lock(&proxy_consumer_list_lock);
++	list_for_each_entry_safe(consumer, temp, &proxy_consumer_list, list) {
++		if (consumer->dev == dev)
++			regulator_proxy_consumer_remove(consumer);
++	}
++	mutex_unlock(&proxy_consumer_list_lock);
++}
++EXPORT_SYMBOL(regulator_proxy_consumer_unregister);
++
++/* proxy_consumer_list_lock must be held by caller. */
++static void
++_devm_regulator_proxy_consumer_release(struct device *dev, void *res)
++{
++	struct proxy_consumer *consumer = *(struct proxy_consumer **)res;
++	struct proxy_consumer *temp;
++	bool found = false;
++
++	/*
++	 * The proxy consumer may have already been removed due to a
++	 * sync_state() or devm_regulator_proxy_consumer_unregister() call.
++	 * Therefore, verify that it is still in the list before attempting to
++	 * remove it.
++	 */
++	list_for_each_entry(temp, &proxy_consumer_list, list) {
++		if (temp == consumer) {
++			found = true;
++			break;
++		}
++	}
++
++	if (found)
++		regulator_proxy_consumer_remove(consumer);
++}
++
++static void devm_regulator_proxy_consumer_release(struct device *dev, void *res)
++{
++	mutex_lock(&proxy_consumer_list_lock);
++	_devm_regulator_proxy_consumer_release(dev, res);
++	mutex_unlock(&proxy_consumer_list_lock);
++}
++
++/**
++ * devm_regulator_proxy_consumer_register() - resource managed version of
++ *					     regulator_proxy_consumer_register()
++ * @dev:		Device pointer of the regulator
++ * @node:		Device node pointer of the regulator
++ *
++ * This is a resource managed version of regulator_proxy_consumer_register().
++ * Proxy consumer requests made via this call are automatically removed via
++ * regulator_proxy_consumer_unregister() on driver detach. See
++ * regulator_proxy_consumer_register() for more details.
++ *
++ * Returns 0 on success or an errno on failure.
++ */
++int devm_regulator_proxy_consumer_register(struct device *dev,
++					   struct device_node *node)
++{
++	struct proxy_consumer *consumer;
++	struct proxy_consumer **ptr;
++
++	ptr = devres_alloc(devm_regulator_proxy_consumer_release, sizeof(*ptr),
++			   GFP_KERNEL);
++	if (!ptr)
++		return -ENOMEM;
++
++	consumer = regulator_proxy_consumer_add(dev, node);
++	if (IS_ERR_OR_NULL(consumer)) {
++		devres_free(ptr);
++		return PTR_ERR(consumer);
++	}
++
++	*ptr = consumer;
++	devres_add(dev, ptr);
++
++	return 0;
++}
++EXPORT_SYMBOL(devm_regulator_proxy_consumer_register);
++
++static int devm_regulator_proxy_consumer_match(struct device *dev, void *res,
++					       void *data)
++{
++	struct proxy_consumer **consumer = res;
++
++	if (!consumer || !*consumer) {
++		WARN_ON(!consumer || !*consumer);
++		return 0;
++	}
++
++	return *consumer == data;
++}
++
++/**
++ * devm_regulator_proxy_consumer_unregister() - resource managed version of
++ *					regulator_proxy_consumer_unregister()
++ * @dev:		Device pointer of the regulator
++ *
++ * Deallocate the proxy consumers allocated for 'dev' with
++ * devm_regulator_proxy_consumer_register().  Normally this function will not
++ * need to be called and the resource management code will ensure that the
++ * resource is freed.
++ *
++ * Returns 0 on success or an errno on failure.
++ */
++void devm_regulator_proxy_consumer_unregister(struct device *dev)
++{
++	struct proxy_consumer *consumer, *temp;
++
++	if (IS_ERR_OR_NULL(dev))
++		return;
++
++	mutex_lock(&proxy_consumer_list_lock);
++	list_for_each_entry_safe(consumer, temp, &proxy_consumer_list, list) {
++		if (consumer->dev == dev)
++			devres_release(dev,
++					_devm_regulator_proxy_consumer_release,
++					devm_regulator_proxy_consumer_match,
++					consumer);
++	}
++	mutex_unlock(&proxy_consumer_list_lock);
++}
++EXPORT_SYMBOL(devm_regulator_proxy_consumer_unregister);
++
++#ifndef CONFIG_REGULATOR_PROXY_CONSUMER_LEGACY
++
++void regulator_proxy_consumer_sync_state(struct device *dev)
++{
++	regulator_proxy_consumer_unregister(dev);
++}
++EXPORT_SYMBOL(regulator_proxy_consumer_sync_state);
++
++#else /* CONFIG_REGULATOR_PROXY_CONSUMER_LEGACY=y */
++
++void regulator_proxy_consumer_sync_state(struct device *dev) { }
++EXPORT_SYMBOL(regulator_proxy_consumer_sync_state);
++
++/*
++ * Remove all proxy requests at late_initcall_sync.  The assumption is that all
++ * devices have probed at this point and made their own regulator requests.
++ */
++static int __init regulator_proxy_consumer_remove_all(void)
++{
++	struct proxy_consumer *consumer;
++	struct proxy_consumer *temp;
++
++	mutex_lock(&proxy_consumer_list_lock);
++	proxy_consumers_removed = true;
++
++	if (!list_empty(&proxy_consumer_list))
++		pr_info("removing regulator proxy consumer requests\n");
++
++	list_for_each_entry_safe(consumer, temp, &proxy_consumer_list, list) {
++		regulator_proxy_consumer_remove(consumer);
++	}
++	mutex_unlock(&proxy_consumer_list_lock);
++
++	return 0;
++}
++late_initcall_sync(regulator_proxy_consumer_remove_all);
++
++#endif
++
++MODULE_DESCRIPTION("Regulator proxy consumer library");
++MODULE_LICENSE("GPL v2");
+diff --git a/drivers/regulator/qcom-rpmh-regulator-uke.c b/drivers/regulator/qcom-rpmh-regulator-uke.c
+new file mode 100644
+index 000000000000..9b68d9a26ca1
+--- /dev/null
++++ b/drivers/regulator/qcom-rpmh-regulator-uke.c
+@@ -0,0 +1,2121 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* Copyright (c) 2016-2021, The Linux Foundation. All rights reserved. */
++/* Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved. */
++
++#define pr_fmt(fmt) "%s: " fmt, __func__
++
++#include <linux/bitops.h>
++#include <linux/err.h>
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/of_device.h>
++#include <linux/of_platform.h>
++#include <linux/platform_device.h>
++#include <linux/slab.h>
++#include <linux/string.h>
++#include <linux/regulator/driver.h>
++#include <linux/regulator/machine.h>
++#include <linux/regulator/of_regulator.h>
++#include <linux/regulator/proxy-consumer.h>
++
++#include <soc/qcom/cmd-db.h>
++#include <soc/qcom/rpmh.h>
++
++#include <dt-bindings/regulator/qcom,rpmh-regulator-levels.h>
++
++/**
++ * enum rpmh_regulator_type - supported RPMh accelerator types
++ * %RPMH_REGULATOR_TYPE_VRM:	RPMh VRM accelerator which supports voting on
++ *				enable, voltage, mode, and headroom voltage of
++ *				LDO, SMPS, VS, and BOB type PMIC regulators.
++ * %RPMH_REGULATOR_TYPE_ARC:	RPMh ARC accelerator which supports voting on
++ *				the CPR managed voltage level of LDO and SMPS
++ *				type PMIC regulators.
++ * %RPMH_REGULATOR_TYPE_XOB:	RPMh XOB accelerator which supports voting on
++ *				the enable state of PMIC regulators.
++ */
++enum rpmh_regulator_type {
++	RPMH_REGULATOR_TYPE_VRM,
++	RPMH_REGULATOR_TYPE_ARC,
++	RPMH_REGULATOR_TYPE_XOB,
++};
++
++/**
++ * enum rpmh_regulator_hw_type - supported PMIC regulator hardware types
++ * This enum defines the specific regulator type along with its PMIC family.
++ */
++enum rpmh_regulator_hw_type {
++	RPMH_REGULATOR_HW_TYPE_UNKNOWN,
++	RPMH_REGULATOR_HW_TYPE_PMIC4_LDO,
++	RPMH_REGULATOR_HW_TYPE_PMIC4_HFSMPS,
++	RPMH_REGULATOR_HW_TYPE_PMIC4_FTSMPS,
++	RPMH_REGULATOR_HW_TYPE_PMIC4_BOB,
++	RPMH_REGULATOR_HW_TYPE_PMIC5_LDO,
++	RPMH_REGULATOR_HW_TYPE_PMIC5_HFSMPS,
++	RPMH_REGULATOR_HW_TYPE_PMIC5_FTSMPS,
++	RPMH_REGULATOR_HW_TYPE_PMIC5_BOB,
++	RPMH_REGULATOR_HW_TYPE_MAX,
++};
++
++/**
++ * enum rpmh_regulator_reg_index - RPMh accelerator register indices
++ * %RPMH_REGULATOR_REG_VRM_VOLTAGE:	VRM voltage voting register index
++ * %RPMH_REGULATOR_REG_ARC_LEVEL:	ARC voltage level voting register index
++ * %RPMH_REGULATOR_REG_VRM_ENABLE:	VRM enable voltage voting register index
++ * %RPMH_REGULATOR_REG_ARC_PSEUDO_ENABLE: Place-holder for enable aggregation.
++ *					ARC does not have a specific register
++ *					for enable voting.  Instead, ARC level
++ *					0 corresponds to "disabled" for a given
++ *					ARC regulator resource if supported.
++ * %RPMH_REGULATOR_REG_XOB_ENABLE:	XOB enable voting register index
++ * %RPMH_REGULATOR_REG_ENABLE:		Common enable index used in callback
++ *					functions for both ARC and VRM.
++ * %RPMH_REGULATOR_REG_VRM_MODE:	VRM regulator mode voting register index
++ * %RPMH_REGULATOR_REG_VRM_HEADROOM:	VRM headroom voltage voting register
++ *					index
++ * %RPMH_REGULATOR_REG_ARC_REAL_MAX:	Upper limit of real existent ARC
++ *					register indices
++ * %RPMH_REGULATOR_REG_ARC_MAX:		Exclusive upper limit of ARC register
++ *					indices
++ * %RPMH_REGULATOR_REG_XOB_MAX:		Exclusive upper limit of XOB register
++ *					indices
++ * %RPMH_REGULATOR_REG_VRM_MAX:		Exclusive upper limit of VRM register
++ *					indices
++ * %RPMH_REGULATOR_REG_MAX:		Combined exclusive upper limit of ARC
++ *					and VRM register indices
++ *
++ * Register addresses are calculated as: base_addr + sizeof(u32) * reg_index
++ */
++enum rpmh_regulator_reg_index {
++	RPMH_REGULATOR_REG_VRM_VOLTAGE		= 0,
++	RPMH_REGULATOR_REG_ARC_LEVEL		= 0,
++	RPMH_REGULATOR_REG_VRM_ENABLE		= 1,
++	RPMH_REGULATOR_REG_ARC_PSEUDO_ENABLE	= RPMH_REGULATOR_REG_VRM_ENABLE,
++	RPMH_REGULATOR_REG_XOB_ENABLE		= RPMH_REGULATOR_REG_VRM_ENABLE,
++	RPMH_REGULATOR_REG_ENABLE		= RPMH_REGULATOR_REG_VRM_ENABLE,
++	RPMH_REGULATOR_REG_VRM_MODE		= 2,
++	RPMH_REGULATOR_REG_VRM_HEADROOM		= 3,
++	RPMH_REGULATOR_REG_ARC_REAL_MAX		= 1,
++	RPMH_REGULATOR_REG_ARC_MAX		= 2,
++	RPMH_REGULATOR_REG_XOB_MAX		= 2,
++	RPMH_REGULATOR_REG_VRM_MAX		= 4,
++	RPMH_REGULATOR_REG_MAX			= 4,
++};
++
++/*
++ * This is the number of bytes used for each command DB aux data entry of an
++ * ARC resource.
++ */
++#define RPMH_ARC_LEVEL_SIZE		2
++
++/*
++ * This is the maximum number of voltage levels that may be defined for an ARC
++ * resource.
++ */
++#define RPMH_ARC_MAX_LEVELS		16
++
++#define RPMH_REGULATOR_LEVEL_OFF	0
++
++/* Min and max limits of VRM resource request parameters */
++#define RPMH_VRM_MIN_UV			0
++#define RPMH_VRM_MAX_UV			8191000
++
++#define RPMH_VRM_HEADROOM_MIN_UV	0
++#define RPMH_VRM_HEADROOM_MAX_UV	511000
++
++#define RPMH_VRM_MODE_MIN		0
++#define RPMH_VRM_MODE_MAX		7
++
++/* XOB voting registers are found in the VRM hardware module */
++#define CMD_DB_HW_XOB			CMD_DB_HW_VRM
++
++#define IPC_LOG_PAGES			10
++
++#define rpmh_reg_dbg(fmt, ...) \
++	do { \
++		pr_debug(fmt, ##__VA_ARGS__); \
++	} while (0)
++
++
++/**
++ * struct rpmh_regulator_request - rpmh request data
++ * @reg:			Array of RPMh accelerator register values
++ * @valid:			Bitmask identifying which of the register values
++ *				are valid/initialized
++ */
++struct rpmh_regulator_request {
++	u32				reg[RPMH_REGULATOR_REG_MAX];
++	u32				valid;
++};
++
++/**
++ * struct rpmh_regulator_mode - RPMh VRM mode attributes
++ * @pmic_mode:			Raw PMIC mode value written into VRM mode voting
++ *				register (i.e. RPMH_REGULATOR_MODE_*)
++ * @framework_mode:		Regulator framework mode value
++ *				(i.e. REGULATOR_MODE_*)
++ * @min_load_ua:		The minimum load current in microamps which
++ *				would utilize this mode
++ *
++ * Software selects the lowest mode for which aggr_load_ua >= min_load_ua.
++ */
++struct rpmh_regulator_mode {
++	u32				pmic_mode;
++	u32				framework_mode;
++	int				min_load_ua;
++};
++
++struct rpmh_vreg;
++
++/**
++ * struct rpmh_aggr_vreg - top level aggregated rpmh regulator resource data
++ *		structure
++ * @dev:			Device pointer to the rpmh aggregated regulator
++ *				device
++ * @resource_name:		Name of rpmh regulator resource which is mapped
++ *				to an RPMh accelerator address via command DB.
++ *				This name must match to one that is defined by
++ *				the bootloader.
++ * @addr:			Base address of the regulator resource within
++ *				an RPMh accelerator
++ * @lock:			Mutex lock used for locking between regulators
++ *				common to a single aggregated resource
++ * @regulator_type:		RPMh accelerator type for this regulator
++ *				resource
++ * @regulator_hw_type:		The regulator hardware type (e.g. LDO or SMPS)
++ *				along with PMIC family (i.e. PMIC4 or PMIC5)
++ * @level:			Mapping from ARC resource specific voltage
++ *				levels (0 to RPMH_ARC_MAX_LEVELS - 1) to common
++ *				consumer voltage levels (i.e.
++ *				RPMH_REGULATOR_LEVEL_*).  These values are read
++ *				out of the AUX data found in command DB for a
++ *				given ARC resource.
++ * @level_count:		The number of valid entries in the level array
++ * @always_wait_for_ack:	Boolean flag indicating if a request must always
++ *				wait for an ACK from RPMh before continuing even
++ *				if it corresponds to a strictly lower power
++ *				state (e.g. enabled --> disabled).
++ * @next_wait_for_ack:		Boolean flag indicating that the next request
++ *				sent must wait for an ACK.  This is used to
++ *				ensure that the driver waits for the voltage to
++ *				slew down in the case that the requested max_uV
++ *				value is lower than the last requested voltage.
++ * @sleep_request_sent:		Boolean flag indicating that a sleep set request
++ *				has been sent at some point due to it diverging
++ *				from the active set request.  After that point,
++ *				the sleep set requests must always be sent for
++ *				a given resource.
++ * @vreg:			Array of rpmh regulator structs representing the
++ *				individual regulators sharing the aggregated
++ *				regulator resource.
++ * @vreg_count:			The number of entries in the vreg array.
++ * @mode:			An array of modes supported by an RPMh VRM
++ *				regulator resource.
++ * @mode_count:			The number of entries in the mode array.
++ * @disable_pmic_mode:		PMIC mode optionally set when aggregated regulator resource
++ *				gets disabled, overriding existing aggregated mode.
++ * @aggr_req_active:		Aggregated active set RPMh accelerator register
++ *				request
++ * @aggr_req_sleep:		Aggregated sleep set RPMh accelerator register
++ *				request
++ */
++struct rpmh_aggr_vreg {
++	struct device			*dev;
++	const char			*resource_name;
++	u32				addr;
++	struct mutex			lock;
++	enum rpmh_regulator_type	regulator_type;
++	enum rpmh_regulator_hw_type	regulator_hw_type;
++	u32				level[RPMH_ARC_MAX_LEVELS];
++	int				level_count;
++	bool				always_wait_for_ack;
++	bool				next_wait_for_ack;
++	bool				sleep_request_sent;
++	struct rpmh_vreg		*vreg;
++	int				vreg_count;
++	struct rpmh_regulator_mode	*mode;
++	int				mode_count;
++	int				disable_pmic_mode;
++	struct rpmh_regulator_request	aggr_req_active;
++	struct rpmh_regulator_request	aggr_req_sleep;
++};
++
++/**
++ * struct rpmh_vreg - individual rpmh regulator data structure encapsulating a
++ *		regulator framework regulator device and its corresponding
++ *		rpmh request
++ * @of_node:			Device node pointer for the individual rpmh
++ *				regulator
++ * @name:			Name of the regulator
++ * @rdesc:			Regulator descriptor
++ * @rdev:			Regulator device pointer returned by
++ *				devm_regulator_register()
++ * @aggr_vreg:			Pointer to the aggregated rpmh regulator
++ *				resource
++ * @set_active:			Boolean flag indicating that requests made by
++ *				this regulator should take affect in the active
++ *				set
++ * @set_sleep:			Boolean flag indicating that requests made by
++ *				this regulator should take affect in the sleep
++ *				set
++ * @req:			RPMh accelerator register request
++ * @mode_index:			RPMh VRM regulator mode selected by index into
++ *				aggr_vreg->mode
++ */
++struct rpmh_vreg {
++	struct device_node		*of_node;
++	struct regulator_desc		rdesc;
++	struct regulator_dev		*rdev;
++	struct rpmh_aggr_vreg		*aggr_vreg;
++	bool				set_active;
++	bool				set_sleep;
++	struct rpmh_regulator_request	req;
++	int				mode_index;
++};
++
++#define RPMH_REGULATOR_MODE_COUNT		5
++
++#define RPMH_REGULATOR_MODE_PMIC4_LDO_RM	4
++#define RPMH_REGULATOR_MODE_PMIC4_LDO_LPM	5
++#define RPMH_REGULATOR_MODE_PMIC4_LDO_HPM	7
++
++#define RPMH_REGULATOR_MODE_PMIC4_SMPS_RM	4
++#define RPMH_REGULATOR_MODE_PMIC4_SMPS_PFM	5
++#define RPMH_REGULATOR_MODE_PMIC4_SMPS_AUTO	6
++#define RPMH_REGULATOR_MODE_PMIC4_SMPS_PWM	7
++
++#define RPMH_REGULATOR_MODE_PMIC4_BOB_PASS	0
++#define RPMH_REGULATOR_MODE_PMIC4_BOB_PFM	1
++#define RPMH_REGULATOR_MODE_PMIC4_BOB_AUTO	2
++#define RPMH_REGULATOR_MODE_PMIC4_BOB_PWM	3
++
++#define RPMH_REGULATOR_MODE_PMIC5_LDO_RM	3
++#define RPMH_REGULATOR_MODE_PMIC5_LDO_LPM	4
++#define RPMH_REGULATOR_MODE_PMIC5_LDO_HPM	7
++
++#define RPMH_REGULATOR_MODE_PMIC5_HFSMPS_RM	3
++#define RPMH_REGULATOR_MODE_PMIC5_HFSMPS_PFM	4
++#define RPMH_REGULATOR_MODE_PMIC5_HFSMPS_AUTO	6
++#define RPMH_REGULATOR_MODE_PMIC5_HFSMPS_PWM	7
++
++#define RPMH_REGULATOR_MODE_PMIC5_FTSMPS_RM	3
++#define RPMH_REGULATOR_MODE_PMIC5_FTSMPS_PWM	7
++
++#define RPMH_REGULATOR_MODE_PMIC5_BOB_PASS	2
++#define RPMH_REGULATOR_MODE_PMIC5_BOB_PFM	4
++#define RPMH_REGULATOR_MODE_PMIC5_BOB_AUTO	6
++#define RPMH_REGULATOR_MODE_PMIC5_BOB_PWM	7
++
++/*
++ * Mappings from RPMh generic modes to VRM accelerator modes and regulator
++ * framework modes for each regulator type.
++ */
++static const struct rpmh_regulator_mode
++rpmh_regulator_mode_map_pmic4_ldo[RPMH_REGULATOR_MODE_COUNT] = {
++	[RPMH_REGULATOR_MODE_RET] = {
++		.pmic_mode = RPMH_REGULATOR_MODE_PMIC4_LDO_RM,
++		.framework_mode = REGULATOR_MODE_STANDBY,
++	},
++	[RPMH_REGULATOR_MODE_LPM] = {
++		.pmic_mode = RPMH_REGULATOR_MODE_PMIC4_LDO_LPM,
++		.framework_mode = REGULATOR_MODE_IDLE,
++	},
++	[RPMH_REGULATOR_MODE_HPM] = {
++		.pmic_mode = RPMH_REGULATOR_MODE_PMIC4_LDO_HPM,
++		.framework_mode = REGULATOR_MODE_FAST,
++	},
++};
++
++static const struct rpmh_regulator_mode
++rpmh_regulator_mode_map_pmic4_smps[RPMH_REGULATOR_MODE_COUNT] = {
++	[RPMH_REGULATOR_MODE_RET] = {
++		.pmic_mode = RPMH_REGULATOR_MODE_PMIC4_SMPS_RM,
++		.framework_mode = REGULATOR_MODE_STANDBY,
++	},
++	[RPMH_REGULATOR_MODE_LPM] = {
++		.pmic_mode = RPMH_REGULATOR_MODE_PMIC4_SMPS_PFM,
++		.framework_mode = REGULATOR_MODE_IDLE,
++	},
++	[RPMH_REGULATOR_MODE_AUTO] = {
++		.pmic_mode = RPMH_REGULATOR_MODE_PMIC4_SMPS_AUTO,
++		.framework_mode = REGULATOR_MODE_NORMAL,
++	},
++	[RPMH_REGULATOR_MODE_HPM] = {
++		.pmic_mode = RPMH_REGULATOR_MODE_PMIC4_SMPS_PWM,
++		.framework_mode = REGULATOR_MODE_FAST,
++	},
++};
++
++static const struct rpmh_regulator_mode
++rpmh_regulator_mode_map_pmic4_bob[RPMH_REGULATOR_MODE_COUNT] = {
++	[RPMH_REGULATOR_MODE_PASS] = {
++		.pmic_mode = RPMH_REGULATOR_MODE_PMIC4_BOB_PASS,
++		.framework_mode = REGULATOR_MODE_STANDBY,
++	},
++	[RPMH_REGULATOR_MODE_LPM] = {
++		.pmic_mode = RPMH_REGULATOR_MODE_PMIC4_BOB_PFM,
++		.framework_mode = REGULATOR_MODE_IDLE,
++	},
++	[RPMH_REGULATOR_MODE_AUTO] = {
++		.pmic_mode = RPMH_REGULATOR_MODE_PMIC4_BOB_AUTO,
++		.framework_mode = REGULATOR_MODE_NORMAL,
++	},
++	[RPMH_REGULATOR_MODE_HPM] = {
++		.pmic_mode = RPMH_REGULATOR_MODE_PMIC4_BOB_PWM,
++		.framework_mode = REGULATOR_MODE_FAST,
++	},
++};
++
++static const struct rpmh_regulator_mode
++rpmh_regulator_mode_map_pmic5_ldo[RPMH_REGULATOR_MODE_COUNT] = {
++	[RPMH_REGULATOR_MODE_RET] = {
++		.pmic_mode = RPMH_REGULATOR_MODE_PMIC5_LDO_RM,
++		.framework_mode = REGULATOR_MODE_STANDBY,
++	},
++	[RPMH_REGULATOR_MODE_LPM] = {
++		.pmic_mode = RPMH_REGULATOR_MODE_PMIC5_LDO_LPM,
++		.framework_mode = REGULATOR_MODE_IDLE,
++	},
++	[RPMH_REGULATOR_MODE_HPM] = {
++		.pmic_mode = RPMH_REGULATOR_MODE_PMIC5_LDO_HPM,
++		.framework_mode = REGULATOR_MODE_FAST,
++	},
++};
++
++static const struct rpmh_regulator_mode
++rpmh_regulator_mode_map_pmic5_hfsmps[RPMH_REGULATOR_MODE_COUNT] = {
++	[RPMH_REGULATOR_MODE_RET] = {
++		.pmic_mode = RPMH_REGULATOR_MODE_PMIC5_HFSMPS_RM,
++		.framework_mode = REGULATOR_MODE_STANDBY,
++	},
++	[RPMH_REGULATOR_MODE_LPM] = {
++		.pmic_mode = RPMH_REGULATOR_MODE_PMIC5_HFSMPS_PFM,
++		.framework_mode = REGULATOR_MODE_IDLE,
++	},
++	[RPMH_REGULATOR_MODE_AUTO] = {
++		.pmic_mode = RPMH_REGULATOR_MODE_PMIC5_HFSMPS_AUTO,
++		.framework_mode = REGULATOR_MODE_NORMAL,
++	},
++	[RPMH_REGULATOR_MODE_HPM] = {
++		.pmic_mode = RPMH_REGULATOR_MODE_PMIC5_HFSMPS_PWM,
++		.framework_mode = REGULATOR_MODE_FAST,
++	},
++};
++
++static const struct rpmh_regulator_mode
++rpmh_regulator_mode_map_pmic5_ftsmps[RPMH_REGULATOR_MODE_COUNT] = {
++	[RPMH_REGULATOR_MODE_RET] = {
++		.pmic_mode = RPMH_REGULATOR_MODE_PMIC5_FTSMPS_RM,
++		.framework_mode = REGULATOR_MODE_STANDBY,
++	},
++	[RPMH_REGULATOR_MODE_HPM] = {
++		.pmic_mode = RPMH_REGULATOR_MODE_PMIC5_FTSMPS_PWM,
++		.framework_mode = REGULATOR_MODE_FAST,
++	},
++};
++
++static const struct rpmh_regulator_mode
++rpmh_regulator_mode_map_pmic5_bob[RPMH_REGULATOR_MODE_COUNT] = {
++	[RPMH_REGULATOR_MODE_PASS] = {
++		.pmic_mode = RPMH_REGULATOR_MODE_PMIC5_BOB_PASS,
++		.framework_mode = REGULATOR_MODE_STANDBY,
++	},
++	[RPMH_REGULATOR_MODE_LPM] = {
++		.pmic_mode = RPMH_REGULATOR_MODE_PMIC5_BOB_PFM,
++		.framework_mode = REGULATOR_MODE_IDLE,
++	},
++	[RPMH_REGULATOR_MODE_AUTO] = {
++		.pmic_mode = RPMH_REGULATOR_MODE_PMIC5_BOB_AUTO,
++		.framework_mode = REGULATOR_MODE_NORMAL,
++	},
++	[RPMH_REGULATOR_MODE_HPM] = {
++		.pmic_mode = RPMH_REGULATOR_MODE_PMIC5_BOB_PWM,
++		.framework_mode = REGULATOR_MODE_FAST,
++	},
++};
++
++static const struct rpmh_regulator_mode * const
++rpmh_regulator_mode_map[RPMH_REGULATOR_HW_TYPE_MAX] = {
++	[RPMH_REGULATOR_HW_TYPE_PMIC4_LDO]
++		= rpmh_regulator_mode_map_pmic4_ldo,
++	[RPMH_REGULATOR_HW_TYPE_PMIC4_HFSMPS]
++		= rpmh_regulator_mode_map_pmic4_smps,
++	[RPMH_REGULATOR_HW_TYPE_PMIC4_FTSMPS]
++		= rpmh_regulator_mode_map_pmic4_smps,
++	[RPMH_REGULATOR_HW_TYPE_PMIC4_BOB]
++		= rpmh_regulator_mode_map_pmic4_bob,
++	[RPMH_REGULATOR_HW_TYPE_PMIC5_LDO]
++		= rpmh_regulator_mode_map_pmic5_ldo,
++	[RPMH_REGULATOR_HW_TYPE_PMIC5_HFSMPS]
++		= rpmh_regulator_mode_map_pmic5_hfsmps,
++	[RPMH_REGULATOR_HW_TYPE_PMIC5_FTSMPS]
++		= rpmh_regulator_mode_map_pmic5_ftsmps,
++	[RPMH_REGULATOR_HW_TYPE_PMIC5_BOB]
++		= rpmh_regulator_mode_map_pmic5_bob,
++};
++
++/*
++ * This voltage in uV is returned by get_voltage functions when there is no way
++ * to determine the current voltage level.  It is needed because the regulator
++ * framework treats a 0 uV voltage as an error.
++ */
++#define VOLTAGE_UNKNOWN 1
++
++#define vreg_err(vreg, message, ...) \
++	pr_err("%s: " message, (vreg)->rdesc.name, ##__VA_ARGS__)
++#define vreg_info(vreg, message, ...) \
++	pr_info("%s: " message, (vreg)->rdesc.name, ##__VA_ARGS__)
++#define vreg_debug(vreg, message, ...) \
++	pr_debug("%s: " message, (vreg)->rdesc.name, ##__VA_ARGS__)
++
++#define aggr_vreg_err(aggr_vreg, message, ...) \
++	pr_err("%s: " message, (aggr_vreg)->resource_name, ##__VA_ARGS__)
++#define aggr_vreg_info(aggr_vreg, message, ...) \
++	pr_info("%s: " message, (aggr_vreg)->resource_name, ##__VA_ARGS__)
++#define aggr_vreg_debug(aggr_vreg, message, ...) \
++	pr_debug("%s: " message, (aggr_vreg)->resource_name, ##__VA_ARGS__)
++
++#define DEBUG_PRINT_BUFFER_SIZE 256
++static const char *const rpmh_regulator_state_names[] = {
++	[RPMH_SLEEP_STATE]		= "sleep ",
++	[RPMH_WAKE_ONLY_STATE]		= "wake  ",
++	[RPMH_ACTIVE_ONLY_STATE]	= "active",
++};
++
++static const char *const rpmh_regulator_vrm_param_names[] = {
++	[RPMH_REGULATOR_REG_VRM_VOLTAGE]	= "mv",
++	[RPMH_REGULATOR_REG_VRM_ENABLE]		= "en",
++	[RPMH_REGULATOR_REG_VRM_MODE]		= "mode",
++	[RPMH_REGULATOR_REG_VRM_HEADROOM]	= "hr_mv",
++};
++
++static const char *const rpmh_regulator_arc_param_names[] = {
++	[RPMH_REGULATOR_REG_ARC_LEVEL]		= "hlvl",
++};
++
++static const char *const rpmh_regulator_xob_param_names[] = {
++	[RPMH_REGULATOR_REG_XOB_ENABLE]		= "en",
++};
++
++static const int max_reg_index_map[] = {
++	[RPMH_REGULATOR_TYPE_VRM] = RPMH_REGULATOR_REG_VRM_MAX,
++	[RPMH_REGULATOR_TYPE_ARC] = RPMH_REGULATOR_REG_ARC_MAX,
++	[RPMH_REGULATOR_TYPE_XOB] = RPMH_REGULATOR_REG_XOB_MAX,
++};
++
++/**
++ * rpmh_regulator_get_max_reg_index() - return the number of registers
++ *		associated with the rpmh resource
++ * @aggr_vreg:		Pointer to the aggregated rpmh regulator resource
++ *
++ * Return: max number of registers for the aggr_vreg rpmh resource
++ */
++static int rpmh_regulator_get_max_reg_index(struct rpmh_aggr_vreg *aggr_vreg)
++{
++	if (aggr_vreg->regulator_type >= ARRAY_SIZE(max_reg_index_map))
++		return -EINVAL;
++	else
++		return max_reg_index_map[aggr_vreg->regulator_type];
++}
++
++/**
++ * rpmh_regulator_req() - print the rpmh regulator request to the kernel log
++ * @vreg:		Pointer to the RPMh regulator
++ * @current_req:	Pointer to the new request
++ * @prev_req:		Pointer to the last request
++ * @sent_mask:		Bitmask which specifies the parameters sent in this
++ *			request
++ * @state:		The rpmh state that the request was sent for
++ *
++ * Return: none
++ */
++static void rpmh_regulator_req(struct rpmh_vreg *vreg,
++		struct rpmh_regulator_request *current_req,
++		struct rpmh_regulator_request *prev_req,
++		u32 sent_mask,
++		enum rpmh_state state)
++{
++	struct rpmh_aggr_vreg *aggr_vreg = vreg->aggr_vreg;
++	char buf[DEBUG_PRINT_BUFFER_SIZE];
++	size_t buflen = DEBUG_PRINT_BUFFER_SIZE;
++	const char *const *param_name;
++	int i, max_reg_index;
++	int pos = 0;
++	u32 valid;
++	bool first;
++
++	switch (aggr_vreg->regulator_type) {
++	case RPMH_REGULATOR_TYPE_VRM:
++		max_reg_index = RPMH_REGULATOR_REG_VRM_MAX;
++		param_name = rpmh_regulator_vrm_param_names;
++		break;
++	case RPMH_REGULATOR_TYPE_ARC:
++		max_reg_index = RPMH_REGULATOR_REG_ARC_REAL_MAX;
++		param_name = rpmh_regulator_arc_param_names;
++		break;
++	case RPMH_REGULATOR_TYPE_XOB:
++		max_reg_index = RPMH_REGULATOR_REG_XOB_MAX;
++		param_name = rpmh_regulator_xob_param_names;
++		break;
++	default:
++		return;
++	}
++
++	pos += scnprintf(buf + pos, buflen - pos,
++			"%s (%s), addr=0x%05X: s=%s; sent: ",
++			aggr_vreg->resource_name, vreg->rdesc.name,
++			aggr_vreg->addr, rpmh_regulator_state_names[state]);
++
++	valid = sent_mask;
++	first = true;
++	for (i = 0; i < max_reg_index; i++) {
++		if (valid & BIT(i)) {
++			pos += scnprintf(buf + pos, buflen - pos, "%s%s=%u",
++					(first ? "" : ", "), param_name[i],
++					current_req->reg[i]);
++			first = false;
++			if (aggr_vreg->regulator_type
++				== RPMH_REGULATOR_TYPE_ARC
++			    && i == RPMH_REGULATOR_REG_ARC_LEVEL)
++				pos += scnprintf(buf + pos, buflen - pos,
++					" (vlvl=%u)",
++					aggr_vreg->level[current_req->reg[i]]);
++		}
++	}
++
++	valid = prev_req->valid & ~sent_mask;
++
++	if (valid)
++		pos += scnprintf(buf + pos, buflen - pos, "; prev: ");
++	first = true;
++	for (i = 0; i < max_reg_index; i++) {
++		if (valid & BIT(i)) {
++			pos += scnprintf(buf + pos, buflen - pos, "%s%s=%u",
++					(first ? "" : ", "), param_name[i],
++					current_req->reg[i]);
++			first = false;
++			if (aggr_vreg->regulator_type
++				== RPMH_REGULATOR_TYPE_ARC
++			    && i == RPMH_REGULATOR_REG_ARC_LEVEL)
++				pos += scnprintf(buf + pos, buflen - pos,
++					" (vlvl=%u)",
++					aggr_vreg->level[current_req->reg[i]]);
++		}
++	}
++
++	rpmh_reg_dbg("%s\n", buf);
++}
++
++/**
++ * rpmh_regulator_handle_arc_enable() - handle masking of the voltage level
++ *		request based on the pseudo-enable value
++ * @aggr_vreg:		Pointer to the aggregated rpmh regulator resource
++ * @req			Pointer to the newly aggregated request
++ *
++ * Return: none
++ */
++static void rpmh_regulator_handle_arc_enable(struct rpmh_aggr_vreg *aggr_vreg,
++					     struct rpmh_regulator_request *req)
++{
++	if (aggr_vreg->regulator_type != RPMH_REGULATOR_TYPE_ARC)
++		return;
++
++	/*
++	 * Mask the voltage level if "off" level is supported and the regulator
++	 * has not been enabled.
++	 */
++	if (aggr_vreg->level[0] == RPMH_REGULATOR_LEVEL_OFF) {
++		if (req->valid & BIT(RPMH_REGULATOR_REG_ARC_PSEUDO_ENABLE)) {
++			if (!req->reg[RPMH_REGULATOR_REG_ARC_PSEUDO_ENABLE])
++				req->reg[RPMH_REGULATOR_REG_ARC_LEVEL] = 0;
++		} else {
++			/* Invalidate voltage level if enable is invalid. */
++			req->valid &= ~BIT(RPMH_REGULATOR_REG_ARC_LEVEL);
++		}
++	}
++
++	/*
++	 * Mark the pseudo enable bit as invalid so that it is not accidentally
++	 * included in an RPMh command.
++	 */
++	req->valid &= ~BIT(RPMH_REGULATOR_REG_ARC_PSEUDO_ENABLE);
++}
++
++static void rpmh_regulator_handle_disable_mode(struct rpmh_aggr_vreg *aggr_vreg,
++					     struct rpmh_regulator_request *req)
++{
++	if (aggr_vreg->regulator_type != RPMH_REGULATOR_TYPE_VRM
++	   || aggr_vreg->disable_pmic_mode <= 0)
++		return;
++
++	if ((req->valid & BIT(RPMH_REGULATOR_REG_ENABLE))
++	   && !req->reg[RPMH_REGULATOR_REG_ENABLE]) {
++		req->reg[RPMH_REGULATOR_REG_VRM_MODE] = aggr_vreg->disable_pmic_mode;
++		req->valid |= RPMH_REGULATOR_REG_VRM_MODE;
++	}
++}
++
++/**
++ * rpmh_regulator_aggregate_requests() - aggregate the requests from all
++ *		regulators associated with an RPMh resource
++ * @aggr_vreg:		Pointer to the aggregated rpmh regulator resource
++ * @req_active:		Pointer to active set request output
++ * @req_sleep:		Pointer to sleep set request output
++ *
++ * This function aggregates the requests from the different regulators
++ * associated with the aggr_vreg resource independently in both the active set
++ * and sleep set.  The aggregated results are stored in req_active and
++ * req_sleep.
++ *
++ * Return: none
++ */
++static void rpmh_regulator_aggregate_requests(struct rpmh_aggr_vreg *aggr_vreg,
++				struct rpmh_regulator_request *req_active,
++				struct rpmh_regulator_request *req_sleep)
++{
++	int i, j, max_reg_index;
++
++	max_reg_index = rpmh_regulator_get_max_reg_index(aggr_vreg);
++	/*
++	 * Perform max aggregration of each register value across all regulators
++	 * which use this RPMh resource.
++	 */
++	for (i = 0; i < aggr_vreg->vreg_count; i++) {
++		if (aggr_vreg->vreg[i].set_active) {
++			for (j = 0; j < max_reg_index; j++)
++				req_active->reg[j] = max(req_active->reg[j],
++						aggr_vreg->vreg[i].req.reg[j]);
++			req_active->valid |= aggr_vreg->vreg[i].req.valid;
++		}
++		if (aggr_vreg->vreg[i].set_sleep) {
++			for (j = 0; j < max_reg_index; j++)
++				req_sleep->reg[j] = max(req_sleep->reg[j],
++						aggr_vreg->vreg[i].req.reg[j]);
++			req_sleep->valid |= aggr_vreg->vreg[i].req.valid;
++		}
++	}
++
++	rpmh_regulator_handle_arc_enable(aggr_vreg, req_active);
++	rpmh_regulator_handle_arc_enable(aggr_vreg, req_sleep);
++	rpmh_regulator_handle_disable_mode(aggr_vreg, req_active);
++	rpmh_regulator_handle_disable_mode(aggr_vreg, req_sleep);
++}
++
++static void swap_cmds(struct tcs_cmd *cmd1, struct tcs_cmd *cmd2)
++{
++	struct tcs_cmd cmd_temp;
++
++	if (cmd1 == cmd2)
++		return;
++
++	cmd_temp = *cmd1;
++	*cmd1 = *cmd2;
++	*cmd2 = cmd_temp;
++}
++
++/**
++ * rpmh_regulator_reorder_cmds() - reorder tcs commands to ensure safe regulator
++ *		state transitions
++ * @aggr_vreg:		Pointer to the aggregated rpmh regulator resource
++ * @cmd:		TCS command array
++ * @len:		Number of elements in 'cmd' array
++ *
++ * LDO regulators can accidentally trigger over-current protection (OCP) when
++ * RPMh regulator requests are processed if the commands in the request are in
++ * an order that temporarily places the LDO in an incorrect state.  For example,
++ * if an LDO is disabled with mode=LPM, then executing the request
++ * [en=ON, mode=HPM] can trigger OCP after the first command is executed since
++ * it will result in the overall state: en=ON, mode=LPM.  This issue can be
++ * avoided by reordering the commands: [mode=HPM, en=ON].
++ *
++ * This function reorders the request command sequence to avoid invalid
++ * transient LDO states.
++ *
++ * Return: none
++ */
++static void rpmh_regulator_reorder_cmds(struct rpmh_aggr_vreg *aggr_vreg,
++					struct tcs_cmd *cmd, int len)
++{
++	enum rpmh_regulator_reg_index reg_index;
++	int i;
++
++	if (len == 1 || aggr_vreg->regulator_type != RPMH_REGULATOR_TYPE_VRM)
++		return;
++
++	for (i = 0; i < len; i++) {
++		reg_index = (cmd[i].addr - aggr_vreg->addr) >> 2;
++
++		if (reg_index == RPMH_REGULATOR_REG_VRM_ENABLE) {
++			if (cmd[i].data) {
++				/* Move enable command to end */
++				swap_cmds(&cmd[i], &cmd[len - 1]);
++			} else {
++				/* Move disable command to start */
++				swap_cmds(&cmd[i], &cmd[0]);
++			}
++			break;
++		}
++	}
++}
++
++/**
++ * rpmh_regulator_send_aggregate_requests() - aggregate the requests from all
++ *		regulators associated with an RPMh resource and send the request
++ *		to RPMh
++ * @vreg:		Pointer to the RPMh regulator
++ *
++ * This function aggregates the requests from the different regulators
++ * associated with the aggr_vreg resource independently in both the active set
++ * and sleep set.  The requests are only sent for the sleep set if they differ,
++ * or have differed in the past, from those of the active set.
++ *
++ * Return: 0 on success, errno on failure
++ */
++static int
++rpmh_regulator_send_aggregate_requests(struct rpmh_vreg *vreg)
++{
++	struct rpmh_aggr_vreg *aggr_vreg = vreg->aggr_vreg;
++	struct rpmh_regulator_request req_active = { {0} };
++	struct rpmh_regulator_request req_sleep = { {0} };
++	struct tcs_cmd cmd[RPMH_REGULATOR_REG_MAX] = { {0} };
++	bool sleep_set_differs = aggr_vreg->sleep_request_sent;
++	bool wait_for_ack = aggr_vreg->always_wait_for_ack
++				|| aggr_vreg->next_wait_for_ack;
++	bool resend_active = false;
++	int i, j, max_reg_index, rc;
++	enum rpmh_state state;
++	u32 sent_mask;
++
++	max_reg_index = rpmh_regulator_get_max_reg_index(aggr_vreg);
++
++	rpmh_regulator_aggregate_requests(aggr_vreg, &req_active, &req_sleep);
++
++	/*
++	 * Check if the aggregated sleep set parameter values differ from the
++	 * aggregated active set parameter values.
++	 */
++	if (!aggr_vreg->sleep_request_sent) {
++		for (i = 0; i < max_reg_index; i++) {
++			if ((req_active.reg[i] != req_sleep.reg[i])
++			    && (req_sleep.valid & BIT(i))) {
++				sleep_set_differs = true;
++				/*
++				 * Resend full active set request so that
++				 * all parameters are specified in the wake-only
++				 * state request.
++				 */
++				resend_active = true;
++				break;
++			}
++		}
++	}
++
++	if (sleep_set_differs) {
++		/*
++		 * Generate an rpmh command consisting of only those registers
++		 * which have new values or which have never been touched before
++		 * (i.e. those that were previously not valid).
++		 */
++		sent_mask = 0;
++		for (i = 0, j = 0; i < max_reg_index; i++) {
++			if ((req_sleep.valid & BIT(i))
++			    && (!(aggr_vreg->aggr_req_sleep.valid & BIT(i))
++				|| aggr_vreg->aggr_req_sleep.reg[i]
++					!= req_sleep.reg[i])) {
++				cmd[j].addr = aggr_vreg->addr + i * 4;
++				cmd[j].data = req_sleep.reg[i];
++				cmd[j].wait = true;
++				j++;
++				sent_mask |= BIT(i);
++			}
++		}
++
++		/* Send the rpmh command if any register values differ. */
++		if (j > 0) {
++			rpmh_regulator_reorder_cmds(aggr_vreg, cmd, j);
++
++			rc = rpmh_write_async(aggr_vreg->dev,
++					RPMH_SLEEP_STATE, cmd, j);
++			if (rc) {
++				aggr_vreg_err(aggr_vreg, "sleep state rpmh_write_async() failed, rc=%d\n",
++					rc);
++				return rc;
++			}
++			rpmh_regulator_req(vreg, &req_sleep,
++				&aggr_vreg->aggr_req_sleep,
++				sent_mask,
++				RPMH_SLEEP_STATE);
++			aggr_vreg->sleep_request_sent = true;
++			aggr_vreg->aggr_req_sleep = req_sleep;
++		}
++	}
++
++	/*
++	 * Generate an rpmh command consisting of only those registers
++	 * which have new values or which have never been touched before
++	 * (i.e. those that were previously not valid).
++	 */
++	sent_mask = 0;
++	for (i = 0, j = 0; i < max_reg_index; i++) {
++		if ((req_active.valid & BIT(i))
++		    && (!(aggr_vreg->aggr_req_active.valid & BIT(i))
++			|| aggr_vreg->aggr_req_active.reg[i]
++				!= req_active.reg[i] || resend_active)) {
++			cmd[j].addr = aggr_vreg->addr + i * 4;
++			cmd[j].data = req_active.reg[i];
++			cmd[j].wait = true;
++			j++;
++			sent_mask |= BIT(i);
++
++			/*
++			 * Must wait for ACK from RPMh if power state is
++			 * increasing
++			 */
++			if (req_active.reg[i]
++			    > aggr_vreg->aggr_req_active.reg[i])
++				wait_for_ack = true;
++		}
++	}
++
++	/* Send the rpmh command if any register values differ. */
++	if (j > 0) {
++		rpmh_regulator_reorder_cmds(aggr_vreg, cmd, j);
++
++		if (sleep_set_differs) {
++			state = RPMH_WAKE_ONLY_STATE;
++			rc = rpmh_write_async(aggr_vreg->dev, state, cmd, j);
++			if (rc) {
++				aggr_vreg_err(aggr_vreg, "%s state rpmh_write_async() failed, rc=%d\n",
++					rpmh_regulator_state_names[state], rc);
++				return rc;
++			}
++			rpmh_regulator_req(vreg, &req_active,
++				&aggr_vreg->aggr_req_active, sent_mask, state);
++		}
++
++		state = RPMH_ACTIVE_ONLY_STATE;
++		if (wait_for_ack)
++			rc = rpmh_write(aggr_vreg->dev, state, cmd, j);
++		else
++			rc = rpmh_write_async(aggr_vreg->dev, state,
++						cmd, j);
++		if (rc) {
++			aggr_vreg_err(aggr_vreg, "%s state rpmh_write() failed, rc=%d\n",
++				rpmh_regulator_state_names[state], rc);
++			return rc;
++		}
++		rpmh_regulator_req(vreg, &req_active,
++				&aggr_vreg->aggr_req_active, sent_mask, state);
++
++		aggr_vreg->aggr_req_active = req_active;
++		aggr_vreg->next_wait_for_ack = false;
++	}
++
++	return 0;
++}
++
++/**
++ * rpmh_regulator_set_reg() - set a register value within the request for an
++ *		RPMh regulator and return the previous value
++ * @vreg:		Pointer to the RPMh regulator
++ * @reg_index:		Index of the register value to update
++ * @value:		New register value to set
++ *
++ * Return: old register value
++ */
++static u32 rpmh_regulator_set_reg(struct rpmh_vreg *vreg, int reg_index,
++				u32 value)
++{
++	u32 old_value;
++
++	old_value = vreg->req.reg[reg_index];
++	vreg->req.reg[reg_index] = value;
++	vreg->req.valid |= BIT(reg_index);
++
++	return old_value;
++}
++
++/**
++ * rpmh_regulator_check_param_max() - sets if the next request must wait for
++ *		an ACK based on the previously sent reg[index] value and the new
++ *		max value
++ * @aggr_vreg:		Pointer to the aggregated rpmh regulator resource
++ * @index:		Register index
++ * @new_max:		Newly requested maximum allowed value for the parameter
++ *
++ * This function is used to handle the case when a consumer makes a new
++ * (min_uv, max_uv) range request in which the new max_uv is lower than the
++ * previously requested min_uv.  In this case, the driver must wait for an ACK
++ * from RPMh to ensure that the voltage has completed reducing to the new min_uv
++ * value since the consumer cannot operate at the old min_uv value.
++ *
++ * Return: none
++ */
++static void rpmh_regulator_check_param_max(struct rpmh_aggr_vreg *aggr_vreg,
++					int index, u32 new_max)
++{
++	if ((aggr_vreg->aggr_req_active.valid & BIT(index))
++	    && aggr_vreg->aggr_req_active.reg[index] > new_max)
++		aggr_vreg->next_wait_for_ack = true;
++}
++
++/**
++ * rpmh_regulator_is_enabled() - return the enable state of the RPMh
++ *		regulator
++ * @rdev:		Regulator device pointer for the rpmh-regulator
++ *
++ * This function is passed as a callback function into the regulator ops that
++ * are registered for each rpmh-regulator device.
++ *
++ * Note that for ARC resources, this value is effectively a flag indicating if
++ * the requested voltage level is masked or unmasked since "disabled" = voltage
++ * level 0 (if supported).
++ *
++ * Return: true if regulator is enabled, false if regulator is disabled
++ */
++static int rpmh_regulator_is_enabled(struct regulator_dev *rdev)
++{
++	struct rpmh_vreg *vreg = rdev_get_drvdata(rdev);
++
++	return !!vreg->req.reg[RPMH_REGULATOR_REG_ENABLE];
++}
++
++/**
++ * rpmh_regulator_enable() - enable the RPMh regulator
++ * @rdev:		Regulator device pointer for the rpmh-regulator
++ *
++ * This function is passed as a callback function into the regulator ops that
++ * are registered for each rpmh-regulator device.
++ *
++ * Note that for ARC devices the enable state is handled via the voltage level
++ * parameter.  Therefore, this enable value effectively masks or unmasks the
++ * enabled voltage level.
++ *
++ * Return: 0 on success, errno on failure
++ */
++static int rpmh_regulator_enable(struct regulator_dev *rdev)
++{
++	struct rpmh_vreg *vreg = rdev_get_drvdata(rdev);
++	u32 prev_enable;
++	int rc;
++
++	mutex_lock(&vreg->aggr_vreg->lock);
++
++	prev_enable
++	       = rpmh_regulator_set_reg(vreg, RPMH_REGULATOR_REG_ENABLE, 1);
++
++	rc = rpmh_regulator_send_aggregate_requests(vreg);
++	if (rc) {
++		vreg_err(vreg, "enable failed, rc=%d\n", rc);
++		rpmh_regulator_set_reg(vreg, RPMH_REGULATOR_REG_ENABLE,
++					prev_enable);
++	}
++
++	mutex_unlock(&vreg->aggr_vreg->lock);
++
++	return rc;
++}
++
++/**
++ * rpmh_regulator_disable() - disable the RPMh regulator
++ * @rdev:		Regulator device pointer for the rpmh-regulator
++ *
++ * This function is passed as a callback function into the regulator ops that
++ * are registered for each rpmh-regulator device.
++ *
++ * Note that for ARC devices the enable state is handled via the voltage level
++ * parameter.  Therefore, this enable value effectively masks or unmasks the
++ * enabled voltage level.
++ *
++ * Return: 0 on success, errno on failure
++ */
++static int rpmh_regulator_disable(struct regulator_dev *rdev)
++{
++	struct rpmh_vreg *vreg = rdev_get_drvdata(rdev);
++	u32 prev_enable;
++	int rc;
++
++	mutex_lock(&vreg->aggr_vreg->lock);
++
++	prev_enable
++	       = rpmh_regulator_set_reg(vreg, RPMH_REGULATOR_REG_ENABLE, 0);
++
++	rc = rpmh_regulator_send_aggregate_requests(vreg);
++	if (rc) {
++		vreg_err(vreg, "disable failed, rc=%d\n", rc);
++		rpmh_regulator_set_reg(vreg, RPMH_REGULATOR_REG_ENABLE,
++					prev_enable);
++	}
++
++	mutex_unlock(&vreg->aggr_vreg->lock);
++
++	return rc;
++}
++
++/**
++ * rpmh_regulator_vrm_set_voltage() - set the voltage of the VRM rpmh-regulator
++ * @rdev:		Regulator device pointer for the rpmh-regulator
++ * @min_uv:		New voltage in microvolts to set
++ * @max_uv:		Maximum voltage in microvolts allowed
++ * @selector:		Unused
++ *
++ * This function is passed as a callback function into the regulator ops that
++ * are registered for each VRM rpmh-regulator device.
++ *
++ * Return: 0 on success, errno on failure
++ */
++static int rpmh_regulator_vrm_set_voltage(struct regulator_dev *rdev,
++				int min_uv, int max_uv, unsigned int *selector)
++{
++	struct rpmh_vreg *vreg = rdev_get_drvdata(rdev);
++	u32 prev_voltage;
++	int mv;
++	int rc = 0;
++
++	mv = DIV_ROUND_UP(min_uv, 1000);
++	if (mv * 1000 > max_uv) {
++		vreg_err(vreg, "no set points available in range %d-%d uV\n",
++			min_uv, max_uv);
++		return -EINVAL;
++	}
++
++	mutex_lock(&vreg->aggr_vreg->lock);
++
++	prev_voltage
++	     = rpmh_regulator_set_reg(vreg, RPMH_REGULATOR_REG_VRM_VOLTAGE, mv);
++	rpmh_regulator_check_param_max(vreg->aggr_vreg,
++				RPMH_REGULATOR_REG_VRM_VOLTAGE, max_uv);
++
++	rc = rpmh_regulator_send_aggregate_requests(vreg);
++	if (rc) {
++		vreg_err(vreg, "set voltage=%d mV failed, rc=%d\n", mv, rc);
++		rpmh_regulator_set_reg(vreg, RPMH_REGULATOR_REG_VRM_VOLTAGE,
++					prev_voltage);
++	}
++
++	mutex_unlock(&vreg->aggr_vreg->lock);
++
++	return rc;
++}
++
++/**
++ * rpmh_regulator_vrm_get_voltage() - get the voltage of the VRM rpmh-regulator
++ * @rdev:		Regulator device pointer for the rpmh-regulator
++ *
++ * This function is passed as a callback function into the regulator ops that
++ * are registered for each VRM rpmh-regulator device.
++ *
++ * Return: regulator voltage in microvolts
++ */
++static int rpmh_regulator_vrm_get_voltage(struct regulator_dev *rdev)
++{
++	struct rpmh_vreg *vreg = rdev_get_drvdata(rdev);
++	int uv;
++
++	uv = vreg->req.reg[RPMH_REGULATOR_REG_VRM_VOLTAGE] * 1000;
++	if (uv == 0)
++		uv = VOLTAGE_UNKNOWN;
++
++	return uv;
++}
++
++/**
++ * rpmh_regulator_vrm_set_mode_index() - set the mode of a VRM regulator to the
++ *		mode mapped to mode_index
++ * @vreg:		Pointer to the RPMh regulator
++ * @mode_index:		Index into aggr_vreg->mode[] array
++ *
++ * Return: 0 on success, errno on failure
++ */
++static int rpmh_regulator_vrm_set_mode_index(struct rpmh_vreg *vreg,
++					     int mode_index)
++{
++	u32 prev_mode;
++	int rc;
++
++	mutex_lock(&vreg->aggr_vreg->lock);
++
++	prev_mode = rpmh_regulator_set_reg(vreg, RPMH_REGULATOR_REG_VRM_MODE,
++				vreg->aggr_vreg->mode[mode_index].pmic_mode);
++
++	rc = rpmh_regulator_send_aggregate_requests(vreg);
++	if (rc) {
++		vreg_err(vreg, "set mode=%u failed, rc=%d\n",
++			vreg->req.reg[RPMH_REGULATOR_REG_VRM_MODE],
++			rc);
++		rpmh_regulator_set_reg(vreg, RPMH_REGULATOR_REG_VRM_MODE,
++					prev_mode);
++	} else {
++		vreg->mode_index = mode_index;
++	}
++
++	mutex_unlock(&vreg->aggr_vreg->lock);
++
++	return rc;
++}
++
++/**
++ * rpmh_regulator_vrm_set_mode() - set the mode of the VRM rpmh-regulator
++ * @rdev:		Regulator device pointer for the rpmh-regulator
++ * @mode:		The regulator framework mode to set
++ *
++ * This function is passed as a callback function into the regulator ops that
++ * are registered for each VRM rpmh-regulator device.
++ *
++ * This function sets the PMIC mode corresponding to the specified framework
++ * mode.  The set of PMIC modes allowed is defined in device tree for a given
++ * RPMh regulator resource.  The full mapping from generic modes to PMIC modes
++ * and framework modes is defined in the rpmh_regulator_mode_map[] array.  The
++ * RPMh resource specific mapping is defined in the aggr_vreg->mode[] array.
++ *
++ * Return: 0 on success, errno on failure
++ */
++static int rpmh_regulator_vrm_set_mode(struct regulator_dev *rdev,
++					unsigned int mode)
++{
++	struct rpmh_vreg *vreg = rdev_get_drvdata(rdev);
++	int i;
++
++	for (i = 0; i < vreg->aggr_vreg->mode_count; i++)
++		if (vreg->aggr_vreg->mode[i].framework_mode == mode)
++			break;
++	if (i >= vreg->aggr_vreg->mode_count) {
++		vreg_err(vreg, "invalid mode=%u\n", mode);
++		return -EINVAL;
++	}
++
++	return rpmh_regulator_vrm_set_mode_index(vreg, i);
++}
++
++/**
++ * rpmh_regulator_vrm_get_mode() - get the mode of the VRM rpmh-regulator
++ * @rdev:		Regulator device pointer for the rpmh-regulator
++ *
++ * This function is passed as a callback function into the regulator ops that
++ * are registered for each VRM rpmh-regulator device.
++ *
++ * Return: the regulator framework mode of the regulator
++ */
++static unsigned int rpmh_regulator_vrm_get_mode(struct regulator_dev *rdev)
++{
++	struct rpmh_vreg *vreg = rdev_get_drvdata(rdev);
++
++	return vreg->aggr_vreg->mode[vreg->mode_index].framework_mode;
++}
++
++/**
++ * rpmh_regulator_vrm_set_load() - set the PMIC mode based upon the maximum load
++ *		required from the VRM rpmh-regulator
++ * @rdev:		Regulator device pointer for the rpmh-regulator
++ * @load_ua:		Maximum current required from all consumers in microamps
++ *
++ * This function is passed as a callback function into the regulator ops that
++ * are registered for each VRM rpmh-regulator device.
++ *
++ * This function sets the mode of the regulator to that which has the highest
++ * min support load less than or equal to load_ua.  Example:
++ *	mode_count = 3
++ *	mode[].min_load_ua = 0, 100000, 6000000
++ *
++ *	load_ua = 10000   --> mode_index = 0
++ *	load_ua = 250000  --> mode_index = 1
++ *	load_ua = 7000000 --> mode_index = 2
++ *
++ * Return: 0 on success, errno on failure
++ */
++static int rpmh_regulator_vrm_set_load(struct regulator_dev *rdev, int load_ua)
++{
++	struct rpmh_vreg *vreg = rdev_get_drvdata(rdev);
++	int i;
++
++	/* No need to check element 0 as it will be the default. */
++	for (i = vreg->aggr_vreg->mode_count - 1; i > 0; i--)
++		if (vreg->aggr_vreg->mode[i].min_load_ua <= load_ua)
++			break;
++
++	return rpmh_regulator_vrm_set_mode_index(vreg, i);
++}
++
++/**
++ * rpmh_regulator_arc_set_voltage_sel() - set the voltage level of the ARC
++ *		rpmh-regulator device
++ * @rdev:		Regulator device pointer for the rpmh-regulator
++ * @selector:		ARC voltage level to set
++ *
++ * This function is passed as a callback function into the regulator ops that
++ * are registered for each ARC rpmh-regulator device.
++ *
++ * Return: 0 on success, errno on failure
++ */
++static int rpmh_regulator_arc_set_voltage_sel(struct regulator_dev *rdev,
++						unsigned int selector)
++{
++	struct rpmh_vreg *vreg = rdev_get_drvdata(rdev);
++	u32 prev_level;
++	int rc;
++
++	mutex_lock(&vreg->aggr_vreg->lock);
++
++	prev_level = rpmh_regulator_set_reg(vreg, RPMH_REGULATOR_REG_ARC_LEVEL,
++						selector);
++
++	rc = rpmh_regulator_send_aggregate_requests(vreg);
++	if (rc) {
++		vreg_err(vreg, "set level=%d failed, rc=%d\n",
++			vreg->req.reg[RPMH_REGULATOR_REG_ARC_LEVEL],
++			rc);
++		rpmh_regulator_set_reg(vreg, RPMH_REGULATOR_REG_ARC_LEVEL,
++					prev_level);
++	}
++
++	mutex_unlock(&vreg->aggr_vreg->lock);
++
++	return rc;
++}
++
++/**
++ * rpmh_regulator_arc_get_voltage_sel() - get the voltage level of the ARC
++ *		rpmh-regulator device
++ * @rdev:		Regulator device pointer for the rpmh-regulator
++ *
++ * This function is passed as a callback function into the regulator ops that
++ * are registered for each ARC rpmh-regulator device.
++ *
++ * Return: ARC voltage level
++ */
++static int rpmh_regulator_arc_get_voltage_sel(struct regulator_dev *rdev)
++{
++	struct rpmh_vreg *vreg = rdev_get_drvdata(rdev);
++
++	return vreg->req.reg[RPMH_REGULATOR_REG_ARC_LEVEL];
++}
++
++/**
++ * rpmh_regulator_arc_list_voltage() - return the consumer voltage level mapped
++ *		to a given ARC voltage level
++ * @rdev:		Regulator device pointer for the rpmh-regulator
++ * @selector:		ARC voltage level
++ *
++ * This function is passed as a callback function into the regulator ops that
++ * are registered for each ARC rpmh-regulator device.
++ *
++ * Data ranges:
++ * ARC voltage level:      0 - 15 (fixed in hardware)
++ * Consumer voltage level: 1 - 513 (could be expanded to larger values)
++ *
++ * Return: consumer voltage level
++ */
++static int rpmh_regulator_arc_list_voltage(struct regulator_dev *rdev,
++						unsigned int selector)
++{
++	struct rpmh_vreg *vreg = rdev_get_drvdata(rdev);
++
++	if (selector >= vreg->aggr_vreg->level_count)
++		return 0;
++
++	return vreg->aggr_vreg->level[selector];
++}
++
++static const struct regulator_ops rpmh_regulator_vrm_ops = {
++	.enable			= rpmh_regulator_enable,
++	.disable		= rpmh_regulator_disable,
++	.is_enabled		= rpmh_regulator_is_enabled,
++	.set_voltage		= rpmh_regulator_vrm_set_voltage,
++	.get_voltage		= rpmh_regulator_vrm_get_voltage,
++	.set_mode		= rpmh_regulator_vrm_set_mode,
++	.get_mode		= rpmh_regulator_vrm_get_mode,
++	.set_load		= rpmh_regulator_vrm_set_load,
++};
++
++static const struct regulator_ops rpmh_regulator_arc_ops = {
++	.enable			= rpmh_regulator_enable,
++	.disable		= rpmh_regulator_disable,
++	.is_enabled		= rpmh_regulator_is_enabled,
++	.set_voltage_sel	= rpmh_regulator_arc_set_voltage_sel,
++	.get_voltage_sel	= rpmh_regulator_arc_get_voltage_sel,
++	.list_voltage		= rpmh_regulator_arc_list_voltage,
++};
++
++static const struct regulator_ops rpmh_regulator_xob_ops = {
++	.enable			= rpmh_regulator_enable,
++	.disable		= rpmh_regulator_disable,
++	.is_enabled		= rpmh_regulator_is_enabled,
++};
++
++static const struct regulator_ops *rpmh_regulator_ops[] = {
++	[RPMH_REGULATOR_TYPE_VRM]	= &rpmh_regulator_vrm_ops,
++	[RPMH_REGULATOR_TYPE_ARC]	= &rpmh_regulator_arc_ops,
++	[RPMH_REGULATOR_TYPE_XOB]	= &rpmh_regulator_xob_ops,
++};
++
++/**
++ * rpmh_regulator_load_arc_level_mapping() - load the RPMh ARC resource's
++ *		voltage level mapping from command db
++ * @aggr_vreg:		Pointer to the aggregated rpmh regulator resource
++ *
++ * The set of supported RPMH_REGULATOR_LEVEL_* voltage levels (0 - ~512) that
++ * map to ARC operating levels (0 - 15) is defined in aux data per ARC resource
++ * in the command db SMEM data structure.  It is in a u16 array with 1 to 16
++ * elements.  Note that the aux data array may be zero padded at the end for
++ * data alignment purposes.  Such padding entries are invalid and must be
++ * ignored.
++ *
++ * Return: 0 on success, errno on failure
++ */
++static int
++rpmh_regulator_load_arc_level_mapping(struct rpmh_aggr_vreg *aggr_vreg)
++{
++	size_t len = 0;
++	int i, j;
++	const u8 *buf;
++
++	buf = cmd_db_read_aux_data(aggr_vreg->resource_name, &len);
++	if (IS_ERR(buf)) {
++		aggr_vreg_err(aggr_vreg, "could not retrieve ARC aux data, rc=%ld\n",
++				PTR_ERR(buf));
++		return PTR_ERR(buf);
++	} else if (len == 0) {
++		aggr_vreg_err(aggr_vreg, "ARC level mapping data missing in command db\n");
++		return -EINVAL;
++	} else if (len > RPMH_ARC_MAX_LEVELS * RPMH_ARC_LEVEL_SIZE) {
++		aggr_vreg_err(aggr_vreg, "more ARC levels defined than allowed: %zd > %d\n",
++			len, RPMH_ARC_MAX_LEVELS * RPMH_ARC_LEVEL_SIZE);
++		return -EINVAL;
++	} else if (len % RPMH_ARC_LEVEL_SIZE) {
++		aggr_vreg_err(aggr_vreg, "invalid ARC aux data size: %zd\n",
++			len);
++		return -EINVAL;
++	}
++
++	aggr_vreg->level_count = len / RPMH_ARC_LEVEL_SIZE;
++
++	for (i = 0; i < aggr_vreg->level_count; i++) {
++		for (j = 0; j < RPMH_ARC_LEVEL_SIZE; j++)
++			aggr_vreg->level[i] |=
++				buf[i * RPMH_ARC_LEVEL_SIZE + j] << (8 * j);
++
++		/*
++		 * The AUX data may be zero padded.  These 0 valued entries at
++		 * the end of the map must be ignored.
++		 */
++		if (i > 0 && aggr_vreg->level[i] == 0) {
++			aggr_vreg->level_count = i;
++			break;
++		}
++
++		aggr_vreg_debug(aggr_vreg, "ARC hlvl=%2d --> vlvl=%4u\n",
++				i, aggr_vreg->level[i]);
++	}
++
++	return 0;
++}
++
++/**
++ * rpmh_regulator_parse_vrm_modes() - parse the supported mode configurations
++ *		for a VRM RPMh resource from device tree
++ * @aggr_vreg:		Pointer to the aggregated rpmh regulator resource
++ *
++ * This function initializes the mode[] array of aggr_vreg based upon the values
++ * of optional device tree properties.
++ *
++ * Return: 0 on success, errno on failure
++ */
++static int rpmh_regulator_parse_vrm_modes(struct rpmh_aggr_vreg *aggr_vreg)
++{
++	struct device_node *node = aggr_vreg->dev->of_node;
++	const char *type = "";
++	const struct rpmh_regulator_mode *map;
++	const char *prop;
++	int i, len, rc;
++	u32 *buf, disable_mode;
++
++	aggr_vreg->regulator_hw_type = RPMH_REGULATOR_HW_TYPE_UNKNOWN;
++	aggr_vreg->disable_pmic_mode = -EINVAL;
++
++	/* qcom,regulator-type is optional */
++	prop = "qcom,regulator-type";
++	if (!of_find_property(node, prop, &len))
++		return 0;
++
++	rc = of_property_read_string(node, prop, &type);
++	if (rc) {
++		aggr_vreg_err(aggr_vreg, "unable to read %s, rc=%d\n",
++				prop, rc);
++		return rc;
++	}
++
++	if (!strcmp(type, "pmic4-ldo")) {
++		aggr_vreg->regulator_hw_type
++			= RPMH_REGULATOR_HW_TYPE_PMIC4_LDO;
++	} else if (!strcmp(type, "pmic4-hfsmps")) {
++		aggr_vreg->regulator_hw_type
++			= RPMH_REGULATOR_HW_TYPE_PMIC4_HFSMPS;
++	} else if (!strcmp(type, "pmic4-ftsmps")) {
++		aggr_vreg->regulator_hw_type
++			= RPMH_REGULATOR_HW_TYPE_PMIC4_FTSMPS;
++	} else if (!strcmp(type, "pmic4-bob")) {
++		aggr_vreg->regulator_hw_type
++			= RPMH_REGULATOR_HW_TYPE_PMIC4_BOB;
++	} else if (!strcmp(type, "pmic5-ldo")) {
++		aggr_vreg->regulator_hw_type
++			= RPMH_REGULATOR_HW_TYPE_PMIC5_LDO;
++	} else if (!strcmp(type, "pmic5-hfsmps")) {
++		aggr_vreg->regulator_hw_type
++			= RPMH_REGULATOR_HW_TYPE_PMIC5_HFSMPS;
++	} else if (!strcmp(type, "pmic5-ftsmps")) {
++		aggr_vreg->regulator_hw_type
++			= RPMH_REGULATOR_HW_TYPE_PMIC5_FTSMPS;
++	} else if (!strcmp(type, "pmic5-bob")) {
++		aggr_vreg->regulator_hw_type
++			= RPMH_REGULATOR_HW_TYPE_PMIC5_BOB;
++	} else {
++		aggr_vreg_err(aggr_vreg, "unknown %s = %s\n",
++				prop, type);
++		return -EINVAL;
++	}
++
++	map = rpmh_regulator_mode_map[aggr_vreg->regulator_hw_type];
++
++	prop = "qcom,disable-mode";
++	if (!of_property_read_u32(node, prop, &disable_mode)) {
++		if (disable_mode >= RPMH_REGULATOR_MODE_COUNT) {
++			aggr_vreg_err(aggr_vreg, "qcom,disable-mode value %u is invalid\n",
++				disable_mode);
++			return -EINVAL;
++		}
++
++		if (!map[disable_mode].framework_mode) {
++			aggr_vreg_err(aggr_vreg, "qcom,disable-mode value %u is invalid for regulator type = %s\n",
++				disable_mode, type);
++			return -EINVAL;
++		}
++
++		aggr_vreg->disable_pmic_mode = map[disable_mode].pmic_mode;
++	}
++
++	/* qcom,supported-modes is optional */
++	prop = "qcom,supported-modes";
++	if (!of_find_property(node, prop, &len))
++		return 0;
++
++	len /= sizeof(u32);
++	aggr_vreg->mode = devm_kcalloc(aggr_vreg->dev, len,
++					sizeof(*aggr_vreg->mode), GFP_KERNEL);
++	if (!aggr_vreg->mode)
++		return -ENOMEM;
++	aggr_vreg->mode_count = len;
++
++
++	buf = kcalloc(len, sizeof(*buf), GFP_KERNEL);
++	if (!buf)
++		return -ENOMEM;
++
++	rc = of_property_read_u32_array(node, prop, buf, len);
++	if (rc) {
++		aggr_vreg_err(aggr_vreg, "unable to read %s, rc=%d\n",
++			prop, rc);
++		goto done;
++	}
++
++	for (i = 0; i < len; i++) {
++		if (buf[i] >= RPMH_REGULATOR_MODE_COUNT) {
++			aggr_vreg_err(aggr_vreg, "element %d of %s = %u is invalid\n",
++				i, prop, buf[i]);
++			rc = -EINVAL;
++			goto done;
++		}
++
++		if (!map[buf[i]].framework_mode) {
++			aggr_vreg_err(aggr_vreg, "element %d of %s = %u is invalid for regulator type = %s\n",
++				i, prop, buf[i], type);
++			rc = -EINVAL;
++			goto done;
++		}
++
++		aggr_vreg->mode[i].pmic_mode = map[buf[i]].pmic_mode;
++		aggr_vreg->mode[i].framework_mode = map[buf[i]].framework_mode;
++
++		if (i > 0 && aggr_vreg->mode[i].pmic_mode
++				<= aggr_vreg->mode[i - 1].pmic_mode) {
++			aggr_vreg_err(aggr_vreg, "%s elements are not in ascending order\n",
++				prop);
++			rc = -EINVAL;
++			goto done;
++		}
++	}
++
++	prop = "qcom,mode-threshold-currents";
++
++	rc = of_property_read_u32_array(node, prop, buf, len);
++	if (rc) {
++		aggr_vreg_err(aggr_vreg, "unable to read %s, rc=%d\n",
++			prop, rc);
++		goto done;
++	}
++
++	for (i = 0; i < len; i++) {
++		aggr_vreg->mode[i].min_load_ua = buf[i];
++
++		if (i > 0 && aggr_vreg->mode[i].min_load_ua
++				<= aggr_vreg->mode[i - 1].min_load_ua) {
++			aggr_vreg_err(aggr_vreg, "%s elements are not in ascending order\n",
++				prop);
++			rc = -EINVAL;
++			goto done;
++		}
++	}
++
++done:
++	kfree(buf);
++	return rc;
++}
++
++/**
++ * rpmh_regulator_allocate_vreg() - allocate space for the regulators associated
++ *		with the RPMh regulator resource and initialize important
++ *		pointers for each regulator
++ * @aggr_vreg:		Pointer to the aggregated rpmh regulator resource
++ *
++ * Return: 0 on success, errno on failure
++ */
++static int rpmh_regulator_allocate_vreg(struct rpmh_aggr_vreg *aggr_vreg)
++{
++	struct device_node *node;
++	int i, rc;
++
++	aggr_vreg->vreg_count = 0;
++
++	for_each_available_child_of_node(aggr_vreg->dev->of_node, node) {
++		/* Skip child nodes handled by other drivers. */
++		if (of_find_property(node, "compatible", NULL))
++			continue;
++		aggr_vreg->vreg_count++;
++	}
++
++	if (aggr_vreg->vreg_count == 0) {
++		aggr_vreg_err(aggr_vreg, "could not find any regulator subnodes\n");
++		return -ENODEV;
++	}
++
++	aggr_vreg->vreg = devm_kcalloc(aggr_vreg->dev, aggr_vreg->vreg_count,
++			sizeof(*aggr_vreg->vreg), GFP_KERNEL);
++	if (!aggr_vreg->vreg)
++		return -ENOMEM;
++
++	i = 0;
++	for_each_available_child_of_node(aggr_vreg->dev->of_node, node) {
++		/* Skip child nodes handled by other drivers. */
++		if (of_find_property(node, "compatible", NULL))
++			continue;
++
++		aggr_vreg->vreg[i].of_node = node;
++		aggr_vreg->vreg[i].aggr_vreg = aggr_vreg;
++
++		rc = of_property_read_string(node, "regulator-name",
++						&aggr_vreg->vreg[i].rdesc.name);
++		if (rc) {
++			aggr_vreg_err(aggr_vreg, "could not read regulator-name property, rc=%d\n",
++				rc);
++			return rc;
++		}
++
++		i++;
++	}
++
++	return 0;
++}
++
++/**
++ * rpmh_regulator_load_default_parameters() - initialize the RPMh resource
++ *		request for this regulator based on optional device tree
++ *		properties
++ * @vreg:		Pointer to the RPMh regulator
++ *
++ * Return: 0 on success, errno on failure
++ */
++static int rpmh_regulator_load_default_parameters(struct rpmh_vreg *vreg)
++{
++	enum rpmh_regulator_type type = vreg->aggr_vreg->regulator_type;
++	const struct rpmh_regulator_mode *map;
++	const char *prop;
++	int i, rc;
++	u32 temp;
++
++	if (type == RPMH_REGULATOR_TYPE_ARC) {
++		prop = "qcom,init-voltage-level";
++		rc = of_property_read_u32(vreg->of_node, prop, &temp);
++		if (!rc) {
++			for (i = 0; i < vreg->aggr_vreg->level_count; i++)
++				if (temp <= vreg->aggr_vreg->level[i])
++					break;
++			if (i < vreg->aggr_vreg->level_count) {
++				rpmh_regulator_set_reg(vreg,
++					RPMH_REGULATOR_REG_ARC_LEVEL, i);
++			} else {
++				vreg_err(vreg, "%s=%u is invalid\n",
++					prop, temp);
++				return -EINVAL;
++			}
++		}
++
++		prop = "qcom,min-dropout-voltage-level";
++		rc = of_property_read_u32(vreg->of_node, prop, &temp);
++		if (!rc)
++			vreg->rdesc.min_dropout_uV = temp;
++	} else if (type == RPMH_REGULATOR_TYPE_VRM) {
++		prop = "qcom,init-enable";
++		rc = of_property_read_u32(vreg->of_node, prop, &temp);
++		if (!rc)
++			rpmh_regulator_set_reg(vreg,
++						RPMH_REGULATOR_REG_VRM_ENABLE,
++						!!temp);
++
++		prop = "qcom,init-voltage";
++		rc = of_property_read_u32(vreg->of_node, prop, &temp);
++		if (!rc) {
++			if (temp < RPMH_VRM_MIN_UV || temp > RPMH_VRM_MAX_UV) {
++				vreg_err(vreg, "%s=%u is invalid\n",
++					prop, temp);
++				return -EINVAL;
++			}
++			rpmh_regulator_set_reg(vreg,
++						RPMH_REGULATOR_REG_VRM_VOLTAGE,
++						temp / 1000);
++		}
++
++		prop = "qcom,init-mode";
++		rc = of_property_read_u32(vreg->of_node, prop, &temp);
++		if (!rc) {
++			if (temp >= RPMH_REGULATOR_MODE_COUNT) {
++				vreg_err(vreg, "%s=%u is invalid\n",
++					prop, temp);
++				return -EINVAL;
++			} else if (vreg->aggr_vreg->regulator_hw_type
++					== RPMH_REGULATOR_HW_TYPE_UNKNOWN) {
++				vreg_err(vreg, "qcom,regulator-type missing so %s cannot be used\n",
++					prop);
++				return -EINVAL;
++			}
++
++			map = rpmh_regulator_mode_map[
++					vreg->aggr_vreg->regulator_hw_type];
++			if (!map[temp].framework_mode) {
++				vreg_err(vreg, "%s=%u is not supported by type = %d\n",
++					prop, temp,
++					vreg->aggr_vreg->regulator_hw_type);
++				return -EINVAL;
++			}
++
++			rpmh_regulator_set_reg(vreg,
++						RPMH_REGULATOR_REG_VRM_MODE,
++						map[temp].pmic_mode);
++			for (i = 0; i < vreg->aggr_vreg->mode_count; i++) {
++				if (vreg->aggr_vreg->mode[i].pmic_mode
++				    == map[temp].pmic_mode) {
++					vreg->mode_index = i;
++					break;
++				}
++			}
++		}
++
++		prop = "qcom,init-headroom-voltage";
++		rc = of_property_read_u32(vreg->of_node, prop, &temp);
++		if (!rc) {
++			if (temp < RPMH_VRM_HEADROOM_MIN_UV ||
++			    temp > RPMH_VRM_HEADROOM_MAX_UV) {
++				vreg_err(vreg, "%s=%u is invalid\n",
++					prop, temp);
++				return -EINVAL;
++			}
++			rpmh_regulator_set_reg(vreg,
++						RPMH_REGULATOR_REG_VRM_HEADROOM,
++						temp / 1000);
++		}
++
++		prop = "qcom,min-dropout-voltage";
++		rc = of_property_read_u32(vreg->of_node, prop, &temp);
++		if (!rc)
++			vreg->rdesc.min_dropout_uV = temp;
++	} else if (type == RPMH_REGULATOR_TYPE_XOB) {
++		prop = "qcom,init-enable";
++		rc = of_property_read_u32(vreg->of_node, prop, &temp);
++		if (!rc)
++			rpmh_regulator_set_reg(vreg,
++						RPMH_REGULATOR_REG_XOB_ENABLE,
++						!!temp);
++	}
++
++	return 0;
++}
++
++/**
++ * rpmh_regulator_init_vreg_supply() - initialize the regulator's parent supply
++ *		mapping based on optional DT parent supply property
++ * @vreg:		Pointer to the RPMh regulator
++ *
++ * Return: 0 on success, errno on failure
++ */
++static int rpmh_regulator_init_vreg_supply(struct rpmh_vreg *vreg)
++{
++	char *buf;
++	size_t len;
++
++	len = strlen(vreg->rdesc.name) + 16;
++	buf = kzalloc(len, GFP_KERNEL);
++	if (!buf)
++		return -ENOMEM;
++	scnprintf(buf, len, "%s-parent-supply", vreg->rdesc.name);
++
++	if (of_find_property(vreg->aggr_vreg->dev->of_node, buf, NULL) ||
++	    of_find_property(vreg->of_node, buf, NULL)) {
++		kfree(buf);
++
++		len = strlen(vreg->rdesc.name) + 10;
++		buf = devm_kzalloc(vreg->aggr_vreg->dev, len, GFP_KERNEL);
++		if (!buf)
++			return -ENOMEM;
++		scnprintf(buf, len, "%s-parent", vreg->rdesc.name);
++
++		vreg->rdesc.supply_name = buf;
++	} else if (of_find_property(vreg->of_node, "vin-supply", NULL)) {
++		kfree(buf);
++		vreg->rdesc.supply_name = "vin";
++	} else {
++		kfree(buf);
++	}
++
++	return 0;
++}
++
++/**
++ * rpmh_regulator_init_vreg() - initialize all abbributes of an rpmh-regulator
++ * @vreg:		Pointer to the RPMh regulator
++ *
++ * Return: 0 on success, errno on failure
++ */
++static int rpmh_regulator_init_vreg(struct rpmh_vreg *vreg)
++{
++	struct device *dev = vreg->aggr_vreg->dev;
++	enum rpmh_regulator_type type = vreg->aggr_vreg->regulator_type;
++	struct regulator_config reg_config = {};
++	struct regulator_init_data *init_data;
++	struct regulator_ops *ops;
++	int rc, i;
++	u32 set;
++
++	ops = devm_kzalloc(dev, sizeof(*ops), GFP_KERNEL);
++	if (!ops)
++		return -ENOMEM;
++
++	*ops			= *rpmh_regulator_ops[type];
++	vreg->rdesc.owner	= THIS_MODULE;
++	vreg->rdesc.type	= REGULATOR_VOLTAGE;
++	vreg->rdesc.ops		= ops;
++
++	init_data = of_get_regulator_init_data(dev,
++						vreg->of_node, &vreg->rdesc);
++	if (init_data == NULL)
++		return -ENOMEM;
++
++	init_data->constraints.input_uV = init_data->constraints.max_uV;
++	if (type == RPMH_REGULATOR_TYPE_VRM) {
++		init_data->constraints.min_uV
++			= max(init_data->constraints.min_uV, RPMH_VRM_MIN_UV);
++		init_data->constraints.min_uV
++			= min(init_data->constraints.min_uV, RPMH_VRM_MAX_UV);
++		init_data->constraints.max_uV
++			= max(init_data->constraints.max_uV, RPMH_VRM_MIN_UV);
++		init_data->constraints.max_uV
++			= min(init_data->constraints.max_uV, RPMH_VRM_MAX_UV);
++	}
++
++	if (ops->set_voltage || ops->set_voltage_sel)
++		init_data->constraints.valid_ops_mask
++			|= REGULATOR_CHANGE_VOLTAGE;
++
++	if (type == RPMH_REGULATOR_TYPE_XOB
++	    && init_data->constraints.min_uV == init_data->constraints.max_uV)
++		vreg->rdesc.fixed_uV = init_data->constraints.min_uV;
++
++	if (vreg->aggr_vreg->mode_count) {
++		init_data->constraints.valid_ops_mask
++			|= REGULATOR_CHANGE_MODE | REGULATOR_CHANGE_DRMS;
++		for (i = 0; i < vreg->aggr_vreg->mode_count; i++)
++			init_data->constraints.valid_modes_mask
++				|= vreg->aggr_vreg->mode[i].framework_mode;
++	} else {
++		ops->get_mode = NULL;
++		ops->set_mode = NULL;
++		ops->set_load = NULL;
++	}
++
++	/*
++	 * Remove enable state control if the ARC resource does not support the
++	 * off level.
++	 */
++	if (type == RPMH_REGULATOR_TYPE_ARC
++	    && vreg->aggr_vreg->level[0] != RPMH_REGULATOR_LEVEL_OFF) {
++		ops->enable = NULL;
++		ops->disable = NULL;
++		ops->is_enabled = NULL;
++	}
++	if (ops->enable)
++		init_data->constraints.valid_ops_mask
++			|= REGULATOR_CHANGE_STATUS;
++
++	switch (type) {
++	case RPMH_REGULATOR_TYPE_VRM:
++		vreg->rdesc.n_voltages = 2;
++		break;
++	case RPMH_REGULATOR_TYPE_ARC:
++		vreg->rdesc.n_voltages = vreg->aggr_vreg->level_count;
++		break;
++	case RPMH_REGULATOR_TYPE_XOB:
++		vreg->rdesc.n_voltages = 1;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	rc = of_property_read_u32(vreg->of_node, "qcom,set", &set);
++	if (rc) {
++		vreg_err(vreg, "qcom,set property missing, rc=%d\n", rc);
++		return rc;
++	} else if (!(set & RPMH_REGULATOR_SET_ALL)) {
++		vreg_err(vreg, "qcom,set=%u property is invalid\n", set);
++		return rc;
++	}
++
++	vreg->set_active = !!(set & RPMH_REGULATOR_SET_ACTIVE);
++	vreg->set_sleep = !!(set & RPMH_REGULATOR_SET_SLEEP);
++
++	rc = rpmh_regulator_init_vreg_supply(vreg);
++	if (rc) {
++		vreg_err(vreg, "unable to initialize regulator supply name, rc=%d\n",
++			rc);
++		return rc;
++	}
++
++	reg_config.dev			= dev;
++	reg_config.init_data		= init_data;
++	reg_config.of_node		= vreg->of_node;
++	reg_config.driver_data		= vreg;
++
++	rc = rpmh_regulator_load_default_parameters(vreg);
++	if (rc) {
++		vreg_err(vreg, "unable to load default parameters, rc=%d\n",
++			rc);
++		return rc;
++	}
++
++	vreg->rdev = devm_regulator_register(dev, &vreg->rdesc, &reg_config);
++	if (IS_ERR(vreg->rdev)) {
++		rc = PTR_ERR(vreg->rdev);
++		vreg->rdev = NULL;
++		vreg_err(vreg, "devm_regulator_register() failed, rc=%d\n", rc);
++		return rc;
++	}
++
++	rc = devm_regulator_proxy_consumer_register(dev, vreg->of_node);
++	if (rc)
++		return dev_err_probe(dev, rc, "failed to register proxy consumer\n");
++
++	vreg_debug(vreg, "successfully registered; set=%s\n",
++		vreg->set_active && vreg->set_sleep
++			? "active + sleep"
++			: vreg->set_active ? "active" : "sleep");
++
++	return 0;
++}
++
++static const struct of_device_id rpmh_regulator_match_table[] = {
++	{
++		.compatible = "qcom,rpmh-vrm-regulator",
++		.data = (void *)(uintptr_t)RPMH_REGULATOR_TYPE_VRM,
++	},
++	{
++		.compatible = "qcom,rpmh-arc-regulator",
++		.data = (void *)(uintptr_t)RPMH_REGULATOR_TYPE_ARC,
++	},
++	{
++		.compatible = "qcom,rpmh-xob-regulator",
++		.data = (void *)(uintptr_t)RPMH_REGULATOR_TYPE_XOB,
++	},
++	{}
++};
++
++/**
++ * rpmh_regulator_probe() - probe an aggregated RPMh regulator resource and
++ *		register regulators for each of the regulator nodes associated
++ *		with it
++ * @pdev:		Pointer to the platform device of the aggregated rpmh
++ *			regulator resource
++ *
++ * Return: 0 on success, errno on failure
++ */
++static int rpmh_regulator_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	const struct of_device_id *match;
++	struct rpmh_aggr_vreg *aggr_vreg;
++	struct device_node *node;
++	int rc, i, sid;
++
++	node = dev->of_node;
++
++	if (!node) {
++		dev_err(dev, "Device tree node is missing\n");
++		return -EINVAL;
++	}
++
++	aggr_vreg = devm_kzalloc(dev, sizeof(*aggr_vreg), GFP_KERNEL);
++	if (!aggr_vreg)
++		return -ENOMEM;
++
++	aggr_vreg->dev = dev;
++	mutex_init(&aggr_vreg->lock);
++
++	match = of_match_node(rpmh_regulator_match_table, node);
++	if (match) {
++		aggr_vreg->regulator_type = (uintptr_t)match->data;
++	} else {
++		dev_err(dev, "could not find compatible string match\n");
++		return -ENODEV;
++	}
++
++	rc = of_property_read_string(node, "qcom,resource-name",
++				     &aggr_vreg->resource_name);
++	if (rc) {
++		dev_err(dev, "qcom,resource-name missing in DT node\n");
++		return rc;
++	}
++
++	/* Limit this data-only experiment to the six required supply resources. */
++	if (strcmp(aggr_vreg->resource_name, "cx.lvl") &&
++	    strcmp(aggr_vreg->resource_name, "mx.lvl") &&
++	    strcmp(aggr_vreg->resource_name, "ldob2") &&
++	    strcmp(aggr_vreg->resource_name, "ldob4") &&
++	    strcmp(aggr_vreg->resource_name, "ldob7") &&
++	    strcmp(aggr_vreg->resource_name, "ldob17"))
++		return -ENODEV;
++
++	aggr_vreg->addr = cmd_db_read_addr(aggr_vreg->resource_name);
++	if (!aggr_vreg->addr) {
++		aggr_vreg_err(aggr_vreg, "could not find RPMh address for resource\n");
++		return -ENODEV;
++	}
++
++	sid = cmd_db_read_slave_id(aggr_vreg->resource_name);
++	if (sid < 0) {
++		aggr_vreg_err(aggr_vreg, "could not find RPMh slave id for resource, rc=%d\n",
++			sid);
++		return sid;
++	}
++
++	/* Confirm slave ID listed in command DB matches DT configuration. */
++	if ((aggr_vreg->regulator_type == RPMH_REGULATOR_TYPE_ARC
++			&& sid != CMD_DB_HW_ARC)
++	    || (aggr_vreg->regulator_type == RPMH_REGULATOR_TYPE_VRM
++			&& sid != CMD_DB_HW_VRM)
++	    || (aggr_vreg->regulator_type == RPMH_REGULATOR_TYPE_XOB
++			&& sid != CMD_DB_HW_XOB)) {
++		aggr_vreg_err(aggr_vreg, "RPMh slave ID mismatch; config=%d (%s) != cmd-db=%d\n",
++			aggr_vreg->regulator_type,
++			aggr_vreg->regulator_type == RPMH_REGULATOR_TYPE_ARC
++				? "ARC" : (aggr_vreg->regulator_type
++						== RPMH_REGULATOR_TYPE_VRM
++					  ? "VRM" : "XOB"),
++			sid);
++		return -EINVAL;
++	}
++
++	if (aggr_vreg->regulator_type == RPMH_REGULATOR_TYPE_ARC) {
++		rc = rpmh_regulator_load_arc_level_mapping(aggr_vreg);
++		if (rc) {
++			aggr_vreg_err(aggr_vreg, "could not load arc level mapping, rc=%d\n",
++				rc);
++			return rc;
++		}
++	} else if (aggr_vreg->regulator_type == RPMH_REGULATOR_TYPE_VRM) {
++		rc = rpmh_regulator_parse_vrm_modes(aggr_vreg);
++		if (rc) {
++			aggr_vreg_err(aggr_vreg, "could not parse vrm mode mapping, rc=%d\n",
++				rc);
++			return rc;
++		}
++	}
++
++	aggr_vreg->always_wait_for_ack
++		= of_property_read_bool(node, "qcom,always-wait-for-ack");
++
++	rc = rpmh_regulator_allocate_vreg(aggr_vreg);
++	if (rc) {
++		aggr_vreg_err(aggr_vreg, "failed to allocate regulator subnode array, rc=%d\n",
++			rc);
++		return rc;
++	}
++
++	for (i = 0; i < aggr_vreg->vreg_count; i++) {
++		rc = rpmh_regulator_init_vreg(&aggr_vreg->vreg[i]);
++		if (rc) {
++			pr_err("unable to initialize rpmh-regulator vreg %s for resource %s, rc=%d\n",
++				aggr_vreg->vreg[i].rdesc.name,
++				aggr_vreg->resource_name, rc);
++			return rc;
++		}
++	}
++
++	if (of_property_read_bool(node, "qcom,send-defaults")) {
++		mutex_lock(&aggr_vreg->lock);
++		rc = rpmh_regulator_send_aggregate_requests(
++					&aggr_vreg->vreg[0]);
++		if (rc) {
++			aggr_vreg_err(aggr_vreg, "error while sending default request, rc=%d\n",
++				rc);
++			mutex_unlock(&aggr_vreg->lock);
++			return rc;
++		}
++		mutex_unlock(&aggr_vreg->lock);
++	}
++
++	rc = devm_of_platform_populate(&pdev->dev);
++	if (rc)
++		return rc;
++	platform_set_drvdata(pdev, aggr_vreg);
++
++	aggr_vreg_debug(aggr_vreg, "successfully probed; addr=0x%05X, type=%s\n",
++			aggr_vreg->addr,
++			aggr_vreg->regulator_type == RPMH_REGULATOR_TYPE_ARC
++				? "ARC"
++				: (aggr_vreg->regulator_type
++						== RPMH_REGULATOR_TYPE_VRM
++					? "VRM" : "XOB"));
++
++	return rc;
++}
++
++static struct platform_driver rpmh_regulator_driver = {
++	.driver = {
++		.name		= "qcom,rpmh-regulator",
++		.of_match_table	= rpmh_regulator_match_table,
++		.sync_state	= regulator_proxy_consumer_sync_state,
++	},
++	.probe = rpmh_regulator_probe,
++};
++
++static int rpmh_regulator_init(void)
++{
++	return platform_driver_register(&rpmh_regulator_driver);
++}
++
++static void rpmh_regulator_exit(void)
++{
++	platform_driver_unregister(&rpmh_regulator_driver);
++}
++
++MODULE_DESCRIPTION("RPMh regulator driver");
++MODULE_LICENSE("GPL v2");
++
++arch_initcall(rpmh_regulator_init);
++module_exit(rpmh_regulator_exit);
+diff --git a/drivers/soc/qcom/Kconfig b/drivers/soc/qcom/Kconfig
+index 2caadbbcf830..b7552cf1ef6a 100644
+--- a/drivers/soc/qcom/Kconfig
++++ b/drivers/soc/qcom/Kconfig
+@@ -304,3 +304,15 @@ config QCOM_UBWC_CONFIG
+ 	  (UBWC) engines across various IP blocks, which need to be initialized
+ 	  with coherent configuration data. This module functions as a single
+ 	  source of truth for that information.
++config QCOM_RPMH_UKE
++	bool "Xiaomi Uke downstream RPMh DRV/channel support"
++	depends on QCOM_RPMH=y
++	help
++	  Use the public Uke DRV/channel and fast-path implementation with
++	  the stock Cliffs device tree. This replaces the flat upstream RSC
++	  implementation in this kernel and is intended only for Uke builds.
++
++config QCOM_RPMH_UKE_KUNIT_TEST
++	tristate "Uke RPMh TCS bounds tests" if !KUNIT_ALL_TESTS
++	depends on KUNIT
++	default KUNIT_ALL_TESTS
+diff --git a/drivers/soc/qcom/Makefile b/drivers/soc/qcom/Makefile
+index b7f1d2a57367..1b3f32fbfca8 100644
+--- a/drivers/soc/qcom/Makefile
++++ b/drivers/soc/qcom/Makefile
+@@ -1,5 +1,6 @@
+ # SPDX-License-Identifier: GPL-2.0
+ CFLAGS_rpmh-rsc.o := -I$(src)
++CFLAGS_rpmh-uke-rsc.o := -I$(src)
+ CFLAGS_qcom_aoss.o := -I$(src)
+ obj-$(CONFIG_QCOM_AOSS_QMP) +=	qcom_aoss.o
+ obj-$(CONFIG_QCOM_GENI_SE) +=	qcom-geni-se.o
+@@ -20,8 +21,11 @@ obj-$(CONFIG_QCOM_RAMP_CTRL)	+= ramp_controller.o
+ obj-$(CONFIG_QCOM_RMTFS_MEM)	+= rmtfs_mem.o
+ obj-$(CONFIG_QCOM_RPM_MASTER_STATS)	+= rpm_master_stats.o
+ obj-$(CONFIG_QCOM_RPMH)		+= qcom_rpmh.o
+-qcom_rpmh-y			+= rpmh-rsc.o
+-qcom_rpmh-y			+= rpmh.o
++ifeq ($(CONFIG_QCOM_RPMH_UKE),y)
++qcom_rpmh-y += rpmh-uke-rsc.o rpmh-uke.o
++else
++qcom_rpmh-y += rpmh-rsc.o rpmh.o
++endif
+ obj-$(CONFIG_QCOM_SMD_RPM)	+= rpm-proc.o smd-rpm.o
+ obj-$(CONFIG_QCOM_SMEM) +=	smem.o
+ obj-$(CONFIG_QCOM_SMEM_STATE) += smem_state.o
+@@ -40,3 +44,5 @@ qcom_ice-objs			+= ice.o
+ obj-$(CONFIG_QCOM_INLINE_CRYPTO_ENGINE)	+= qcom_ice.o
+ obj-$(CONFIG_QCOM_PBS) +=	qcom-pbs.o
+ obj-$(CONFIG_QCOM_UBWC_CONFIG) += ubwc_config.o
++
++obj-$(CONFIG_QCOM_RPMH_UKE_KUNIT_TEST) += rpmh-uke-test.o
+diff --git a/drivers/soc/qcom/cmd-db.c b/drivers/soc/qcom/cmd-db.c
+index 84a75d8c4b70..136ad865b8d2 100644
+--- a/drivers/soc/qcom/cmd-db.c
++++ b/drivers/soc/qcom/cmd-db.c
+@@ -338,6 +338,15 @@ static const struct file_operations cmd_db_debugfs_ops = {
+ 	.release = single_release,
+ };
+ 
++/* Uke downstream command DB standalone flag (reserved bit 0). */
++bool cmd_db_is_standalone(void)
++{
++	if (cmd_db_ready())
++		return false;
++	return !!(le32_to_cpu(cmd_db_header->reserved) & BIT(0));
++}
++EXPORT_SYMBOL_GPL(cmd_db_is_standalone);
++
+ static int cmd_db_dev_probe(struct platform_device *pdev)
+ {
+ 	struct reserved_mem *rmem;
+diff --git a/drivers/soc/qcom/rpmh-uke-config.h b/drivers/soc/qcom/rpmh-uke-config.h
+new file mode 100644
+index 000000000000..5ca7577cb176
+--- /dev/null
++++ b/drivers/soc/qcom/rpmh-uke-config.h
+@@ -0,0 +1,13 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef __RPMH_UKE_CONFIG_H__
++#define __RPMH_UKE_CONFIG_H__
++
++/* The Uke implementation has five groups of at most three TCS entries. */
++static inline int rpmh_uke_tcs_fits(unsigned int offset, unsigned int count,
++				    unsigned int hardware_max)
++{
++	return count <= 3 && offset <= 15 && count <= 15 - offset &&
++	       offset <= hardware_max && count <= hardware_max - offset;
++}
++
++#endif
+diff --git a/drivers/soc/qcom/rpmh-uke-internal.h b/drivers/soc/qcom/rpmh-uke-internal.h
+new file mode 100644
+index 000000000000..47f074e7314f
+--- /dev/null
++++ b/drivers/soc/qcom/rpmh-uke-internal.h
+@@ -0,0 +1,230 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (c) 2016-2018, 2020-2021, The Linux Foundation. All rights reserved.
++ * Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
++ */
++
++
++#ifndef __RPM_INTERNAL_H__
++#define __RPM_INTERNAL_H__
++
++#include <linux/bitmap.h>
++#include <linux/wait.h>
++#include <soc/qcom/tcs.h>
++
++#define MAX_NAME_LENGTH			20
++
++#define CH0				0
++#define CH1				1
++#define MAX_CHANNEL			2
++
++#define TCS_TYPE_NR			5
++#define MAX_CMDS_PER_TCS		16
++#define MAX_TCS_PER_TYPE		3
++#define MAX_TCS_NR			(MAX_TCS_PER_TYPE * TCS_TYPE_NR)
++#define MAX_TCS_SLOTS			(MAX_CMDS_PER_TCS * MAX_TCS_PER_TYPE)
++
++/* CTRLR specific flags */
++#define SOLVER_PRESENT			1
++#define HW_CHANNEL_PRESENT		2
++
++#define	CMD_DB_MAX_RESOURCES	250
++
++struct rsc_drv;
++
++/**
++ * struct cache_req: the request object for caching
++ *
++ * @addr: the address of the resource
++ * @sleep_val: the sleep vote
++ * @wake_val: the wake vote
++ * @list: linked list obj
++ */
++struct cache_req {
++	u32 addr;
++	u32 sleep_val;
++	u32 wake_val;
++	struct list_head list;
++};
++
++/**
++ * struct tcs_group: group of Trigger Command Sets (TCS) to send state requests
++ * to the controller
++ *
++ * @drv:       The controller.
++ * @type:      Type of the TCS in this group - active, sleep, wake.
++ * @mask:      Mask of the TCSes relative to all the TCSes in the RSC.
++ * @offset:    Start of the TCS group relative to the TCSes in the RSC.
++ * @num_tcs:   Number of TCSes in this type.
++ * @ncpt:      Number of commands in each TCS.
++ * @req:       Requests that are sent from the TCS; only used for ACTIVE_ONLY
++ *             transfers (could be on a wake/sleep TCS if we are borrowing for
++ *             an ACTIVE_ONLY transfer).
++ *             Start: grab drv->lock, set req, set tcs_in_use, drop drv->lock,
++ *                    trigger
++ *             End: get irq, access req,
++ *                  grab drv->lock, clear tcs_in_use, drop drv->lock
++ * @slots:     Indicates which of @cmd_addr are occupied; only used for
++ *             SLEEP / WAKE TCSs.  Things are tightly packed in the
++ *             case that (ncpt < MAX_CMDS_PER_TCS).  That is if ncpt = 2 and
++ *             MAX_CMDS_PER_TCS = 16 then bit[2] = the first bit in 2nd TCS.
++ */
++struct tcs_group {
++	struct rsc_drv *drv;
++	int type;
++	u32 mask;
++	u32 offset;
++	int num_tcs;
++	int ncpt;
++	const struct tcs_request *req[MAX_TCS_PER_TYPE];
++	DECLARE_BITMAP(slots, MAX_TCS_SLOTS);
++};
++
++/**
++ * struct rpmh_request: the message to be sent to rpmh-rsc
++ *
++ * @msg: the request
++ * @cmd: the payload that will be part of the @msg
++ * @completion: triggered when request is done
++ * @dev: the device making the request
++ */
++struct rpmh_request {
++	struct tcs_request msg;
++	struct tcs_cmd cmd[MAX_RPMH_PAYLOAD];
++	struct completion *completion;
++	const struct device *dev;
++};
++
++/**
++ * struct rpmh_ctrlr: our representation of the controller
++ *
++ * @cache_lock: synchronize access to the cache data
++ * @dirty: was the cache updated since flush
++ * @in_solver_mode: Controller is busy in solver mode
++ * @flags: Controller specific flags
++ * @batch_cache: Cache sleep and wake requests sent as batch
++ */
++struct rpmh_ctrlr {
++	spinlock_t cache_lock;
++	bool dirty;
++	bool in_solver_mode;
++	u32 flags;
++	struct rpmh_request batch_cache[RPMH_ACTIVE_ONLY_STATE];
++	u32 non_batch_cache_idx;
++	struct cache_req *non_batch_cache;
++};
++
++/**
++ * struct drv_channel: our representation of the drv channels
++ *
++ * @tcs:                TCS groups.
++ * @drv:                DRV containing the channel
++ * @initialized:        Whether channel is initialized
++ */
++struct drv_channel {
++	struct tcs_group tcs[TCS_TYPE_NR];
++	struct rsc_drv *drv;
++	bool initialized;
++};
++
++/**
++ * struct rsc_drv_top: our representation of the top RSC device
++ *
++ * @name:               Controller RSC device name.
++ * @drv_count:          No. of DRV controllers in the RSC device
++ * @drv:                Controller for each DRV
++ * @dev:                RSC top device
++ * @list:               RSC device added in rpmh_rsc_dev_list.
++ */
++struct rsc_drv_top {
++	char name[MAX_NAME_LENGTH];
++	int drv_count;
++	struct rsc_drv *drv;
++	struct device *dev;
++	struct list_head list;
++};
++
++/**
++ * struct rsc_drv: the Direct Resource Voter (DRV) of the
++ * Resource State Coordinator controller (RSC)
++ *
++ * @name:               Controller identifier.
++ * @base:               Base address of the RSC controller.
++ * @tcs_base:           Start address of the TCS registers in this controller.
++ * @reg:                Register offsets for RSC controller.
++ * @id:                 Instance id in the controller (Direct Resource Voter).
++ * @num_tcs:            Number of TCSes in this DRV.
++ * @num_channels:       Number of channels in this DRV.
++ * @irq:                IRQ at gic.
++ * @in_solver_mode:     Controller is busy in solver mode
++ * @initialized:        Whether DRV is initialized
++ * @rsc_pm:             CPU PM notifier for controller.
++ *                      Used when solver mode is not present.
++ * @cpus_in_pm:         Number of CPUs not in idle power collapse.
++ *                      Used when solver mode is not present.
++ * @ch:                 DRV channels.
++ * @tcs_in_use:         S/W state of the TCS; only set for ACTIVE_ONLY
++ *                      transfers, but might show a sleep/wake TCS in use if
++ *                      it was borrowed for an active_only transfer.  You
++ *                      must hold the lock in this struct (AKA drv->lock) in
++ *                      order to update this.
++ * @lock:               Synchronize state of the controller.  If RPMH's cache
++ *                      lock will also be held, the order is: drv->lock then
++ *                      cache_lock.
++ * @tcs_wait:           Wait queue used to wait for @tcs_in_use to free up a
++ *                      slot
++ * @client:             Handle to the DRV's client.
++ * @genpd_nb:           PM Domain notifier
++ * @dev:                RSC device
++ * @ipc_log_ctx:        IPC logger handle
++ * @pdev:               platform device
++ */
++struct rsc_drv {
++	char name[MAX_NAME_LENGTH];
++	void __iomem *base;
++	void __iomem *tcs_base;
++	u32 *regs;
++	int id;
++	int num_tcs;
++	int num_channels;
++	int irq;
++	bool in_solver_mode;
++	bool initialized;
++	struct notifier_block rsc_pm;
++	atomic_t cpus_in_pm;
++	struct drv_channel ch[MAX_CHANNEL];
++	DECLARE_BITMAP(tcs_in_use, MAX_TCS_NR);
++	spinlock_t lock;
++	wait_queue_head_t tcs_wait;
++	struct rpmh_ctrlr client;
++	struct notifier_block genpd_nb;
++	struct device *dev;
++	void *ipc_log_ctx;
++	struct platform_device *pdev;
++};
++
++extern bool rpmh_standalone;
++
++int rpmh_rsc_send_data(struct rsc_drv *drv, const struct tcs_request *msg, int ch);
++int rpmh_rsc_write_ctrl_data(struct rsc_drv *drv,
++			     const struct tcs_request *msg,
++			     int ch);
++void rpmh_rsc_invalidate(struct rsc_drv *drv, int ch);
++void rpmh_rsc_debug(struct rsc_drv *drv, struct completion *compl);
++void rpmh_rsc_debug_channel_busy(struct rsc_drv *drv);
++int rpmh_rsc_mode_solver_set(struct rsc_drv *drv, bool enable);
++int rpmh_rsc_get_channel(struct rsc_drv *drv);
++int rpmh_rsc_switch_channel(struct rsc_drv *drv, int ch);
++int rpmh_rsc_drv_enable(struct rsc_drv *drv, bool enable);
++const struct device *rpmh_rsc_get_device(const char *name, u32 drv_id);
++
++void rpmh_tx_done(const struct tcs_request *msg);
++int rpmh_flush(struct rpmh_ctrlr *ctrlr, int ch);
++int _rpmh_flush(struct rpmh_ctrlr *ctrlr, int ch);
++
++int rpmh_rsc_init_fast_path(struct rsc_drv *drv, const struct tcs_request *msg, int ch);
++int rpmh_rsc_update_fast_path(struct rsc_drv *drv,
++			      const struct tcs_request *msg,
++			      u32 update_mask, int ch);
++
++#endif /* __RPM_INTERNAL_H__ */
+diff --git a/drivers/soc/qcom/rpmh-uke-rsc.c b/drivers/soc/qcom/rpmh-uke-rsc.c
+new file mode 100644
+index 000000000000..4155e953a311
+--- /dev/null
++++ b/drivers/soc/qcom/rpmh-uke-rsc.c
+@@ -0,0 +1,1906 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (c) 2016-2018, 2020-2021, The Linux Foundation. All rights reserved.
++ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
++ */
++
++#define pr_fmt(fmt) "%s " fmt, KBUILD_MODNAME
++
++#include <linux/atomic.h>
++#include <linux/cpu_pm.h>
++#include <linux/delay.h>
++#include <linux/interrupt.h>
++#include <linux/io.h>
++#include <linux/iopoll.h>
++#include <linux/kernel.h>
++#include <linux/list.h>
++#include <linux/module.h>
++#include <linux/notifier.h>
++#include <linux/of.h>
++#include <linux/of_irq.h>
++#include <linux/of_platform.h>
++#include <linux/platform_device.h>
++#include <linux/pm_domain.h>
++#include <linux/pm_runtime.h>
++#include <linux/slab.h>
++#include <linux/spinlock.h>
++#include <linux/wait.h>
++
++#include <soc/qcom/cmd-db.h>
++#include <soc/qcom/tcs.h>
++#include <dt-bindings/soc/qcom,rpmh-rsc.h>
++
++#include "rpmh-uke-internal.h"
++#include "rpmh-uke-config.h"
++
++#define CREATE_TRACE_POINTS
++#include "trace-rpmh-uke.h"
++
++
++#define RSC_DRV_IPC_LOG_SIZE		2
++
++/* DRV ID Register */
++#define RSC_DRV_ID			0
++#define MAJOR_VER_MASK			0xFF
++#define MAJOR_VER_SHIFT			16
++#define MINOR_VER_MASK			0xFF
++#define MINOR_VER_SHIFT			8
++
++/* DRV HW Solver Configuration Register Mask */
++#define DRV_HW_SOLVER_MASK		1
++#define DRV_HW_SOLVER_SHIFT		24
++
++/* DRV TCS Configuration Information Register Mask */
++#define DRV_NUM_TCS_MASK		0x3F
++#define DRV_NUM_TCS_SHIFT		6
++#define DRV_NCPT_MASK			0x1F
++#define DRV_NCPT_SHIFT			27
++
++#define TCS_AMC_MODE_ENABLE		BIT(16)
++#define TCS_AMC_MODE_TRIGGER		BIT(24)
++
++/* TCS CMD register bit mask */
++#define CMD_MSGID_LEN			8
++#define CMD_MSGID_RESP_REQ		BIT(8)
++#define CMD_MSGID_WRITE			BIT(16)
++#define CMD_STATUS_ISSUED		BIT(8)
++#define CMD_STATUS_COMPL		BIT(16)
++
++/* Offsets for DRV channel status register */
++#define CH0_CHN_BUSY			BIT(0)
++#define CH1_CHN_BUSY			BIT(1)
++#define CH0_WAKE_TCS_STATUS		BIT(0)
++#define CH0_SLEEP_TCS_STATUS		BIT(1)
++#define CH1_WAKE_TCS_STATUS		BIT(2)
++#define CH1_SLEEP_TCS_STATUS		BIT(3)
++#define CH_CLEAR_STATUS			BIT(31)
++
++#define ACCL_TYPE(addr)			((addr >> 16) & 0xF)
++#define VREG_ADDR(addr)			(addr & ~0xF)
++
++#define MAX_RSC_COUNT			5
++
++enum {
++	HW_ACCL_CLK = 0x3,
++	HW_ACCL_VREG,
++	HW_ACCL_BUS,
++};
++
++static const char * const accl_str[] = {
++	"", "", "", "CLK", "VREG", "BUS",
++};
++
++static LIST_HEAD(rpmh_rsc_dev_list);
++bool rpmh_standalone;
++
++/*
++ * Here's a high level overview of how all the registers in RPMH work
++ * together:
++ *
++ * - The main rpmh-rsc address is the base of a register space that can
++ *   be used to find overall configuration of the hardware
++ *   (DRV_PRNT_CHLD_CONFIG). Also found within the rpmh-rsc register
++ *   space are all the TCS blocks. The offset of the TCS blocks is
++ *   specified in the device tree by "qcom,tcs-offset" and used to
++ *   compute tcs_base.
++ * - TCS blocks come one after another. Type, count, and order are
++ *   specified by the device tree as "qcom,tcs-config".
++ * - Each TCS block has some registers, then space for up to 16 commands.
++ *   Note that though address space is reserved for 16 commands, fewer
++ *   might be present. See ncpt (num cmds per TCS).
++ *
++ * Here's a picture:
++ *
++ *  +---------------------------------------------------+
++ *  |RSC                                                |
++ *  | ctrl                                              |
++ *  |                                                   |
++ *  | Drvs:                                             |
++ *  | +-----------------------------------------------+ |
++ *  | |DRV0                                           | |
++ *  | | ctrl/config                                   | |
++ *  | | IRQ                                           | |
++ *  | |                                               | |
++ *  | | TCSes:                                        | |
++ *  | | +------------------------------------------+  | |
++ *  | | |TCS0  |  |  |  |  |  |  |  |  |  |  |  |  |  | |
++ *  | | | ctrl | 0| 1| 2| 3| 4| 5| .| .| .| .|14|15|  | |
++ *  | | |      |  |  |  |  |  |  |  |  |  |  |  |  |  | |
++ *  | | +------------------------------------------+  | |
++ *  | | +------------------------------------------+  | |
++ *  | | |TCS1  |  |  |  |  |  |  |  |  |  |  |  |  |  | |
++ *  | | | ctrl | 0| 1| 2| 3| 4| 5| .| .| .| .|14|15|  | |
++ *  | | |      |  |  |  |  |  |  |  |  |  |  |  |  |  | |
++ *  | | +------------------------------------------+  | |
++ *  | | +------------------------------------------+  | |
++ *  | | |TCS2  |  |  |  |  |  |  |  |  |  |  |  |  |  | |
++ *  | | | ctrl | 0| 1| 2| 3| 4| 5| .| .| .| .|14|15|  | |
++ *  | | |      |  |  |  |  |  |  |  |  |  |  |  |  |  | |
++ *  | | +------------------------------------------+  | |
++ *  | |                    ......                     | |
++ *  | +-----------------------------------------------+ |
++ *  | +-----------------------------------------------+ |
++ *  | |DRV1                                           | |
++ *  | | (same as DRV0)                                | |
++ *  | +-----------------------------------------------+ |
++ *  |                      ......                       |
++ *  +---------------------------------------------------+
++ */
++
++enum {
++	RSC_DRV_TCS_OFFSET,
++	RSC_DRV_CMD_OFFSET,
++/* DRV HW Solver Configuration Information Register */
++	DRV_SOLVER_CONFIG,
++/* DRV TCS Configuration Information Register */
++	DRV_PRNT_CHLD_CONFIG,
++/* Offsets for common TCS Registers, one bit per TCS */
++	RSC_DRV_IRQ_ENABLE,
++	RSC_DRV_IRQ_STATUS,
++	RSC_DRV_IRQ_CLEAR,	/* w/o; write 1 to clear */
++/*
++ * Offsets for per TCS Registers.
++ *
++ * TCSes start at 0x10 from tcs_base and are stored one after another.
++ * Multiply tcs_id by RSC_DRV_TCS_OFFSET to find a given TCS and add one
++ * of the below to find a register.
++ */
++	RSC_DRV_CMD_WAIT_FOR_CMPL,	/* 1 bit per command */
++	RSC_DRV_CONTROL,
++	RSC_DRV_STATUS,	/* zero if tcs is busy */
++	RSC_DRV_CMD_ENABLE,	/* 1 bit per command */
++/*
++ * Offsets for per command in a TCS.
++ *
++ * Commands (up to 16) start at 0x30 in a TCS; multiply command index
++ * by RSC_DRV_CMD_OFFSET and add one of the below to find a register.
++ */
++	RSC_DRV_CMD_MSGID,
++	RSC_DRV_CMD_ADDR,
++	RSC_DRV_CMD_DATA,
++	RSC_DRV_CMD_STATUS,
++	RSC_DRV_CMD_RESP_DATA,
++/* DRV channel Registers */
++	RSC_DRV_CHN_SEQ_BUSY,
++	RSC_DRV_CHN_SEQ_PC,
++	RSC_DRV_CHN_TCS_TRIGGER,
++	RSC_DRV_CHN_TCS_COMPLETE,
++	RSC_DRV_CHN_UPDATE,
++	RSC_DRV_CHN_BUSY,
++	RSC_DRV_CHN_EN,
++};
++
++static u32 rpmh_rsc_reg_offsets_ver_2_7[] = {
++	[RSC_DRV_TCS_OFFSET]		=	672,
++	[RSC_DRV_CMD_OFFSET]		=	20,
++	[DRV_SOLVER_CONFIG]		=	0x04,
++	[DRV_PRNT_CHLD_CONFIG]		=	0x0C,
++	[RSC_DRV_IRQ_ENABLE]		=	0x00,
++	[RSC_DRV_IRQ_STATUS]		=	0x04,
++	[RSC_DRV_IRQ_CLEAR]		=	0x08,
++	[RSC_DRV_CMD_WAIT_FOR_CMPL]	=	0x10,
++	[RSC_DRV_CONTROL]		=	0x14,
++	[RSC_DRV_STATUS]		=	0x18,
++	[RSC_DRV_CMD_ENABLE]		=	0x1C,
++	[RSC_DRV_CMD_MSGID]		=	0x30,
++	[RSC_DRV_CMD_ADDR]		=	0x34,
++	[RSC_DRV_CMD_DATA]		=	0x38,
++	[RSC_DRV_CMD_STATUS]		=	0x3C,
++	[RSC_DRV_CMD_RESP_DATA]		=	0x40,
++	[RSC_DRV_CHN_SEQ_BUSY]		=	0x0,
++	[RSC_DRV_CHN_SEQ_PC]		=	0x0,
++	[RSC_DRV_CHN_TCS_TRIGGER]	=	0x0,
++	[RSC_DRV_CHN_TCS_COMPLETE]	=	0x0,
++	[RSC_DRV_CHN_UPDATE]		=	0x0,
++	[RSC_DRV_CHN_BUSY]		=	0x0,
++	[RSC_DRV_CHN_EN]		=	0x0,
++};
++
++static u32 rpmh_rsc_reg_offsets_ver_3_0[] = {
++	[RSC_DRV_TCS_OFFSET]		=	672,
++	[RSC_DRV_CMD_OFFSET]		=	24,
++	[DRV_SOLVER_CONFIG]		=	0x04,
++	[DRV_PRNT_CHLD_CONFIG]		=	0x0C,
++	[RSC_DRV_IRQ_ENABLE]		=	0x00,
++	[RSC_DRV_IRQ_STATUS]		=	0x04,
++	[RSC_DRV_IRQ_CLEAR]		=	0x08,
++	[RSC_DRV_CMD_WAIT_FOR_CMPL]	=	0x20,
++	[RSC_DRV_CONTROL]		=	0x24,
++	[RSC_DRV_STATUS]		=	0x28,
++	[RSC_DRV_CMD_ENABLE]		=	0x2C,
++	[RSC_DRV_CMD_MSGID]		=	0x34,
++	[RSC_DRV_CMD_ADDR]		=	0x38,
++	[RSC_DRV_CMD_DATA]		=	0x3C,
++	[RSC_DRV_CMD_STATUS]		=	0x40,
++	[RSC_DRV_CMD_RESP_DATA]		=	0x44,
++	[RSC_DRV_CHN_SEQ_BUSY]		=	0x464,
++	[RSC_DRV_CHN_SEQ_PC]		=	0x468,
++	[RSC_DRV_CHN_TCS_TRIGGER]	=	0x490,
++	[RSC_DRV_CHN_TCS_COMPLETE]	=	0x494,
++	[RSC_DRV_CHN_UPDATE]		=	0x498,
++	[RSC_DRV_CHN_BUSY]		=	0x49C,
++	[RSC_DRV_CHN_EN]		=	0x4A0,
++};
++
++static u32 rpmh_rsc_reg_offsets_ver_3_0_hw_channel[] = {
++	[RSC_DRV_TCS_OFFSET]		=	336,
++	[RSC_DRV_CMD_OFFSET]		=	24,
++	[DRV_SOLVER_CONFIG]		=	0x04,
++	[DRV_PRNT_CHLD_CONFIG]		=	0x0C,
++	[RSC_DRV_IRQ_ENABLE]		=	0x00,
++	[RSC_DRV_IRQ_STATUS]		=	0x04,
++	[RSC_DRV_IRQ_CLEAR]		=	0x08,
++	[RSC_DRV_CMD_WAIT_FOR_CMPL]	=	0x20,
++	[RSC_DRV_CONTROL]		=	0x24,
++	[RSC_DRV_STATUS]		=	0x28,
++	[RSC_DRV_CMD_ENABLE]		=	0x2C,
++	[RSC_DRV_CMD_MSGID]		=	0x34,
++	[RSC_DRV_CMD_ADDR]		=	0x38,
++	[RSC_DRV_CMD_DATA]		=	0x3C,
++	[RSC_DRV_CMD_STATUS]		=	0x40,
++	[RSC_DRV_CMD_RESP_DATA]		=	0x44,
++	[RSC_DRV_CHN_SEQ_BUSY]		=	0x464,
++	[RSC_DRV_CHN_SEQ_PC]		=	0x468,
++	[RSC_DRV_CHN_TCS_TRIGGER]	=	0x490,
++	[RSC_DRV_CHN_TCS_COMPLETE]	=	0x494,
++	[RSC_DRV_CHN_UPDATE]		=	0x498,
++	[RSC_DRV_CHN_BUSY]		=	0x49C,
++	[RSC_DRV_CHN_EN]		=	0x4A0,
++};
++
++static inline void __iomem *
++tcs_reg_addr(const struct rsc_drv *drv, int reg, int tcs_id)
++{
++	return drv->tcs_base + drv->regs[RSC_DRV_TCS_OFFSET] * tcs_id + reg;
++}
++
++static inline void __iomem *
++tcs_cmd_addr(const struct rsc_drv *drv, int reg, int tcs_id, int cmd_id)
++{
++	return tcs_reg_addr(drv, reg, tcs_id) + drv->regs[RSC_DRV_CMD_OFFSET] * cmd_id;
++}
++
++static u32 read_tcs_cmd(const struct rsc_drv *drv, int reg, int tcs_id,
++			int cmd_id)
++{
++	return readl_relaxed(tcs_cmd_addr(drv, reg, tcs_id, cmd_id));
++}
++
++static u32 read_tcs_reg(const struct rsc_drv *drv, int reg, int tcs_id)
++{
++	return readl_relaxed(tcs_reg_addr(drv, reg, tcs_id));
++}
++
++static void write_tcs_cmd(const struct rsc_drv *drv, int reg, int tcs_id,
++			  int cmd_id, u32 data)
++{
++	writel_relaxed(data, tcs_cmd_addr(drv, reg, tcs_id, cmd_id));
++}
++
++static void write_tcs_reg(const struct rsc_drv *drv, int reg, int tcs_id,
++			  u32 data)
++{
++	writel_relaxed(data, tcs_reg_addr(drv, reg, tcs_id));
++}
++
++static void write_tcs_reg_sync(const struct rsc_drv *drv, int reg, int tcs_id,
++			       u32 data)
++{
++	int i;
++
++	writel(data, tcs_reg_addr(drv, reg, tcs_id));
++
++	/*
++	 * Wait until we read back the same value.  Use a counter rather than
++	 * ktime for timeout since this may be called after timekeeping stops.
++	 */
++	for (i = 0; i < USEC_PER_SEC; i++) {
++		if (readl(tcs_reg_addr(drv, reg, tcs_id)) == data)
++			return;
++		udelay(1);
++	}
++	pr_err("%s: error writing %#x to %d:%#x\n", drv->name,
++	       data, tcs_id, reg);
++}
++
++/**
++ * tcs_invalidate() - Invalidate all TCSes of the given type (sleep or wake).
++ * @drv:  The RSC controller.
++ * @type: SLEEP_TCS or WAKE_TCS
++ * @ch:   Channel number
++ *
++ * This will clear the "slots" variable of the given tcs_group and also
++ * tell the hardware to forget about all entries.
++ *
++ * The caller must ensure that no other RPMH actions are happening when this
++ * function is called, since otherwise the device may immediately become
++ * used again even before this function exits.
++ */
++static void tcs_invalidate(struct rsc_drv *drv, int type, int ch)
++{
++	int m;
++	struct tcs_group *tcs = &drv->ch[ch].tcs[type];
++
++	/* Caller ensures nobody else is running so no lock */
++	if (bitmap_empty(tcs->slots, tcs->ncpt * tcs->num_tcs))
++		return;
++
++	for (m = tcs->offset; m < tcs->offset + tcs->num_tcs; m++) {
++		write_tcs_reg_sync(drv, drv->regs[RSC_DRV_CMD_ENABLE], m, 0);
++		write_tcs_reg_sync(drv, drv->regs[RSC_DRV_CMD_WAIT_FOR_CMPL], m, 0);
++	}
++
++	bitmap_zero(tcs->slots, tcs->ncpt * tcs->num_tcs);
++}
++
++/**
++ * rpmh_rsc_get_channel() - Get the Unused channel to send data on.
++ * @drv: The RSC controller.
++ *
++ * Return: 0 on success, else -error.
++ */
++int rpmh_rsc_get_channel(struct rsc_drv *drv)
++{
++	int chn_update, chn_busy;
++
++	if (drv->num_channels == 1)
++		return CH0;
++
++	/* Select Unused channel */
++	do {
++		chn_update = readl_relaxed(drv->base + drv->regs[RSC_DRV_CHN_UPDATE]);
++		chn_busy = readl_relaxed(drv->base + drv->regs[RSC_DRV_CHN_BUSY]);
++	} while (chn_busy != chn_update);
++
++	if (chn_busy & CH0_CHN_BUSY)
++		return CH1;
++	else if (chn_busy & CH1_CHN_BUSY)
++		return CH0;
++	else
++		return -EBUSY;
++}
++
++/**
++ * rpmh_rsc_invalidate() - Invalidate sleep and wake TCSes.
++ * @drv: The RSC controller.
++ * @ch:  Channel number
++ *
++ * The caller must ensure that no other RPMH actions are happening when thi]s
++ * function is called, since otherwise the device may immediately become
++ * used again even before this function exits.
++ */
++void rpmh_rsc_invalidate(struct rsc_drv *drv, int ch)
++{
++	tcs_invalidate(drv, SLEEP_TCS, ch);
++	tcs_invalidate(drv, WAKE_TCS, ch);
++}
++
++/**
++ * get_tcs_for_msg() - Get the tcs_group used to send the given message.
++ * @drv: The RSC controller.
++ * @msg: The message we want to send.
++ *
++ * This is normally pretty straightforward except if we are trying to send
++ * an ACTIVE_ONLY message but don't have any active_only TCSes.
++ *
++ * Return: A pointer to a tcs_group or an ERR_PTR.
++ */
++static struct tcs_group *get_tcs_for_msg(struct rsc_drv *drv,
++					 enum rpmh_state state,
++					 int ch)
++{
++	int type;
++	struct tcs_group *tcs;
++
++	switch (state) {
++	case RPMH_ACTIVE_ONLY_STATE:
++		type = ACTIVE_TCS;
++		break;
++	case RPMH_WAKE_ONLY_STATE:
++		type = WAKE_TCS;
++		break;
++	case RPMH_SLEEP_STATE:
++		type = SLEEP_TCS;
++		break;
++	default:
++		return ERR_PTR(-EINVAL);
++	}
++
++	/*
++	 * If we are making an active request on a RSC that does not have a
++	 * dedicated TCS for active state use, then re-purpose a wake TCS to
++	 * send active votes. This is safe because we ensure any active-only
++	 * transfers have finished before we use it (maybe by running from
++	 * the last CPU in PM code).
++	 */
++	tcs = &drv->ch[ch].tcs[type];
++	if (state == RPMH_ACTIVE_ONLY_STATE && !tcs->num_tcs)
++		tcs = &drv->ch[ch].tcs[WAKE_TCS];
++
++	return tcs;
++}
++
++/**
++ * get_req_from_tcs() - Get a stashed request that was xfering on the given TCS.
++ * @drv:    The RSC controller.
++ * @tcs_id: The global ID of this TCS.
++ *
++ * For ACTIVE_ONLY transfers we want to call back into the client when the
++ * transfer finishes. To do this we need the "request" that the client
++ * originally provided us. This function grabs the request that we stashed
++ * when we started the transfer.
++ *
++ * This only makes sense for ACTIVE_ONLY transfers since those are the only
++ * ones we track sending (the only ones we enable interrupts for and the only
++ * ones we call back to the client for).
++ *
++ * Return: The stashed request.
++ */
++static const struct tcs_request *get_req_from_tcs(struct rsc_drv *drv,
++						  int tcs_id,
++						  int *ch)
++{
++	struct tcs_group *tcs;
++	int i;
++
++	for (i = 0; i < MAX_CHANNEL; i++) {
++		if (!drv->ch[i].initialized)
++			continue;
++
++		tcs = get_tcs_for_msg(drv, RPMH_ACTIVE_ONLY_STATE, i);
++		if (tcs->mask & BIT(tcs_id)) {
++			*ch = i;
++			return tcs->req[tcs_id - tcs->offset];
++		}
++	}
++
++	return NULL;
++}
++
++/**
++ * __tcs_set_trigger() - Start xfer on a TCS or unset trigger on a borrowed TCS
++ * @drv:     The controller.
++ * @tcs_id:  The global ID of this TCS.
++ * @trigger: If true then untrigger/retrigger. If false then just untrigger.
++ *
++ * In the normal case we only ever call with "trigger=true" to start a
++ * transfer. That will un-trigger/disable the TCS from the last transfer
++ * then trigger/enable for this transfer.
++ *
++ * If we borrowed a wake TCS for an active-only transfer we'll also call
++ * this function with "trigger=false" to just do the un-trigger/disable
++ * before using the TCS for wake purposes again.
++ *
++ * Note that the AP is only in charge of triggering active-only transfers.
++ * The AP never triggers sleep/wake values using this function.
++ */
++static void __tcs_set_trigger(struct rsc_drv *drv, int tcs_id, bool trigger)
++{
++	u32 enable;
++
++	/*
++	 * HW req: Clear the DRV_CONTROL and enable TCS again
++	 * While clearing ensure that the AMC mode trigger is cleared
++	 * and then the mode enable is cleared.
++	 */
++	enable = read_tcs_reg(drv, drv->regs[RSC_DRV_CONTROL], tcs_id);
++	enable &= ~TCS_AMC_MODE_TRIGGER;
++	write_tcs_reg_sync(drv, drv->regs[RSC_DRV_CONTROL], tcs_id, enable);
++	enable &= ~TCS_AMC_MODE_ENABLE;
++	write_tcs_reg_sync(drv, drv->regs[RSC_DRV_CONTROL], tcs_id, enable);
++
++	if (trigger) {
++		/* Enable the AMC mode on the TCS and then trigger the TCS */
++		enable = TCS_AMC_MODE_ENABLE;
++		write_tcs_reg_sync(drv, drv->regs[RSC_DRV_CONTROL], tcs_id, enable);
++		enable |= TCS_AMC_MODE_TRIGGER;
++		write_tcs_reg(drv, drv->regs[RSC_DRV_CONTROL], tcs_id, enable);
++	}
++}
++
++/**
++ * enable_tcs_irq() - Enable or disable interrupts on the given TCS.
++ * @drv:     The controller.
++ * @tcs_id:  The global ID of this TCS.
++ * @enable:  If true then enable; if false then disable
++ *
++ * We only ever call this when we borrow a wake TCS for an active-only
++ * transfer. For active-only TCSes interrupts are always left enabled.
++ */
++static void enable_tcs_irq(struct rsc_drv *drv, int tcs_id, bool enable)
++{
++	u32 data;
++
++	data = readl_relaxed(drv->tcs_base + drv->regs[RSC_DRV_IRQ_ENABLE]);
++	if (enable)
++		data |= BIT(tcs_id);
++	else
++		data &= ~BIT(tcs_id);
++	writel_relaxed(data, drv->tcs_base + drv->regs[RSC_DRV_IRQ_ENABLE]);
++}
++
++/**
++ * tcs_tx_done() - TX Done interrupt handler.
++ * @irq: The IRQ number (ignored).
++ * @p:   Pointer to "struct rsc_drv".
++ *
++ * Called for ACTIVE_ONLY transfers (those are the only ones we enable the
++ * IRQ for) when a transfer is done.
++ *
++ * Return: IRQ_HANDLED
++ */
++static irqreturn_t tcs_tx_done(int irq, void *p)
++{
++	struct rsc_drv *drv = p;
++	int i, ch;
++	unsigned long irq_status;
++	const struct tcs_request *req;
++
++	irq_status = readl_relaxed(drv->tcs_base + drv->regs[RSC_DRV_IRQ_STATUS]);
++
++	for_each_set_bit(i, &irq_status, BITS_PER_TYPE(u32)) {
++		req = get_req_from_tcs(drv, i, &ch);
++		if (WARN_ON(!req))
++			goto skip;
++
++		trace_rpmh_tx_done(drv, i, req);
++		dev_dbg(drv->dev, "IRQ response: m=%d", i);
++
++		/*
++		 * If wake tcs was re-purposed for sending active
++		 * votes, clear AMC trigger & enable modes and
++		 * disable interrupt for this TCS
++		 */
++		if (!drv->ch[ch].tcs[ACTIVE_TCS].num_tcs)
++			__tcs_set_trigger(drv, i, false);
++skip:
++		/* Reclaim the TCS */
++
++		write_tcs_reg(drv, drv->regs[RSC_DRV_CMD_ENABLE], i, 0);
++		write_tcs_reg(drv, drv->regs[RSC_DRV_CMD_WAIT_FOR_CMPL], i, 0);
++		writel_relaxed(BIT(i), drv->tcs_base + drv->regs[RSC_DRV_IRQ_CLEAR]);
++		spin_lock(&drv->lock);
++		clear_bit(i, drv->tcs_in_use);
++		/*
++		 * Disable interrupt for WAKE TCS to avoid being
++		 * spammed with interrupts coming when the solver
++		 * sends its wake votes.
++		 */
++		if (!drv->ch[ch].tcs[ACTIVE_TCS].num_tcs)
++			enable_tcs_irq(drv, i, false);
++		spin_unlock(&drv->lock);
++		wake_up(&drv->tcs_wait);
++		if (req)
++			rpmh_tx_done(req);
++	}
++
++	return IRQ_HANDLED;
++}
++
++/**
++ * __tcs_buffer_write() - Write to TCS hardware from a request; don't trigger.
++ * @drv:    The controller.
++ * @tcs_id: The global ID of this TCS.
++ * @cmd_id: The index within the TCS to start writing.
++ * @msg:    The message we want to send, which will contain several addr/data
++ *          pairs to program (but few enough that they all fit in one TCS).
++ *
++ * This is used for all types of transfers (active, sleep, and wake).
++ */
++static void __tcs_buffer_write(struct rsc_drv *drv, int tcs_id, int cmd_id,
++			       const struct tcs_request *msg)
++{
++	u32 msgid;
++	u32 cmd_msgid = CMD_MSGID_LEN | CMD_MSGID_WRITE;
++	u32 cmd_enable = 0;
++	u32 cmd_complete;
++	struct tcs_cmd *cmd;
++	int i, j;
++
++	cmd_msgid |= msg->wait_for_compl ? CMD_MSGID_RESP_REQ : 0;
++	cmd_complete = read_tcs_reg(drv, drv->regs[RSC_DRV_CMD_WAIT_FOR_CMPL], tcs_id);
++
++	for (i = 0, j = cmd_id; i < msg->num_cmds; i++, j++) {
++		cmd = &msg->cmds[i];
++		cmd_enable |= BIT(j);
++		cmd_complete |= cmd->wait << j;
++		msgid = cmd_msgid;
++		msgid |= cmd->wait ? CMD_MSGID_RESP_REQ : 0;
++
++		write_tcs_cmd(drv, drv->regs[RSC_DRV_CMD_MSGID], tcs_id, j, msgid);
++		write_tcs_cmd(drv, drv->regs[RSC_DRV_CMD_ADDR], tcs_id, j, cmd->addr);
++		write_tcs_cmd(drv, drv->regs[RSC_DRV_CMD_DATA], tcs_id, j, cmd->data);
++		trace_rpmh_send_msg(drv, tcs_id, j, msgid, cmd);
++		dev_dbg(drv->dev,
++			       "TCS write: m=%d n=%d msgid=%#x addr=%#x data=%#x wait=%d",
++			       tcs_id, j, msgid, cmd->addr,
++			       cmd->data, cmd->wait);
++	}
++
++	write_tcs_reg(drv, drv->regs[RSC_DRV_CMD_WAIT_FOR_CMPL], tcs_id, cmd_complete);
++	cmd_enable |= read_tcs_reg(drv, drv->regs[RSC_DRV_CMD_ENABLE], tcs_id);
++	write_tcs_reg(drv, drv->regs[RSC_DRV_CMD_ENABLE], tcs_id, cmd_enable);
++}
++
++/**
++ * check_for_req_inflight() - Look to see if conflicting cmds are in flight.
++ * @drv: The controller.
++ * @tcs: A pointer to the tcs_group used for ACTIVE_ONLY transfers.
++ * @msg: The message we want to send, which will contain several addr/data
++ *       pairs to program (but few enough that they all fit in one TCS).
++ *
++ * This will walk through the TCSes in the group and check if any of them
++ * appear to be sending to addresses referenced in the message. If it finds
++ * one it'll return -EBUSY.
++ *
++ * Only for use for active-only transfers.
++ *
++ * Must be called with the drv->lock held since that protects tcs_in_use.
++ *
++ * Return: 0 if nothing in flight or -EBUSY if we should try again later.
++ *         The caller must re-enable interrupts between tries since that's
++ *         the only way tcs_in_use will ever be updated and the only way
++ *         RSC_DRV_CMD_ENABLE will ever be cleared.
++ */
++static int check_for_req_inflight(struct rsc_drv *drv, struct tcs_group *tcs,
++				  const struct tcs_request *msg)
++{
++	unsigned long curr_enabled;
++	u32 addr;
++	int j, k;
++	int i = tcs->offset;
++	unsigned long accl;
++
++	for_each_set_bit_from(i, drv->tcs_in_use, tcs->offset + tcs->num_tcs) {
++		curr_enabled = read_tcs_reg(drv, drv->regs[RSC_DRV_CMD_ENABLE], i);
++
++		for_each_set_bit(j, &curr_enabled, tcs->ncpt) {
++			addr = read_tcs_cmd(drv, drv->regs[RSC_DRV_CMD_ADDR], i, j);
++			for (k = 0; k < msg->num_cmds; k++) {
++			/*
++			 * Each RPMh VREG accelerator resource has 3 or 4 contiguous 4-byte
++			 * aligned addresses associated with it. Ignore the offset to check
++			 * for in-flight VREG requests.
++			 */
++				accl = ACCL_TYPE(msg->cmds[k].addr);
++				if (accl == HW_ACCL_VREG &&
++				    VREG_ADDR(addr) == VREG_ADDR(msg->cmds[k].addr))
++					return -EBUSY;
++				else if (addr == msg->cmds[k].addr)
++					return -EBUSY;
++			}
++		}
++	}
++
++	return 0;
++}
++
++/**
++ * find_free_tcs() - Find free tcs in the given tcs_group; only for active.
++ * @tcs: A pointer to the active-only tcs_group (or the wake tcs_group if
++ *       we borrowed it because there are zero active-only ones).
++ *
++ * Must be called with the drv->lock held since that protects tcs_in_use.
++ *
++ * Return: The first tcs that's free or -EBUSY if all in use.
++ */
++static int find_free_tcs(struct tcs_group *tcs)
++{
++	const struct rsc_drv *drv = tcs->drv;
++	unsigned long i;
++	unsigned long max = tcs->offset + tcs->num_tcs;
++	int timeout = 100;
++
++	i = find_next_zero_bit(drv->tcs_in_use, max, tcs->offset);
++	if (i >= max)
++		return -EBUSY;
++
++	while (timeout) {
++		if (read_tcs_reg(drv, drv->regs[RSC_DRV_STATUS], i))
++			break;
++		timeout--;
++		udelay(1);
++	}
++
++	if (!timeout)
++		return -EBUSY;
++
++	return i;
++}
++
++/**
++ * claim_tcs_for_req() - Claim a tcs in the given tcs_group; only for active.
++ * @drv: The controller.
++ * @tcs: The tcs_group used for ACTIVE_ONLY transfers.
++ * @msg: The data to be sent.
++ *
++ * Claims a tcs in the given tcs_group while making sure that no existing cmd
++ * is in flight that would conflict with the one in @msg.
++ *
++ * Context: Must be called with the drv->lock held since that protects
++ * tcs_in_use.
++ *
++ * Return: The id of the claimed tcs or -EBUSY if a matching msg is in flight
++ * or the tcs_group is full.
++ */
++static int claim_tcs_for_req(struct rsc_drv *drv, struct tcs_group *tcs,
++			     const struct tcs_request *msg)
++{
++	int ret;
++
++	/*
++	 * The h/w does not like if we send a request to the same address,
++	 * when one is already in-flight or being processed.
++	 */
++	ret = check_for_req_inflight(drv, tcs, msg);
++	if (ret)
++		return ret;
++
++	return find_free_tcs(tcs);
++}
++
++/**
++ * rpmh_rsc_send_data() - Write / trigger active-only message.
++ * @drv: The controller.
++ * @msg: The data to be sent.
++ * @ch:  Channel number
++ *
++ * NOTES:
++ * - This is only used for "ACTIVE_ONLY" since the limitations of this
++ *   function don't make sense for sleep/wake cases.
++ * - To do the transfer, we will grab a whole TCS for ourselves--we don't
++ *   try to share. If there are none available we'll wait indefinitely
++ *   for a free one.
++ * - This function will not wait for the commands to be finished, only for
++ *   data to be programmed into the RPMh. See rpmh_tx_done() which will
++ *   be called when the transfer is fully complete.
++ * - This function must be called with interrupts enabled. If the hardware
++ *   is busy doing someone else's transfer we need that transfer to fully
++ *   finish so that we can have the hardware, and to fully finish it needs
++ *   the interrupt handler to run. If the interrupts is set to run on the
++ *   active CPU this can never happen if interrupts are disabled.
++ *
++ * Return: 0 on success, -EINVAL on error.
++ */
++int rpmh_rsc_send_data(struct rsc_drv *drv, const struct tcs_request *msg, int ch)
++{
++	struct tcs_group *tcs;
++	int tcs_id;
++	unsigned long flags;
++
++	tcs = get_tcs_for_msg(drv, msg->state, ch);
++	if (IS_ERR(tcs))
++		return PTR_ERR(tcs);
++
++	spin_lock_irqsave(&drv->lock, flags);
++
++	/* Controller is busy in 'solver' mode */
++	if (drv->in_solver_mode) {
++		spin_unlock_irqrestore(&drv->lock, flags);
++		return -EBUSY;
++	}
++
++	/* Wait forever for a free tcs. It better be there eventually! */
++	wait_event_lock_irq(drv->tcs_wait,
++			    (tcs_id = claim_tcs_for_req(drv, tcs, msg)) >= 0,
++			    drv->lock);
++
++	tcs->req[tcs_id - tcs->offset] = msg;
++	set_bit(tcs_id, drv->tcs_in_use);
++
++	/*
++	 * Clear previously programmed ACTIVE/WAKE commands in selected
++	 * repurposed TCS to avoid triggering them. tcs->slots will be
++	 * cleaned from rpmh_flush() by invoking rpmh_rsc_invalidate()
++	 */
++	write_tcs_reg_sync(drv, drv->regs[RSC_DRV_CMD_ENABLE], tcs_id, 0);
++	write_tcs_reg_sync(drv, drv->regs[RSC_DRV_CMD_WAIT_FOR_CMPL], tcs_id, 0);
++
++	if (msg->wait_for_compl || (msg->state == RPMH_ACTIVE_ONLY_STATE &&
++	    tcs->type != ACTIVE_TCS))
++		enable_tcs_irq(drv, tcs_id, true);
++	else
++		enable_tcs_irq(drv, tcs_id, false);
++
++	/*
++	 * These two can be done after the lock is released because:
++	 * - We marked "tcs_in_use" under lock.
++	 * - Once "tcs_in_use" has been marked nobody else could be writing
++	 *   to these registers until the interrupt goes off.
++	 * - The interrupt can't go off until we trigger w/ the last line
++	 *   of __tcs_set_trigger() below.
++	 */
++	__tcs_buffer_write(drv, tcs_id, 0, msg);
++	__tcs_set_trigger(drv, tcs_id, true);
++	dev_dbg(drv->dev, "TCS trigger: m=%d wait_for_compl=%u",
++		       tcs_id, msg->wait_for_compl);
++
++	if (!msg->wait_for_compl)
++		clear_bit(tcs_id, drv->tcs_in_use);
++
++	spin_unlock_irqrestore(&drv->lock, flags);
++
++	if (!msg->wait_for_compl)
++		wake_up(&drv->tcs_wait);
++
++	return 0;
++}
++
++/**
++ * find_slots() - Find a place to write the given message.
++ * @tcs:    The tcs group to search.
++ * @msg:    The message we want to find room for.
++ * @tcs_id: If we return 0 from the function, we return the global ID of the
++ *          TCS to write to here.
++ * @cmd_id: If we return 0 from the function, we return the index of
++ *          the command array of the returned TCS where the client should
++ *          start writing the message.
++ *
++ * Only for use on sleep/wake TCSes since those are the only ones we maintain
++ * tcs->slots for.
++ *
++ * Return: -ENOMEM if there was no room, else 0.
++ */
++static int find_slots(struct tcs_group *tcs, const struct tcs_request *msg,
++		      int *tcs_id, int *cmd_id)
++{
++	int slot, offset;
++	int i = 0;
++
++	/* Do over, until we can fit the full payload in a single TCS */
++	do {
++		slot = bitmap_find_next_zero_area(tcs->slots,
++						  tcs->ncpt * tcs->num_tcs,
++						  i, msg->num_cmds, 0);
++		if (slot >= tcs->num_tcs * tcs->ncpt)
++			return -ENOMEM;
++		i += tcs->ncpt;
++	} while (slot + msg->num_cmds - 1 >= i);
++
++	bitmap_set(tcs->slots, slot, msg->num_cmds);
++
++	offset = slot / tcs->ncpt;
++	*tcs_id = offset + tcs->offset;
++	*cmd_id = slot % tcs->ncpt;
++
++	return 0;
++}
++
++/**
++ * rpmh_rsc_write_ctrl_data() - Write request to controller but don't trigger.
++ * @drv: The controller.
++ * @msg: The data to be written to the controller.
++ * @ch:  Channel number
++ *
++ * This should only be called for sleep/wake state, never active-only
++ * state.
++ *
++ * The caller must ensure that no other RPMH actions are happening and the
++ * controller is idle when this function is called since it runs lockless.
++ *
++ * Return: 0 if no error; else -error.
++ */
++int rpmh_rsc_write_ctrl_data(struct rsc_drv *drv, const struct tcs_request *msg, int ch)
++{
++	struct tcs_group *tcs;
++	int tcs_id = 0, cmd_id = 0;
++	int ret;
++
++	if (!msg->num_cmds) {
++		dev_dbg(drv->dev, "Empty num_cmds, returning");
++		return 0;
++	}
++
++	tcs = get_tcs_for_msg(drv, msg->state, ch);
++	if (IS_ERR(tcs))
++		return PTR_ERR(tcs);
++
++	/* find the TCS id and the command in the TCS to write to */
++	ret = find_slots(tcs, msg, &tcs_id, &cmd_id);
++	if (!ret)
++		__tcs_buffer_write(drv, tcs_id, cmd_id, msg);
++
++	return ret;
++}
++
++static struct tcs_group *get_tcs_from_index(struct rsc_drv *drv, int tcs_id)
++{
++	unsigned int i, j;
++
++	for (i = 0; i < TCS_TYPE_NR; i++) {
++		for (j = 0; j < MAX_CHANNEL; j++) {
++			if (!drv->ch[j].initialized)
++				continue;
++
++			if (drv->ch[j].tcs[i].mask & BIT(tcs_id))
++				return &drv->ch[j].tcs[i];
++		}
++	}
++
++	return NULL;
++}
++
++static void print_tcs_info(struct rsc_drv *drv, int tcs_id, unsigned long *accl,
++			   bool *aoss_irq_sts)
++{
++	int ch = 0;
++	struct tcs_group *tcs_grp = get_tcs_from_index(drv, tcs_id);
++	const struct tcs_request *req = get_req_from_tcs(drv, tcs_id, &ch);
++	unsigned long cmds_enabled;
++	u32 addr, data, msgid, sts, irq_sts;
++	bool in_use = test_bit(tcs_id, drv->tcs_in_use);
++	int i;
++
++	sts = read_tcs_reg(drv, drv->regs[RSC_DRV_STATUS], tcs_id);
++	cmds_enabled = read_tcs_reg(drv, drv->regs[RSC_DRV_CMD_ENABLE], tcs_id);
++	if (!cmds_enabled || !tcs_grp)
++		return;
++
++	if (!req)
++		goto print_tcs_data;
++
++	data = read_tcs_reg(drv, drv->regs[RSC_DRV_CONTROL], tcs_id);
++	irq_sts = readl_relaxed(drv->tcs_base + drv->regs[RSC_DRV_IRQ_STATUS]);
++	pr_warn("Request: tcs-in-use:%s active_tcs=%s(%d) state=%d wait_for_compl=%u]\n",
++		(in_use ? "YES" : "NO"),
++		((tcs_grp->type == ACTIVE_TCS) ? "YES" : "NO"),
++		tcs_grp->type, req->state, req->wait_for_compl);
++	pr_warn("TCS=%d [ctrlr-sts:%s amc-mode:0x%x irq-sts:%s]\n",
++		tcs_id, sts ? "IDLE" : "BUSY", data,
++		(irq_sts & BIT(tcs_id)) ? "COMPLETED" : "PENDING");
++
++	*aoss_irq_sts = (irq_sts & BIT(tcs_id)) ? true : false;
++
++print_tcs_data:
++	for_each_set_bit(i, &cmds_enabled, tcs_grp->ncpt) {
++		addr = read_tcs_cmd(drv, drv->regs[RSC_DRV_CMD_ADDR], tcs_id, i);
++		data = read_tcs_cmd(drv, drv->regs[RSC_DRV_CMD_DATA], tcs_id, i);
++		msgid = read_tcs_cmd(drv, drv->regs[RSC_DRV_CMD_MSGID], tcs_id, i);
++		sts = read_tcs_cmd(drv, drv->regs[RSC_DRV_CMD_STATUS], tcs_id, i);
++		pr_warn("\tCMD=%d [addr=0x%x data=0x%x hdr=0x%x sts=0x%x enabled=1]\n",
++			i, addr, data, msgid, sts);
++		if (!(sts & CMD_STATUS_ISSUED))
++			continue;
++		if (!(sts & CMD_STATUS_COMPL))
++			*accl |= BIT(ACCL_TYPE(addr));
++	}
++}
++
++void rpmh_rsc_debug_channel_busy(struct rsc_drv *drv)
++{
++	u32 event_sts, ctrl_sts;
++	u32 chn_update, chn_busy, chn_en;
++	u32 seq_busy, seq_pc;
++
++	pr_err("RSC:%s\n", drv->name);
++
++	event_sts = readl_relaxed(drv->base + drv->regs[RSC_DRV_CHN_TCS_COMPLETE]);
++	ctrl_sts = readl_relaxed(drv->base + drv->regs[RSC_DRV_CHN_TCS_TRIGGER]);
++	chn_update = readl_relaxed(drv->base + drv->regs[RSC_DRV_CHN_UPDATE]);
++	chn_busy = readl_relaxed(drv->base + drv->regs[RSC_DRV_CHN_BUSY]);
++	chn_en = readl_relaxed(drv->base + drv->regs[RSC_DRV_CHN_EN]);
++	seq_busy = readl_relaxed(drv->base + drv->regs[RSC_DRV_CHN_SEQ_BUSY]);
++	seq_pc = readl_relaxed(drv->base + drv->regs[RSC_DRV_CHN_SEQ_PC]);
++
++	pr_err("event sts: 0x%x ctrl_sts: 0x%x\n", event_sts, ctrl_sts);
++	pr_err("chn_update: 0x%x chn_busy: 0x%x chn_en: 0x%x\n", chn_update, chn_busy, chn_en);
++	pr_err("seq_busy: 0x%x seq_pc: 0x%x\n", seq_busy, seq_pc);
++
++}
++
++void rpmh_rsc_debug(struct rsc_drv *drv, struct completion *compl)
++{
++	struct irq_data *rsc_irq_data = irq_get_irq_data(drv->irq);
++	bool gic_irq_sts, aoss_irq_sts = false;
++	int i;
++	int busy = 0;
++	unsigned long accl = 0;
++	char str[20] = "";
++
++	pr_warn("RSC:%s\n", drv->name);
++
++	for (i = 0; i < drv->num_tcs; i++) {
++		if (!test_bit(i, drv->tcs_in_use))
++			continue;
++		busy++;
++		print_tcs_info(drv, i, &accl, &aoss_irq_sts);
++	}
++
++	if (!rsc_irq_data) {
++		pr_err("No IRQ data for RSC:%s\n", drv->name);
++		return;
++	}
++
++	irq_get_irqchip_state(drv->irq, IRQCHIP_STATE_PENDING, &gic_irq_sts);
++	pr_warn("HW IRQ %lu is %s at GIC\n", rsc_irq_data->hwirq,
++		gic_irq_sts ? "PENDING" : "NOT PENDING");
++	pr_warn("Completion is %s to finish\n",
++		completion_done(compl) ? "PENDING" : "NOT PENDING");
++
++	for_each_set_bit(i, &accl, ARRAY_SIZE(accl_str)) {
++		strlcat(str, accl_str[i], sizeof(str));
++		strlcat(str, " ", sizeof(str));
++	}
++
++	if ((busy && !gic_irq_sts) || !aoss_irq_sts)
++		pr_warn("ERROR:Accelerator(s) { %s } at AOSS did not respond\n",
++			str);
++	else if (gic_irq_sts)
++		pr_warn("ERROR:Possible lockup in Linux\n");
++
++	/* Show fast path status, if the TCS is busy */
++	for (i = 0; i < MAX_CHANNEL; i++) {
++		if (!drv->ch[i].initialized)
++			continue;
++
++		/* Show fast path status, if the TCS is busy */
++		if (drv->ch[i].tcs[FAST_PATH_TCS].num_tcs) {
++			int tcs_id = drv->ch[i].tcs[FAST_PATH_TCS].offset;
++			bool sts = read_tcs_reg(drv,
++						drv->regs[RSC_DRV_STATUS],
++						tcs_id);
++
++			if (!sts) {
++				pr_err("Fast-path TCS information:\n");
++				print_tcs_info(drv, tcs_id, &accl, &aoss_irq_sts);
++			}
++		}
++	}
++
++	/*
++	 * The TCS(s) are busy waiting, we have no way to recover from this.
++	 * If this debug function is called, we assume it's because timeout
++	 * has happened.
++	 * Crash and report.
++	 */
++	BUG_ON(busy);
++}
++
++/**
++ * rpmh_rsc_ctrlr_is_busy() - Check if any of the AMCs are busy.
++ * @drv: The controller
++ *
++ * Checks if any of the AMCs are busy in handling ACTIVE sets.
++ * This is called from the last cpu powering down before flushing
++ * SLEEP and WAKE sets. If AMCs are busy, controller can not enter
++ * power collapse, so deny from the last cpu's pm notification.
++ *
++ * Context: Must be called with the drv->lock held.
++ *
++ * Return:
++ * * False		- AMCs are idle
++ * * True		- AMCs are busy
++ */
++static bool rpmh_rsc_ctrlr_is_busy(struct rsc_drv *drv)
++{
++	int i;
++	struct tcs_group *tcs;
++	unsigned long set;
++	unsigned long max;
++
++	for (i = 0; i < MAX_CHANNEL; i++) {
++		if (!drv->ch[i].initialized)
++			continue;
++
++		tcs = &drv->ch[i].tcs[ACTIVE_TCS];
++		/*
++		 * If we made an active request on a RSC that does not have a
++		 * dedicated TCS for active state use, then re-purposed wake TCSes
++		 * should be checked for not busy, because we used wake TCSes for
++		 * active requests in this case.
++		 */
++		if (!tcs->num_tcs)
++			tcs = &drv->ch[i].tcs[WAKE_TCS];
++
++		max = tcs->offset + tcs->num_tcs;
++		set = find_next_bit(drv->tcs_in_use, max, tcs->offset);
++		if (set < max)
++			return true;
++
++		/* Check if there is pending fastpath transaction */
++		tcs = &drv->ch[i].tcs[FAST_PATH_TCS];
++		if (tcs->num_tcs &&
++		    !read_tcs_reg(drv, drv->regs[RSC_DRV_STATUS], tcs->offset))
++			return true;
++	}
++
++	return false;
++}
++
++/**
++ * rpmh_rsc_cpu_pm_callback() - Check if any of the AMCs are busy.
++ * @nfb:    Pointer to the notifier block in struct rsc_drv.
++ * @action: CPU_PM_ENTER, CPU_PM_ENTER_FAILED, or CPU_PM_EXIT.
++ * @v:      Unused
++ *
++ * This function is given to cpu_pm_register_notifier so we can be informed
++ * about when CPUs go down. When all CPUs go down we know no more active
++ * transfers will be started so we write sleep/wake sets. This function gets
++ * called from cpuidle code paths and also at system suspend time.
++ *
++ * If its last CPU going down and AMCs are not busy then writes cached sleep
++ * and wake messages to TCSes. The firmware then takes care of triggering
++ * them when entering deepest low power modes.
++ *
++ * Return: See cpu_pm_register_notifier()
++ */
++static int rpmh_rsc_cpu_pm_callback(struct notifier_block *nfb,
++				    unsigned long action, void *v)
++{
++	struct rsc_drv *drv = container_of(nfb, struct rsc_drv, rsc_pm);
++	int ret = NOTIFY_OK;
++	int cpus_in_pm, ch;
++
++	switch (action) {
++	case CPU_PM_ENTER:
++		cpus_in_pm = atomic_inc_return(&drv->cpus_in_pm);
++		/*
++		 * NOTE: comments for num_online_cpus() point out that it's
++		 * only a snapshot so we need to be careful. It should be OK
++		 * for us to use, though.  It's important for us not to miss
++		 * if we're the last CPU going down so it would only be a
++		 * problem if a CPU went offline right after we did the check
++		 * AND that CPU was not idle AND that CPU was the last non-idle
++		 * CPU. That can't happen. CPUs would have to come out of idle
++		 * before the CPU could go offline.
++		 */
++		if (cpus_in_pm < num_online_cpus())
++			return NOTIFY_OK;
++		break;
++	case CPU_PM_ENTER_FAILED:
++	case CPU_PM_EXIT:
++		atomic_dec(&drv->cpus_in_pm);
++		return NOTIFY_OK;
++	default:
++		return NOTIFY_DONE;
++	}
++
++	/*
++	 * It's likely we're on the last CPU. Grab the drv->lock and write
++	 * out the sleep/wake commands to RPMH hardware. Grabbing the lock
++	 * means that if we race with another CPU coming up we are still
++	 * guaranteed to be safe. If another CPU came up just after we checked
++	 * and has grabbed the lock or started an active transfer then we'll
++	 * notice we're busy and abort. If another CPU comes up after we start
++	 * flushing it will be blocked from starting an active transfer until
++	 * we're done flushing. If another CPU starts an active transfer after
++	 * we release the lock we're still OK because we're no longer the last
++	 * CPU.
++	 */
++	if (spin_trylock(&drv->lock)) {
++		ch = rpmh_rsc_get_channel(drv);
++		if (ch < 0 || rpmh_rsc_ctrlr_is_busy(drv) || rpmh_flush(&drv->client, ch))
++			ret = NOTIFY_BAD;
++		spin_unlock(&drv->lock);
++	} else {
++		/* Another CPU must be up */
++		return NOTIFY_OK;
++	}
++
++	if (ret == NOTIFY_BAD) {
++		/* Double-check if we're here because someone else is up */
++		if (cpus_in_pm < num_online_cpus())
++			ret = NOTIFY_OK;
++		else
++			/* We won't be called w/ CPU_PM_ENTER_FAILED */
++			atomic_dec(&drv->cpus_in_pm);
++	}
++
++	return ret;
++}
++
++/**
++ * rpmh_rsc_mode_solver_set() - Enable/disable solver mode.
++ * @drv:     The controller.
++ * @enable:  Boolean state to be set - true/false
++ *
++ * Return:
++ * * 0			- success
++ * * -EBUSY		- AMCs are busy
++ */
++int rpmh_rsc_mode_solver_set(struct rsc_drv *drv, bool enable)
++{
++	int ret = -EBUSY;
++
++	if (spin_trylock(&drv->lock)) {
++		if (!enable || !rpmh_rsc_ctrlr_is_busy(drv)) {
++			drv->in_solver_mode = enable;
++			trace_rpmh_solver_set(drv, enable);
++			dev_dbg(drv->dev,
++				       "solver mode set: %d", enable);
++			ret = 0;
++		}
++		spin_unlock(&drv->lock);
++	}
++
++	return ret;
++}
++
++static int rpmh_rsc_is_tcs_completed(struct rsc_drv *drv, int ch)
++{
++	u32 sts;
++	int retry = 10, ret = 0;
++
++	do {
++		sts = readl_relaxed(drv->base + drv->regs[RSC_DRV_CHN_TCS_COMPLETE]);
++
++		if (ch == 0)
++			sts &= CH0_WAKE_TCS_STATUS;
++		else
++			sts &= CH1_WAKE_TCS_STATUS;
++
++		retry--;
++		/*
++		 * Wait till all the WAKE votes of the new channel are
++		 * applied during channel switch.
++		 * Maximum delay of 100 usec.
++		 */
++		if (!sts)
++			udelay(10);
++	} while (!sts && retry);
++
++	if (!retry) {
++		ret = -EBUSY;
++		goto exit;
++	}
++
++	writel_relaxed(CH_CLEAR_STATUS,
++		       drv->base + drv->regs[RSC_DRV_CHN_TCS_COMPLETE]);
++
++exit:
++	trace_rpmh_switch_channel(drv, ch, ret);
++	dev_dbg(drv->dev, "channel switched to: %d ret: %d", ch, ret);
++	return 0;
++}
++
++/**
++ * rpmh_rsc_switch_channel() - Switch to the channel
++ * @drv:     The controller.
++ * @ch:      The channel number to switch to.
++ *
++ * NOTE: Caller should ensure serialization before making this call.
++ * Return:
++ * * 0			- success
++ * * -Error             - Error code
++ */
++int rpmh_rsc_switch_channel(struct rsc_drv *drv, int ch)
++{
++	writel_relaxed(BIT(ch), drv->base + drv->regs[RSC_DRV_CHN_UPDATE]);
++	return rpmh_rsc_is_tcs_completed(drv, ch);
++}
++
++/**
++ * rpmh_rsc_drv_enable() - Enable the DRV and trigger Wake vote
++ * @drv:     The controller.
++ *
++ * NOTE: Caller should ensure serialization before making this call.
++ * Return:
++ * * 0			- success
++ * * -Error             - Error code
++ */
++int rpmh_rsc_drv_enable(struct rsc_drv *drv, bool enable)
++{
++	int ret = 0, ch;
++	u32 chn_en;
++
++	spin_lock(&drv->lock);
++
++	chn_en = readl_relaxed(drv->base + drv->regs[RSC_DRV_CHN_EN]);
++	if (chn_en == enable) {
++		ret = -EINVAL;
++		goto exit;
++	}
++
++	if (enable) {
++		/* Start with channel 0 */
++		ch = 0;
++
++		ret = rpmh_flush(&drv->client, ch);
++		if (ret)
++			goto exit;
++
++		writel_relaxed(enable, drv->base + drv->regs[RSC_DRV_CHN_EN]);
++
++		ret = rpmh_rsc_switch_channel(drv, ch);
++		if (ret)
++			goto exit;
++	} else {
++		/* Select unused channel */
++		ch = rpmh_rsc_get_channel(drv);
++		if (ch < 0)
++			goto exit;
++
++		ret = rpmh_flush(&drv->client, ch);
++		if (ret)
++			goto exit;
++
++		ret = rpmh_rsc_switch_channel(drv, ch);
++		if (ret)
++			goto exit;
++
++		writel_relaxed(0, drv->base + drv->regs[RSC_DRV_CHN_UPDATE]);
++		writel_relaxed(enable, drv->base + drv->regs[RSC_DRV_CHN_EN]);
++	}
++exit:
++	spin_unlock(&drv->lock);
++	trace_rpmh_drv_enable(drv, enable, ret);
++	dev_dbg(drv->dev, "drv enable: %d ret: %d", enable, ret);
++	return ret;
++}
++
++/**
++ * rpmh_rsc_init_fast_path() - Initialize the fast-path TCS contents
++ * @drv:    The controller.
++ * @msg:    The TCS request to populate.
++ * @ch:     Channel number
++ *
++ * Return:
++ * * 0			- success
++ * * -ENODEV            - no fast-path TCS available
++ */
++int rpmh_rsc_init_fast_path(struct rsc_drv *drv, const struct tcs_request *msg, int ch)
++{
++	int tcs_id;
++
++	if (!drv->ch[ch].tcs[FAST_PATH_TCS].num_tcs)
++		return -ENODEV;
++
++	tcs_id = drv->ch[ch].tcs[FAST_PATH_TCS].offset;
++
++	/* We won't use the AMC IRQ to confirm if the TCS is free */
++	enable_tcs_irq(drv, tcs_id, false);
++
++	__tcs_buffer_write(drv, tcs_id, 0, msg);
++
++	return 0;
++}
++
++/**
++ * rpmh_rsc_update_fast_path() - Update the fast-path TCS data and trigger
++ * @drv:     The controller.
++ * @msg:     The TCS request data to be updated.
++ * @mask:    The update mask for elements in @msg to be sent
++ * @ch:      Channel number
++ *
++ * NOTE: Caller should ensure serialization before making this call.
++ * Return:
++ * * 0			- success
++ * * -ENODEV            - no fast-path TCS available
++ */
++int rpmh_rsc_update_fast_path(struct rsc_drv *drv,
++			      const struct tcs_request *msg,
++			      u32 mask, int ch)
++{
++	int i;
++	u32 sts;
++	int tcs_id;
++	struct tcs_cmd *cmd;
++	int retry = 5;
++
++	if (!drv->ch[ch].tcs[FAST_PATH_TCS].num_tcs)
++		return -ENODEV;
++
++	tcs_id = drv->ch[ch].tcs[FAST_PATH_TCS].offset;
++
++	/* Ensure the TCS is free before writing to the TCS */
++	do {
++		sts = read_tcs_reg(drv, drv->regs[RSC_DRV_STATUS], tcs_id);
++		if (!sts) {
++			retry--;
++			/* Report and bail, if it took too many attempts */
++			if (!retry) {
++				pr_err("Fast-path TCS is too busy\n");
++				return -EBUSY;
++			}
++			udelay(1);
++		}
++	} while (!sts);
++
++	/*
++	 * We only update the data, everything else remains the same.
++	 * The number of commands and the addresses do not change with
++	 * updates.
++	 */
++	for (i = 0; i < msg->num_cmds; i++) {
++		if (!(mask & BIT(i)))
++			continue;
++		cmd = &msg->cmds[i];
++		write_tcs_cmd(drv, drv->regs[RSC_DRV_CMD_DATA], tcs_id, i, cmd->data);
++	}
++
++	/* Trigger the TCS to send the request */
++	__tcs_set_trigger(drv, tcs_id, true);
++
++	return 0;
++}
++
++static int rpmh_rsc_poweroff_noirq(struct device *dev)
++{
++	return 0;
++}
++
++static void rpmh_rsc_tcs_irq_enable(struct rsc_drv *drv)
++{
++	u32 tcs_mask;
++	int ch;
++
++	for (ch = 0; ch < MAX_CHANNEL; ch++) {
++		if (!drv->ch[ch].initialized)
++			continue;
++
++		tcs_mask = readl_relaxed(drv->tcs_base + drv->regs[RSC_DRV_IRQ_ENABLE]);
++		tcs_mask |= drv->ch[ch].tcs[ACTIVE_TCS].mask;
++		writel_relaxed(tcs_mask, drv->tcs_base + drv->regs[RSC_DRV_IRQ_ENABLE]);
++	}
++}
++
++static int rpmh_rsc_restore_noirq(struct device *dev)
++{
++	struct rsc_drv_top *rsc_top = dev_get_drvdata(dev);
++	int i;
++
++	for (i = 0; i < rsc_top->drv_count; i++) {
++		if (rsc_top->drv[i].initialized)
++			rpmh_rsc_tcs_irq_enable(&rsc_top->drv[i]);
++	}
++
++	return 0;
++}
++
++static struct rsc_drv_top *rpmh_rsc_get_top_device(const char *name)
++{
++	struct rsc_drv_top *rsc_top;
++	bool rsc_dev_present = false;
++
++	list_for_each_entry(rsc_top, &rpmh_rsc_dev_list, list) {
++		if (!strcmp(name, rsc_top->name)) {
++			rsc_dev_present = true;
++			break;
++		}
++	}
++
++	if (!rsc_dev_present)
++		return ERR_PTR(-ENODEV);
++
++	return rsc_top;
++}
++
++const struct device *rpmh_rsc_get_device(const char *name, u32 drv_id)
++{
++	struct rsc_drv_top *rsc_top = rpmh_rsc_get_top_device(name);
++	int i;
++
++	if (IS_ERR(rsc_top))
++		return ERR_PTR(-ENODEV);
++
++	for (i = 0; i < rsc_top->drv_count; i++) {
++		if (i == drv_id && rsc_top->drv[i].initialized)
++			return rsc_top->drv[i].dev;
++	}
++
++	return ERR_PTR(-ENODEV);
++}
++
++static int rpmh_probe_channel_tcs_config(struct device_node *np,
++					 struct rsc_drv *drv,
++					 u32 max_tcs, u32 ncpt, int ch)
++{
++	struct tcs_type_config {
++		u32 type;
++		u32 n;
++	} tcs_cfg[TCS_TYPE_NR] = { { 0 } };
++	struct tcs_group *tcs;
++	struct drv_channel *channel = &drv->ch[ch];
++	int i, ret, n, st = 0;
++	u32 tcs_mask;
++
++	n = of_property_count_u32_elems(np, "qcom,tcs-config");
++	if (n != 2 * TCS_TYPE_NR)
++		return -EINVAL;
++
++	for (i = 0; i < TCS_TYPE_NR; i++) {
++		ret = of_property_read_u32_index(np, "qcom,tcs-config",
++						 i * 2, &tcs_cfg[i].type);
++		if (ret)
++			return ret;
++		if (tcs_cfg[i].type >= TCS_TYPE_NR)
++			return -EINVAL;
++
++		ret = of_property_read_u32_index(np, "qcom,tcs-config",
++						 i * 2 + 1, &tcs_cfg[i].n);
++		if (ret)
++			return ret;
++		if (tcs_cfg[i].n > MAX_TCS_PER_TYPE)
++			return -EINVAL;
++	}
++
++	for (i = 0; i < TCS_TYPE_NR; i++) {
++		tcs = &channel->tcs[tcs_cfg[i].type];
++		if (tcs->drv)
++			return -EINVAL;
++		tcs->drv = drv;
++		tcs->type = tcs_cfg[i].type;
++		tcs->num_tcs = tcs_cfg[i].n;
++		tcs->ncpt = ncpt;
++
++		if (!tcs->num_tcs || tcs->type == CONTROL_TCS)
++			continue;
++
++		if (!rpmh_uke_tcs_fits(st + drv->num_tcs, tcs->num_tcs, max_tcs))
++			return -EINVAL;
++
++		tcs->mask = ((1 << tcs->num_tcs) - 1) << (st + drv->num_tcs);
++		tcs->offset = st + drv->num_tcs;
++		st += tcs->num_tcs;
++	}
++
++	/* Enable the active TCS to send requests immediately */
++	tcs_mask = readl_relaxed(drv->tcs_base + drv->regs[RSC_DRV_IRQ_ENABLE]);
++	tcs_mask |= drv->ch[ch].tcs[ACTIVE_TCS].mask;
++	writel_relaxed(tcs_mask, drv->tcs_base + drv->regs[RSC_DRV_IRQ_ENABLE]);
++
++	channel->drv = drv;
++	channel->initialized = true;
++	drv->num_tcs += st;
++
++	return 0;
++}
++
++static int rpmh_probe_tcs_config(struct rsc_drv *drv)
++{
++	struct device_node *np = drv->dev->of_node;
++	int ch = 0, ret;
++	u32 offset, config;
++	u32 max_tcs, ncpt;
++
++	ret = of_property_read_u32(np, "qcom,tcs-offset", &offset);
++	if (ret)
++		return ret;
++	drv->tcs_base = drv->base + offset;
++
++	config = readl_relaxed(drv->base + drv->regs[DRV_PRNT_CHLD_CONFIG]);
++
++	max_tcs = config;
++	max_tcs &= DRV_NUM_TCS_MASK << (DRV_NUM_TCS_SHIFT * drv->id);
++	max_tcs = max_tcs >> (DRV_NUM_TCS_SHIFT * drv->id);
++
++	ncpt = config & (DRV_NCPT_MASK << DRV_NCPT_SHIFT);
++	ncpt = ncpt >> DRV_NCPT_SHIFT;
++	for_each_child_of_node_scoped(np, child) {
++		struct device_node *cn = child;
++
++		if (!of_node_name_eq(cn, "channel"))
++			continue;
++
++		if (ch >= MAX_CHANNEL)
++			return -EINVAL;
++		ret = rpmh_probe_channel_tcs_config(cn, drv, max_tcs, ncpt, ch);
++		if (ret)
++			return ret;
++		ch++;
++	}
++	drv->num_channels = ch;
++
++	return ch ? 0 : -EINVAL;
++}
++
++static int rpmh_rsc_pd_cb(struct notifier_block *nb,
++			  unsigned long action, void *data)
++{
++	struct rsc_drv *drv = container_of(nb, struct rsc_drv, genpd_nb);
++	int ch;
++
++	if (action != GENPD_NOTIFY_PRE_OFF)
++		return NOTIFY_OK;
++
++	ch = rpmh_rsc_get_channel(drv);
++
++	/* We don't need to lock as domin on/off are serialized */
++	if (ch < 0 || rpmh_rsc_ctrlr_is_busy(drv) || _rpmh_flush(&drv->client, ch))
++		return NOTIFY_BAD;
++
++	return NOTIFY_OK;
++}
++
++static void rpmh_uke_pd_detach(void *data)
++{
++	struct device *dev = data;
++
++	dev_pm_genpd_remove_notifier(dev);
++}
++
++static int rpmh_rsc_pd_attach(struct rsc_drv *drv)
++{
++	struct device *dev = &drv->pdev->dev;
++	int ret;
++
++	/* The platform bus has already attached the DT power domain. */
++	if (!dev->pm_domain)
++		return -EPROBE_DEFER;
++	ret = devm_pm_runtime_enable(dev);
++	if (ret)
++		return ret;
++	drv->genpd_nb.notifier_call = rpmh_rsc_pd_cb;
++	ret = dev_pm_genpd_add_notifier(dev, &drv->genpd_nb);
++	if (ret)
++		return ret;
++	return devm_add_action_or_reset(dev, rpmh_uke_pd_detach, dev);
++}
++
++static void rpmh_uke_drv_release(struct device *dev)
++{
++	of_node_put(dev->of_node);
++	kfree(dev);
++}
++
++static void rpmh_uke_drv_unregister(void *data)
++{
++	device_unregister(data);
++}
++
++static void rpmh_uke_cpu_pm_unregister(void *data)
++{
++	cpu_pm_unregister_notifier(data);
++}
++
++static void rpmh_uke_list_remove(void *data)
++{
++	struct rsc_drv_top *top = data;
++
++	list_del(&top->list);
++}
++
++static int rpmh_rsc_probe(struct platform_device *pdev)
++{
++	struct device_node *dn = pdev->dev.of_node;
++	struct rsc_drv *drv;
++	struct rsc_drv_top *rsc_top;
++	int ret, irq;
++	u32 rsc_id, major_ver, solver_config;
++	u32 i, drv_count;
++	int j;
++	const char *name;
++
++	/* This port is scoped to the applications RSC used by Uke suppliers. */
++	if (of_property_read_string(dn, "label", &name) ||
++	    strcmp(name, "apps_rsc"))
++		return -ENODEV;
++
++	/*
++	 * Even though RPMh doesn't directly use cmd-db, all of its children
++	 * do. To avoid adding this check to our children we'll do it now.
++	 */
++	ret = cmd_db_ready();
++	if (ret) {
++		if (ret != -EPROBE_DEFER)
++			dev_err(&pdev->dev, "Command DB not available (%d)\n",
++									ret);
++		return ret;
++	}
++
++	rpmh_standalone = cmd_db_is_standalone();
++	if (rpmh_standalone)
++		dev_info(&pdev->dev, "RPMH is running in standalone mode.\n");
++
++
++	rsc_top = devm_kzalloc(&pdev->dev, sizeof(*rsc_top), GFP_KERNEL);
++	if (!rsc_top)
++		return -ENOMEM;
++
++	ret = of_property_read_u32(dn, "qcom,drv-count", &drv_count);
++	if (ret)
++		return ret;
++	if (!drv_count || drv_count > 3)
++		return -EINVAL;
++
++	drv = devm_kcalloc(&pdev->dev, drv_count, sizeof(*drv), GFP_KERNEL);
++	if (!drv)
++		return -ENOMEM;
++
++	name = of_get_property(dn, "label", NULL);
++	if (!name)
++		name = dev_name(&pdev->dev);
++
++	rsc_top->drv_count = drv_count;
++	rsc_top->drv = drv;
++	rsc_top->dev = &pdev->dev;
++	scnprintf(rsc_top->name, sizeof(rsc_top->name), "%s", name);
++
++	for_each_child_of_node_scoped(dn, child) {
++		struct device_node *np = child;
++		struct device *drv_dev;
++
++		if (!of_node_name_eq(np, "drv"))
++			continue;
++
++		ret = of_property_read_u32(np, "qcom,drv-id", &i);
++		if (ret)
++			return ret;
++
++		if (i >= drv_count || drv[i].initialized)
++			return -EINVAL;
++
++		scnprintf(drv[i].name, sizeof(drv[i].name), "%s-drv-%d", name, i);
++
++		drv[i].base = devm_platform_ioremap_resource(pdev, i);
++		if (IS_ERR(drv[i].base))
++			return PTR_ERR(drv[i].base);
++
++		drv_dev = kzalloc(sizeof(*drv_dev), GFP_KERNEL);
++		if (!drv_dev)
++			return -ENOMEM;
++
++		drv[i].id = i;
++		drv[i].pdev = pdev;
++		drv[i].dev = drv_dev;
++		drv_dev->parent = &pdev->dev;
++		drv_dev->of_node = of_node_get(np);
++		drv_dev->release = rpmh_uke_drv_release;
++		dev_set_name(drv_dev, "%s:%pOFn%d", dev_name(drv_dev->parent), np, i);
++		ret = device_register(drv_dev);
++		if (ret) {
++			put_device(drv_dev);
++			return ret;
++		}
++		ret = devm_add_action_or_reset(&pdev->dev,
++					       rpmh_uke_drv_unregister, drv_dev);
++		if (ret)
++			return ret;
++
++		rsc_id = readl_relaxed(drv[i].base + RSC_DRV_ID);
++		major_ver = rsc_id & (MAJOR_VER_MASK << MAJOR_VER_SHIFT);
++		major_ver >>= MAJOR_VER_SHIFT;
++
++		if (major_ver >= 3)
++			drv[i].regs = rpmh_rsc_reg_offsets_ver_3_0;
++		else
++			drv[i].regs = rpmh_rsc_reg_offsets_ver_2_7;
++
++		ret = rpmh_probe_tcs_config(&drv[i]);
++		if (ret)
++			return ret;
++
++		dev_set_drvdata(drv_dev, &drv[i]);
++		drv[i].initialized = true;
++	}
++
++	for (i = 0; i < drv_count; i++) {
++		if (!drv[i].initialized)
++			continue;
++
++		/*
++		 * CPU PM notification are not required for controllers that support
++		 * 'HW solver' mode where they can be in autonomous mode executing low
++		 * power mode to power down.
++		 */
++		solver_config = readl_relaxed(drv[i].base +
++					      drv[i].regs[DRV_SOLVER_CONFIG]);
++		solver_config &= DRV_HW_SOLVER_MASK << DRV_HW_SOLVER_SHIFT;
++		solver_config = solver_config >> DRV_HW_SOLVER_SHIFT;
++
++		spin_lock_init(&drv[i].lock);
++		init_waitqueue_head(&drv[i].tcs_wait);
++		bitmap_zero(drv[i].tcs_in_use, MAX_TCS_NR);
++		drv[i].client.non_batch_cache = devm_kcalloc(&pdev->dev, CMD_DB_MAX_RESOURCES,
++							     sizeof(struct cache_req), GFP_KERNEL);
++		if (!drv[i].client.non_batch_cache)
++			return -ENOMEM;
++
++		for (j = 0; j < CMD_DB_MAX_RESOURCES; j++)
++			INIT_LIST_HEAD(&drv[i].client.non_batch_cache[j].list);
++
++		irq = platform_get_irq(pdev, drv[i].id);
++		if (irq < 0)
++			return irq;
++
++		drv[i].irq = irq;
++
++		ret = devm_request_irq(&pdev->dev, irq, tcs_tx_done,
++				       IRQF_TRIGGER_HIGH | IRQF_NO_SUSPEND,
++				       drv[i].name, &drv[i]);
++		if (ret)
++			return ret;
++
++		spin_lock_init(&drv[i].client.cache_lock);
++
++		if (of_find_property(dn, "power-domains", NULL)) {
++			ret = rpmh_rsc_pd_attach(&drv[i]);
++			if (ret)
++				return ret;
++		} else if (!solver_config &&
++			   !of_find_property(dn, "qcom,hw-channel", NULL)) {
++			drv[i].rsc_pm.notifier_call = rpmh_rsc_cpu_pm_callback;
++			cpu_pm_register_notifier(&drv[i].rsc_pm);
++			ret = devm_add_action_or_reset(&pdev->dev,
++					       rpmh_uke_cpu_pm_unregister,
++					       &drv[i].rsc_pm);
++			if (ret)
++				return ret;
++		} else if (solver_config) {
++			drv[i].client.flags = SOLVER_PRESENT;
++		} else {
++		/*
++		 * The requets for HW channel TCSes has to be either
++		 * RPMH_SLEEP_STATE or RPMH_WAKE_ONLY_STATE.
++		 *
++		 * Assume 'solver' state which does nothing but to disallow
++		 * RPMH_ACTIVE_ONLY_STATE requests.
++		 */
++			drv[i].client.flags = SOLVER_PRESENT | HW_CHANNEL_PRESENT;
++			drv[i].client.in_solver_mode = true;
++			drv[i].in_solver_mode = true;
++			drv[i].regs = rpmh_rsc_reg_offsets_ver_3_0_hw_channel;
++		}
++
++
++
++		/* Children must release their RPMh votes before the IRQ is freed. */
++		devm_remove_action(&pdev->dev, rpmh_uke_drv_unregister, drv[i].dev);
++		ret = devm_add_action_or_reset(&pdev->dev,
++					       rpmh_uke_drv_unregister, drv[i].dev);
++		if (ret)
++			return ret;
++		ret = devm_of_platform_populate(drv[i].dev);
++		if (ret)
++			return ret;
++	}
++
++	INIT_LIST_HEAD(&rsc_top->list);
++	list_add_tail(&rsc_top->list, &rpmh_rsc_dev_list);
++	ret = devm_add_action_or_reset(&pdev->dev, rpmh_uke_list_remove, rsc_top);
++	if (ret)
++		return ret;
++	dev_set_drvdata(&pdev->dev, rsc_top);
++
++	return devm_of_platform_populate(&pdev->dev);
++}
++
++static const struct dev_pm_ops rpmh_rsc_dev_pm_ops = {
++	.poweroff_noirq = rpmh_rsc_poweroff_noirq,
++	.restore_noirq = rpmh_rsc_restore_noirq,
++};
++
++static const struct of_device_id rpmh_drv_match[] = {
++	{ .compatible = "qcom,rpmh-rsc", },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, rpmh_drv_match);
++
++static struct platform_driver rpmh_driver = {
++	.probe = rpmh_rsc_probe,
++	.driver = {
++		  .name = "rpmh",
++		  .of_match_table = rpmh_drv_match,
++		  .pm = &rpmh_rsc_dev_pm_ops,
++		  .suppress_bind_attrs = true,
++	},
++};
++
++static int __init rpmh_driver_init(void)
++{
++	return platform_driver_register(&rpmh_driver);
++}
++arch_initcall(rpmh_driver_init);
++
++MODULE_DESCRIPTION("Qualcomm Technologies, Inc. RPMh Driver");
++MODULE_LICENSE("GPL v2");
+diff --git a/drivers/soc/qcom/rpmh-uke-test.c b/drivers/soc/qcom/rpmh-uke-test.c
+new file mode 100644
+index 000000000000..6d04fff4f0d9
+--- /dev/null
++++ b/drivers/soc/qcom/rpmh-uke-test.c
+@@ -0,0 +1,31 @@
++// SPDX-License-Identifier: GPL-2.0-only
++#include <kunit/test.h>
++#include "rpmh-uke-config.h"
++
++static void rpmh_uke_tcs_bounds_test(struct kunit *test)
++{
++	/* Uke channel 0: ACTIVE 3, SLEEP 2, WAKE 2, FAST_PATH 1. */
++	KUNIT_EXPECT_TRUE(test, rpmh_uke_tcs_fits(0, 3, 8));
++	KUNIT_EXPECT_TRUE(test, rpmh_uke_tcs_fits(3, 2, 8));
++	KUNIT_EXPECT_TRUE(test, rpmh_uke_tcs_fits(5, 2, 8));
++	KUNIT_EXPECT_TRUE(test, rpmh_uke_tcs_fits(7, 1, 8));
++	/* A second channel must include the first channel's allocation. */
++	KUNIT_EXPECT_FALSE(test, rpmh_uke_tcs_fits(8, 1, 8));
++	KUNIT_EXPECT_TRUE(test, rpmh_uke_tcs_fits(12, 3, 16));
++	KUNIT_EXPECT_FALSE(test, rpmh_uke_tcs_fits(14, 2, 16));
++	KUNIT_EXPECT_FALSE(test, rpmh_uke_tcs_fits(0, 4, 16));
++	KUNIT_EXPECT_FALSE(test, rpmh_uke_tcs_fits(~0U, 1, ~0U));
++	KUNIT_EXPECT_FALSE(test, rpmh_uke_tcs_fits(1, ~0U, ~0U));
++}
++
++static struct kunit_case rpmh_uke_cases[] = {
++	KUNIT_CASE(rpmh_uke_tcs_bounds_test),
++	{}
++};
++
++static struct kunit_suite rpmh_uke_suite = {
++	.name = "rpmh-uke-config",
++	.test_cases = rpmh_uke_cases,
++};
++kunit_test_suite(rpmh_uke_suite);
++MODULE_LICENSE("GPL");
+diff --git a/drivers/soc/qcom/rpmh-uke.c b/drivers/soc/qcom/rpmh-uke.c
+new file mode 100644
+index 000000000000..b53f3c6962c1
+--- /dev/null
++++ b/drivers/soc/qcom/rpmh-uke.c
+@@ -0,0 +1,750 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (c) 2016-2018, 2020-2021, The Linux Foundation. All rights reserved.
++ * Copyright (c) 2023-2024, Qualcomm Innovation Center, Inc. All rights reserved.
++ */
++
++#include <linux/atomic.h>
++#include <linux/bug.h>
++#include <linux/interrupt.h>
++#include <linux/jiffies.h>
++#include <linux/kernel.h>
++#include <linux/list.h>
++#include <linux/lockdep.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/slab.h>
++#include <linux/spinlock.h>
++#include <linux/types.h>
++#include <linux/wait.h>
++
++#include <soc/qcom/rpmh.h>
++
++#include "rpmh-uke-internal.h"
++
++#define RPMH_TIMEOUT_MS			msecs_to_jiffies(10000)
++
++#define DEFINE_RPMH_MSG_ONSTACK(device, s, q, name)	\
++	struct rpmh_request name = {			\
++		.msg = {				\
++			.state = s,			\
++			.cmds = name.cmd,		\
++			.num_cmds = 0,			\
++			.wait_for_compl = true,		\
++		},					\
++		.cmd = { { 0 } },			\
++		.completion = q,			\
++		.dev = device,				\
++	}
++
++#define ctrlr_to_drv(ctrlr) container_of(ctrlr, struct rsc_drv, client)
++
++static struct rpmh_ctrlr *get_rpmh_ctrlr(const struct device *dev)
++{
++	struct rsc_drv *drv = dev_get_drvdata(dev->parent);
++
++	return &drv->client;
++}
++
++static struct rpmh_ctrlr *get_rpmh_ctrlr_no_child(const struct device *dev)
++{
++	struct rsc_drv *drv = dev_get_drvdata(dev);
++
++	return &drv->client;
++}
++
++static int check_ctrlr_state(struct rpmh_ctrlr *ctrlr, enum rpmh_state state)
++{
++	int ret = 0;
++
++	if (state != RPMH_ACTIVE_ONLY_STATE)
++		return ret;
++
++	if (!(ctrlr->flags & SOLVER_PRESENT))
++		return ret;
++
++	/* Do not allow sending active votes when in solver mode */
++	spin_lock(&ctrlr->cache_lock);
++	if (ctrlr->in_solver_mode)
++		ret = -EBUSY;
++	spin_unlock(&ctrlr->cache_lock);
++
++	return ret;
++}
++
++void rpmh_tx_done(const struct tcs_request *msg)
++{
++	struct rpmh_request *rpm_msg = container_of(msg, struct rpmh_request,
++						    msg);
++	struct completion *compl = rpm_msg->completion;
++
++	if (!compl)
++		return;
++
++	/* Signal the blocking thread we are done */
++	complete(compl);
++}
++
++static struct cache_req *get_non_batch_cache_req(struct rpmh_ctrlr *ctrlr, u32 addr)
++{
++	struct cache_req *req = ctrlr->non_batch_cache;
++	int i;
++
++	if (ctrlr->non_batch_cache_idx >= CMD_DB_MAX_RESOURCES)
++		return NULL;
++
++	for (i = 0; i < ctrlr->non_batch_cache_idx; i++) {
++		req = &ctrlr->non_batch_cache[i];
++		if (req->addr == addr)
++			return req;
++	}
++
++	req = &ctrlr->non_batch_cache[ctrlr->non_batch_cache_idx];
++	req->sleep_val = req->wake_val = UINT_MAX;
++	ctrlr->non_batch_cache_idx++;
++
++	return req;
++}
++
++static struct cache_req *cache_rpm_request(struct rpmh_ctrlr *ctrlr,
++					   enum rpmh_state state,
++					   struct tcs_cmd *cmd)
++{
++	struct cache_req *req;
++	unsigned long flags;
++	u32 old_sleep_val, old_wake_val;
++
++	spin_lock_irqsave(&ctrlr->cache_lock, flags);
++
++	req = get_non_batch_cache_req(ctrlr, cmd->addr);
++	if (!req) {
++		req = ERR_PTR(-ENOMEM);
++		goto unlock;
++	}
++
++	req->addr = cmd->addr;
++	old_sleep_val = req->sleep_val;
++	old_wake_val = req->wake_val;
++
++	switch (state) {
++	case RPMH_ACTIVE_ONLY_STATE:
++	case RPMH_WAKE_ONLY_STATE:
++		req->wake_val = cmd->data;
++		break;
++	case RPMH_SLEEP_STATE:
++		req->sleep_val = cmd->data;
++		break;
++	}
++
++	ctrlr->dirty |= (req->sleep_val != old_sleep_val ||
++			 req->wake_val != old_wake_val) &&
++			 req->sleep_val != UINT_MAX &&
++			 req->wake_val != UINT_MAX;
++
++unlock:
++	spin_unlock_irqrestore(&ctrlr->cache_lock, flags);
++
++	return req;
++}
++
++/**
++ * __rpmh_write: Cache and send the RPMH request
++ *
++ * @dev: The device making the request
++ * @state: Active/Sleep request type
++ * @rpm_msg: The data that needs to be sent (cmds).
++ *
++ * Cache the RPMH request and send if the state is ACTIVE_ONLY.
++ * SLEEP/WAKE_ONLY requests are not sent to the controller at
++ * this time. Use rpmh_flush() to send them to the controller.
++ */
++static int __rpmh_write(const struct device *dev, enum rpmh_state state,
++			struct rpmh_request *rpm_msg)
++{
++	struct rpmh_ctrlr *ctrlr = get_rpmh_ctrlr(dev);
++	int ret = -EINVAL;
++	struct cache_req *req;
++	int i, ch;
++
++	/* Cache the request in our store and link the payload */
++	for (i = 0; i < rpm_msg->msg.num_cmds; i++) {
++		req = cache_rpm_request(ctrlr, state, &rpm_msg->msg.cmds[i]);
++		if (IS_ERR(req))
++			return PTR_ERR(req);
++	}
++
++	if (state == RPMH_ACTIVE_ONLY_STATE) {
++		WARN_ON(irqs_disabled());
++
++		ch = rpmh_rsc_get_channel(ctrlr_to_drv(ctrlr));
++		if (ch < 0)
++			return ch;
++
++		ret = rpmh_rsc_send_data(ctrlr_to_drv(ctrlr), &rpm_msg->msg, ch);
++	} else {
++		/* Clean up our call by spoofing tx_done */
++		ret = 0;
++		rpmh_tx_done(&rpm_msg->msg);
++	}
++
++	return ret;
++}
++
++static int __fill_rpmh_msg(struct rpmh_request *req, enum rpmh_state state,
++		const struct tcs_cmd *cmd, u32 n)
++{
++	if (!cmd || !n || n > MAX_RPMH_PAYLOAD)
++		return -EINVAL;
++
++	memcpy(req->cmd, cmd, n * sizeof(*cmd));
++
++	req->msg.state = state;
++	req->msg.cmds = req->cmd;
++	req->msg.num_cmds = n;
++
++	return 0;
++}
++
++/**
++ * rpmh_write_async: Write a set of RPMH commands
++ *
++ * @dev: The device making the request
++ * @state: Active/sleep set
++ * @cmd: The payload data
++ * @n: The number of elements in payload
++ *
++ * Write a set of RPMH commands, the order of commands is maintained
++ * and will be sent as a single shot.
++ */
++int rpmh_write_async(const struct device *dev, enum rpmh_state state,
++		     const struct tcs_cmd *cmd, u32 n)
++{
++	DEFINE_RPMH_MSG_ONSTACK(dev, state, NULL, rpm_msg);
++	struct rpmh_ctrlr *ctrlr = get_rpmh_ctrlr(dev);
++	int ret;
++
++	if (rpmh_standalone)
++		return 0;
++
++	rpm_msg.msg.wait_for_compl = false;
++	ret = check_ctrlr_state(ctrlr, state);
++	if (ret)
++		return ret;
++
++	ret = __fill_rpmh_msg(&rpm_msg, state, cmd, n);
++	if (ret)
++		return ret;
++
++	return __rpmh_write(dev, state, &rpm_msg);
++}
++EXPORT_SYMBOL(rpmh_write_async);
++
++/**
++ * rpmh_write: Write a set of RPMH commands and block until response
++ *
++ * @dev: The device making the request
++ * @state: Active/sleep set
++ * @cmd: The payload data
++ * @n: The number of elements in @cmd
++ *
++ * May sleep. Do not call from atomic contexts.
++ */
++int rpmh_write(const struct device *dev, enum rpmh_state state,
++	       const struct tcs_cmd *cmd, u32 n)
++{
++	DECLARE_COMPLETION_ONSTACK(compl);
++	DEFINE_RPMH_MSG_ONSTACK(dev, state, &compl, rpm_msg);
++	struct rpmh_ctrlr *ctrlr = get_rpmh_ctrlr(dev);
++	int ret;
++
++	if (rpmh_standalone)
++		return 0;
++
++	ret = check_ctrlr_state(ctrlr, state);
++	if (ret)
++		return ret;
++
++	ret = __fill_rpmh_msg(&rpm_msg, state, cmd, n);
++	if (ret)
++		return ret;
++
++	ret = __rpmh_write(dev, state, &rpm_msg);
++	if (ret)
++		return ret;
++
++	ret = wait_for_completion_timeout(&compl, RPMH_TIMEOUT_MS);
++	if (!ret) {
++		rpmh_rsc_debug(ctrlr_to_drv(ctrlr), &compl);
++		return -ETIMEDOUT;
++	}
++
++	return 0;
++}
++EXPORT_SYMBOL(rpmh_write);
++
++static int flush_batch(struct rpmh_ctrlr *ctrlr, int ch)
++{
++	int ret;
++
++	/* Send Sleep/Wake requests to the controller, expect no response IRQ */
++	ret = rpmh_rsc_write_ctrl_data(ctrlr_to_drv(ctrlr),
++				       &ctrlr->batch_cache[RPMH_SLEEP_STATE].msg, ch);
++	if (ret)
++		return ret;
++
++	return rpmh_rsc_write_ctrl_data(ctrlr_to_drv(ctrlr),
++					&ctrlr->batch_cache[RPMH_WAKE_ONLY_STATE].msg, ch);
++}
++
++/**
++ * rpmh_write_batch: Write multiple sets of RPMH commands and wait for the
++ * batch to finish.
++ *
++ * @dev: the device making the request
++ * @state: Active/sleep set
++ * @cmd: The payload data
++ * @n: The array of count of elements in each batch, 0 terminated.
++ *
++ * Write a request to the RSC controller without caching. If the request
++ * state is ACTIVE, then the requests are treated as completion request
++ * and sent to the controller immediately. The function waits until all the
++ * commands are complete. If the request was to SLEEP or WAKE_ONLY, then the
++ * request is sent as fire-n-forget and no ack is expected.
++ *
++ * May sleep. Do not call from atomic contexts for ACTIVE_ONLY requests.
++ */
++int rpmh_write_batch(const struct device *dev, enum rpmh_state state,
++		     const struct tcs_cmd *cmd, u32 *n)
++{
++	DECLARE_COMPLETION_ONSTACK(compl);
++	DEFINE_RPMH_MSG_ONSTACK(dev, state, &compl, rpm_msg);
++	struct rpmh_ctrlr *ctrlr = get_rpmh_ctrlr(dev);
++	int ret, ch;
++	unsigned long flags;
++
++	if (rpmh_standalone)
++		return 0;
++
++	ret = check_ctrlr_state(ctrlr, state);
++	if (ret)
++		return ret;
++
++	if (state == RPMH_ACTIVE_ONLY_STATE) {
++		ret = __fill_rpmh_msg(&rpm_msg, state, cmd, *n);
++		if (ret)
++			return ret;
++	} else {
++		spin_lock_irqsave(&ctrlr->cache_lock, flags);
++		memset(&ctrlr->batch_cache[state], 0, sizeof(struct rpmh_request));
++		ret = __fill_rpmh_msg(&ctrlr->batch_cache[state], state, cmd, *n);
++		ctrlr->dirty = true;
++		spin_unlock_irqrestore(&ctrlr->cache_lock, flags);
++
++		return ret;
++	}
++
++	ch = rpmh_rsc_get_channel(ctrlr_to_drv(ctrlr));
++	if (ch < 0)
++		return ch;
++
++	ret = rpmh_rsc_send_data(ctrlr_to_drv(ctrlr), &rpm_msg.msg, ch);
++	if (ret) {
++		pr_err("Error(%d) sending RPMH message addr=%#x\n",
++		       ret, rpm_msg.msg.cmds[0].addr);
++		return ret;
++	}
++
++	ret = wait_for_completion_timeout(&compl, RPMH_TIMEOUT_MS);
++	if (!ret) {
++		/*
++		 * Better hope they never finish because they'll signal
++		 * the completion that we're going to free once
++		 * we've returned from this function.
++		 */
++		rpmh_rsc_debug(ctrlr_to_drv(ctrlr), &compl);
++		BUG_ON(1);
++	}
++
++	return 0;
++}
++EXPORT_SYMBOL(rpmh_write_batch);
++
++static int is_req_valid(struct cache_req *req)
++{
++	return (req->sleep_val != UINT_MAX &&
++		req->wake_val != UINT_MAX &&
++		req->sleep_val != req->wake_val);
++}
++
++static int send_single(struct rpmh_ctrlr *ctrlr, enum rpmh_state state,
++		       u32 addr, u32 data, int ch)
++{
++	DEFINE_RPMH_MSG_ONSTACK(NULL, state, NULL, rpm_msg);
++
++	/* Wake sets are always complete and sleep sets are not */
++	rpm_msg.msg.wait_for_compl = (state == RPMH_WAKE_ONLY_STATE);
++	rpm_msg.cmd[0].addr = addr;
++	rpm_msg.cmd[0].data = data;
++	rpm_msg.msg.num_cmds = 1;
++
++	return rpmh_rsc_write_ctrl_data(ctrlr_to_drv(ctrlr), &rpm_msg.msg, ch);
++}
++
++int _rpmh_flush(struct rpmh_ctrlr *ctrlr, int ch)
++{
++	struct cache_req *p;
++	int ret = 0, i;
++
++	if (!ctrlr->dirty) {
++		pr_debug("Skipping flush, TCS has latest data.\n");
++		return ret;
++	}
++
++	/* Invalidate the TCSes first to avoid stale data */
++	rpmh_rsc_invalidate(ctrlr_to_drv(ctrlr), ch);
++
++	/* First flush the cached batch requests */
++	ret = flush_batch(ctrlr, ch);
++	if (ret)
++		return ret;
++
++	for (i = 0; i < ctrlr->non_batch_cache_idx; i++) {
++		p = &ctrlr->non_batch_cache[i];
++		if (!is_req_valid(p)) {
++			pr_debug("%s: skipping RPMH req: a:%#x s:%#x w:%#x\n",
++				 __func__, p->addr, p->sleep_val, p->wake_val);
++			continue;
++		}
++		ret = send_single(ctrlr, RPMH_SLEEP_STATE, p->addr,
++				  p->sleep_val, ch);
++		if (ret)
++			return ret;
++		ret = send_single(ctrlr, RPMH_WAKE_ONLY_STATE, p->addr,
++				  p->wake_val, ch);
++		if (ret)
++			return ret;
++	}
++
++	ctrlr->dirty = false;
++
++	return ret;
++}
++
++/**
++ * rpmh_flush() - Flushes the buffered sleep and wake sets to TCSes
++ *
++ * @ctrlr: Controller making request to flush cached data
++ * @ch:    Channel number
++ *
++ * Return:
++ * * 0          - Success
++ * * Error code - Otherwise
++ */
++int rpmh_flush(struct rpmh_ctrlr *ctrlr, int ch)
++{
++	unsigned long flags;
++	int ret;
++
++	if (rpmh_standalone)
++		return 0;
++
++	/*
++	 * For RSC that don't have solver mode,
++	 * rpmh_flush() is only called when we think we're running
++	 * on the last CPU with irqs_disabled.
++	 *
++	 * For RSC that have solver mode,
++	 * rpmh_flush() can be invoked with irqs enabled by any CPU.
++	 *
++	 * Conditionally check for irqs_disabled only when solver mode
++	 * is not available.
++	 */
++	if (!(ctrlr->flags & SOLVER_PRESENT))
++		lockdep_assert_irqs_disabled();
++
++	spin_lock_irqsave(&ctrlr->cache_lock, flags);
++	ret = _rpmh_flush(ctrlr, ch);
++	spin_unlock_irqrestore(&ctrlr->cache_lock, flags);
++
++	return ret;
++}
++
++/**
++ * rpmh_write_sleep_and_wake: Writes the buffered wake and sleep sets to TCSes
++ *
++ * @dev: The device making the request
++ *
++ * Return:
++ * * 0          - Success
++ * * Error code - Otherwise
++ */
++int rpmh_write_sleep_and_wake(const struct device *dev)
++{
++	struct rpmh_ctrlr *ctrlr = get_rpmh_ctrlr(dev);
++	int ch, ret;
++
++	ch = rpmh_rsc_get_channel(ctrlr_to_drv(ctrlr));
++	if (ch < 0)
++		return ch;
++
++	ret = rpmh_flush(ctrlr, ch);
++	if (ret || !(ctrlr->flags & HW_CHANNEL_PRESENT))
++		return ret;
++
++	return rpmh_rsc_switch_channel(ctrlr_to_drv(ctrlr), ch);
++}
++EXPORT_SYMBOL(rpmh_write_sleep_and_wake);
++
++/**
++ * rpmh_write_sleep_and_wake_no_child: Writes the buffered wake and sleep sets to TCSes
++ *
++ * Used when the client calling this is not a child device of RSC device.
++ * Use it only after getting the device using rpmh_get_device().
++ * @dev: The device making the request
++ *
++ * Return:
++ * * 0          - Success
++ * * Error code - Otherwise
++ */
++int rpmh_write_sleep_and_wake_no_child(const struct device *dev)
++{
++	struct rpmh_ctrlr *ctrlr = get_rpmh_ctrlr_no_child(dev);
++	int ch, ret;
++
++	ch = rpmh_rsc_get_channel(ctrlr_to_drv(ctrlr));
++	if (ch < 0) {
++		rpmh_rsc_debug_channel_busy(ctrlr_to_drv(ctrlr));
++		BUG_ON(1);
++		return ch;
++	}
++
++	ret = rpmh_flush(ctrlr, ch);
++	if (ret || !(ctrlr->flags & HW_CHANNEL_PRESENT))
++		return ret;
++
++	ret = rpmh_rsc_switch_channel(ctrlr_to_drv(ctrlr), ch);
++	if (ret) {
++		rpmh_rsc_debug_channel_busy(ctrlr_to_drv(ctrlr));
++		BUG_ON(1);
++	}
++
++	return ret;
++}
++EXPORT_SYMBOL(rpmh_write_sleep_and_wake_no_child);
++
++/**
++ * rpmh_invalidate: Invalidate sleep and wake sets in batch_cache
++ *
++ * @dev: The device making the request
++ *
++ * Invalidate the sleep and wake values in batch_cache.
++ */
++void rpmh_invalidate(const struct device *dev)
++{
++	struct rpmh_ctrlr *ctrlr = get_rpmh_ctrlr(dev);
++	unsigned long flags;
++
++	if (rpmh_standalone)
++		return;
++
++	spin_lock_irqsave(&ctrlr->cache_lock, flags);
++	memset(&ctrlr->batch_cache[RPMH_SLEEP_STATE], 0, sizeof(struct rpmh_request));
++	memset(&ctrlr->batch_cache[RPMH_WAKE_ONLY_STATE], 0, sizeof(struct rpmh_request));
++	ctrlr->dirty = true;
++	spin_unlock_irqrestore(&ctrlr->cache_lock, flags);
++}
++EXPORT_SYMBOL(rpmh_invalidate);
++
++/**
++ * rpmh_mode_solver_set: Indicate that the RSC controller hardware has
++ * been configured to be in solver mode
++ *
++ * @dev: The device making the request
++ * @enable: Boolean value indicating if the controller is in solver mode.
++ * Return:
++ * * 0          - Success
++ * * Error code - Otherwise
++ */
++int rpmh_mode_solver_set(const struct device *dev, bool enable)
++{
++	int ret;
++	struct rpmh_ctrlr *ctrlr = get_rpmh_ctrlr(dev);
++
++	if (rpmh_standalone)
++		return 0;
++
++	if (!(ctrlr->flags & SOLVER_PRESENT))
++		return -EINVAL;
++
++	spin_lock(&ctrlr->cache_lock);
++	ret = rpmh_rsc_mode_solver_set(ctrlr_to_drv(ctrlr), enable);
++	if (!ret)
++		ctrlr->in_solver_mode = enable;
++	spin_unlock(&ctrlr->cache_lock);
++
++	return ret;
++}
++EXPORT_SYMBOL(rpmh_mode_solver_set);
++
++
++/**
++ * RPMH Fast Path mode
++ *
++ * - Fast path mode is a lock-less request transmission to AOSS.
++ * - Requests may be sent from interrupt/scheduler context.
++ * - Dedicated fast-path TCS must be available in the RSC.
++ * - Error returned, when dedicated TCS is not available.
++ * - Only one client is expected to call RPMH fast path.
++ * - Serialization of requests is a responsibility of the client.
++ * - Only active state requests may be made through this mode.
++ * - Sleep/Wake requests for the nodes must be made through
++ *   the standard RPMH APIs (locking modes).
++ * - Fast path requests are not cached and sent immediately.
++ * - Fast path requests are all blocking requests.
++ * - Fast path requests do not use AMC completion interrupts,
++ *   therefore will not receive a tx_done callback.
++ */
++
++/**
++ * rpmh_init_fast_path: Initialize TCS request in fast-path TCS
++ *
++ * @dev: The device making the request
++ * @cmd: The {addr, data} to be initialized with.
++ * @n:   The number of @cmd
++ *
++ * Return:
++ * * 0          - Success
++ * * Error code - Otherwise
++ */
++int rpmh_init_fast_path(const struct device *dev,
++			struct tcs_cmd *cmd, int n)
++{
++	struct rpmh_ctrlr *ctrlr = get_rpmh_ctrlr(dev);
++	struct tcs_request req;
++	int ch;
++
++	if (rpmh_standalone)
++		return 0;
++
++	ch = rpmh_rsc_get_channel(ctrlr_to_drv(ctrlr));
++	if (ch < 0)
++		return ch;
++
++	req.cmds = cmd;
++	req.num_cmds = n;
++	req.wait_for_compl = 0;
++
++	return rpmh_rsc_init_fast_path(ctrlr_to_drv(ctrlr), &req, ch);
++}
++EXPORT_SYMBOL(rpmh_init_fast_path);
++
++/**
++ * rpmh_update_fast_path: Initialize TCS request in fast-path TCS
++ *
++ * @dev:         The device making the request
++ * @cmd:         The data to be updated.
++ * @n:           The number of @cmd
++ * @update_mask: The elements in @cmd that only need to be updated
++ *
++ * Return:
++ * * 0          - Success
++ * * Error code - Otherwise
++ */
++int rpmh_update_fast_path(const struct device *dev,
++			  struct tcs_cmd *cmd, int n, u32 update_mask)
++{
++	struct rpmh_ctrlr *ctrlr = get_rpmh_ctrlr(dev);
++	struct tcs_request req;
++	int ch;
++
++	if (rpmh_standalone)
++		return 0;
++
++	ch = rpmh_rsc_get_channel(ctrlr_to_drv(ctrlr));
++	if (ch < 0)
++		return ch;
++
++	req.cmds = cmd;
++	req.num_cmds = n;
++	req.wait_for_compl = 0;
++
++	return rpmh_rsc_update_fast_path(ctrlr_to_drv(ctrlr), &req,
++					 update_mask, ch);
++}
++EXPORT_SYMBOL(rpmh_update_fast_path);
++
++/**
++ * rpmh_get_device: Get the DRV device
++ *
++ * @name:        The RSC device used for DRV DRV
++ * @drv_id:      The index of DRV
++ *
++ * Used when the device voting to RPMh is not a child device
++ * of RSC device. Such device can get RSC device using this API.
++ * but will be able to use only rpmh_drv_start(), rpmh_drv_stop()
++ * and rpmh_write_sleep_and_wake_no_child().
++ *
++ * Return:
++ * * dev          - Device to use when calling above APIs
++ * * Error        - Error pointer
++ */
++const struct device *rpmh_get_device(const char *name, u32 drv_id)
++{
++	return rpmh_rsc_get_device(name, drv_id);
++}
++EXPORT_SYMBOL(rpmh_get_device);
++
++/**
++ * rpmh_drv_start: Start the DRV channel
++ *
++ * @dev:         The device making the request
++ *
++ * Return:
++ * * 0          - Success
++ * * Error code - Otherwise
++ */
++int rpmh_drv_start(const struct device *dev)
++{
++	struct rpmh_ctrlr *ctrlr = get_rpmh_ctrlr_no_child(dev);
++	int ret;
++
++	if (rpmh_standalone)
++		return 0;
++
++	ret = rpmh_rsc_drv_enable(ctrlr_to_drv(ctrlr), true);
++	if (ret) {
++		rpmh_rsc_debug_channel_busy(ctrlr_to_drv(ctrlr));
++		BUG_ON(1);
++	}
++
++	return ret;
++}
++EXPORT_SYMBOL(rpmh_drv_start);
++
++/**
++ * rpmh_drv_stop: Start the DRV channel
++ *
++ * @dev:         The device making the request
++ *
++ * Return:
++ * * 0          - Success
++ * * Error code - Otherwise
++ */
++int rpmh_drv_stop(const struct device *dev)
++{
++	struct rpmh_ctrlr *ctrlr = get_rpmh_ctrlr_no_child(dev);
++	int ret;
++
++	if (rpmh_standalone)
++		return 0;
++
++	ret = rpmh_rsc_drv_enable(ctrlr_to_drv(ctrlr), false);
++	if (ret) {
++		rpmh_rsc_debug_channel_busy(ctrlr_to_drv(ctrlr));
++		BUG_ON(1);
++	}
++
++	return ret;
++}
++EXPORT_SYMBOL(rpmh_drv_stop);
+diff --git a/drivers/soc/qcom/trace-rpmh-uke.h b/drivers/soc/qcom/trace-rpmh-uke.h
+new file mode 100644
+index 000000000000..cce0c74e609f
+--- /dev/null
++++ b/drivers/soc/qcom/trace-rpmh-uke.h
+@@ -0,0 +1,143 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (c) 2016-2019, 2021, The Linux Foundation. All rights reserved.
++ */
++
++#if !defined(_TRACE_RPMH_H) || defined(TRACE_HEADER_MULTI_READ)
++#define _TRACE_RPMH_H
++
++#undef TRACE_SYSTEM
++#define TRACE_SYSTEM rpmh
++
++#include <linux/tracepoint.h>
++#include "rpmh-uke-internal.h"
++
++TRACE_EVENT(rpmh_tx_done,
++
++	TP_PROTO(struct rsc_drv *d, int m, const struct tcs_request *r),
++
++	TP_ARGS(d, m, r),
++
++	TP_STRUCT__entry(
++			 __string(name, d->name)
++			 __field(int, m)
++			 __field(u32, addr)
++			 __field(u32, data)
++	),
++
++	TP_fast_assign(
++		       __assign_str(name);
++		       __entry->m = m;
++		       __entry->addr = r->cmds[0].addr;
++		       __entry->data = r->cmds[0].data;
++	),
++
++	TP_printk("%s: ack: tcs-m: %d addr: %#x data: %#x",
++		  __get_str(name), __entry->m, __entry->addr, __entry->data)
++);
++
++TRACE_EVENT(rpmh_send_msg,
++
++	TP_PROTO(struct rsc_drv *d, int m, int n, u32 h,
++		 const struct tcs_cmd *c),
++
++	TP_ARGS(d, m, n, h, c),
++
++	TP_STRUCT__entry(
++			 __string(name, d->name)
++			 __field(int, m)
++			 __field(int, n)
++			 __field(u32, hdr)
++			 __field(u32, addr)
++			 __field(u32, data)
++			 __field(bool, wait)
++	),
++
++	TP_fast_assign(
++		       __assign_str(name);
++		       __entry->m = m;
++		       __entry->n = n;
++		       __entry->hdr = h;
++		       __entry->addr = c->addr;
++		       __entry->data = c->data;
++		       __entry->wait = c->wait;
++	),
++
++	TP_printk("%s: send-msg: tcs(m): %d cmd(n): %d msgid: %#x addr: %#x data: %#x complete: %d",
++		  __get_str(name), __entry->m, __entry->n, __entry->hdr,
++		  __entry->addr, __entry->data, __entry->wait)
++);
++
++TRACE_EVENT(rpmh_solver_set,
++
++	TP_PROTO(struct rsc_drv *d, bool set),
++
++	TP_ARGS(d, set),
++
++	TP_STRUCT__entry(
++			 __string(name, d->name)
++			 __field(bool, set)
++	),
++
++	TP_fast_assign(
++		       __assign_str(name);
++		       __entry->set = set;
++	),
++
++	TP_printk("%s: solver mode set: %d",
++		  __get_str(name), __entry->set)
++);
++
++TRACE_EVENT(rpmh_switch_channel,
++
++	TP_PROTO(struct rsc_drv *d, int ch, int ret),
++
++	TP_ARGS(d, ch, ret),
++
++	TP_STRUCT__entry(
++			 __string(name, d->name)
++			 __field(int, ch)
++			 __field(int, ret)
++	),
++
++	TP_fast_assign(
++		       __assign_str(name);
++		       __entry->ch = ch;
++		       __entry->ret = ret;
++	),
++
++	TP_printk("%s: channel switched to: %d ret: %d",
++		  __get_str(name), __entry->ch, __entry->ret)
++);
++
++TRACE_EVENT(rpmh_drv_enable,
++
++	TP_PROTO(struct rsc_drv *d, bool enable, int ret),
++
++	TP_ARGS(d, enable, ret),
++
++	TP_STRUCT__entry(
++			 __string(name, d->name)
++			 __field(bool, enable)
++			 __field(int, ret)
++	),
++
++	TP_fast_assign(
++		       __assign_str(name);
++		       __entry->enable = enable;
++		       __entry->ret = ret;
++	),
++
++	TP_printk("%s: drv enable: %d ret: %d",
++		  __get_str(name), __entry->enable, __entry->ret)
++);
++
++#endif /* _TRACE_RPMH_H */
++
++#undef TRACE_INCLUDE_PATH
++#define TRACE_INCLUDE_PATH .
++
++#undef TRACE_INCLUDE_FILE
++#define TRACE_INCLUDE_FILE trace-rpmh-uke
++
++#include <trace/define_trace.h>
+diff --git a/include/dt-bindings/regulator/qcom,rpmh-regulator-levels.h b/include/dt-bindings/regulator/qcom,rpmh-regulator-levels.h
+new file mode 100644
+index 000000000000..5795efc3e321
+--- /dev/null
++++ b/include/dt-bindings/regulator/qcom,rpmh-regulator-levels.h
+@@ -0,0 +1,79 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
++ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
++ */
++
++#ifndef __QCOM_RPMH_REGULATOR_LEVELS_H
++#define __QCOM_RPMH_REGULATOR_LEVELS_H
++
++/* These levels may be used for ARC type RPMh regulators. */
++#define RPMH_REGULATOR_LEVEL_RETENTION		16
++#define RPMH_REGULATOR_LEVEL_MIN_SVS		48
++#define RPMH_REGULATOR_LEVEL_LOW_SVS_D2		52
++#define RPMH_REGULATOR_LEVEL_LOW_SVS_D1		56
++#define RPMH_REGULATOR_LEVEL_LOW_SVS_D0		60
++#define RPMH_REGULATOR_LEVEL_LOW_SVS		64
++#define RPMH_REGULATOR_LEVEL_LOW_SVS_P1		72
++#define RPMH_REGULATOR_LEVEL_LOW_SVS_L1		80
++#define RPMH_REGULATOR_LEVEL_LOW_SVS_L2		96
++#define RPMH_REGULATOR_LEVEL_SVS		128
++#define RPMH_REGULATOR_LEVEL_SVS_L0		144
++#define RPMH_REGULATOR_LEVEL_SVS_L1		192
++#define RPMH_REGULATOR_LEVEL_SVS_L2		224
++#define RPMH_REGULATOR_LEVEL_NOM		256
++#define RPMH_REGULATOR_LEVEL_NOM_L0		288
++#define RPMH_REGULATOR_LEVEL_NOM_L1		320
++#define RPMH_REGULATOR_LEVEL_NOM_L2		336
++#define RPMH_REGULATOR_LEVEL_TURBO		384
++#define RPMH_REGULATOR_LEVEL_TURBO_L0		400
++#define RPMH_REGULATOR_LEVEL_TURBO_L1		416
++#define RPMH_REGULATOR_LEVEL_TURBO_L2		432
++#define RPMH_REGULATOR_LEVEL_TURBO_L3		448
++#define RPMH_REGULATOR_LEVEL_SUPER_TURBO	464
++#define RPMH_REGULATOR_LEVEL_SUPER_TURBO_NO_CPR	480
++#define RPMH_REGULATOR_LEVEL_MAX		65535
++#define RPMH_REGULATOR_CONSUMER_LEVEL_MAX	3300000
++
++/*
++ * These set constants may be used as the value for qcom,set of an RPMh
++ * resource device.
++ */
++#define RPMH_REGULATOR_SET_ACTIVE	1
++#define RPMH_REGULATOR_SET_SLEEP	2
++#define RPMH_REGULATOR_SET_ALL		3
++
++/*
++ * These mode constants may be used for qcom,supported-modes and qcom,init-mode
++ * properties of an RPMh resource.  Each type of regulator supports a subset of
++ * the possible modes.
++ *
++ * %RPMH_REGULATOR_MODE_PASS:	Pass-through mode in which output is directly
++ *				tied to input.  This mode is only supported by
++ *				BOB type regulators.
++ * %RPMH_REGULATOR_MODE_RET:	Retention mode in which only an extremely small
++ *				load current is allowed.  This mode is supported
++ *				by LDO and SMPS type regulators.
++ * %RPMH_REGULATOR_MODE_LPM:	Low power mode in which a small load current is
++ *				allowed.  This mode corresponds to PFM for SMPS
++ *				and BOB type regulators.  This mode is supported
++ *				by LDO, HFSMPS, BOB, and PMIC4 FTSMPS type
++ *				regulators.
++ * %RPMH_REGULATOR_MODE_AUTO:	Auto mode in which the regulator hardware
++ *				automatically switches between LPM and HPM based
++ *				upon the real-time load current.  This mode is
++ *				supported by HFSMPS, BOB, and PMIC4 FTSMPS type
++ *				regulators.
++ * %RPMH_REGULATOR_MODE_HPM:	High power mode in which the full rated current
++ *				of the regulator is allowed.  This mode
++ *				corresponds to PWM for SMPS and BOB type
++ *				regulators.  This mode is supported by all types
++ *				of regulators.
++ */
++#define RPMH_REGULATOR_MODE_PASS	0
++#define RPMH_REGULATOR_MODE_RET		1
++#define RPMH_REGULATOR_MODE_LPM		2
++#define RPMH_REGULATOR_MODE_AUTO	3
++#define RPMH_REGULATOR_MODE_HPM		4
++
++#endif
+diff --git a/include/dt-bindings/soc/qcom,rpmh-rsc.h b/include/dt-bindings/soc/qcom,rpmh-rsc.h
+index 868f998ea998..f0dff7dbafb6 100644
+--- a/include/dt-bindings/soc/qcom,rpmh-rsc.h
++++ b/include/dt-bindings/soc/qcom,rpmh-rsc.h
+@@ -10,5 +10,6 @@
+ #define WAKE_TCS	1
+ #define ACTIVE_TCS	2
+ #define CONTROL_TCS	3
++#define FAST_PATH_TCS	4
+ 
+ #endif /* __DT_QCOM_RPMH_RSC_H__ */
+diff --git a/include/linux/regulator/proxy-consumer.h b/include/linux/regulator/proxy-consumer.h
+new file mode 100644
+index 000000000000..62135f3cdd13
+--- /dev/null
++++ b/include/linux/regulator/proxy-consumer.h
+@@ -0,0 +1,38 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Copyright (c) 2019, The Linux Foundation. All rights reserved.
++ */
++
++#ifndef _LINUX_REGULATOR_PROXY_CONSUMER_H_
++#define _LINUX_REGULATOR_PROXY_CONSUMER_H_
++
++#include <linux/device.h>
++#include <linux/of.h>
++
++#if IS_ENABLED(CONFIG_REGULATOR_PROXY_CONSUMER)
++
++int regulator_proxy_consumer_register(struct device *dev,
++				      struct device_node *node);
++void regulator_proxy_consumer_unregister(struct device *dev);
++int devm_regulator_proxy_consumer_register(struct device *dev,
++				      struct device_node *node);
++void devm_regulator_proxy_consumer_unregister(struct device *dev);
++void regulator_proxy_consumer_sync_state(struct device *dev);
++
++#else
++
++static inline int regulator_proxy_consumer_register(struct device *dev,
++						    struct device_node *node)
++{ return 0; }
++static inline void regulator_proxy_consumer_unregister(struct device *dev)
++{ }
++static inline int devm_regulator_proxy_consumer_register(struct device *dev,
++						    struct device_node *node)
++{ return 0; }
++static inline void devm_regulator_proxy_consumer_unregister(struct device *dev)
++{ }
++void regulator_proxy_consumer_sync_state(struct device *dev)
++{ }
++
++#endif
++#endif
+diff --git a/include/soc/qcom/cmd-db.h b/include/soc/qcom/cmd-db.h
+index 47a6cab75e63..624e78131f77 100644
+--- a/include/soc/qcom/cmd-db.h
++++ b/include/soc/qcom/cmd-db.h
+@@ -29,6 +29,7 @@ bool cmd_db_match_resource_addr(u32 addr1, u32 addr2);
+ enum cmd_db_hw_type cmd_db_read_slave_id(const char *resource_id);
+ 
+ int cmd_db_ready(void);
++bool cmd_db_is_standalone(void);
+ #else
+ static inline u32 cmd_db_read_addr(const char *resource_id)
+ { return 0; }
+diff --git a/include/soc/qcom/rpmh-uke.h b/include/soc/qcom/rpmh-uke.h
+new file mode 100644
+index 000000000000..3c5048cdd02a
+--- /dev/null
++++ b/include/soc/qcom/rpmh-uke.h
+@@ -0,0 +1,90 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
++ * Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
++ */
++
++#ifndef __SOC_QCOM_RPMH_UKE_H__
++#define __SOC_QCOM_RPMH_UKE_H__
++
++#include <soc/qcom/tcs.h>
++#include <linux/platform_device.h>
++
++
++#if IS_ENABLED(CONFIG_QCOM_RPMH)
++int rpmh_write(const struct device *dev, enum rpmh_state state,
++	       const struct tcs_cmd *cmd, u32 n);
++
++int rpmh_write_async(const struct device *dev, enum rpmh_state state,
++		     const struct tcs_cmd *cmd, u32 n);
++
++int rpmh_write_batch(const struct device *dev, enum rpmh_state state,
++		     const struct tcs_cmd *cmd, u32 *n);
++
++int rpmh_mode_solver_set(const struct device *dev, bool enable);
++
++int rpmh_write_sleep_and_wake(const struct device *dev);
++
++int rpmh_write_sleep_and_wake_no_child(const struct device *dev);
++
++void rpmh_invalidate(const struct device *dev);
++
++int rpmh_init_fast_path(const struct device *dev,
++			struct tcs_cmd *cmd, int n);
++
++int rpmh_update_fast_path(const struct device *dev,
++			  struct tcs_cmd *cmd, int n, u32 update_mask);
++int rpmh_drv_start(const struct device *dev);
++
++int rpmh_drv_stop(const struct device *dev);
++
++const struct device *rpmh_get_device(const char *name, u32 drv_id);
++#else
++
++static inline int rpmh_write(const struct device *dev, enum rpmh_state state,
++			     const struct tcs_cmd *cmd, u32 n)
++{ return -ENODEV; }
++
++static inline int rpmh_write_async(const struct device *dev,
++				   enum rpmh_state state,
++				   const struct tcs_cmd *cmd, u32 n)
++{ return -ENODEV; }
++
++static inline int rpmh_write_batch(const struct device *dev,
++				   enum rpmh_state state,
++				   const struct tcs_cmd *cmd, u32 *n)
++{ return -ENODEV; }
++
++static inline int rpmh_mode_solver_set(const struct device *dev, bool enable)
++{ return -ENODEV; }
++
++static inline int rpmh_write_sleep_and_wake(const struct device *dev)
++{ return -ENODEV; }
++
++static inline int rpmh_write_sleep_and_wake_no_child(const struct device *dev)
++{ return -ENODEV; }
++
++static inline void rpmh_invalidate(const struct device *dev)
++{
++}
++
++static inline int rpmh_init_fast_path(const struct device *dev,
++				      struct tcs_cmd *msg, int n)
++{ return -ENODEV; }
++
++static inline int rpmh_update_fast_path(const struct device *dev,
++					struct tcs_cmd *msg, int n,
++					u32 update_mask)
++{ return -ENODEV; }
++
++static inline int rpmh_drv_start(const struct device *dev)
++{ return -ENODEV; }
++
++static inline int rpmh_drv_stop(const struct device *dev)
++{ return -ENODEV; }
++
++static inline const struct device *rpmh_get_device(char *name, u32 drv_id)
++{ return ERR_PTR(-ENODEV); }
++#endif /* CONFIG_QCOM_RPMH */
++
++#endif /* __SOC_QCOM_RPMH_UKE_H__ */
+diff --git a/include/soc/qcom/rpmh.h b/include/soc/qcom/rpmh.h
+index bdbee1a97d36..3f73bcb147bd 100644
+--- a/include/soc/qcom/rpmh.h
++++ b/include/soc/qcom/rpmh.h
+@@ -6,6 +6,10 @@
+ #ifndef __SOC_QCOM_RPMH_H__
+ #define __SOC_QCOM_RPMH_H__
+ 
++#if IS_ENABLED(CONFIG_QCOM_RPMH_UKE)
++#include <soc/qcom/rpmh-uke.h>
++#else
++
+ #include <soc/qcom/tcs.h>
+ #include <linux/platform_device.h>
+ 
+@@ -44,4 +48,5 @@ static inline void rpmh_invalidate(const struct device *dev)
+ 
+ #endif /* CONFIG_QCOM_RPMH */
+ 
++#endif /* CONFIG_QCOM_RPMH_UKE */
+ #endif /* __SOC_QCOM_RPMH_H__ */

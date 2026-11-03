@@ -1,0 +1,957 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-15",
+  "scope": "Read-only MiCode source research; not a build lock or hardware support claim",
+  "survey": "Workspace uke-linux-docs/docs/research/MICODE-UKE-SOURCE-SURVEY-2026-10-15.md",
+  "donor_code_executed": false,
+  "build_lock_changed": false,
+  "physical_support_changed": false,
+  "full_source_closure": false,
+  "organization_catalogue": [
+    {
+      "repository": "MiCode/brut.apktool",
+      "url": "https://github.com/MiCode/brut.apktool",
+      "ref": "master",
+      "commit": "10ccf153a24afc666818231b621bebca9d3e1686",
+      "tree": "8d9577a258f49e93fdef7012612eeaa272e3ce8c",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/Compass",
+      "url": "https://github.com/MiCode/Compass",
+      "ref": "master",
+      "commit": "077fdb627bb7511f52cde8eddfdc24c2409e4190",
+      "tree": "c0f6280c816d879f7fe91aff978a8fd611b6b438",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/dalvik",
+      "url": "https://github.com/MiCode/dalvik",
+      "ref": "for-upload",
+      "commit": "df4cb89d9f6a14e2eec948a3e127cf6933eb1153",
+      "tree": "5a48dacc6cb36c77be4133c9b5480cfc6847a9a1",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/device_xiaomi",
+      "url": "https://github.com/MiCode/device_xiaomi",
+      "ref": "main",
+      "commit": "2d1b2f4b711c9ba8e2516efbac0b6aeb6f165419",
+      "tree": "c378d48e78f13602200d9cbde2ab352628ed3bc5",
+      "head_status": "resolved",
+      "review_class": "readme_only_placeholder"
+    },
+    {
+      "repository": "MiCode/exfat-nofuse",
+      "url": "https://github.com/MiCode/exfat-nofuse",
+      "ref": "q-dev",
+      "commit": "133c75babab3eaf10bcfc5567badcc59568f7866",
+      "tree": "f3cf8e651431f4ac582c25020d74c68580a904a5",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/FileExplorer",
+      "url": "https://github.com/MiCode/FileExplorer",
+      "ref": "master",
+      "commit": "d4876cd6bea3fca3f808aa6263fdc5655c089646",
+      "tree": "ae33c0a442bdc8e3009cfa5371a262b1cfdf3a6d",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/i18n_miui",
+      "url": "https://github.com/MiCode/i18n_miui",
+      "ref": "master",
+      "commit": "930bd2674e4fc2759f3315e2ba47045fa1ad6c19",
+      "tree": "394969f77081b047317a6f998e60e00171e680ad",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/i18n_pctools",
+      "url": "https://github.com/MiCode/i18n_pctools",
+      "ref": "master",
+      "commit": "2eeb8bf85f3ab3130410c23e4af467a8596edd6e",
+      "tree": "76eedd842e44dd667153ebce9c7bcfb240613ff2",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/JankyFrameStatistics",
+      "url": "https://github.com/MiCode/JankyFrameStatistics",
+      "ref": "master",
+      "commit": "a948ae22d3800c31c8419833efda42d0b5d0e89e",
+      "tree": "84ff9c30ad8699410325157558cbf35cd5fcf5c9",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/kernel_build",
+      "url": "https://github.com/MiCode/kernel_build",
+      "ref": "master",
+      "commit": "961bb178ed8f7312e9444b15916b0a0baec0d202",
+      "tree": "e7f3d088643f5135e2c373f1d09f2364103f1b06",
+      "head_status": "resolved",
+      "review_class": "direct_uke_release_family"
+    },
+    {
+      "repository": "MiCode/kernel_devicetree",
+      "url": "https://github.com/MiCode/kernel_devicetree",
+      "ref": "master",
+      "commit": "4695b595950b13484fac552124b01efeec548e29",
+      "tree": "7f7fa4f259b9a5bca3d742289252934bb142ceed",
+      "head_status": "resolved",
+      "review_class": "direct_uke_release_family"
+    },
+    {
+      "repository": "MiCode/legacy-patchrom",
+      "url": "https://github.com/MiCode/legacy-patchrom",
+      "ref": "master",
+      "commit": "a6a023fdacbfe771785fccf8e0e9f47b54706f3a",
+      "tree": "fe6a7654c54593d23170f9ddf4b07ae33c34fcd8",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/mi1_kernel",
+      "url": "https://github.com/MiCode/mi1_kernel",
+      "ref": "master",
+      "commit": "d6b55280bc8c1667f5d12538a148bb1edf441ecf",
+      "tree": "cb08e589995450963f6400abafe3d9549f6fcf05",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/mi2_kernel",
+      "url": "https://github.com/MiCode/mi2_kernel",
+      "ref": "master",
+      "commit": "562eeb94300806df79ad0f0be02902e823bb7ae4",
+      "tree": "cfa385d42f4d59d7be15fcba38f3d964786502ae",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/mi2_lk",
+      "url": "https://github.com/MiCode/mi2_lk",
+      "ref": "master",
+      "commit": "f509e0ab8cc358349e4d42ca10b24c0e37ee447b",
+      "tree": "01a26ddf3fe79ee254c97d0be0e073a9e9d4c80d",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/mi2_wlan_module",
+      "url": "https://github.com/MiCode/mi2_wlan_module",
+      "ref": "master",
+      "commit": "29c586d1f5b292d524be04739b67a79f47712fb8",
+      "tree": "509ae7f31b4750b908908c4bba0c2ffbf401d9ed",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/MiBox_Kernel_OpenSource",
+      "url": "https://github.com/MiCode/MiBox_Kernel_OpenSource",
+      "ref": "README",
+      "commit": "4b1ba1686ce0a53d147bd1b618a4f47c8d287671",
+      "tree": "0b1d4c9ec16232aea8cca3d2f81d460e35d136e8",
+      "head_status": "resolved",
+      "review_class": "other_product_family"
+    },
+    {
+      "repository": "MiCode/MiBridge",
+      "url": "https://github.com/MiCode/MiBridge",
+      "ref": "master",
+      "commit": "bfbedb250d2a1b7d7fe5b7fd403840cb62b4c4bd",
+      "tree": "5deee3897d6020574bf6dad4ca1b00c603233791",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/MilinkSDK",
+      "url": "https://github.com/MiCode/MilinkSDK",
+      "ref": "master",
+      "commit": "2073f80a4f32600a4e4ba6a85cf1963b9341ff06",
+      "tree": "127bb30239d50f9ceabf5d1e452e8bdaeb45b770",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/MiTV_OpenSource",
+      "url": "https://github.com/MiCode/MiTV_OpenSource",
+      "ref": "README",
+      "commit": "cf87bacdfc3edc88de34579f7418ac0701e98bc4",
+      "tree": "d6f0ba8e766448c2d68f2b964d87ac69d5e97993",
+      "head_status": "resolved",
+      "review_class": "other_product_family"
+    },
+    {
+      "repository": "MiCode/miui_recovery",
+      "url": "https://github.com/MiCode/miui_recovery",
+      "ref": "master",
+      "commit": "08058536d0f900be91f1e7664d544c7ce264ce0e",
+      "tree": "ebefcb7e9e11fcc42b507d83300ce78e3df289ac",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/MIUI_SDK",
+      "url": "https://github.com/MiCode/MIUI_SDK",
+      "ref": "master",
+      "commit": "5f083351399fb359fcd0b5bb0cd6c7e3b46644a7",
+      "tree": "f691e03913996d7ab2d46de990020dd1d926acd6",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/MiWatch_Kernel_Opensource",
+      "url": "https://github.com/MiCode/MiWatch_Kernel_Opensource",
+      "ref": "master",
+      "commit": "ea21b7f1d7347eb9b2084ed83e18b4def748b29a",
+      "tree": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+      "head_status": "resolved",
+      "review_class": "other_product_family"
+    },
+    {
+      "repository": "MiCode/mtkcam-kernel_device_modules",
+      "url": "https://github.com/MiCode/mtkcam-kernel_device_modules",
+      "ref": "bsp-duchamp-u-oss",
+      "commit": "45caada0e5dba145a7f97af56a9d7200f9c42558",
+      "tree": "2925f9958a992d969d6f5bca2ed1706c1f9448b7",
+      "head_status": "resolved",
+      "review_class": "different_soc_family"
+    },
+    {
+      "repository": "MiCode/MTK_kernel_device_modules",
+      "url": "https://github.com/MiCode/MTK_kernel_device_modules",
+      "ref": "main",
+      "commit": "bd2814391e3d0d82cdf2a8b2de2411144da8e6a1",
+      "tree": "6b20ccbc84bb4e5cf0d5b5a4a908ca336fcbe0bc",
+      "head_status": "resolved",
+      "review_class": "different_soc_family"
+    },
+    {
+      "repository": "MiCode/MTK_kernel_modules",
+      "url": "https://github.com/MiCode/MTK_kernel_modules",
+      "ref": "master",
+      "commit": "1837e8ce53707afdc22a96cf0da51a248a9026b1",
+      "tree": "0cffabfa04ef6d3913b47a489a1e07fb699b7e61",
+      "head_status": "resolved",
+      "review_class": "different_soc_family"
+    },
+    {
+      "repository": "MiCode/Notes",
+      "url": "https://github.com/MiCode/Notes",
+      "ref": "master",
+      "commit": "81a66024fe48eaa2206b854430856fe3875ff3ba",
+      "tree": "bc4eb888510e833f12071a026198430080b5f269",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom",
+      "url": "https://github.com/MiCode/patchrom",
+      "ref": "marshmallow",
+      "commit": "28ee8e949120b43d339e53d120f5c2be2bd5297f",
+      "tree": "daf0ffea4393b25c3c2e116a55d2bbdbc9997dcc",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom-gnote",
+      "url": "https://github.com/MiCode/patchrom-gnote",
+      "ref": "ics",
+      "commit": "9f902384deb9349c9977adca7e3fd580056ad162",
+      "tree": "ef1b4506e6a1b6df451ff38a1c694c476f1b2cd9",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom-lt26i",
+      "url": "https://github.com/MiCode/patchrom-lt26i",
+      "ref": "ics",
+      "commit": "9ce07338b614420757168f83296cd3dd6a69f274",
+      "tree": "cd5a92440b39edcd3f7824a70dbdc5f56706e51c",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom-ones",
+      "url": "https://github.com/MiCode/patchrom-ones",
+      "ref": "master",
+      "commit": null,
+      "tree": null,
+      "head_status": "empty_repository_http_409",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom-razr",
+      "url": "https://github.com/MiCode/patchrom-razr",
+      "ref": "ics",
+      "commit": "d80ee6b1a548464151a336592a08f9e61bb427a4",
+      "tree": "fb3e15b85d4568b2cc557a7e48ebb212ae23d645",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom-saga",
+      "url": "https://github.com/MiCode/patchrom-saga",
+      "ref": "ics",
+      "commit": "304c61d6b56fe716d3a9be39a6714d3178ae4f94",
+      "tree": "1e9bd99170039105fac2aec9173f859fc0c443fb",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom-vivo",
+      "url": "https://github.com/MiCode/patchrom-vivo",
+      "ref": "ics",
+      "commit": "7904cf0654a97a58cfff1b386ab589cb7a3be9f8",
+      "tree": "9281cdf6c228ddf1c3fd7b164aa0ea9c8013ed9e",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom-x515m",
+      "url": "https://github.com/MiCode/patchrom-x515m",
+      "ref": "ics",
+      "commit": "be4db9a2b8d5c05dedbc31aad432cb381326da37",
+      "tree": "c93cdb624e4fe374a6db5791ecc70638178a976b",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_android",
+      "url": "https://github.com/MiCode/patchrom_android",
+      "ref": "marshmallow",
+      "commit": "f024253ad5421852138d7805da152843bdfebcae",
+      "tree": "5f207a3dd967a8e6ca46476feeeaeca55aa0b0c4",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_angler",
+      "url": "https://github.com/MiCode/patchrom_angler",
+      "ref": "marshmallow",
+      "commit": "1a7c66dc90e30b15e10ce94dfde9785b7afa5602",
+      "tree": "bf3de902960532d790710f13e5acebb313a4820c",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_build",
+      "url": "https://github.com/MiCode/patchrom_build",
+      "ref": "marshmallow",
+      "commit": "6a8103e8924a1d5df9f9405ea2cb74f7cf1b7221",
+      "tree": "b0622a9bbbc7eadebbc2b9be214830dfea60d892",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_d1",
+      "url": "https://github.com/MiCode/patchrom_d1",
+      "ref": "ics",
+      "commit": "b6c5f4b1c208a36b22459486d0075c43c3933f6b",
+      "tree": "ab6b378e222f3e7557a945dc92c9574e0a1a2258",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_defy",
+      "url": "https://github.com/MiCode/patchrom_defy",
+      "ref": "gingerbread",
+      "commit": "e15c8eb7e173dc991c78d8c6af485c59706d4d53",
+      "tree": "35682af490597a4506c99c88db5a397c2b374bb2",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_honor",
+      "url": "https://github.com/MiCode/patchrom_honor",
+      "ref": "ics",
+      "commit": "e7f54cc935a3db85e78407f65bb08f16d454017d",
+      "tree": "78e46df2c6624fc11fbacfac1223ba732ebcc660",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_honor2",
+      "url": "https://github.com/MiCode/patchrom_honor2",
+      "ref": "master",
+      "commit": "e0d40da33f02555bc16873fad6077a6ba3f53fe3",
+      "tree": "6ccf892582fe1db61aea655c41efe5bf21e0b116",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_i9000",
+      "url": "https://github.com/MiCode/patchrom_i9000",
+      "ref": "gingerbread",
+      "commit": "92bd2dd385a28a9428da4abbe3b1ecd2a06ae841",
+      "tree": "51ee316be5cebe83df79908a3719b564486c34f6",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_i9100",
+      "url": "https://github.com/MiCode/patchrom_i9100",
+      "ref": "ics",
+      "commit": "7f2fc08ad344d9521e883377cf40e31075af7b41",
+      "tree": "2fe75eea89546a211e890803abc5212fd3bb6a99",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_i9300",
+      "url": "https://github.com/MiCode/patchrom_i9300",
+      "ref": "ics",
+      "commit": "293dfcd3d8ea5a32e37b46cfdcc7589a6b4aa3e4",
+      "tree": "7ee438c83b47fde6adccb5cc7d1219b38898bcfb",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_i9500",
+      "url": "https://github.com/MiCode/patchrom_i9500",
+      "ref": "jellybean42",
+      "commit": "033f34f8ac0ae83497741d7fd9d9e81f7e4f9311",
+      "tree": "01b2fe4eafdb7c79d66594f2c1278e3fb5e77b51",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_lt18i",
+      "url": "https://github.com/MiCode/patchrom_lt18i",
+      "ref": "ics",
+      "commit": "0ca7f7c65184fa6328b989bda676198eab979abe",
+      "tree": "e37fe2566ff39e05b0b1cf7501c0dadd91890c22",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_lu6200",
+      "url": "https://github.com/MiCode/patchrom_lu6200",
+      "ref": "ics",
+      "commit": "3717b4f5f8b2562cb325ae1120b8c9a7d490a017",
+      "tree": "b977da75c4d81e23b08cbca82db30282c5ae779b",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_me865",
+      "url": "https://github.com/MiCode/patchrom_me865",
+      "ref": "ics",
+      "commit": "de897cdd93c4870b7385a56a6315bb6805c3feb9",
+      "tree": "72ce6a1b606e96aad509378d9b69b877e79f98fd",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_miui",
+      "url": "https://github.com/MiCode/patchrom_miui",
+      "ref": "marshmallow",
+      "commit": "7d4e0b26a9dd3d88258968ed07aaa890c792b004",
+      "tree": "1c7483dc189213a631adf8bedaa89e74753c4c7b",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_mx",
+      "url": "https://github.com/MiCode/patchrom_mx",
+      "ref": "ics",
+      "commit": "c7df0f34189c9b21fd088c8b10fe08c157c2dcfd",
+      "tree": "9e4312af5f28a75761eae2b725b9744dd2a15f23",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_mx2",
+      "url": "https://github.com/MiCode/patchrom_mx2",
+      "ref": "master",
+      "commit": "09fc0affa695fed154566865283366d2ade0811b",
+      "tree": "373a2293a0e5adc983f9d5e4a1e1a0990a659f5b",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_nexus5",
+      "url": "https://github.com/MiCode/patchrom_nexus5",
+      "ref": "v7-android-4.4.4",
+      "commit": "51d7c51c7a9484c72a7694dc018e89e6a69520e3",
+      "tree": "de201a0b028b3d3d04779755a350ecd64b649b4a",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_note2",
+      "url": "https://github.com/MiCode/patchrom_note2",
+      "ref": "jellybean",
+      "commit": "941abc12a06e41975c9b31fc76418d2bbab1240b",
+      "tree": "cab4b731e2f2e45de67aeb20d3456cf5fc3cec12",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_ones",
+      "url": "https://github.com/MiCode/patchrom_ones",
+      "ref": "ics",
+      "commit": "49f6ae728884868625b5dac54427f9dc84737114",
+      "tree": "304389cf634b968d931a6d15d6c1b7fcdff47d3e",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_onex",
+      "url": "https://github.com/MiCode/patchrom_onex",
+      "ref": "ics",
+      "commit": "ab456b88c1af2b2316a4b3661982bb04c4cb138a",
+      "tree": "87269f0298d694491b8145520a47ea6e6ff46eaf",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_p1",
+      "url": "https://github.com/MiCode/patchrom_p1",
+      "ref": "ics",
+      "commit": "11c7e738a2f57967c30cc63edbcfe4eff935a325",
+      "tree": "a97a95da614ee33639212debda7ef537441baee7",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_sensation",
+      "url": "https://github.com/MiCode/patchrom_sensation",
+      "ref": "ics",
+      "commit": "9ab16c8fad4a599ca4cd158b41cf1689762117a3",
+      "tree": "11d1ba030b3c32d9b289b1823578271ae462ec6b",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_tools",
+      "url": "https://github.com/MiCode/patchrom_tools",
+      "ref": "marshmallow",
+      "commit": "1bd99e03321b6b240b440ba738a89ccca795d734",
+      "tree": "5486bf082c4215d6b52e84e76ee3f5936642fbec",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_u8800pro",
+      "url": "https://github.com/MiCode/patchrom_u8800pro",
+      "ref": "gingerbread",
+      "commit": "8850bc44cb34796ca16a2ca21ae7216d62e9a15b",
+      "tree": "5d23c218b6ac2eeae8af36feed41e2ff79e39286",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_u970",
+      "url": "https://github.com/MiCode/patchrom_u970",
+      "ref": "ics",
+      "commit": "dc51726288f9e7da79fe416f9b1e0530cdbede53",
+      "tree": "41862b9142623935e23a326eec278384609286dd",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/patchrom_v8",
+      "url": "https://github.com/MiCode/patchrom_v8",
+      "ref": "master",
+      "commit": null,
+      "tree": null,
+      "head_status": "empty_repository_http_409",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/platform_external_exfat",
+      "url": "https://github.com/MiCode/platform_external_exfat",
+      "ref": "master",
+      "commit": "44c9de9aa8a2ae26efef46795e8b422e8fe92c65",
+      "tree": "4e9abd871d2026b52a22e0ce6c3335d41af7b940",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/platform_external_ntfs-3g",
+      "url": "https://github.com/MiCode/platform_external_ntfs-3g",
+      "ref": "q-dev",
+      "commit": "080f8c197697891d59252857121e57e6d2f8f786",
+      "tree": "1e4bef4a0db2da026a381372209383026700bbf0",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/SoundRecorder",
+      "url": "https://github.com/MiCode/SoundRecorder",
+      "ref": "master",
+      "commit": "16efc01ecd11e3927d1915be0789856f96483881",
+      "tree": "3a889eae8d1dfd49f4a5ef135a47ae3c7a9bc595",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/SPRD_common_module",
+      "url": "https://github.com/MiCode/SPRD_common_module",
+      "ref": "main",
+      "commit": "849311415890d80c62a3b33227cf1fe9c0e0f88f",
+      "tree": "63452edf414dead2efa819041cd40a6ece54dceb",
+      "head_status": "resolved",
+      "review_class": "different_soc_family"
+    },
+    {
+      "repository": "MiCode/SPRD_kernel_module",
+      "url": "https://github.com/MiCode/SPRD_kernel_module",
+      "ref": "main",
+      "commit": "ce1771072960e51837c0ba484382b300ae643545",
+      "tree": "d3fb181c30bdb16b5bfcc93c74a8ddec29e6ccae",
+      "head_status": "resolved",
+      "review_class": "different_soc_family"
+    },
+    {
+      "repository": "MiCode/vendor_opensource_display-drivers",
+      "url": "https://github.com/MiCode/vendor_opensource_display-drivers",
+      "ref": "main",
+      "commit": "fdb91c3835ac2f7a6c69932aff94a1f5b05c1838",
+      "tree": "82190eaab250ecf3e1febe02ed9083a191fe2b39",
+      "head_status": "resolved",
+      "review_class": "direct_uke_release_family"
+    },
+    {
+      "repository": "MiCode/vendor_qcom_opensource_ais-kernel",
+      "url": "https://github.com/MiCode/vendor_qcom_opensource_ais-kernel",
+      "ref": "main",
+      "commit": "3aca0f8b8a54decf3ce64fbe061d26a9977cc2f3",
+      "tree": "fc8cccf4bb589e54d4baefa6c5385c18b6e723ea",
+      "head_status": "resolved",
+      "review_class": "direct_uke_release_family"
+    },
+    {
+      "repository": "MiCode/vendor_qcom_opensource_audio-kernel",
+      "url": "https://github.com/MiCode/vendor_qcom_opensource_audio-kernel",
+      "ref": "README",
+      "commit": "f154035f2f2a98c9c396828d7e6250f3728949aa",
+      "tree": "3d013cfcdf6b96142884e55529fb5fded0f49242",
+      "head_status": "resolved",
+      "review_class": "direct_uke_release_family"
+    },
+    {
+      "repository": "MiCode/vendor_qcom_opensource_camera-kernel",
+      "url": "https://github.com/MiCode/vendor_qcom_opensource_camera-kernel",
+      "ref": "main",
+      "commit": "27113d4a940dc7f49879dc7eeaee8a9b31f7d39d",
+      "tree": "133d6f6d2ea0dfa31599fa88212ac3e1e389e06d",
+      "head_status": "resolved",
+      "review_class": "direct_uke_release_family"
+    },
+    {
+      "repository": "MiCode/vendor_qcom_opensource_data-kernel",
+      "url": "https://github.com/MiCode/vendor_qcom_opensource_data-kernel",
+      "ref": "README",
+      "commit": "dec8e3934e03a3ac0b0e66cf8a3ededfaca6d7f7",
+      "tree": "4f304c5c10e81676a1f10f72d383edec1fb6e061",
+      "head_status": "resolved",
+      "review_class": "qualcomm_family_no_uke_branch"
+    },
+    {
+      "repository": "MiCode/vendor_qcom_opensource_display-devicetree",
+      "url": "https://github.com/MiCode/vendor_qcom_opensource_display-devicetree",
+      "ref": "main",
+      "commit": "25aa280a0adc4c564db97a08d84ce064a5197d2d",
+      "tree": "be46f9dd822253e9ed8a74f2f989e84e10d4f4cb",
+      "head_status": "resolved",
+      "review_class": "qualcomm_family_no_uke_branch"
+    },
+    {
+      "repository": "MiCode/vendor_qcom_opensource_wlan",
+      "url": "https://github.com/MiCode/vendor_qcom_opensource_wlan",
+      "ref": "README",
+      "commit": "54d63b44ddce8478957236c3a36356a5dbeae120",
+      "tree": "8199a87023286ae1fa4d6d900a993bad9059601d",
+      "head_status": "resolved",
+      "review_class": "direct_uke_release_family"
+    },
+    {
+      "repository": "MiCode/vendor_qcom_proprietary_camera-devicetree",
+      "url": "https://github.com/MiCode/vendor_qcom_proprietary_camera-devicetree",
+      "ref": "main",
+      "commit": "ce34fb15da8694d993e6251aecc6676561490e0a",
+      "tree": "5b781fbe0ad0ffacdb2209a6691717e60e639992",
+      "head_status": "resolved",
+      "review_class": "direct_uke_release_family"
+    },
+    {
+      "repository": "MiCode/vendor_qcom_proprietary_display-devicetree",
+      "url": "https://github.com/MiCode/vendor_qcom_proprietary_display-devicetree",
+      "ref": "main",
+      "commit": "1de49f78c62e4fedf05a65bad2ac5e5883ad8b93",
+      "tree": "c7733b0a50b757a9bd3172dc05e5ef5ad695248c",
+      "head_status": "resolved",
+      "review_class": "direct_uke_release_family"
+    },
+    {
+      "repository": "MiCode/vendor_xiaomi_proprietary_touch-driver",
+      "url": "https://github.com/MiCode/vendor_xiaomi_proprietary_touch-driver",
+      "ref": "main",
+      "commit": "1dce59696e662b830e47d170b669b5e99f961283",
+      "tree": "aa67c3d8b35230f4f68a797841ef1a2000709152",
+      "head_status": "resolved",
+      "review_class": "shared_nt36532_controller_no_uke_branch"
+    },
+    {
+      "repository": "MiCode/x907",
+      "url": "https://github.com/MiCode/x907",
+      "ref": "ics",
+      "commit": "6e075a2ca86b2a1c8824a33f69034197654891c1",
+      "tree": "3b21432aaee27f7af41d5f0d724de910e983261e",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    },
+    {
+      "repository": "MiCode/Xiaomi_Kernel_OpenSource",
+      "url": "https://github.com/MiCode/Xiaomi_Kernel_OpenSource",
+      "ref": "README",
+      "commit": "16d89a630ea8752c84bf4d76201964524d620616",
+      "tree": "60e6195a50a743e37808cb53336a37c2ac4d9287",
+      "head_status": "resolved",
+      "review_class": "direct_uke_release_family"
+    },
+    {
+      "repository": "MiCode/Xposed",
+      "url": "https://github.com/MiCode/Xposed",
+      "ref": "master",
+      "commit": "06f5f582267f5cdc300edc9d1d95ea3873c99794",
+      "tree": "027e728643dfaa7958282c778b63b3504bda00e7",
+      "head_status": "resolved",
+      "review_class": "legacy_android_application_or_tool_metadata_only"
+    }
+  ],
+  "existing_sources": [
+    {
+      "repository": "MiCode/Xiaomi_Kernel_OpenSource",
+      "url": "https://github.com/MiCode/Xiaomi_Kernel_OpenSource",
+      "ref": "uke-v-oss",
+      "commit": "5712080a4b0c0b1a879e6d145c601c649ddaddfd",
+      "tree": "bc1bda385d926a7bcc29828f7b6649a106f743e7",
+      "committed_at": "2025-01-09T10:10:18+08:00",
+      "classification": "direct_uke_oem",
+      "local_path": "referances/xiaomi/xiaomi-kernel",
+      "acquisition": "existing_checkout",
+      "remote_pin_matches": true,
+      "inspection": "Selected subsystem files and release map; not whole-tree audit"
+    },
+    {
+      "repository": "MiCode/kernel_devicetree",
+      "url": "https://github.com/MiCode/kernel_devicetree",
+      "ref": "uke-v-oss",
+      "commit": "94c84aeb9e517dbde546fc732033c184094c8e57",
+      "tree": "627a7ba6b99f0a5aa6308eeda3e6e81c642ee8e5",
+      "committed_at": "2025-01-08T16:25:16+08:00",
+      "classification": "direct_uke_oem",
+      "local_path": "referances/xiaomi/xiaomi-devicetree",
+      "acquisition": "existing_checkout",
+      "remote_pin_matches": true,
+      "inspection": "Selected subsystem files and release map; not whole-tree audit"
+    },
+    {
+      "repository": "MiCode/kernel_build",
+      "url": "https://github.com/MiCode/kernel_build",
+      "ref": "uke-v-oss",
+      "commit": "e6b1cb8a38fa93564009bbd8116094928c67b876",
+      "tree": "ec82fe65b400a6f73827423872ca04a0b2af3fa2",
+      "committed_at": "2025-01-08T16:23:42+08:00",
+      "classification": "direct_uke_oem",
+      "local_path": "referances/xiaomi/xiaomi-build",
+      "acquisition": "existing_checkout",
+      "remote_pin_matches": true,
+      "inspection": "Selected subsystem files and release map; not whole-tree audit"
+    },
+    {
+      "repository": "MiCode/vendor_qcom_opensource_audio-kernel",
+      "url": "https://github.com/MiCode/vendor_qcom_opensource_audio-kernel",
+      "ref": "uke-v-oss",
+      "commit": "8eb0eccbc4027ae4a4987e4bced03a4381039714",
+      "tree": "2a2cb00ee7a2398858a10f0b619ae3d0d28b005d",
+      "committed_at": "2025-01-08T16:32:15+08:00",
+      "classification": "direct_uke_oem",
+      "local_path": "referances/xiaomi/xiaomi-audio",
+      "acquisition": "existing_checkout",
+      "remote_pin_matches": true,
+      "inspection": "Selected subsystem files and release map; not whole-tree audit"
+    },
+    {
+      "repository": "MiCode/vendor_qcom_opensource_wlan",
+      "url": "https://github.com/MiCode/vendor_qcom_opensource_wlan",
+      "ref": "uke-v-oss",
+      "commit": "2825b01e22ac3e16345c12e6c85549188e2e765e",
+      "tree": "fded2778c452321479b337ec1820de491b115d89",
+      "committed_at": "2025-01-08T16:35:07+08:00",
+      "classification": "direct_uke_oem",
+      "local_path": "referances/xiaomi/xiaomi-wlan",
+      "acquisition": "existing_checkout",
+      "remote_pin_matches": true,
+      "inspection": "Selected subsystem files and release map; not whole-tree audit"
+    },
+    {
+      "repository": "MiCode/vendor_qcom_opensource_camera-kernel",
+      "url": "https://github.com/MiCode/vendor_qcom_opensource_camera-kernel",
+      "ref": "uke-v-oss",
+      "commit": "699fa15a98abd40fbb94f3a6fc00f91723d29d35",
+      "tree": "11119e5b8dd007a6dcd2566f76f6dd398fa9ce61",
+      "committed_at": "2025-01-08T16:26:10+08:00",
+      "classification": "direct_uke_oem",
+      "local_path": "referances/xiaomi/xiaomi-camera",
+      "acquisition": "existing_checkout",
+      "remote_pin_matches": true,
+      "inspection": "Selected subsystem files and release map; not whole-tree audit"
+    },
+    {
+      "repository": "MiCode/vendor_qcom_proprietary_camera-devicetree",
+      "url": "https://github.com/MiCode/vendor_qcom_proprietary_camera-devicetree",
+      "ref": "uke-v-oss",
+      "commit": "57d2135ee6909ffb7d288a7dc4d82c85d95fc10d",
+      "tree": "1dc1aa43171a0bd751e5dded1e5da6e64e01e4ec",
+      "committed_at": "2025-01-08T16:40:15+08:00",
+      "classification": "direct_uke_oem",
+      "local_path": "referances/xiaomi/xiaomi-camera-dt",
+      "acquisition": "existing_checkout",
+      "remote_pin_matches": true,
+      "inspection": "Selected subsystem files and release map; not whole-tree audit"
+    },
+    {
+      "repository": "MiCode/vendor_opensource_display-drivers",
+      "url": "https://github.com/MiCode/vendor_opensource_display-drivers",
+      "ref": "uke-v-oss",
+      "commit": "44275c404a677d9d9e5230fedd1af2ef02fc7b9a",
+      "tree": "4e4e3461b52db633e65e58fbc8820a8fbfe833b4",
+      "committed_at": "2025-01-08T16:27:57+08:00",
+      "classification": "direct_uke_oem",
+      "local_path": "referances/xiaomi/xiaomi-display",
+      "acquisition": "existing_checkout",
+      "remote_pin_matches": true,
+      "inspection": "Selected subsystem files and release map; not whole-tree audit"
+    },
+    {
+      "repository": "MiCode/vendor_qcom_proprietary_display-devicetree",
+      "url": "https://github.com/MiCode/vendor_qcom_proprietary_display-devicetree",
+      "ref": "uke-v-oss",
+      "commit": "4a3e1c391130237c5e8c2b250d1c94f3e25b9b11",
+      "tree": "0a83b51efab9135d7cf8f41d2e28ad109877b549",
+      "committed_at": "2025-01-08T16:46:06+08:00",
+      "classification": "direct_uke_oem",
+      "local_path": "referances/xiaomi/xiaomi-display-dt",
+      "acquisition": "existing_checkout",
+      "remote_pin_matches": true,
+      "inspection": "Selected subsystem files and release map; not whole-tree audit"
+    }
+  ],
+  "new_acquisitions": [
+    {
+      "id": "micode-pad8-nt36532",
+      "repository": "MiCode/vendor_xiaomi_proprietary_touch-driver",
+      "url": "https://github.com/MiCode/vendor_xiaomi_proprietary_touch-driver.git",
+      "ref": "yupei-w-oss",
+      "commit": "15798a6c73e37643c627c00579932fd483a7fcc8",
+      "tree": "a29cc39a86a5eaaf0c296417e68cca22bae64065",
+      "equivalent_tree_ref": "piano-w-oss",
+      "equivalent_tree_commit": "6957f6b646d1c919e175e6f9000eb50c8635273c",
+      "classification": "shared_controller_android_oem_not_uke_board",
+      "local_path": "referances/donors/micode-touch-pad8",
+      "prior_partial_path": "referances/community/micode-piano-touch-6957f6b",
+      "prior_source_difference": "Existing flattened nt36xxx.c is byte-identical; acquisition adds complete Git tree and shared framework, not a new touch algorithm",
+      "prior_nt36xxx_c_sha256": "a15a6571ecd817f5c0029c104fe840948743a89040b0bff818aefdc0e7427bfd",
+      "tracked_file_count": 47,
+      "inspected_paths": [
+        "p82/nt36532/nt36xxx.c",
+        "p82/nt36532/nt36xxx.h",
+        "p82/nt36532/nt36xxx_mem_map.h",
+        "p82/Kbuild",
+        "p82/config/xiaomi_touch.h",
+        "xiaomi/xiaomi_touch.h"
+      ],
+      "file_license_observations": [
+        "NT36532 C/header notice: GPL-2.0-or-later; Novatek 2010-2022",
+        "Selected config/Kbuild: GPL-2.0-only",
+        "No blanket repository or firmware license inferred"
+      ],
+      "useful_contracts": [
+        "Ten-contact constants",
+        "39-byte polling information and bounded firmware frame length",
+        "Raw THP frame length/checksum complement layout",
+        "Chip/cascade mapping and suspend/resume ordering"
+      ],
+      "limits": [
+        "No Uke branch",
+        "Pad 8 firmware and board GPIOs are not portable",
+        "THP raw-matrix forwarding is not a complete native Uke coordinate decoder",
+        "Qualcomm panel-event notifiers and Android framework dependencies",
+        "No donor build or execution",
+        "No firmware acquired or substituted"
+      ],
+      "git_integrity": "git-fsck-full-passed",
+      "detached": true,
+      "shallow": false,
+      "tracked_clean": true,
+      "gitlink_count": 0,
+      "tracked_gitattributes_count": 0,
+      "donor_code_executed": false,
+      "archive_complete": false,
+      "dependency_closure_verified": false,
+      "hardware_result_claimed": false
+    },
+    {
+      "id": "micode-uke-ais",
+      "repository": "MiCode/vendor_qcom_opensource_ais-kernel",
+      "url": "https://github.com/MiCode/vendor_qcom_opensource_ais-kernel.git",
+      "ref": "uke-v-oss",
+      "commit": "43ed0711989186c8f71f16f33cb22448867344ad",
+      "tree": "f0906fa58e4d8fb2d30171d580392c13ad2499c6",
+      "classification": "direct_uke_oem_release_selection_not_verified",
+      "local_path": "referances/donors/micode-uke-ais",
+      "prior_source_difference": "Absent from the nine existing MiCode Git checkouts; exact Uke AIS release now acquired",
+      "inspected_paths": [
+        "drivers/ais/ais_ife_dev.c",
+        "drivers/ais/csid_hw/",
+        "Kconfig",
+        "Kbuild",
+        "config/pineapple.mk"
+      ],
+      "file_license_observations": [
+        "Inspected ais_ife_dev.c and config/pineapple.mk: GPL-2.0-only; Linux Foundation and Qualcomm Innovation Center notices",
+        "Per-file license review required for additional reuse"
+      ],
+      "useful_contracts": [
+        "AIS/IFE/CSID framework comparison",
+        "Build selector and external dependency inventory"
+      ],
+      "limits": [
+        "Complete OEM product selection not verified",
+        "ION, camera request-manager, Qualcomm SMMU, MMRM, CRM and RPMh dependencies",
+        "Not a stand-alone native V4L2 driver",
+        "No donor build or execution",
+        "No firmware acquired or substituted"
+      ],
+      "git_integrity": "git-fsck-full-passed",
+      "detached": true,
+      "shallow": false,
+      "tracked_clean": true,
+      "gitlink_count": 0,
+      "tracked_gitattributes_count": 0,
+      "donor_code_executed": false,
+      "archive_complete": false,
+      "dependency_closure_verified": false,
+      "hardware_result_claimed": false
+    }
+  ],
+  "limits": [
+    "Repository default heads are metadata snapshots, not automatically selected donor revisions",
+    "Existing Uke branch remains Linux 6.1.68 and does not identify newer installed Android firmware source or ABI",
+    "Matching controller or Qualcomm family does not authorize board-value transfer",
+    "Complete Git tree integrity does not prove external dependency or firmware closure",
+    "Firmware redistribution rights remain unadmitted; GPL source notices do not license extracted OEM blobs",
+    "No source, package, build or other-device result was promoted to physical Uke support"
+  ]
+}

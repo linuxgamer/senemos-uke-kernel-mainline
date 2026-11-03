@@ -1,0 +1,205 @@
+From: Uke platform maintainers
+Subject: [PATCH] remoteproc: qcom: use exact Cliffs WPSS proxy regulators
+
+The OEM Cliffs WPSS contract uses CX/MX ARC regulators, PAS 6 and AOP
+load-state QMP. Keep firmware startup manual, propagate supply/vote errors
+and release proxy votes on failed startup or handover. Other platforms
+retain their existing genpd and optional CX/PX regulator paths.
+
+--- a/drivers/remoteproc/qcom_q6v5_pas.c
++++ b/drivers/remoteproc/qcom_q6v5_pas.c
+@@ -8,6 +8,7 @@
+  */
+ 
+ #include <linux/clk.h>
++#include <dt-bindings/regulator/qcom,rpmh-regulator-levels.h>
+ #include <linux/delay.h>
+ #include <linux/firmware.h>
+ #include <linux/interrupt.h>
+@@ -49,6 +50,7 @@
+ 	bool decrypt_shutdown;
+ 
+ 	char **proxy_pd_names;
++	unsigned int proxy_regulator_level;
+ 
+ 	const char *load_state;
+ 	const char *ssr_name;
+@@ -78,6 +80,8 @@
+ 	struct device *proxy_pds[3];
+ 
+ 	int proxy_pd_count;
++	unsigned int proxy_regulator_level;
++	struct regulator_bulk_data proxy_regs[2];
+ 
+ 	const char *dtb_firmware_name;
+ 	int pas_id;
+@@ -149,12 +153,40 @@
+ 	qcom_minidump(rproc, pas->minidump_id, qcom_pas_segment_dump);
+ }
+ 
+-static int qcom_pas_pds_enable(struct qcom_pas *pas, struct device **pds,
+-			       size_t pd_count)
++static void qcom_pas_proxy_unvote(struct qcom_pas *pas, int count)
+ {
++	while (count--) {
++		int ret = regulator_set_voltage(pas->proxy_regs[count].consumer,
++						0, INT_MAX);
++
++		if (ret)
++			dev_err(pas->dev, "failed to release %s proxy vote: %d\n",
++				pas->proxy_regs[count].supply, ret);
++	}
++}
++
++static int qcom_pas_proxy_enable(struct qcom_pas *pas)
++{
++	struct device **pds = pas->proxy_pds;
++	int pd_count = pas->proxy_pd_count;
+ 	int ret;
+ 	int i;
+ 
++	if (pas->proxy_regulator_level) {
++		for (i = 0; i < ARRAY_SIZE(pas->proxy_regs); i++) {
++			ret = regulator_set_voltage(pas->proxy_regs[i].consumer,
++						pas->proxy_regulator_level, INT_MAX);
++			if (ret) {
++				qcom_pas_proxy_unvote(pas, i);
++				return ret;
++			}
++		}
++		ret = regulator_bulk_enable(ARRAY_SIZE(pas->proxy_regs), pas->proxy_regs);
++		if (ret)
++			qcom_pas_proxy_unvote(pas, ARRAY_SIZE(pas->proxy_regs));
++		return ret;
++	}
++
+ 	for (i = 0; i < pd_count; i++) {
+ 		dev_pm_genpd_set_performance_state(pds[i], INT_MAX);
+ 		ret = pm_runtime_get_sync(pds[i]);
+@@ -176,11 +208,23 @@
+ 	return ret;
+ };
+ 
+-static void qcom_pas_pds_disable(struct qcom_pas *pas, struct device **pds,
+-				 size_t pd_count)
++static void qcom_pas_proxy_disable(struct qcom_pas *pas)
+ {
++	struct device **pds = pas->proxy_pds;
++	int pd_count = pas->proxy_pd_count;
+ 	int i;
+ 
++	if (pas->proxy_regulator_level) {
++		int ret = regulator_bulk_disable(ARRAY_SIZE(pas->proxy_regs), pas->proxy_regs);
++
++		if (ret) {
++			dev_err(pas->dev, "failed to disable proxy regulators: %d\n", ret);
++			return;
++		}
++		qcom_pas_proxy_unvote(pas, ARRAY_SIZE(pas->proxy_regs));
++		return;
++	}
++
+ 	for (i = 0; i < pd_count; i++) {
+ 		dev_pm_genpd_set_performance_state(pds[i], 0);
+ 		pm_runtime_put(pds[i]);
+@@ -276,7 +320,7 @@
+ 	if (ret)
+ 		return ret;
+ 
+-	ret = qcom_pas_pds_enable(pas, pas->proxy_pds, pas->proxy_pd_count);
++	ret = qcom_pas_proxy_enable(pas);
+ 	if (ret < 0)
+ 		goto disable_irqs;
+ 
+@@ -368,7 +412,7 @@
+ disable_xo_clk:
+ 	clk_disable_unprepare(pas->xo);
+ disable_proxy_pds:
+-	qcom_pas_pds_disable(pas, pas->proxy_pds, pas->proxy_pd_count);
++	qcom_pas_proxy_disable(pas);
+ disable_irqs:
+ 	qcom_q6v5_unprepare(&pas->q6v5);
+ 
+@@ -388,7 +432,7 @@
+ 		regulator_disable(pas->cx_supply);
+ 	clk_disable_unprepare(pas->aggre2_clk);
+ 	clk_disable_unprepare(pas->xo);
+-	qcom_pas_pds_disable(pas, pas->proxy_pds, pas->proxy_pd_count);
++	qcom_pas_proxy_disable(pas);
+ }
+ 
+ static int qcom_pas_stop(struct rproc *rproc)
+@@ -606,6 +650,17 @@
+ 
+ static int qcom_pas_init_regulator(struct qcom_pas *pas)
+ {
++	if (pas->proxy_regulator_level) {
++		/* Cliffs votes ARC levels through the OEM CX/MX regulator graph. */
++		if (!of_property_present(pas->dev->of_node, "cx-supply") ||
++		    !of_property_present(pas->dev->of_node, "mx-supply"))
++			return dev_err_probe(pas->dev, -EINVAL, "WPSS requires CX and MX supplies\n");
++		pas->proxy_regs[0].supply = "cx";
++		pas->proxy_regs[1].supply = "mx";
++		return devm_regulator_bulk_get(pas->dev, ARRAY_SIZE(pas->proxy_regs),
++					       pas->proxy_regs);
++	}
++
+ 	pas->cx_supply = devm_regulator_get_optional(pas->dev, "cx");
+ 	if (IS_ERR(pas->cx_supply)) {
+ 		if (PTR_ERR(pas->cx_supply) == -ENODEV)
+@@ -838,6 +893,7 @@
+ 	pas = rproc->priv;
+ 	pas->dev = &pdev->dev;
+ 	pas->rproc = rproc;
++	pas->proxy_regulator_level = desc->proxy_regulator_level;
+ 	pas->minidump_id = desc->minidump_id;
+ 	pas->pas_id = desc->pas_id;
+ 	pas->lite_pas_id = desc->lite_pas_id;
+@@ -885,6 +941,11 @@
+ 	if (ret)
+ 		goto detach_proxy_pds;
+ 
++	if (pas->proxy_regulator_level && !pas->q6v5.qmp) {
++		ret = dev_err_probe(pas->dev, -ENODEV, "WPSS requires AOP load-state QMP\n");
++		goto deinit_q6v5;
++	}
++
+ 	qcom_add_glink_subdev(rproc, &pas->glink_subdev, desc->ssr_name);
+ 	qcom_add_smd_subdev(rproc, &pas->smd_subdev);
+ 	qcom_add_pdm_subdev(rproc, &pas->pdm_subdev);
+@@ -930,6 +991,7 @@
+ 	qcom_remove_pdm_subdev(rproc, &pas->pdm_subdev);
+ 	qcom_remove_smd_subdev(rproc, &pas->smd_subdev);
+ 	qcom_remove_glink_subdev(rproc, &pas->glink_subdev);
++deinit_q6v5:
+ 	qcom_q6v5_deinit(&pas->q6v5);
+ detach_proxy_pds:
+ 	qcom_pas_pds_detach(pas, pas->proxy_pds, pas->proxy_pd_count);
+@@ -1502,6 +1564,19 @@
+ 	.region_assign_vmid = QCOM_SCM_VMID_MSS_MSA,
+ };
+ 
++static const struct qcom_pas_data cliffs_wpss_resource = {
++	.crash_reason_smem = 626,
++	.firmware_name = "qca6750/wpss.mdt",
++	.pas_id = 6,
++	.minidump_id = 4,
++	.auto_boot = false,
++	.proxy_regulator_level = RPMH_REGULATOR_LEVEL_TURBO,
++	.load_state = "wpss",
++	.ssr_name = "wpss",
++	.sysmon_name = "wpss",
++	.ssctl_id = 0x19,
++};
++
+ static const struct qcom_pas_data sc7280_wpss_resource = {
+ 	.crash_reason_smem = 626,
+ 	.firmware_name = "wpss.mdt",
+@@ -1638,6 +1713,7 @@
+ };
+ 
+ static const struct of_device_id qcom_pas_of_match[] = {
++	{ .compatible = "qcom,cliffs-wpss-pas", .data = &cliffs_wpss_resource },
+ 	{ .compatible = "qcom,eliza-adsp-pas", .data = &sm8550_adsp_resource },
+ 	{ .compatible = "qcom,milos-adsp-pas", .data = &sm8550_adsp_resource },
+ 	{ .compatible = "qcom,milos-cdsp-pas", .data = &milos_cdsp_resource },

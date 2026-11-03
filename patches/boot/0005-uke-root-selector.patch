@@ -1,0 +1,23 @@
+diff --git a/arch/arm64/kernel/setup.c b/arch/arm64/kernel/setup.c
+--- a/arch/arm64/kernel/setup.c
++++ b/arch/arm64/kernel/setup.c
+@@ -169,6 +169,8 @@ static void __init smp_build_mpidr_hash(void)
+ 
+ #ifdef CONFIG_QCOM_UKE_ABL_DT
+ void *__init uke_abl_prepare_fdt(void *input, int size, phys_addr_t *physical);
++void __init uke_abl_prepare_cmdline(const void *fdt, char *cmdline,
++                                  size_t capacity);
+ #endif
+ 
+ static void __init setup_machine_fdt(phys_addr_t dt_phys)
+@@ -206,6 +208,10 @@ static void __init setup_machine_fdt(phys_addr_t dt_phys)
+ 			cpu_relax();
+ 	}
+ 
++#ifdef CONFIG_QCOM_UKE_ABL_DT
++	uke_abl_prepare_cmdline(dt_virt, boot_command_line, COMMAND_LINE_SIZE);
++#endif
++
+ 	/* Early fixups are done, map the FDT as read-only now */
+ 	fixmap_remap_fdt(dt_phys, &size, PAGE_KERNEL_RO);
+ 

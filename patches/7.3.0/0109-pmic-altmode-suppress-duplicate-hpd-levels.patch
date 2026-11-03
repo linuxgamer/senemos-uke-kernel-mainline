@@ -1,0 +1,89 @@
+From: Senemos maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] soc: qcom: pmic-glink: avoid repeated unchanged Uke HPD reports
+
+Acknowledge and apply every firmware event, but notify the Uke display bridge
+only when its level or route changes, or when firmware reports an HPD IRQ.
+Repeated identical status reports otherwise rerun the MSM hotplug/EDID path
+and reload display settings. Keep forced disconnects on faults and invalidate
+the cache when service cleanup runs. Preserve non-Uke notification behavior.
+
+---
+--- a/drivers/soc/qcom/pmic_glink_altmode.c
++++ b/drivers/soc/qcom/pmic_glink_altmode.c
+@@ -124,6 +124,7 @@
+ 	bool overflow;
+ 
+ 	struct auxiliary_device *bridge;
++	enum drm_connector_status hpd_status;
+ 
+ 	enum typec_orientation orientation;
+ 	u16 svid;
+@@ -393,13 +394,22 @@
+ 	return 0;
+ }
+ 
++static void pmic_glink_altmode_hpd_notify(struct pmic_glink_altmode_port *port,
++					enum drm_connector_status status, bool force)
++{
++	if (port->altmode->uke && !force && port->hpd_status == status)
++		return;
++	port->hpd_status = status;
++	drm_aux_hpd_bridge_notify(&port->bridge->dev, status);
++}
++
+ static void pmic_glink_altmode_worker(struct work_struct *work)
+ {
+ 	struct pmic_glink_altmode_port *port = work_to_altmode_port(work);
+ 	struct pmic_glink_altmode *am = port->altmode;
+ 	struct pmic_glink_altmode_event event;
+ 	unsigned long flags;
+-	bool valid, overflow;
++	bool valid, overflow, route_changed;
+ 	int ret;
+ 
+ 	for (;;) {
+@@ -410,7 +420,8 @@
+ 		if (!valid || overflow) {
+ 			port->head = port->count = 0;
+ 			spin_unlock_irqrestore(&am->event_lock, flags);
+-			drm_aux_hpd_bridge_notify(&port->bridge->dev, connector_status_disconnected);
++			pmic_glink_altmode_hpd_notify(port, connector_status_disconnected, true);
++			port->hpd_status = connector_status_unknown;
+ 			ret = pmic_glink_altmode_safe(am, port);
+ 			if (ret)
+ 				dev_err_ratelimited(am->dev, "port %u cleanup indeterminate: %d\n", port->index, ret);
+@@ -436,6 +447,9 @@
+ 		spin_unlock_irqrestore(&am->event_lock, flags);
+ 		if (!valid)
+ 			continue;
++		route_changed = port->orientation != event.orientation ||
++			port->svid != event.svid || port->mode != event.mode ||
++			port->mux_ctrl != event.mux_ctrl;
+ 		port->orientation = event.orientation;
+ 		port->svid = event.svid;
+ 		port->mode = event.mode;
+@@ -467,12 +481,13 @@
+ 			event.generation == am->generation;
+ 		spin_unlock_irqrestore(&am->event_lock, flags);
+ 		if (!ret && valid)
+-			drm_aux_hpd_bridge_notify(&port->bridge->dev,
++			pmic_glink_altmode_hpd_notify(port,
+ 				event.svid == USB_TYPEC_DP_SID && event.hpd_state &&
+ 				event.mux_ctrl != MUX_CTRL_STATE_NO_CONN ?
+-				connector_status_connected : connector_status_disconnected);
++				connector_status_connected : connector_status_disconnected,
++				route_changed || event.hpd_irq);
+ 		else if (ret || !valid)
+-			drm_aux_hpd_bridge_notify(&port->bridge->dev, connector_status_disconnected);
++			pmic_glink_altmode_hpd_notify(port, connector_status_disconnected, true);
+ 		if (ret)
+ 			dev_err_ratelimited(am->dev, "port %u mux application failed: %d\n", port->index, ret);
+ 	}
+@@ -816,6 +831,7 @@
+ 		alt_port = &altmode->ports[port];
+ 		alt_port->altmode = altmode;
+ 		alt_port->index = port;
++		alt_port->hpd_status = connector_status_unknown;
+ 		INIT_WORK(&alt_port->work, pmic_glink_altmode_worker);
+ 
+ 		alt_port->bridge = devm_drm_dp_hpd_bridge_alloc(dev, to_of_node(fwnode));

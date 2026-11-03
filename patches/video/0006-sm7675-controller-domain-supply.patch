@@ -1,0 +1,49 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] clk: qcom: preserve Cliffs controller GDSC parent regulator ownership
+
+Use the exact Uke OEM MVS0C/MVS1C parent from MiCode DT 94c84aeb:
+VDD_MM_MXC_VOTER_LEVEL votes MXC with the existing MMCX parent.
+The native GDSC must enable this parent before controller clocks vote.
+Require the bridge supply only for SM7675; keep other platforms unchanged.
+This remains an inactive source candidate with no hardware acceptance.
+
+--- a/drivers/clk/qcom/videocc-sm8550.c
++++ b/drivers/clk/qcom/videocc-sm8550.c
+@@ -673,6 +673,9 @@
+ 	}
+ 
+ 	if (is_sm7675) {
++		/* OEM MVSxC domains vote MXC with an MMCX parent before clocks. */
++		video_cc_mvs0c_gdsc.supply = "vdd_mm_mxc";
++		video_cc_mvs1c_gdsc.supply = "vdd_mm_mxc";
+ 		ret = uke_video_voltage_init(&pdev->dev);
+ 		if (ret)
+ 			return dev_err_probe(&pdev->dev, ret,
+--- a/Documentation/devicetree/bindings/clock/qcom,sm8450-videocc.yaml
++++ b/Documentation/devicetree/bindings/clock/qcom,sm8450-videocc.yaml
+@@ -66,6 +66,9 @@
+   vdd_mxc-supply:
+     description: Aggregated MXC voltage-corner regulator for SM7675
+ 
++  vdd_mm_mxc-supply:
++    description: MXC regulator with MMCX parent for SM7675 controller power domains
++
+ required:
+   - compatible
+   - clocks
+@@ -94,6 +97,7 @@
+       required:
+         - vdd_mm-supply
+         - vdd_mxc-supply
++        - vdd_mm_mxc-supply
+       properties:
+         power-domains: false
+         required-opps: false
+@@ -103,6 +107,7 @@
+       properties:
+         vdd_mm-supply: false
+         vdd_mxc-supply: false
++        vdd_mm_mxc-supply: false
+ 
+ unevaluatedProperties: false
+ 

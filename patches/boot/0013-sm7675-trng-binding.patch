@@ -1,0 +1,10 @@
+--- a/Documentation/devicetree/bindings/crypto/qcom,prng.yaml
++++ b/Documentation/devicetree/bindings/crypto/qcom,prng.yaml
+@@ -32,6 +32,7 @@
+               - qcom,sa8775p-trng
+               - qcom,sc7280-trng
+               - qcom,shikra-trng
++              - qcom,sm7675-trng
+               - qcom,sm8450-trng
+               - qcom,sm8550-trng
+               - qcom,sm8650-trng

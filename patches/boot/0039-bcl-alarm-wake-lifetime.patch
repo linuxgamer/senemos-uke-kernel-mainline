@@ -1,0 +1,71 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: hwmon: qcom-bcl: stop alarm work and wake in one cleanup action
+
+Prevent polling from reacquiring IRQ wake between separate devm cleanups.
+Serialize initial wake setup with the already active interrupt thread.
+
+--- a/drivers/hwmon/qcom-bcl-hwmon.c
++++ b/drivers/hwmon/qcom-bcl-hwmon.c
+@@ -1243,22 +1243,15 @@
+ {
+ 	struct bcl_alarm_data *alarm = data;
+ 
+-	/* Set shutting_down flag to prevent work from being rescheduled */
+-	scoped_guard(mutex, &alarm->a_lock)
++	/* Stop the worker before it can restore the wake reference. */
++	scoped_guard(mutex, &alarm->a_lock) {
+ 		WRITE_ONCE(alarm->shutting_down, true);
+-
+-	cancel_delayed_work_sync(&alarm->alarm_poll_work);
+-}
+-
+-static void bcl_alarm_wake_cleanup_action(void *data)
+-{
+-	struct bcl_alarm_data *alarm = data;
+-
+-	guard(mutex)(&alarm->a_lock);
+-	if (alarm->irq_wake_enabled) {
+-		disable_irq_wake(alarm->irq);
+-		alarm->irq_wake_enabled = false;
++		if (alarm->irq_wake_enabled) {
++			disable_irq_wake(alarm->irq);
++			alarm->irq_wake_enabled = false;
++		}
+ 	}
++	cancel_delayed_work_sync(&alarm->alarm_poll_work);
+ }
+ 
+ static int bcl_alarm_irq_init(struct platform_device *pdev,
+@@ -1291,26 +1284,17 @@
+ 		if (ret)
+ 			return ret;
+ 
+-		/*
+-		 * Register the work cleanup action right after the IRQ is
+-		 * requested, before any other fallible step in this loop, so
+-		 * a delayed work scheduled by the IRQ handler is guaranteed to
+-		 * be canceled on teardown even if the wake cleanup registration
+-		 * below fails. Keeping it after the IRQ request also preserves
+-		 * safe devm LIFO teardown order.
+-		 */
++		/* Cancel work and wake before devm frees the requested IRQ. */
+ 		ret = devm_add_action_or_reset(&pdev->dev, bcl_alarm_work_cleanup_action,
+ 					       alarm);
+ 		if (ret)
+ 			return ret;
+ 
+-		if (!enable_irq_wake(irq_num))
+-			alarm->irq_wake_enabled = true;
+-
+-		ret = devm_add_action_or_reset(&pdev->dev, bcl_alarm_wake_cleanup_action,
+-					       alarm);
+-		if (ret)
+-			return ret;
++		/* The IRQ thread may already have disabled this alarm. */
++		scoped_guard(mutex, &alarm->a_lock) {
++			if (alarm->irq_enabled && !enable_irq_wake(irq_num))
++				alarm->irq_wake_enabled = true;
++		}
+ 	}
+ 
+ 	return 0;

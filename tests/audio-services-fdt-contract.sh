@@ -44,5 +44,23 @@ for node in slim@6C40000 i2c@88c000; do
 done
 profile=$root/audio-profile
 [[ -f $profile ]] || profile=$root/packaging/native/audio-profile
-test "$(cat "$profile")" = disabled
+case $(cat "$profile") in registration-only|hdmi-only|speakers|microphones) ;; *) exit 1;; esac
 printf 'Audio service FDT: native 1/2, OEM 3/7 retained, both DAIs and physical buses disabled.\n'
+
+printf '/dts-v1/;\n/plugin/;\n#include "%s/src/audio/sm7675-uke-audio-services.dtsi"\n#include "%s/src/audio/sm7675-uke-audio-card.dtsi"\n' "$root" "$root" > "$work/card.dts"
+cpp -nostdinc -undef -DUKE_AUDIO_CARD=1 -x assembler-with-cpp "$work/card.dts" > "$work/card.pp.dts"
+dtc -q -@ -I dts -O dtb -o "$work/card.dtbo" "$work/card.pp.dts"
+fdtoverlay -i "$work/base.dtb" -o "$work/card.dtb" "$work/card.dtbo"
+test "$(fdtget -t s "$work/card.dtb" "$gpr/service@1/dais" status)" = okay
+fdtget "$work/card.dtb" "$gpr/service@1/dais" xiaomi,registration-only >/dev/null
+if fdtget "$work/card.dtb" "$gpr/service@1/dais" iommus >/dev/null 2>&1; then
+ echo 'Registration-only frontends must not attach an IOMMU' >&2; exit 1
+fi
+test "$(fdtget -t s "$work/card.dtb" "$gpr/service@1/bedais" status)" = disabled
+test "$(fdtget -t s "$work/card.dtb" /sound-uke compatible)" = xiaomi,uke-audio-card
+test "$(fdtget -t x "$work/card.dtb" /sound-uke aux-devs)" = \
+    "$(fdtget -t x "$work/card.dtb" "$gpr/service@1/dais" phandle) $(fdtget -t x "$work/card.dtb" "$gpr/service@1" phandle)"
+for node in slim@6C40000 i2c@88c000; do
+ test "$(fdtget -t s "$work/card.dtb" "/soc/$node" status)" = disabled
+done
+printf 'Card FDT: guarded PCM first, APM second, backend/amp/SLIM disabled.\n'

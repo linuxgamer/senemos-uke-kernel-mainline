@@ -6,8 +6,8 @@
  * Source commit: 0d9f7fdf720ae9f4ecfbee4fadaf1e3b5c442e95
  * Register inventory checked against matching Uke stock DT.
  * Offsets here are relative to DPU @ ae01000, not stock MDP @ ae00000.
- * DP0 is described for a separate external-display graph; no MST, writeback or CWB.
- * Not registered/activated by the supported build. Hardware unvalidated.
+ * DP0 stream 0/1 uses INTF0/3, checked against the exact Uke OEM catalog.
+ * The native profile activates this catalog; physical MST remains unvalidated.
  */
 #ifndef _DPU_10_1_SM7675_H
 #define _DPU_10_1_SM7675_H
@@ -145,6 +145,11 @@ static const struct dpu_intf_cfg sm7675_intf[] = {
 	  .intr_underrun = DPU_IRQ_IDX(MDP_SSPP_TOP0_INTR, 28),
 	  .intr_vsync = DPU_IRQ_IDX(MDP_SSPP_TOP0_INTR, 29),
 	  .intr_tear_rd_ptr = DPU_IRQ_IDX(MDP_INTF2_TEAR_INTR, 2) },
+	{ .name = "intf_3", .id = INTF_3, .base = 0x37000, .len = 0x300,
+	  .type = INTF_DP,
+	  .controller_id = MSM_DP_CONTROLLER_0, .prog_fetch_lines_worst_case = 24,
+	  .intr_underrun = DPU_IRQ_IDX(MDP_SSPP_TOP0_INTR, 30),
+	  .intr_vsync = DPU_IRQ_IDX(MDP_SSPP_TOP0_INTR, 31) },
 };
 
 /* Retain donor QoS tables as an explicitly unvalidated integration gate. */

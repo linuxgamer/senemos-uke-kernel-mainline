@@ -1,0 +1,75 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH 3/3] drm/msm: order native Cliffs7 GPU probing after LLCC
+
+The native slice initializer runs once in the GPU constructor. For the
+explicit SM7675 LLCC graph, defer the GPU platform probe until the cache
+provider is bound instead of retaining failed descriptor lookups. Add a
+managed supplier link before checking readiness so removal and system-PM
+ordering follow the driver core. Leave legacy and other GPU paths alone.
+
+OEM comparison: MiCode/Xiaomi_Kernel_OpenSource 5712080a4b0c and Lineage
+Xiaomi SM8635 modules ed4ad0d1ad00, adreno.c/adreno_gen7.c.
+Native framework: Linux 7.2.11 and upstream f47d223627f8, adreno_device.c;
+Documentation/driver-api/device_link.rst. No GPU hardware command added.
+
+Signed-off-by: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+---
+--- a/drivers/gpu/drm/msm/adreno/adreno_device.c
++++ b/drivers/gpu/drm/msm/adreno/adreno_device.c
+@@ -8,6 +8,8 @@
+ 
+ #include "adreno_gpu.h"
+ 
++#include <linux/of_platform.h>
++
+ bool hang_debug = false;
+ MODULE_PARM_DESC(hang_debug, "Dump registers when hang is detected (can be slow!)");
+ module_param_named(hang_debug, hang_debug, bool, 0600);
+@@ -269,8 +271,47 @@
+ 	.unbind = adreno_unbind,
+ };
+ 
++static int adreno_link_llcc(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct device_node *node;
++	struct platform_device *supplier;
++	int ret = 0;
++
++	/* Only the explicit native Cliffs7 graph makes LLCC a required supplier. */
++	if (!of_device_is_compatible(dev->of_node, "qcom,adreno-43030b00"))
++		return 0;
++
++	node = of_find_compatible_node(NULL, NULL, "qcom,sm7675-llcc");
++	if (!node)
++		return 0;
++	if (!of_device_is_available(node)) {
++		of_node_put(node);
++		return 0;
++	}
++
++	supplier = of_find_device_by_node(node);
++	of_node_put(node);
++	if (!supplier)
++		return -EPROBE_DEFER;
++
++	if (!device_link_add(dev, &supplier->dev, DL_FLAG_AUTOREMOVE_CONSUMER))
++		ret = -ENOMEM;
++	else if (!device_is_bound(&supplier->dev))
++		ret = -EPROBE_DEFER;
++
++	put_device(&supplier->dev);
++	return ret;
++}
++
+ static int adreno_probe(struct platform_device *pdev)
+ {
++	int ret;
++
++	ret = adreno_link_llcc(pdev);
++	if (ret)
++		return ret;
++
+ 	if (of_device_is_compatible(pdev->dev.of_node, "amd,imageon") ||
+ 	    msm_gpu_no_components())
+ 		return msm_gpu_probe(pdev, &a3xx_ops);

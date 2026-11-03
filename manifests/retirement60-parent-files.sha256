@@ -1,0 +1,16 @@
+03fd86dbe08c1c6999695df14ec0016e0c3cb52bbf1e6806ead1d3a454db2350  drivers/gpu/drm/msm/Makefile
+bac3041539bc9273fc38187c6c85eec4e98548cee99d7e600941237dc4645aae  drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c
+ae704a7f7fe35d7dae2f3d493929d7e31740dc5da39a894d14a8e41e35b3d4cf  drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.h
+f15f49aa43850423d8e337e7d4b0b000c5449fa448934bcb8faac8113f0056b9  drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c
+d8c07333b43dccecade0a211372973df4412973ad614ffd3c45e029a8fc5fa6c  drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.h
+d57d84a4fbf4db92aa5240c114d310cc0549f03a0c0da640fa53e19642816714  drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys.h
+6a85e19769c1fd2c4f67b12b8131275269470a8d63f92031e83ccd45cb201d87  drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_cmd.c
+bc5009c8d53d180a6619330ed69471a3f2161c41491cc94ae7825abe71956421  drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_vid.c
+a5c1bdbe6881da1b3110a1f00d66c1d4d5f585c81a70f616e966ea7358bf2c57  drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_wb.c
+ee28c47a5ec683fce88e66dc8fcb0d9499d7466816d4d51f22151875f85290b8  drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
+0ca71c3946045c4d92c1d54ea4ace6f3d9898c5fcfa1eb2e4c89783a0303254b  drivers/gpu/drm/msm/msm_atomic.c
+42f78b88c2f3f6f519917259bb27c89cf8764fd3385173f546dfd3cb950b053b  drivers/gpu/drm/msm/msm_kms.h
+3eebc9a5ae77c7636a905483e559647173169e3419e05b0c8f1b77d0e51d418e  drivers/gpu/drm/msm/disp/dpu1/dpu_hw_intf.c
+6589d7676e5bb6721ab2d11104dd7ba0a03d128367565581109df15ec5e3dcd4  drivers/gpu/drm/msm/disp/dpu1/dpu_hw_top.c
+c66a80dde1a8cd1c5d8a3f09286ac7a94de0d6dc4e2f126297e9f9e4dd891ff3  drivers/gpu/drm/msm/disp/dpu1/dpu_hw_mdss.h
+3e708bfa9ebf15b52a4ecdc2f819da202643b0f9cdf7580de51c62a8b96eadfa  drivers/gpu/drm/msm/dsi/dsi_host.c

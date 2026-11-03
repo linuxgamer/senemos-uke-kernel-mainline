@@ -1,0 +1,33 @@
+From: Rob Clark <robin.clark@oss.qualcomm.com>
+Subject: [PATCH] drm/msm/gem: Add modparam to disable shrinker blocking
+
+Normally if we are under enough memory pressure, the shrinker will
+eventually start waiting for BOs to become idle. In some very latency
+sensitive use-cases this is undesirable.
+
+Upstream-Status: Submitted [https://lkml.iu.edu/hypermail/linux/kernel/2609.1/12644.html]
+Source: Rob Clark, v2 2/2, 12 September 2026. GPL-2.0-only.
+Signed-off-by: Rob Clark <robin.clark@oss.qualcomm.com>
+
+--- a/drivers/gpu/drm/msm/msm_gem_shrinker.c
++++ b/drivers/gpu/drm/msm/msm_gem_shrinker.c
+@@ -19,6 +19,10 @@
+ MODULE_PARM_DESC(enable_eviction, "Enable swappable GEM buffers");
+ module_param(enable_eviction, bool, 0600);
+ 
++static bool eviction_can_block = true;
++MODULE_PARM_DESC(eviction_can_block, "Enable blocking for GEM buffer to become idle for eviction");
++module_param(eviction_can_block, bool, 0600);
++
+ static bool can_swap(void)
+ {
+ 	return enable_eviction && get_nr_swap_pages() > 0;
+@@ -26,6 +30,8 @@
+ 
+ static bool can_block(struct shrink_control *sc)
+ {
++	if (!eviction_can_block)
++		return false;
+ 	return (sc->gfp_mask & __GFP_DIRECT_RECLAIM) ||
+ 	       (current_is_kswapd() && (sc->gfp_mask & __GFP_KSWAPD_RECLAIM));
+ }

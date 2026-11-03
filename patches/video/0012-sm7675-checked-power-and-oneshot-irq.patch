@@ -1,0 +1,819 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] media: iris: own Cliffs reset, retention and oneshot IRQ lifetime
+
+Follow OnePlus SM7675 1138e00f iris33 controller ordering and MiCode
+5712080a clk-branch retention bits. Use the native VIDEOCC regmap through
+an identity-checked provider helper. Keep partial startup and failed
+teardown resources owned, resume reset cleanup at the failed step, and
+never consume a PM reference twice after a failed put_sync.
+
+Use a platform-only oneshot IRQ thread with a runtime power reference.
+Enable after HFI ops and firmware setup; disable without waiting under
+the mutex taken by the thread. Keep legacy platform IRQ behavior.
+Preserve power errors through core and runtime PM cleanup. Firmware/PAS,
+runtime races and failed administrative removal still need target work.
+
+--- a/drivers/clk/qcom/videocc-sm8550.c
++++ b/drivers/clk/qcom/videocc-sm8550.c
+@@ -4,11 +4,14 @@
+  * SM7675 variant adapted from Alexandr Zubtsov's Palawan support.
+  */
+ 
++#include <linux/clk.h>
+ #include <linux/clk-provider.h>
++#include <linux/delay.h>
+ #include <linux/module.h>
+ #include <linux/platform_device.h>
+ #include <linux/regmap.h>
+ #include <linux/regulator/consumer.h>
++#include <linux/qcom-uke-video.h>
+ 
+ #include <dt-bindings/clock/qcom,sm7675-videocc.h>
+ 
+@@ -362,6 +365,45 @@
+ 	},
+ };
+ 
++/* MiCode uke-v-oss 5712080a, clk_branch2_set_flags(): CBCR bits 14/13. */
++int qcom_uke_videocc_set_retention(struct device *consumer, bool enable)
++{
++	const u32 mask = BIT(14) | BIT(13);
++	struct clk *clk;
++	struct clk_hw *hw;
++	struct device *provider;
++	u32 value;
++	int ret;
++
++	if (!of_machine_is_compatible("xiaomi,uke") ||
++	    !of_device_is_compatible(consumer->of_node, "qcom,sm7675-iris"))
++		return -ENODEV;
++	clk = clk_get(consumer, "core");
++	if (IS_ERR(clk))
++		return PTR_ERR(clk);
++	hw = __clk_get_hw(clk);
++	provider = hw ? clk_hw_get_dev(hw) : NULL;
++	if (hw != &video_cc_mvs0c_clk.clkr.hw || !provider ||
++	    !of_device_is_compatible(provider->of_node, "qcom,sm7675-videocc")) {
++		ret = -ENODEV;
++		goto out;
++	}
++	ret = regmap_update_bits(video_cc_mvs0c_clk.clkr.regmap,
++				video_cc_mvs0c_clk.halt_reg, mask, enable ? mask : 0);
++	if (ret)
++		goto out;
++	/* Match the OEM settling interval and reject an ignored retention write. */
++	udelay(1);
++	ret = regmap_read(video_cc_mvs0c_clk.clkr.regmap,
++			  video_cc_mvs0c_clk.halt_reg, &value);
++	if (!ret && (value & mask) != (enable ? mask : 0))
++		ret = -EACCES;
++out:
++	clk_put(clk);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(qcom_uke_videocc_set_retention);
++
+ static struct clk_branch video_cc_mvs0c_shift_clk = {
+ 	.halt_reg = 0x812c,
+ 	.halt_check = BRANCH_HALT_VOTED,
+--- a/drivers/media/platform/qcom/iris/iris_core.c
++++ b/drivers/media/platform/qcom/iris/iris_core.c
+@@ -33,8 +33,14 @@
+ 			goto unlock;
+ 		}
+ 
+-		if (running)
+-			iris_vpu_power_off(core);
++		if (running || core->fw_memory) {
++			error = iris_vpu_power_off(core);
++			if (error) {
++				dev_err(core->dev, "power off failed: %d; retaining resources\n", error);
++				core->state = IRIS_CORE_ERROR;
++				goto unlock;
++			}
++		}
+ 
+ 		error = iris_hfi_queues_deinit(core);
+ 		core->state = error ? IRIS_CORE_ERROR : IRIS_CORE_DEINIT;
+@@ -68,7 +74,10 @@
+ 	int ret, error;
+ 
+ 	mutex_lock(&core->lock);
+-	if (core->state == IRIS_CORE_INIT) {
++	if (core->removing) {
++		ret = -ENODEV;
++		goto exit;
++	} else if (core->state == IRIS_CORE_INIT) {
+ 		ret = 0;
+ 		goto exit;
+ 	} else if (core->state == IRIS_CORE_ERROR) {
+@@ -89,6 +98,7 @@
+ 	ret = iris_fw_load(core);
+ 	if (ret)
+ 		goto error_unload_fw;
++	core->iris_firmware_data->init_hfi_ops(core);
+ 
+ 	ret = iris_vpu_boot_firmware(core);
+ 	if (ret)
+@@ -98,7 +108,7 @@
+ 	if (ret)
+ 		goto error_unload_fw;
+ 
+-	core->iris_firmware_data->init_hfi_ops(core);
++	iris_vpu_enable_irq(core);
+ 
+ 	ret = iris_hfi_core_init(core);
+ 	if (ret)
+@@ -116,7 +126,11 @@
+ 		ret = error;
+ 		goto exit;
+ 	}
+-	iris_vpu_power_off(core);
++	error = iris_vpu_power_off(core);
++	if (error) {
++		ret = error;
++		goto error;
++	}
+ error_queue_deinit:
+ 	error = iris_hfi_queues_deinit(core);
+ 	if (error)
+--- a/drivers/media/platform/qcom/iris/iris_core.h
++++ b/drivers/media/platform/qcom/iris/iris_core.h
+@@ -77,6 +77,8 @@
+  * @instances: a list_head of all instances
+  * @fw_memory: platform-owned firmware mappings retained until a successful teardown
+  * @fw_loaded: firmware authenticated and not yet shut down successfully
++ * @irq_enabled: SM7675 oneshot IRQ enable owned by the core lock
++ * @removing: prevent initialization and IRQ enable during driver removal
+  * @inst_fw_caps_dec: an array of supported instance capabilities by decoder
+  * @inst_fw_caps_enc: an array of supported instance capabilities by encoder
+  */
+@@ -107,6 +109,8 @@
+ 	const struct iris_firmware_desc		*iris_firmware_desc;
+ 	struct iris_fw_memory			*fw_memory;
+ 	bool					fw_loaded;
++	bool					irq_enabled;
++	bool					removing;
+ 	const struct qcom_ubwc_cfg_data		*ubwc_cfg;
+ 	enum iris_core_state			state;
+ 	dma_addr_t				iface_q_table_daddr;
+--- a/drivers/media/platform/qcom/iris/iris_hfi_common.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_common.c
+@@ -117,6 +117,37 @@
+ 	return IRQ_HANDLED;
+ }
+ 
++/* SM7675 uses IRQF_ONESHOT and holds runtime power throughout response handling. */
++irqreturn_t iris_hfi_oneshot_handler(int irq, void *data)
++{
++	struct iris_core *core = data;
++	int ret;
++
++	if (!core)
++		return IRQ_NONE;
++	ret = pm_runtime_resume_and_get(core->dev);
++	mutex_lock(&core->lock);
++	if (ret < 0) {
++		iris_vpu_disable_irq(core);
++		core->state = IRIS_CORE_ERROR;
++		mutex_unlock(&core->lock);
++		return IRQ_HANDLED;
++	}
++	if (!core->irq_enabled || core->removing || core->state != IRIS_CORE_INIT) {
++		mutex_unlock(&core->lock);
++		goto put;
++	}
++	iris_vpu_clear_interrupt(core);
++	if (iris_vpu_watchdog(core, core->intr_status))
++		iris_vpu_disable_irq(core);
++	mutex_unlock(&core->lock);
++	core->hfi_sys_ops->sys_hfi_response_handler(core);
++put:
++	pm_runtime_mark_last_busy(core->dev);
++	pm_runtime_put_autosuspend(core->dev);
++	return IRQ_HANDLED;
++}
++
+ int iris_hfi_pm_suspend(struct iris_core *core)
+ {
+ 	int ret;
+@@ -132,7 +163,11 @@
+ 	if (ret)
+ 		goto error;
+ 
+-	iris_vpu_power_off(core);
++	ret = iris_vpu_power_off(core);
++	if (ret) {
++		core->state = IRIS_CORE_ERROR;
++		goto error;
++	}
+ 
+ 	return 0;
+ 
+@@ -162,6 +197,7 @@
+ 	ret = iris_vpu_switch_to_hwmode(core);
+ 	if (ret)
+ 		goto err_suspend_hw;
++	iris_vpu_enable_irq(core);
+ 
+ 	ret = ops->sys_interframe_powercollapse(core);
+ 	if (ret)
+@@ -172,7 +208,14 @@
+ err_suspend_hw:
+ 	iris_set_hw_state(core, false);
+ err_power_off:
+-	iris_vpu_power_off(core);
++	{
++		int error = iris_vpu_power_off(core);
++
++		if (error) {
++			core->state = IRIS_CORE_ERROR;
++			ret = error;
++		}
++	}
+ error:
+ 	dev_err(core->dev, "failed to resume\n");
+ 
+--- a/drivers/media/platform/qcom/iris/iris_hfi_common.h
++++ b/drivers/media/platform/qcom/iris/iris_hfi_common.h
+@@ -158,5 +158,6 @@
+ 
+ irqreturn_t iris_hfi_isr(int irq, void *data);
+ irqreturn_t iris_hfi_isr_handler(int irq, void *data);
++irqreturn_t iris_hfi_oneshot_handler(int irq, void *data);
+ 
+ #endif
+--- a/drivers/media/platform/qcom/iris/iris_platform_sm7675.h
++++ b/drivers/media/platform/qcom/iris/iris_platform_sm7675.h
+@@ -4,7 +4,7 @@
+ #define __IRIS_PLATFORM_SM7675_H__
+ 
+ /* Native startup names: GCC AXI reset and MVS0C clock ARES, not OEM IDs. */
+-static const char * const sm7675_clk_reset_table[] = { "bus", "core" };
++static const char * const sm7675_clk_reset_table[] = { "bus", "core", "vcodec" };
+ static const char * const sm7675_controller_reset_table[] = { "xo" };
+ 
+ /* Common non-AV1 decoder limits across the inspected Cliffs SKU tables. */
+--- a/drivers/media/platform/qcom/iris/iris_probe.c
++++ b/drivers/media/platform/qcom/iris/iris_probe.c
+@@ -15,6 +15,7 @@
+ #include "iris_core.h"
+ #include "iris_ctrls.h"
+ #include "iris_vidc.h"
++#include "iris_vpu_common.h"
+ 
+ static int iris_init_icc(struct iris_core *core)
+ {
+@@ -202,6 +203,13 @@
+ 	core = platform_get_drvdata(pdev);
+ 	if (!core)
+ 		return;
++	mutex_lock(&core->lock);
++	core->removing = true;
++	iris_vpu_disable_irq(core);
++	mutex_unlock(&core->lock);
++	if (core->iris_platform_data->vpu_ops->power_off)
++		synchronize_irq(core->irq);
++	cancel_delayed_work_sync(&core->sys_error_handler);
+ 
+ 	iris_core_deinit(core);
+ 
+@@ -259,7 +267,13 @@
+ 	if (IS_ERR(core->ubwc_cfg))
+ 		return PTR_ERR(core->ubwc_cfg);
+ 
+-	ret = devm_request_threaded_irq(core->dev, core->irq, iris_hfi_isr,
++	if (core->iris_platform_data->vpu_ops->power_off)
++		ret = devm_request_threaded_irq(core->dev, core->irq, NULL,
++					iris_hfi_oneshot_handler,
++					IRQF_ONESHOT | IRQF_TRIGGER_HIGH | IRQF_NO_AUTOEN,
++					"iris", core);
++	else
++		ret = devm_request_threaded_irq(core->dev, core->irq, iris_hfi_isr,
+ 					iris_hfi_isr_handler,
+ 					IRQF_TRIGGER_HIGH | IRQF_NO_AUTOEN,
+ 					"iris", core);
+--- a/drivers/media/platform/qcom/iris/iris_sm7675_memory.c
++++ b/drivers/media/platform/qcom/iris/iris_sm7675_memory.c
+@@ -7,16 +7,25 @@
+  */
+ #include <linux/dma-mapping.h>
+ #include <linux/iommu.h>
++#include <linux/iopoll.h>
++#include <linux/pm_domain.h>
++#include <linux/pm_runtime.h>
++#include <linux/qcom-uke-video.h>
++#include <linux/reset.h>
+ #include <linux/slab.h>
+ 
+ #include "iris_core.h"
+ #include "iris_vpu_common.h"
++#include "iris_vpu_register_defines.h"
+ 
+ struct iris_fw_memory {
+ 	struct iommu_domain *domain;
+ 	void *mmap;
+ 	dma_addr_t mmap_dma;
+ 	u32 mapped;
++	u32 power;
++	u32 off_step;
++	int power_error;
+ };
+ 
+ static const struct {
+@@ -36,6 +45,8 @@
+ 
+ 	if (!memory)
+ 		return 0;
++	if (memory->power || memory->off_step || memory->power_error)
++		return -EBUSY;
+ 
+ 	for (i = ARRAY_SIZE(sm7675_fw_regions) - 1; i >= 0; i--) {
+ 		if (!(memory->mapped & BIT(i)))
+@@ -131,3 +142,279 @@
+ 
+ 	return 0;
+ }
++
++/* Native PM references and the OEM reset transaction have different lifetimes. */
++#define SM7675_CTRL_PD BIT(0)
++#define SM7675_HW_PD BIT(1)
++#define SM7675_AXI_CLK BIT(2)
++#define SM7675_CTRL_CLK BIT(3)
++#define SM7675_HW_CLK BIT(4)
++#define SM7675_BUS_RESET BIT(5)
++#define SM7675_CORE_RESET BIT(6)
++
++#define SM7675_NOC_RESET (AON_BASE_OFFS + 0x18)
++#define SM7675_NOC_CLOCK (AON_BASE_OFFS + 0x20)
++#define SM7675_AON_SPARE (AON_BASE_OFFS + 0x28)
++
++enum sm7675_reset { SM7675_BUS, SM7675_CORE, SM7675_VCODEC };
++enum sm7675_off_step {
++	SM7675_OFF_HW,
++	SM7675_OFF_CPU,
++	SM7675_OFF_BUS_ASSERT,
++	SM7675_OFF_VCODEC_ASSERT,
++	SM7675_OFF_RETAIN,
++	SM7675_OFF_CORE_ASSERT,
++	SM7675_OFF_VCODEC_DEASSERT,
++	SM7675_OFF_BUS_DEASSERT,
++	SM7675_OFF_CORE_DEASSERT,
++	SM7675_OFF_NOC,
++	SM7675_OFF_XO_ASSERT,
++	SM7675_OFF_XO_DEASSERT,
++	SM7675_OFF_CLOCKS,
++	SM7675_OFF_RELEASE,
++};
++
++int iris_sm7675_power_on_controller(struct iris_core *core)
++{
++	struct iris_fw_memory *memory = core->fw_memory;
++	int ret;
++
++	if (!memory || memory->power || memory->off_step || memory->power_error)
++		return -EBUSY;
++	ret = iris_enable_power_domains(core, core->pmdomain_tbl->pd_devs[IRIS_CTRL_POWER_DOMAIN]);
++	if (ret < 0)
++		return ret;
++	memory->power |= SM7675_CTRL_PD;
++	/* Keep possible asserted state even if the reset readback fails. */
++	memory->power |= SM7675_BUS_RESET;
++	ret = reset_control_assert(core->resets[SM7675_BUS].rstc);
++	if (ret)
++		return ret;
++	memory->power |= SM7675_CORE_RESET;
++	ret = reset_control_assert(core->resets[SM7675_CORE].rstc);
++	if (ret)
++		return ret;
++	usleep_range(1000, 1100);
++	ret = reset_control_deassert(core->resets[SM7675_BUS].rstc);
++	if (ret)
++		return ret;
++	memory->power &= ~SM7675_BUS_RESET;
++	ret = reset_control_deassert(core->resets[SM7675_CORE].rstc);
++	if (ret)
++		return ret;
++	memory->power &= ~SM7675_CORE_RESET;
++	ret = iris_prepare_enable_clock(core, IRIS_AXI_CLK);
++	if (ret)
++		return ret;
++	memory->power |= SM7675_AXI_CLK;
++	ret = iris_prepare_enable_clock(core, IRIS_CTRL_CLK);
++	if (!ret)
++		memory->power |= SM7675_CTRL_CLK;
++	return ret;
++}
++
++int iris_sm7675_power_on_hw(struct iris_core *core)
++{
++	struct iris_fw_memory *memory = core->fw_memory;
++	int ret;
++
++	ret = iris_enable_power_domains(core, core->pmdomain_tbl->pd_devs[IRIS_HW_POWER_DOMAIN]);
++	if (ret < 0)
++		return ret;
++	memory->power |= SM7675_HW_PD;
++	ret = iris_prepare_enable_clock(core, IRIS_HW_CLK);
++	if (!ret)
++		memory->power |= SM7675_HW_CLK;
++	return ret;
++}
++
++static int iris_sm7675_put_domain(struct iris_core *core, u32 flag, unsigned int id)
++{
++	struct iris_fw_memory *memory = core->fw_memory;
++	int ret;
++
++	if (!(memory->power & flag))
++		return 0;
++	/* put_sync consumes the reference even on error; never put it twice. */
++	memory->power &= ~flag;
++	ret = pm_runtime_put_sync(core->pmdomain_tbl->pd_devs[id]);
++	if (ret < 0)
++		memory->power_error = ret;
++	return ret < 0 ? ret : 0;
++}
++
++int iris_sm7675_power_off(struct iris_core *core)
++{
++	struct iris_fw_memory *memory = core->fw_memory;
++	u32 value;
++	int ret;
++
++	if (!memory)
++		return 0;
++	if (memory->power_error)
++		return memory->power_error;
++	/* Startup failed before the controller clock became accessible. */
++	if (!(memory->power & SM7675_CTRL_CLK)) {
++		if (memory->power & SM7675_CORE_RESET) {
++			ret = reset_control_deassert(core->resets[SM7675_CORE].rstc);
++			if (ret)
++				return ret;
++			memory->power &= ~SM7675_CORE_RESET;
++		}
++		if (memory->power & SM7675_BUS_RESET) {
++			ret = reset_control_deassert(core->resets[SM7675_BUS].rstc);
++			if (ret)
++				return ret;
++			memory->power &= ~SM7675_BUS_RESET;
++		}
++		goto release;
++	}
++
++	/* Resume at the failed step; do not poll the CPU while its reset is held. */
++	switch (memory->off_step) {
++	case SM7675_OFF_HW:
++		if (memory->power & SM7675_HW_PD) {
++			ret = dev_pm_genpd_set_hwmode(core->pmdomain_tbl->pd_devs[IRIS_HW_POWER_DOMAIN],
++						    false);
++			if (ret)
++				return ret;
++			if ((memory->power & SM7675_HW_CLK) && !iris_vpu3x_hw_power_collapsed(core)) {
++				ret = iris_vpu33_2p_quiesce(core);
++				if (ret)
++					return ret;
++			}
++			ret = iris_sm7675_put_domain(core, SM7675_HW_PD, IRIS_HW_POWER_DOMAIN);
++			if (ret)
++				return ret;
++		}
++		memory->off_step = SM7675_OFF_CPU;
++		fallthrough;
++	case SM7675_OFF_CPU:
++		writel(MSK_SIGNAL_FROM_TENSILICA | MSK_CORE_POWER_ON,
++		       core->reg_base + CPU_CS_X2RPMH);
++		value = readl(core->reg_base + WRAPPER_IRIS_CPU_NOC_LPI_CONTROL);
++		writel(value | BIT(0), core->reg_base + WRAPPER_IRIS_CPU_NOC_LPI_CONTROL);
++		ret = readl_poll_timeout(core->reg_base + WRAPPER_IRIS_CPU_NOC_LPI_STATUS,
++					value, value & BIT(0), 200, 2000);
++		if (ret)
++			return ret;
++		writel(0, core->reg_base + WRAPPER_DEBUG_BRIDGE_LPI_CONTROL);
++		ret = readl_poll_timeout(core->reg_base + WRAPPER_DEBUG_BRIDGE_LPI_STATUS,
++					value, value == 0, 200, 2000);
++		if (ret)
++			return ret;
++		writel(CTL_AXI_CLK_HALT | CTL_CLK_HALT,
++		       core->reg_base + WRAPPER_TZ_CTL_AXI_CLOCK_CONFIG);
++		writel(RESET_HIGH, core->reg_base + WRAPPER_TZ_QNS4PDXFIFO_RESET);
++		writel(0, core->reg_base + WRAPPER_TZ_QNS4PDXFIFO_RESET);
++		writel(0, core->reg_base + WRAPPER_TZ_CTL_AXI_CLOCK_CONFIG);
++		memory->off_step = SM7675_OFF_BUS_ASSERT;
++		fallthrough;
++	case SM7675_OFF_BUS_ASSERT:
++		ret = reset_control_assert(core->resets[SM7675_BUS].rstc);
++		if (ret)
++			return ret;
++		memory->off_step = SM7675_OFF_VCODEC_ASSERT;
++		fallthrough;
++	case SM7675_OFF_VCODEC_ASSERT:
++		ret = reset_control_assert(core->resets[SM7675_VCODEC].rstc);
++		if (ret)
++			return ret;
++		memory->off_step = SM7675_OFF_RETAIN;
++		fallthrough;
++	case SM7675_OFF_RETAIN:
++		ret = qcom_uke_videocc_set_retention(core->dev, true);
++		if (ret)
++			return ret;
++		memory->off_step = SM7675_OFF_CORE_ASSERT;
++		fallthrough;
++	case SM7675_OFF_CORE_ASSERT:
++		ret = reset_control_assert(core->resets[SM7675_CORE].rstc);
++		if (ret)
++			return ret;
++		usleep_range(400, 500);
++		memory->off_step = SM7675_OFF_VCODEC_DEASSERT;
++		fallthrough;
++	case SM7675_OFF_VCODEC_DEASSERT:
++		ret = reset_control_deassert(core->resets[SM7675_VCODEC].rstc);
++		if (ret)
++			return ret;
++		memory->off_step = SM7675_OFF_BUS_DEASSERT;
++		fallthrough;
++	case SM7675_OFF_BUS_DEASSERT:
++		ret = reset_control_deassert(core->resets[SM7675_BUS].rstc);
++		if (ret)
++			return ret;
++		memory->off_step = SM7675_OFF_CORE_DEASSERT;
++		fallthrough;
++	case SM7675_OFF_CORE_DEASSERT:
++		ret = reset_control_deassert(core->resets[SM7675_CORE].rstc);
++		if (ret)
++			return ret;
++		memory->off_step = SM7675_OFF_NOC;
++		fallthrough;
++	case SM7675_OFF_NOC:
++		value = readl(core->reg_base + SM7675_NOC_CLOCK);
++		writel(value | BIT(0), core->reg_base + SM7675_NOC_CLOCK);
++		value = readl(core->reg_base + SM7675_NOC_RESET);
++		writel(value | BIT(0), core->reg_base + SM7675_NOC_RESET);
++		ret = readl_poll_timeout(core->reg_base + SM7675_AON_SPARE,
++					value, !(value & BIT(0)), 1000, 50000);
++		if (ret)
++			return ret;
++		writel(value | BIT(1), core->reg_base + SM7675_AON_SPARE);
++		memory->off_step = SM7675_OFF_XO_ASSERT;
++		fallthrough;
++	case SM7675_OFF_XO_ASSERT:
++		ret = reset_control_assert(core->controller_resets[0].rstc);
++		if (ret)
++			return ret;
++		value = readl(core->reg_base + SM7675_NOC_RESET);
++		writel(value & ~BIT(0), core->reg_base + SM7675_NOC_RESET);
++		usleep_range(80, 100);
++		memory->off_step = SM7675_OFF_XO_DEASSERT;
++		fallthrough;
++	case SM7675_OFF_XO_DEASSERT:
++		ret = reset_control_deassert(core->controller_resets[0].rstc);
++		if (ret)
++			return ret;
++		value = readl(core->reg_base + SM7675_AON_SPARE);
++		writel(value & ~BIT(1), core->reg_base + SM7675_AON_SPARE);
++		value = readl(core->reg_base + SM7675_NOC_CLOCK);
++		writel(value & ~BIT(0), core->reg_base + SM7675_NOC_CLOCK);
++		memory->off_step = SM7675_OFF_CLOCKS;
++		fallthrough;
++	case SM7675_OFF_CLOCKS:
++		if (memory->power & SM7675_HW_CLK) {
++			ret = iris_disable_unprepare_clock(core, IRIS_HW_CLK);
++			if (ret)
++				return ret;
++			memory->power &= ~SM7675_HW_CLK;
++		}
++		ret = qcom_uke_videocc_set_retention(core->dev, false);
++		if (ret)
++			return ret;
++		ret = iris_disable_unprepare_clock(core, IRIS_CTRL_CLK);
++		if (ret)
++			return ret;
++		memory->power &= ~SM7675_CTRL_CLK;
++		memory->off_step = SM7675_OFF_RELEASE;
++		fallthrough;
++	case SM7675_OFF_RELEASE:
++		break;
++	default:
++		return -EINVAL;
++	}
++release:
++	ret = iris_sm7675_put_domain(core, SM7675_CTRL_PD, IRIS_CTRL_POWER_DOMAIN);
++	if (ret)
++		return ret;
++	if (memory->power & SM7675_AXI_CLK) {
++		ret = iris_disable_unprepare_clock(core, IRIS_AXI_CLK);
++		if (ret)
++			return ret;
++		memory->power &= ~SM7675_AXI_CLK;
++	}
++	memory->off_step = SM7675_OFF_HW;
++	return 0;
++}
+--- a/drivers/media/platform/qcom/iris/iris_vpu3x.c
++++ b/drivers/media/platform/qcom/iris/iris_vpu3x.c
+@@ -19,7 +19,7 @@
+ #define NOC_HALT				BIT(0)
+ #define AON_WRAPPER_SPARE			(AON_BASE_OFFS + 0x28)
+ 
+-static bool iris_vpu3x_hw_power_collapsed(struct iris_core *core)
++bool iris_vpu3x_hw_power_collapsed(struct iris_core *core)
+ {
+ 	u32 value, pwr_status;
+ 
+@@ -136,7 +136,7 @@
+ 	iris_vpu_power_off_hw(core);
+ }
+ 
+-static int iris_vpu33_2p_quiesce(struct iris_core *core)
++int iris_vpu33_2p_quiesce(struct iris_core *core)
+ {
+ 	u32 value, i, count, busy;
+ 	void __iomem *control = core->reg_base + AON_WRAPPER_MVP_NOC_LPI_CONTROL;
+@@ -191,24 +191,6 @@
+ 	return 0;
+ }
+ 
+-static void iris_vpu33_2p_power_off_hardware(struct iris_core *core)
+-{
+-	int ret;
+-
+-	if (iris_vpu3x_hw_power_collapsed(core))
+-		goto disable_power;
+-
+-	ret = dev_pm_genpd_set_hwmode(core->pmdomain_tbl->pd_devs[IRIS_HW_POWER_DOMAIN], false);
+-	if (!ret)
+-		ret = iris_vpu33_2p_quiesce(core);
+-	if (ret)
+-		dev_err(core->dev, "Iris33 2P quiesce failed: %d\n", ret);
+-
+-disable_power:
+-	/* Keep the native forced-shutdown policy; runtime fault handling is unqualified. */
+-	iris_vpu_power_off_hw(core);
+-}
+-
+ static void iris_vpu33_2p_set_preset_registers(struct iris_core *core)
+ {
+ 	iris_vpu33_2p_write_presets(core->reg_base);
+@@ -353,13 +335,12 @@
+ };
+ 
+ const struct vpu_ops iris_vpu33_2p_ops = {
++	.power_off = iris_sm7675_power_off,
+ 	.fw_memory_init = iris_sm7675_fw_memory_init,
+ 	.fw_memory_deinit = iris_sm7675_fw_memory_deinit,
+ 	.program_bootup_registers = iris_sm7675_program_bootup_registers,
+-	.power_off_hw = iris_vpu33_2p_power_off_hardware,
+-	.power_on_hw = iris_vpu_power_on_hw,
+-	.power_off_controller = iris_vpu33_power_off_controller,
+-	.power_on_controller = iris_vpu_power_on_controller,
++	.power_on_hw = iris_sm7675_power_on_hw,
++	.power_on_controller = iris_sm7675_power_on_controller,
+ 	.set_preset_registers = iris_vpu33_2p_set_preset_registers,
+ 	.calc_freq = iris_vpu3x_vpu4x_calculate_frequency,
+ 	.set_hwmode = iris_vpu_set_hwmode,
+--- a/drivers/media/platform/qcom/iris/iris_vpu_common.c
++++ b/drivers/media/platform/qcom/iris/iris_vpu_common.c
+@@ -236,8 +236,36 @@
+ 	iris_disable_unprepare_clock(core, IRIS_HW_CLK);
+ }
+ 
+-void iris_vpu_power_off(struct iris_core *core)
++void iris_vpu_enable_irq(struct iris_core *core)
+ {
++	if (core->iris_platform_data->vpu_ops->power_off &&
++	    !core->removing && !core->irq_enabled) {
++		core->irq_enabled = true;
++		enable_irq(core->irq);
++	}
++}
++
++void iris_vpu_disable_irq(struct iris_core *core)
++{
++	if (core->irq_enabled) {
++		core->irq_enabled = false;
++		/* The oneshot thread takes core->lock; waiting here would deadlock. */
++		disable_irq_nosync(core->irq);
++	}
++}
++
++int iris_vpu_power_off(struct iris_core *core)
++{
++	int ret;
++
++	if (core->iris_platform_data->vpu_ops->power_off) {
++		iris_vpu_disable_irq(core);
++		ret = core->iris_platform_data->vpu_ops->power_off(core);
++		if (ret)
++			return ret;
++		return iris_unset_icc_bw(core);
++	}
++
+ 	iris_opp_set_rate(core->dev, 0);
+ 	core->iris_platform_data->vpu_ops->power_off_hw(core);
+ 	core->iris_platform_data->vpu_ops->power_off_controller(core);
+@@ -245,6 +273,8 @@
+ 
+ 	if (!iris_vpu_watchdog(core, core->intr_status))
+ 		disable_irq(core->irq);
++
++	return 0;
+ }
+ 
+ int iris_vpu_power_on_controller(struct iris_core *core)
+@@ -480,8 +510,11 @@
+ 		goto err;
+ 
+ 	ret = core->iris_platform_data->vpu_ops->power_on_controller(core);
+-	if (ret)
++	if (ret) {
++		if (core->iris_platform_data->vpu_ops->power_off)
++			goto err_power_off_ctrl;
+ 		goto err_unvote_icc;
++	}
+ 
+ 	ret = core->iris_platform_data->vpu_ops->power_on_hw(core);
+ 	if (ret)
+@@ -498,14 +531,26 @@
+ 
+ 	iris_vpu_interrupt_init(core);
+ 	core->intr_status = 0;
+-	enable_irq(core->irq);
++	if (!core->iris_platform_data->vpu_ops->power_off)
++		enable_irq(core->irq);
+ 
+ 	return 0;
+ 
+ err_power_off_hw:
++	if (core->iris_platform_data->vpu_ops->power_off)
++		goto err_power_off_ctrl;
+ 	core->iris_platform_data->vpu_ops->power_off_hw(core);
+ err_power_off_ctrl:
+-	core->iris_platform_data->vpu_ops->power_off_controller(core);
++	if (core->iris_platform_data->vpu_ops->power_off) {
++		int error = core->iris_platform_data->vpu_ops->power_off(core);
++
++		if (error) {
++			ret = error;
++			goto err;
++		}
++	} else {
++		core->iris_platform_data->vpu_ops->power_off_controller(core);
++	}
+ err_unvote_icc:
+ 	iris_unset_icc_bw(core);
+ err:
+--- a/drivers/media/platform/qcom/iris/iris_vpu_common.h
++++ b/drivers/media/platform/qcom/iris/iris_vpu_common.h
+@@ -16,6 +16,8 @@
+ extern const struct vpu_ops iris_vpu4x_ops;
+ 
+ struct vpu_ops {
++	/* Optional complete, retryable platform teardown, including partial startup. */
++	int (*power_off)(struct iris_core *core);
+ 	void (*power_off_hw)(struct iris_core *core);
+ 	int (*power_on_hw)(struct iris_core *core);
+ 	int (*power_off_controller)(struct iris_core *core);
+@@ -40,13 +42,20 @@
+ int iris_vpu_power_on(struct iris_core *core);
+ int iris_vpu_power_off_controller(struct iris_core *core);
+ void iris_vpu_power_off_hw(struct iris_core *core);
+-void iris_vpu_power_off(struct iris_core *core);
++int iris_vpu_power_off(struct iris_core *core);
++void iris_vpu_enable_irq(struct iris_core *core);
++void iris_vpu_disable_irq(struct iris_core *core);
+ int iris_vpu35_vpu4x_power_off_controller(struct iris_core *core);
+ int iris_vpu35_vpu4x_power_on_controller(struct iris_core *core);
+ int iris_vpu35_vpu4x_program_bootup_registers(struct iris_core *core);
+ int iris_sm7675_fw_memory_init(struct iris_core *core);
+ int iris_sm7675_fw_memory_deinit(struct iris_core *core);
+ int iris_sm7675_program_bootup_registers(struct iris_core *core);
++int iris_sm7675_power_on_controller(struct iris_core *core);
++int iris_sm7675_power_on_hw(struct iris_core *core);
++int iris_sm7675_power_off(struct iris_core *core);
++int iris_vpu33_2p_quiesce(struct iris_core *core);
++bool iris_vpu3x_hw_power_collapsed(struct iris_core *core);
+ u64 iris_vpu3x_vpu4x_calculate_frequency(struct iris_inst *inst, size_t data_size);
+ 
+ void iris_vpu_set_preset_registers(struct iris_core *core);
+--- /dev/null
++++ b/include/linux/qcom-uke-video.h
+@@ -0,0 +1,18 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef _LINUX_QCOM_UKE_VIDEO_H
++#define _LINUX_QCOM_UKE_VIDEO_H
++
++#include <linux/device.h>
++#include <linux/errno.h>
++#include <linux/kconfig.h>
++
++/* Caller holds the Iris core lock and keeps the controller clock enabled. */
++#if IS_REACHABLE(CONFIG_SM_VIDEOCC_8550)
++int qcom_uke_videocc_set_retention(struct device *consumer, bool enable);
++#else
++static inline int qcom_uke_videocc_set_retention(struct device *consumer, bool enable)
++{
++	return -EOPNOTSUPP;
++}
++#endif
++#endif

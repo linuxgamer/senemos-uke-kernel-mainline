@@ -14,6 +14,10 @@
 #include <linux/i2c.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/of_platform.h>
+#include <linux/pinctrl/consumer.h>
+#include <linux/platform_device.h>
+#include <linux/reset-controller.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 #include <linux/usb/typec_dp.h>
@@ -55,6 +59,140 @@ struct uke_usbss {
 	bool applied, removing;
 };
 
+struct uke_codec_reset {
+	struct reset_controller_dev controller;
+	struct uke_usbss *usbss;
+	struct pinctrl *pinctrl;
+	struct pinctrl_state *active, *sleep;
+};
+
+/* OS3 WCD reset brackets LPASS GPIO12 with the USBSS threshold override. */
+static int uke_codec_reset_cycle(struct reset_controller_dev *controller,
+				unsigned long id)
+{
+	struct uke_codec_reset *r = container_of(controller, struct uke_codec_reset, controller);
+	struct uke_usbss *u = r->usbss;
+	unsigned int value;
+	bool protection_failed = false;
+	int ret, restore;
+
+	if (id)
+		return -EINVAL;
+	mutex_lock(&u->lock);
+	if (u->removing) {
+		ret = -ESHUTDOWN;
+		goto unlock;
+	}
+	ret = regmap_read(u->regmap, FSM_OVERRIDE, &value);
+	if (ret)
+		goto unlock;
+	if ((value & 0x7f) != 0x7f) {
+		ret = -EPROTO;
+		goto unlock;
+	}
+	ret = regmap_read(u->regmap, 0x1e, &value);
+	if (ret)
+		goto unlock;
+	if ((value & 0x0e) != 0x0c) {
+		ret = -EPROTO;
+		goto unlock;
+	}
+	ret = regmap_read(u->regmap, 0x21, &value);
+	if (ret)
+		goto unlock;
+	if ((value & 0x0e) != 0x0c) {
+		ret = -EPROTO;
+		goto unlock;
+	}
+	ret = regmap_clear_bits(u->regmap, FSM_OVERRIDE, BIT(3));
+	if (ret)
+		goto restore;
+	ret = regmap_update_bits(u->regmap, 0x1e, 0x0e, 0x08);
+	if (ret)
+		goto restore;
+	ret = regmap_update_bits(u->regmap, 0x21, 0x0e, 0x08);
+	if (ret)
+		goto restore;
+	ret = pinctrl_select_state(r->pinctrl, r->sleep);
+	if (ret)
+		goto restore;
+	usleep_range(80, 85);
+	ret = pinctrl_select_state(r->pinctrl, r->active);
+	if (ret)
+		goto restore;
+	usleep_range(80, 85);
+restore:
+	/* Attempt every protection restore; retain the first failure. */
+	restore = regmap_update_bits(u->regmap, 0x1e, 0x0e, 0x0c);
+	protection_failed |= !!restore;
+	if (!ret)
+		ret = restore;
+	restore = regmap_update_bits(u->regmap, 0x21, 0x0e, 0x0c);
+	protection_failed |= !!restore;
+	if (!ret)
+		ret = restore;
+	restore = regmap_set_bits(u->regmap, FSM_OVERRIDE, BIT(3));
+	protection_failed |= !!restore;
+	if (!ret)
+		ret = restore;
+	if (ret)
+		pinctrl_select_state(r->pinctrl, r->sleep);
+	if (protection_failed) {
+		u->applied = false;
+		u->last_error = ret;
+	}
+unlock:
+	mutex_unlock(&u->lock);
+	return ret;
+}
+
+static const struct reset_control_ops uke_codec_reset_ops = {
+	.reset = uke_codec_reset_cycle,
+};
+
+static int uke_codec_reset_probe(struct platform_device *pdev)
+{
+	struct device *dev = &pdev->dev;
+	struct uke_codec_reset *r;
+
+	if (!dev->parent || !dev->parent->of_node ||
+	    !of_device_is_compatible(dev->parent->of_node, "xiaomi,uke-wcd939x-typec"))
+		return -ENODEV;
+	r = devm_kzalloc(dev, sizeof(*r), GFP_KERNEL);
+	if (!r)
+		return -ENOMEM;
+	r->usbss = dev_get_drvdata(dev->parent);
+	if (!r->usbss)
+		return -EPROBE_DEFER;
+	r->pinctrl = devm_pinctrl_get(dev);
+	if (IS_ERR(r->pinctrl))
+		return dev_err_probe(dev, PTR_ERR(r->pinctrl), "codec reset pins unavailable\n");
+	r->active = pinctrl_lookup_state(r->pinctrl, "active");
+	if (IS_ERR(r->active))
+		return PTR_ERR(r->active);
+	r->sleep = pinctrl_lookup_state(r->pinctrl, "sleep");
+	if (IS_ERR(r->sleep))
+		return PTR_ERR(r->sleep);
+	r->controller = (struct reset_controller_dev) {
+		.dev = dev,
+		.owner = THIS_MODULE,
+		.ops = &uke_codec_reset_ops,
+		.of_node = dev->of_node,
+		.nr_resets = 1,
+		.of_reset_n_cells = 1,
+	};
+	return devm_reset_controller_register(dev, &r->controller);
+}
+
+static const struct of_device_id uke_codec_reset_match[] = {
+	{ .compatible = "xiaomi,uke-wcd939x-codec-reset" }, { }
+};
+MODULE_DEVICE_TABLE(of, uke_codec_reset_match);
+static struct platform_driver uke_codec_reset_driver = {
+	.probe = uke_codec_reset_probe,
+	.driver = { .name = "uke-wcd939x-codec-reset", .of_match_table = uke_codec_reset_match },
+};
+
 static const struct regmap_range_cfg uke_usbss_ranges[] = {
 	{ .range_min = 0, .range_max = 0x4c1, .selector_reg = 0,
 	  .selector_mask = 0xff, .window_start = 0, .window_len = 0x100 },
@@ -74,7 +212,6 @@ static int uke_usbss_apply(struct uke_usbss *u, enum typec_orientation orientati
 
 	if (u->removing)
 		return -ESHUTDOWN;
-	u->applied = false;
 	if (orientation != TYPEC_ORIENTATION_NONE &&
 	    orientation != TYPEC_ORIENTATION_NORMAL &&
 	    orientation != TYPEC_ORIENTATION_REVERSE) {
@@ -96,10 +233,11 @@ static int uke_usbss_apply(struct uke_usbss *u, enum typec_orientation orientati
 		goto failed;
 	}
 
+	if (u->applied && u->orientation == orientation &&
+	    u->mode == mode && u->svid == svid)
+		return 0;
 	u->applied = false;
 	ret = regmap_clear_bits(u->regmap, SWITCH_ENABLE, AUX_EN);
-	if (ret) goto failed;
-	ret = regmap_clear_bits(u->regmap, EQUALIZER, EQ_EN);
 	if (ret) goto failed;
 	ret = regmap_update_bits(u->regmap, SWITCH_SELECT, AUX_SEL | USB_SEL,
 				0x14 | (dp ? selection : 0));
@@ -130,6 +268,7 @@ static int uke_usbss_apply(struct uke_usbss *u, enum typec_orientation orientati
 	u->last_error = 0; u->applied = true;
 	return 0;
 failed:
+	u->applied = false;
 	/* Preserve the original errno even if this best-effort isolation also fails. */
 	regmap_clear_bits(u->regmap, SWITCH_ENABLE, AUX_EN | USB_EN);
 	regmap_clear_bits(u->regmap, EQUALIZER, EQ_EN);
@@ -237,8 +376,21 @@ static int uke_usbss_probe(struct i2c_client *client)
 	if (IS_ERR(u->sw)) { ret = PTR_ERR(u->sw); goto power_off; }
 	u->mux = typec_mux_register(dev, &mux);
 	if (IS_ERR(u->mux)) { ret = PTR_ERR(u->mux); goto unregister_switch; }
+	ret = devm_of_platform_populate(dev);
+	if (ret)
+		goto depopulate_children;
 	return 0;
+depopulate_children:
+	mutex_lock(&u->lock);
+	u->removing = true; u->applied = false;
+	mutex_unlock(&u->lock);
+	/* A failed population has no devres action to undo partial children. */
+	of_platform_depopulate(dev);
+	typec_mux_unregister(u->mux);
 unregister_switch:
+	mutex_lock(&u->lock);
+	u->removing = true; u->applied = false;
+	mutex_unlock(&u->lock);
 	typec_switch_unregister(u->sw);
 power_off:
 	gpiod_set_value_cansleep(u->reset, 1);
@@ -252,6 +404,7 @@ static void uke_usbss_remove(struct i2c_client *client)
 	mutex_lock(&u->lock);
 	u->removing = true; u->applied = false;
 	mutex_unlock(&u->lock);
+	devm_of_platform_depopulate(&client->dev);
 	typec_mux_unregister(u->mux); typec_switch_unregister(u->sw);
 	regmap_clear_bits(u->regmap, SWITCH_ENABLE, AUX_EN | USB_EN);
 	gpiod_set_value_cansleep(u->reset, 1);
@@ -266,6 +419,23 @@ static struct i2c_driver uke_usbss_driver = {
 	.driver = { .name = "wcd939x-uke-typec", .of_match_table = uke_usbss_match,
 		    .dev_groups = uke_usbss_groups },
 };
-module_i2c_driver(uke_usbss_driver);
+static int __init uke_usbss_init(void)
+{
+	int ret = platform_driver_register(&uke_codec_reset_driver);
+	if (ret)
+		return ret;
+	ret = i2c_add_driver(&uke_usbss_driver);
+	if (ret)
+		platform_driver_unregister(&uke_codec_reset_driver);
+	return ret;
+}
+module_init(uke_usbss_init);
+
+static void __exit uke_usbss_exit(void)
+{
+	i2c_del_driver(&uke_usbss_driver);
+	platform_driver_unregister(&uke_codec_reset_driver);
+}
+module_exit(uke_usbss_exit);
 MODULE_DESCRIPTION("Uke WCD939x USB2 and DisplayPort AUX Type-C routing");
 MODULE_LICENSE("GPL");

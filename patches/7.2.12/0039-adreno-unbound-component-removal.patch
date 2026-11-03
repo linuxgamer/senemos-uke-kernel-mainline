@@ -1,0 +1,30 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] drm/msm/adreno: match removal to the probe registration mode
+
+An unbound component has no master private data. Reading kms_init from that
+pointer faults while unloading MSM on a firmware-framebuffer system. Select
+component deletion or the independent GPU removal using the same condition as
+probe, including the Imageon path. Keep component and GPU lifetime paired.
+
+Observed on Uke with Linux 7.2.10, no native display master and default
+separate_gpu_kms=0; adreno_remove faults on a NULL private pointer.
+
+--- a/drivers/gpu/drm/msm/adreno/adreno_device.c
++++ b/drivers/gpu/drm/msm/adreno/adreno_device.c
+@@ -280,12 +280,11 @@
+ 
+ static void adreno_remove(struct platform_device *pdev)
+ {
+-	struct msm_drm_private *priv = platform_get_drvdata(pdev);
+-
+-	if (priv->kms_init)
+-		component_del(&pdev->dev, &a3xx_ops);
+-	else
++	if (of_device_is_compatible(pdev->dev.of_node, "amd,imageon") ||
++	    msm_gpu_no_components())
+ 		msm_gpu_remove(pdev, &a3xx_ops);
++	else
++		component_del(&pdev->dev, &a3xx_ops);
+ }
+ 
+ static void adreno_shutdown(struct platform_device *pdev)

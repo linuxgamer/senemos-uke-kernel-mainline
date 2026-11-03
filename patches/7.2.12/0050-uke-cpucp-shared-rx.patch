@@ -1,0 +1,49 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] mailbox: qcom: share the exact Uke CPUCP RX domains
+
+The OEM Cliffs RX aperture overlaps qcom-cpufreq-hw. Match the OEM
+nonexclusive mapping only after the existing machine and full resource
+contract passes. Keep modern platforms on devm_of_iomap and the Uke TX
+doorbell reserved. No registers or protocol semantics change.
+
+Source: MiCode/Xiaomi_Kernel_OpenSource
+Commit: 5712080a4b0c0b1a879e6d145c601c649ddaddfd
+File: drivers/soc/qcom/qcom_cpucp.c (GPL-2.0-only)
+
+Signed-off-by: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+---
+diff --git a/drivers/mailbox/qcom-cpucp-mbox.c b/drivers/mailbox/qcom-cpucp-mbox.c
+--- a/drivers/mailbox/qcom-cpucp-mbox.c
++++ b/drivers/mailbox/qcom-cpucp-mbox.c
+@@ -70,6 +70,22 @@
+ 		rx->start == 0x17d90000 && resource_size(rx) == 0x2000;
+ }
+ 
++static void __iomem *qcom_cpucp_map_rx(struct platform_device *pdev, bool uke_legacy)
++{
++	struct resource *res;
++	void __iomem *base;
++
++	if (!uke_legacy)
++		return devm_of_iomap(&pdev->dev, pdev->dev.of_node, 0, NULL);
++	if (!qcom_cpucp_uke_resources(pdev))
++		return ERR_PTR(-EINVAL);
++
++	/* The OEM RX domains share a page with qcom-cpufreq-hw. */
++	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
++	base = devm_ioremap(&pdev->dev, res->start, resource_size(res));
++	return base ? base : ERR_PTR(-ENOMEM);
++}
++
+ static irqreturn_t qcom_cpucp_uke_irq_fn(int irq, void *data)
+ {
+ 	struct qcom_cpucp_mbox *cpucp = data;
+@@ -244,7 +260,7 @@
+ 	if (!cpucp->chans)
+ 		return -ENOMEM;
+ 
+-	cpucp->rx_base = devm_of_iomap(dev, dev->of_node, data->uke_legacy ? 1 : 0, NULL);
++	cpucp->rx_base = qcom_cpucp_map_rx(pdev, data->uke_legacy);
+ 	if (IS_ERR(cpucp->rx_base))
+ 		return PTR_ERR(cpucp->rx_base);
+ 

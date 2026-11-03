@@ -1,0 +1,298 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] usb: add the full Uke Type-C PHY and firmware-role profile
+
+Source: MiCode/Xiaomi_Kernel_OpenSource 5712080a4b0c0b1a879e6d145c601c649ddaddfd
+Source: MiCode/kernel_devicetree 94c84aeb9e517dbde546fc732033c184094c8e57
+Source: MiCode/vendor_qcom_opensource_display-drivers 44275c404a677d9d9e5230fedd1af2ef02fc7b9a
+Base: Joint Uke kernel23 f429992feb638e7dffc0142ecb77c6b1a86fc16e
+License: GPL-2.0-only
+
+diff --git a/drivers/soc/qcom/pmic_glink.c b/drivers/soc/qcom/pmic_glink.c
+index 67eb394..5c08f77 100644
+--- a/drivers/soc/qcom/pmic_glink.c
++++ b/drivers/soc/qcom/pmic_glink.c
+@@ -412,6 +412,7 @@ static const struct pmic_glink_data pmic_glink_soccp_data = {
+ 
+ static const struct of_device_id pmic_glink_of_match[] = {
+ 	{ .compatible = "xiaomi,uke-pmic-glink", .data = &pmic_glink_uke_data },
++	{ .compatible = "xiaomi,uke-typec-pmic-glink", .data = &pmic_glink_adsp_data },
+ 	{ .compatible = "qcom,glymur-pmic-glink", .data = &pmic_glink_soccp_data },
+ 	{ .compatible = "qcom,kaanapali-pmic-glink", .data = &pmic_glink_soccp_data },
+ 	{ .compatible = "qcom,pmic-glink", .data = &pmic_glink_adsp_data },
+diff --git a/drivers/usb/dwc3/drd.c b/drivers/usb/dwc3/drd.c
+index f3e37d3..6ce989e 100644
+--- a/drivers/usb/dwc3/drd.c
++++ b/drivers/usb/dwc3/drd.c
+@@ -520,6 +520,9 @@ static int dwc3_setup_role_switch(struct dwc3 *dwc)
+ 	dwc3_role_switch.get = dwc3_usb_role_switch_get;
+ 	dwc3_role_switch.driver_data = dwc;
+ 	dwc3_role_switch.allow_userspace_control = true;
++	/* Firmware/UCSI is the sole role producer in the Uke full profile. */
++	if (of_device_is_compatible(dwc->dev->of_node, "qcom,sm7675-dwc3-typec"))
++		dwc3_role_switch.allow_userspace_control = false;
+ 	dwc->role_sw = usb_role_switch_register(dwc->dev, &dwc3_role_switch);
+ 	if (IS_ERR(dwc->role_sw))
+ 		return PTR_ERR(dwc->role_sw);
+diff --git a/drivers/usb/dwc3/dwc3-qcom.c b/drivers/usb/dwc3/dwc3-qcom.c
+index f4b2a3d..678830a 100644
+--- a/drivers/usb/dwc3/dwc3-qcom.c
++++ b/drivers/usb/dwc3/dwc3-qcom.c
+@@ -72,6 +72,7 @@ struct dwc3_qcom_port {
+ struct dwc3_qcom {
+ 	struct regulator *gdsc;
+ 	bool uke;
++	bool uke_typec;
+ 	struct device		*dev;
+ 	void __iomem		*qscratch_base;
+ 	struct dwc3		dwc;
+@@ -579,7 +580,9 @@ static void dwc3_qcom_set_role_notifier(struct dwc3 *dwc, enum usb_role next_rol
+ 		return;
+ 	}
+ 
+-	if (qcom->current_role == USB_ROLE_DEVICE)
++	if (qcom->uke_typec)
++		dwc3_qcom_vbus_override_enable(qcom, next_role == USB_ROLE_DEVICE);
++	else if (qcom->current_role == USB_ROLE_DEVICE)
+ 		dwc3_qcom_vbus_override_enable(qcom, false);
+ 	else if (qcom->current_role != USB_ROLE_DEVICE)
+ 		dwc3_qcom_vbus_override_enable(qcom, true);
+@@ -604,7 +607,7 @@ static void dwc3_qcom_run_stop_notifier(struct dwc3 *dwc, bool is_on)
+ 	 * setting of QSCRATCH VBUS_VALID to "1" to generate a connect
+ 	 * done event.
+ 	 */
+-	if (!is_on)
++	if (!is_on || (qcom->uke_typec && qcom->current_role != USB_ROLE_DEVICE))
+ 		return;
+ 
+ 	dwc3_qcom_vbus_override_enable(qcom, true);
+@@ -644,8 +647,10 @@ static int dwc3_qcom_uke_prepare(struct dwc3_qcom *qcom)
+ 
+ 		if (!name)
+ 			continue;
+-		if (!strcmp(name, "core_clk"))
+-			device_property_read_u32(qcom->dev, "qcom,core-clk-rate-disconnected", &rate);
++		if (!strcmp(name, "core_clk")) {
++			if (qcom->uke_typec) rate = 200000000;
++			else device_property_read_u32(qcom->dev, "qcom,core-clk-rate-disconnected", &rate);
++		}
+ 		else if (!strcmp(name, "sleep_clk"))
+ 			rate = 32000;
+ 		else if (!strcmp(name, "utmi_clk"))
+@@ -674,8 +679,13 @@ static int dwc3_qcom_probe(struct platform_device *pdev)
+ 		return -ENOMEM;
+ 
+ 	qcom->dev = &pdev->dev;
+-	qcom->uke = of_device_is_compatible(dev->of_node, "qcom,sm7675-dwc3");
+-	if (qcom->uke && usb_get_dr_mode(dev) != USB_DR_MODE_PERIPHERAL)
++	qcom->uke_typec = of_device_is_compatible(dev->of_node, "qcom,sm7675-dwc3-typec");
++	qcom->uke = qcom->uke_typec || of_device_is_compatible(dev->of_node, "qcom,sm7675-dwc3");
++	if (qcom->uke_typec && (usb_get_dr_mode(dev) != USB_DR_MODE_OTG ||
++	    !device_property_read_bool(dev, "usb-role-switch") ||
++	    !device_property_present(dev, "phys")))
++		return dev_err_probe(dev, -EINVAL, "Incomplete Uke Type-C PHY/role graph\n");
++	if (qcom->uke && !qcom->uke_typec && usb_get_dr_mode(dev) != USB_DR_MODE_PERIPHERAL)
+ 		return dev_err_probe(dev, -EOPNOTSUPP,
+ 				     "Uke host PHY/repeater/VBUS profile is not admitted\n");
+ 
+@@ -900,6 +910,7 @@ static const struct dev_pm_ops dwc3_qcom_dev_pm_ops = {
+ static const struct of_device_id dwc3_qcom_of_match[] = {
+ 	{ .compatible = "qcom,snps-dwc3" },
+ 	{ .compatible = "qcom,sm7675-dwc3" },
++	{ .compatible = "qcom,sm7675-dwc3-typec" },
+ 	{ }
+ };
+ MODULE_DEVICE_TABLE(of, dwc3_qcom_of_match);
+diff --git a/drivers/usb/phy/Kconfig b/drivers/usb/phy/Kconfig
+index 802b618..7a46b68 100644
+--- a/drivers/usb/phy/Kconfig
++++ b/drivers/usb/phy/Kconfig
+@@ -167,3 +167,4 @@ config USB_PHY_QCOM_UKE
+ 	depends on OF && REGULATOR && (ARCH_QCOM || COMPILE_TEST)
+ 	select USB_PHY
+ 	select USB_REPEATER
++	select GENERIC_PHY
+diff --git a/drivers/usb/phy/phy-msm-snps-eusb2-uke.c b/drivers/usb/phy/phy-msm-snps-eusb2-uke.c
+index 8dc00f3..e667374 100644
+--- a/drivers/usb/phy/phy-msm-snps-eusb2-uke.c
++++ b/drivers/usb/phy/phy-msm-snps-eusb2-uke.c
+@@ -21,6 +21,8 @@
+ #include <linux/regulator/consumer.h>
+ #include <linux/usb/phy.h>
+ #include <linux/usb/repeater.h>
++#include <linux/phy/phy.h>
++#include <linux/mutex.h>
+ 
+ /* Flag values from public Xiaomi include/linux/usb/dwc3-msm.h. */
+ #define PHY_HOST_MODE BIT(0)
+@@ -179,6 +181,8 @@ struct msm_eusb2_phy {
+ 	int			param_override_seq_cnt;
+ 
+ 	struct usb_repeater	*ur;
++	bool full_typec, generic_initialized;
++	struct mutex generic_lock;
+ };
+ 
+ static inline bool is_eud_debug_mode_active(struct msm_eusb2_phy *phy)
+@@ -510,7 +514,7 @@ static int msm_eusb2_phy_init_impl(struct usb_phy *uphy)
+ 	int ret;
+ 
+ 	dev_info(uphy->dev, "phy_flags:%x\n", phy->phy.flags);
+-	if (phy->phy.flags & PHY_HOST_MODE)
++	if ((phy->phy.flags & PHY_HOST_MODE) && !phy->full_typec)
+ 		return -EOPNOTSUPP;
+ 	if (is_eud_debug_mode_active(phy)) {
+ 		ret = msm_eusb2_phy_power(phy, true);
+@@ -699,6 +703,87 @@ static int msm_eusb2_phy_notify_disconnect(struct usb_phy *uphy,
+ 	return 0;
+ }
+ 
++/* The full profile exposes one generic PHY owner, retaining exact OEM power,
++ * clocks, reset and repeater tuning. The rescue profile keeps its legacy API.
++ */
++static int uke_eusb2_generic_init(struct phy *generic)
++{
++	struct msm_eusb2_phy *phy = phy_get_drvdata(generic);
++	int ret;
++	mutex_lock(&phy->generic_lock);
++	ret = msm_eusb2_phy_init(&phy->phy);
++	phy->generic_initialized = !ret;
++	phy->suspended = false;
++	mutex_unlock(&phy->generic_lock);
++	return ret;
++}
++
++static int uke_eusb2_generic_exit(struct phy *generic)
++{
++	struct msm_eusb2_phy *phy = phy_get_drvdata(generic);
++	int ret;
++	mutex_lock(&phy->generic_lock);
++	msm_eusb2_phy_clocks(phy, false);
++	ret = msm_eusb2_phy_power(phy, false);
++	if (!ret) ret = usb_repeater_reset(phy->ur, false);
++	if (!ret) ret = usb_repeater_powerdown(phy->ur);
++	phy->generic_initialized = false;
++	phy->init_error = ret;
++	mutex_unlock(&phy->generic_lock);
++	return ret;
++}
++
++static int uke_eusb2_generic_power_on(struct phy *generic)
++{
++	struct msm_eusb2_phy *phy = phy_get_drvdata(generic);
++	int ret;
++	mutex_lock(&phy->generic_lock);
++	ret = phy->init_error;
++	if (!ret)
++		ret = phy->generic_initialized ? msm_eusb2_phy_clocks(phy, true) : -EHOSTDOWN;
++	if (!ret) phy->suspended = false;
++	mutex_unlock(&phy->generic_lock);
++	return ret;
++}
++
++static int uke_eusb2_generic_power_off(struct phy *generic)
++{
++	struct msm_eusb2_phy *phy = phy_get_drvdata(generic);
++	/* Connected-bus retention matches OEM suspend. exit() releases the rails. */
++	mutex_lock(&phy->generic_lock);
++	msm_eusb2_phy_clocks(phy, false);
++	phy->suspended = true;
++	mutex_unlock(&phy->generic_lock);
++	return 0;
++}
++
++static int uke_eusb2_generic_mode(struct phy *generic, enum phy_mode mode, int submode)
++{
++	struct msm_eusb2_phy *phy = phy_get_drvdata(generic);
++	unsigned int flags;
++	int ret = 0;
++	if (mode != PHY_MODE_USB_HOST && mode != PHY_MODE_USB_DEVICE)
++		return -EOPNOTSUPP;
++	mutex_lock(&phy->generic_lock);
++	flags = mode == PHY_MODE_USB_HOST ? PHY_HOST_MODE : 0;
++	if ((phy->phy.flags & PHY_HOST_MODE) != flags) {
++		phy->phy.flags = (phy->phy.flags & ~PHY_HOST_MODE) | flags;
++		phy->ur->flags = phy->phy.flags;
++		if (phy->generic_initialized) {
++			ret = usb_repeater_init(phy->ur);
++			if (ret) phy->init_error = ret;
++		}
++	}
++	mutex_unlock(&phy->generic_lock);
++	return ret;
++}
++
++static const struct phy_ops uke_eusb2_generic_ops = {
++	.init = uke_eusb2_generic_init, .exit = uke_eusb2_generic_exit,
++	.power_on = uke_eusb2_generic_power_on, .power_off = uke_eusb2_generic_power_off,
++	.set_mode = uke_eusb2_generic_mode, .owner = THIS_MODULE,
++};
++
+ static unsigned int diag_probe;
+ module_param_named(diag_probe, diag_probe, uint, 0444);
+ 
+@@ -860,6 +945,21 @@ static int msm_eusb2_phy_probe_impl(struct platform_device *pdev)
+ 	phy->ur = ur;
+ 	phy->phy.dev = dev;
+ 	platform_set_drvdata(pdev, phy);
++	phy->full_typec = of_device_is_compatible(dev->of_node, "qcom,sm7675-eusb2-typec");
++	if (phy->full_typec) {
++		struct phy_provider *provider;
++		struct phy *generic;
++		if (is_eud_debug_mode_active(phy))
++			return dev_err_probe(dev, -EBUSY, "EUD owns the eUSB2 PHY\n");
++		if (!device_link_add(dev, ur->dev, DL_FLAG_AUTOREMOVE_CONSUMER))
++			return -ENOMEM;
++		mutex_init(&phy->generic_lock);
++		generic = devm_phy_create(dev, NULL, &uke_eusb2_generic_ops);
++		if (IS_ERR(generic)) return PTR_ERR(generic);
++		phy_set_drvdata(generic, phy);
++		provider = devm_of_phy_provider_register(dev, of_phy_simple_xlate);
++		return PTR_ERR_OR_ZERO(provider);
++	}
+ 
+ 	phy->phy.init			= msm_eusb2_phy_init;
+ 	phy->phy.set_suspend		= msm_eusb2_phy_set_suspend;
+@@ -896,7 +996,8 @@ static void msm_eusb2_phy_remove(struct platform_device *pdev)
+ {
+ 	struct msm_eusb2_phy *phy = platform_get_drvdata(pdev);
+ 
+-	usb_remove_phy(&phy->phy);
++	if (!phy->full_typec)
++		usb_remove_phy(&phy->phy);
+ 	msm_eusb2_phy_clocks(phy, false);
+ 	if (msm_eusb2_phy_power(phy, false))
+ 		return;
+@@ -905,6 +1006,7 @@ static void msm_eusb2_phy_remove(struct platform_device *pdev)
+ }
+ 
+ static const struct of_device_id msm_usb_id_table[] = {
++	{ .compatible = "qcom,sm7675-eusb2-typec" },
+ 	{
+ 		.compatible = "qcom,usb-snps-eusb2-phy",
+ 	},
+diff --git a/drivers/usb/typec/mux/Kconfig b/drivers/usb/typec/mux/Kconfig
+index 6dd8f96..2b3bcf5 100644
+--- a/drivers/usb/typec/mux/Kconfig
++++ b/drivers/usb/typec/mux/Kconfig
+@@ -95,4 +95,12 @@ config TYPEC_MUX_WCD939X_USBSS
+ 	  common USB Type-C connector.
+ 	  If compiled as a module, the module will be named wcd939x-usbss.
+ 
++config TYPEC_MUX_UKE_WCD939X
++	tristate "Uke WCD939x USB2 and DisplayPort AUX switch"
++	depends on I2C && OF
++	select REGMAP_I2C
++	help
++	  Exact Uke WCD2.0 Type-C USB2/AUX routing. Firmware owns CC/PD.
++	  The fixed USB2 rescue profile uses its existing separate driver.
++
+ endmenu
+diff --git a/drivers/usb/typec/mux/Makefile b/drivers/usb/typec/mux/Makefile
+index b4f599e..95a6423 100644
+--- a/drivers/usb/typec/mux/Makefile
++++ b/drivers/usb/typec/mux/Makefile
+@@ -10,3 +10,4 @@ obj-$(CONFIG_TYPEC_MUX_PS883X)		+= ps883x.o
+ obj-$(CONFIG_TYPEC_MUX_PTN36502)	+= ptn36502.o
+ obj-$(CONFIG_TYPEC_MUX_TUSB1046)	+= tusb1046.o
+ obj-$(CONFIG_TYPEC_MUX_WCD939X_USBSS)	+= wcd939x-usbss.o
++obj-$(CONFIG_TYPEC_MUX_UKE_WCD939X) += wcd939x-uke-typec.o

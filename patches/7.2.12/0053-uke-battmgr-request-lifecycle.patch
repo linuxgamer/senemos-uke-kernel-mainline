@@ -1,0 +1,687 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] power: supply: serialize and qualify exact Uke charger replies
+
+Correlate owner/type/opcode/property/length under an IRQ-safe state lock, then
+commit the response in the serialized request context. Enable notifications
+through the same mutex without inventing undocumented ACK payload semantics.
+Return negative firmware failures, reject sentinel data and signed overflows,
+and expose read-only event generations without calling them firmware attach IDs.
+
+Timeout and interrupted delivery have no wire transaction ID to disambiguate a
+late reply. Keep that instance unavailable instead of replaying an uncertain
+SET. PDR up or resume alone cannot prove a drain boundary. Preserve the bounded
+SDP admission and keep every Uke battery setter blocked. No electrical profile,
+port owner, OEM protection or firmware/calibration data is changed.
+
+Direct protocol evidence: MiCode uke-v-oss
+5712080a4b0c0b1a879e6d145c601c649ddaddfd, qti_battery_charger.c;
+shared framework: upstream qcom_battmgr.c and pmic_glink.c (GPL-2.0-only).
+Source candidate only; tests and builds deliberately deferred by the user.
+
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -18,6 +18,9 @@
+ #include <linux/math.h>
+ #include <linux/math64.h>
+ #include <linux/units.h>
++#include <linux/ktime.h>
++#include <linux/pm.h>
++#include <linux/spinlock.h>
+ 
+ #define BATTMGR_CHEMISTRY_LEN	4
+ #define BATTMGR_STRING_LEN	128
+@@ -311,6 +314,26 @@
+ 	unsigned int current_max;
+ };
+ 
++/* No transaction ID is echoed by the Uke firmware. */
++struct qcom_battmgr_uke_transaction {
++	spinlock_t lock;
++	bool pending;
++	bool desynced;
++	bool suspended;
++	bool removing;
++	u32 generation;
++	u32 firmware_generation;
++	u32 source_generation;
++	u32 opcode;
++	u32 property;
++	u32 raw_result;
++	unsigned long deadline;
++	u64 receipt_ns;
++	u64 instance_ns;
++	size_t response_len;
++	struct qcom_battmgr_message response;
++};
++
+ struct qcom_battmgr {
+ 	struct device *dev;
+ 	struct pmic_glink_client *client;
+@@ -328,6 +351,7 @@
+ 	struct completion ack;
+ 
+ 	bool service_up;
++	struct qcom_battmgr_uke_transaction transaction;
+ 
+ 	struct qcom_battmgr_info info;
+ 	struct qcom_battmgr_status status;
+@@ -344,11 +368,109 @@
+ 	struct mutex lock;
+ };
+ 
++static void qcom_battmgr_sm8350_callback(struct qcom_battmgr *battmgr,
++				       const struct qcom_battmgr_message *resp, size_t len);
++
++static u32 qcom_battmgr_uke_generation(struct qcom_battmgr *battmgr)
++{
++	unsigned long flags;
++	u32 generation;
++
++	spin_lock_irqsave(&battmgr->transaction.lock, flags);
++	generation = battmgr->transaction.generation;
++	spin_unlock_irqrestore(&battmgr->transaction.lock, flags);
++	return generation;
++}
++
++static int qcom_battmgr_uke_request(struct qcom_battmgr *battmgr, void *data, size_t len)
++{
++	struct qcom_battmgr_uke_transaction *tx = &battmgr->transaction;
++	const struct qcom_battmgr_property_request *request = data;
++	const struct pmic_glink_hdr *hdr = data;
++	unsigned long flags, left;
++	u32 generation, opcode = le32_to_cpu(hdr->opcode);
++	int ret;
++
++	lockdep_assert_held(&battmgr->lock);
++	spin_lock_irqsave(&tx->lock, flags);
++	if (tx->removing)
++		ret = -ENODEV;
++	else if (tx->suspended)
++		ret = -EHOSTDOWN;
++	else if (tx->desynced)
++		ret = -EPIPE;
++	else if (!battmgr->service_up)
++		ret = -EAGAIN;
++	else
++		ret = 0;
++	if (ret)
++		goto out_unlock;
++
++	if (opcode == BATTMGR_REQUEST_NOTIFICATION &&
++	    len != sizeof(struct qcom_battmgr_enable_request)) {
++		ret = -EINVAL;
++		goto out_unlock;
++	}
++	if (opcode != BATTMGR_REQUEST_NOTIFICATION &&
++	    (len != sizeof(*request) ||
++	     (opcode != BATTMGR_BAT_PROPERTY_GET && opcode != BATTMGR_USB_PROPERTY_GET &&
++	      opcode != BATTMGR_USB_PROPERTY_SET && opcode != BATTMGR_WLS_PROPERTY_GET))) {
++		ret = -EOPNOTSUPP;
++		goto out_unlock;
++	}
++
++	reinit_completion(&battmgr->ack);
++	battmgr->error = 0;
++	tx->raw_result = 0;
++	tx->response_len = 0;
++	tx->opcode = opcode;
++	tx->property = opcode == BATTMGR_REQUEST_NOTIFICATION ? 0 :
++		       le32_to_cpu(request->property);
++	generation = tx->generation;
++	tx->deadline = jiffies + HZ;
++	tx->pending = true;
++	spin_unlock_irqrestore(&tx->lock, flags);
++
++	ret = pmic_glink_send(battmgr->client, data, len);
++	if (ret < 0)
++		goto out_finish;
++	left = time_before(jiffies, tx->deadline) ? tx->deadline - jiffies : 0;
++	if (!left || !wait_for_completion_timeout(&battmgr->ack, left))
++		ret = -ETIMEDOUT;
++out_finish:
++	spin_lock_irqsave(&tx->lock, flags);
++	if (ret < 0) {
++		/* A send failure can also leave delivery ambiguous; never replay it. */
++		tx->desynced = true;
++	} else if (battmgr->error) {
++		ret = battmgr->error;
++	} else if (!battmgr->service_up || tx->generation != generation) {
++		ret = opcode == BATTMGR_USB_PROPERTY_SET ? -ESTALE : -EAGAIN;
++	} else if (!tx->response_len) {
++		ret = -EPROTO;
++		tx->desynced = true;
++	} else {
++		/* Receive copied the matching response; only this caller commits it. */
++		/* Enable payload semantics are unknown; only its envelope was observed. */
++		if (opcode != BATTMGR_REQUEST_NOTIFICATION)
++			qcom_battmgr_sm8350_callback(battmgr, &tx->response, tx->response_len);
++		ret = battmgr->error;
++	}
++	tx->pending = false;
++	battmgr->error = ret;
++out_unlock:
++	spin_unlock_irqrestore(&tx->lock, flags);
++	return ret;
++}
++
+ static int qcom_battmgr_request(struct qcom_battmgr *battmgr, void *data, size_t len)
+ {
+ 	unsigned long left;
+ 	int ret;
+ 
++	if (battmgr->variant == QCOM_BATTMGR_UKE)
++		return qcom_battmgr_uke_request(battmgr, data, len);
++
+ 	reinit_completion(&battmgr->ack);
+ 
+ 	battmgr->error = 0;
+@@ -488,6 +610,7 @@
+ 					  enum power_supply_property psp)
+ {
+ 	unsigned int prop;
++	u32 generation;
+ 	s64 power;
+ 	int ret;
+ 
+@@ -497,6 +620,7 @@
+ 	prop = sm8350_bat_prop_map[psp];
+ 
+ 	mutex_lock(&battmgr->lock);
++	generation = qcom_battmgr_uke_generation(battmgr);
+ 	if (battmgr->variant == QCOM_BATTMGR_UKE &&
+ 	    psp == POWER_SUPPLY_PROP_POWER_NOW) {
+ 		/* Derive uW from fresh uV/uA samples; OEM power units are unknown. */
+@@ -508,6 +632,10 @@
+ 						    BATT_CURR_NOW, 0);
+ 		if (ret)
+ 			goto out_unlock;
++		if (generation != qcom_battmgr_uke_generation(battmgr)) {
++			ret = -EAGAIN;
++			goto out_unlock;
++		}
+ 		power = div_s64((s64)battmgr->status.voltage_now *
+ 				battmgr->status.current_now, 1000000);
+ 		if (power < INT_MIN || power > INT_MAX) {
+@@ -569,6 +697,7 @@
+ {
+ 	struct qcom_battmgr *battmgr = power_supply_get_drvdata(psy);
+ 	enum qcom_battmgr_unit unit = battmgr->unit;
++	u32 generation = qcom_battmgr_uke_generation(battmgr);
+ 	int ret;
+ 
+ 	if (!battmgr->service_up)
+@@ -1055,6 +1184,7 @@
+ 					 union power_supply_propval *val)
+ {
+ 	struct qcom_battmgr *battmgr = power_supply_get_drvdata(psy);
++	u32 generation = qcom_battmgr_uke_generation(battmgr);
+ 	int ret;
+ 
+ 	if (!battmgr->service_up)
+@@ -1103,6 +1233,7 @@
+ {
+ 	struct qcom_battmgr *battmgr = power_supply_get_drvdata(psy);
+ 	const unsigned int properties[] = { USB_ONLINE, USB_TYPE, USB_CURR_MAX };
++	u32 generation;
+ 	int ret;
+ 	unsigned int i;
+ 
+@@ -1115,12 +1246,17 @@
+ 		return -EINVAL;
+ 
+ 	mutex_lock(&battmgr->lock);
++	generation = qcom_battmgr_uke_generation(battmgr);
+ 	for (i = 0; i < ARRAY_SIZE(properties); i++) {
+ 		ret = qcom_battmgr_request_property(battmgr, BATTMGR_USB_PROPERTY_GET,
+ 						  properties[i], 0);
+ 		if (ret)
+ 			goto out;
+ 	}
++	if (generation != qcom_battmgr_uke_generation(battmgr)) {
++		ret = -EAGAIN;
++		goto out;
++	}
+ 	/* This first path admits the configured USB2 SDP budget only. */
+ 	if (!battmgr->usb.online ||
+ 	    battmgr->usb.usb_type == POWER_SUPPLY_USB_TYPE_UNKNOWN ||
+@@ -1130,7 +1266,7 @@
+ 	}
+ 	if (battmgr->usb.usb_type != POWER_SUPPLY_USB_TYPE_SDP ||
+ 	    (unsigned int)val->intval > battmgr->usb.current_max) {
+-		dev_info(battmgr->dev,
++		dev_info_ratelimited(battmgr->dev,
+ 			 "SDP budget refused: type=%u source=%u request=%d uA\n",
+ 			 battmgr->usb.usb_type, battmgr->usb.current_max, val->intval);
+ 		ret = -EINVAL;
+@@ -1235,6 +1371,7 @@
+ 					 union power_supply_propval *val)
+ {
+ 	struct qcom_battmgr *battmgr = power_supply_get_drvdata(psy);
++	u32 generation = qcom_battmgr_uke_generation(battmgr);
+ 	int ret;
+ 
+ 	if (!battmgr->service_up)
+@@ -1477,6 +1614,32 @@
+ 	complete(&battmgr->ack);
+ }
+ 
++static int qcom_battmgr_uke_validate(unsigned int property, u32 value)
++{
++	switch (property) {
++	case BATT_PRESENT:
++		return value <= 1 ? 0 : -ENODATA;
++	case BATT_CAPACITY:
++		return value <= 10000 ? 0 : -ENODATA;
++	case BATT_SOH:
++		return value <= 100 ? 0 : -ENODATA;
++	case BATT_TEMP:
++		return (s32)value == INT_MIN || (s32)value == INT_MAX ? -ENODATA : 0;
++	case BATT_VOLT_OCV:
++	case BATT_VOLT_NOW:
++	case BATT_VOLT_MAX:
++	case BATT_CHG_FULL_DESIGN:
++	case BATT_CHG_FULL:
++	case BATT_CYCLE_COUNT:
++	case BATT_TTF_AVG:
++	case BATT_TTE_AVG:
++	case BATT_RESISTANCE:
++		return value && value <= INT_MAX ? 0 : -ENODATA;
++	default:
++		return 0;
++	}
++}
++
+ static void qcom_battmgr_sm8350_callback(struct qcom_battmgr *battmgr,
+ 					 const struct qcom_battmgr_message *resp,
+ 					 size_t len)
+@@ -1485,6 +1648,7 @@
+ 	unsigned int opcode = le32_to_cpu(resp->hdr.opcode);
+ 	size_t payload_len = len - sizeof(struct pmic_glink_hdr);
+ 	unsigned int val;
++	s64 counter;
+ 
+ 	if (payload_len < sizeof(__le32)) {
+ 		dev_warn(battmgr->dev, "invalid payload length for %#x: %zd\n",
+@@ -1522,10 +1686,25 @@
+ 			}
+ 
+ 			battmgr->error = le32_to_cpu(resp->intval.result);
++			if (battmgr->variant == QCOM_BATTMGR_UKE && battmgr->error)
++				battmgr->error = -EREMOTEIO;
+ 			if (battmgr->error)
+ 				goto out_complete;
+ 		}
+ 
++		if (battmgr->variant == QCOM_BATTMGR_UKE) {
++			if (property == BATT_MODEL_NAME) {
++				if (!memchr(resp->strval.model, 0, BATTMGR_STRING_LEN)) {
++					battmgr->error = -ENODATA;
++					goto out_complete;
++				}
++			} else {
++				battmgr->error = qcom_battmgr_uke_validate(property,
++						le32_to_cpu(resp->intval.value));
++				if (battmgr->error)
++					goto out_complete;
++			}
++		}
+ 		switch (property) {
+ 		case BATT_STATUS:
+ 			battmgr->status.status = le32_to_cpu(resp->intval.value);
+@@ -1569,7 +1748,7 @@
+ 		case BATT_TEMP:
+ 			val = le32_to_cpu(resp->intval.value);
+ 			if (battmgr->variant == QCOM_BATTMGR_UKE)
+-				battmgr->status.temperature = DIV_ROUND_CLOSEST((int)val, 10);
++				battmgr->status.temperature = DIV_ROUND_CLOSEST((s64)(s32)val, 10);
+ 			else
+ 				battmgr->status.temperature = DIV_ROUND_CLOSEST(val, 10);
+ 			break;
+@@ -1580,11 +1759,12 @@
+ 			val = le32_to_cpu(resp->intval.value);
+ 			if (battmgr->variant == QCOM_BATTMGR_UKE) {
+ 				/* Exact Uke firmware reports mAh; the power-supply ABI uses uAh. */
+-				if (val > INT_MAX / 1000) {
++				counter = (s64)(s32)val * 1000;
++				if (counter < INT_MIN || counter > INT_MAX) {
+ 					battmgr->error = -ERANGE;
+ 					break;
+ 				}
+-				val *= 1000;
++				val = counter;
+ 			}
+ 			battmgr->info.charge_count = val;
+ 			break;
+@@ -1634,6 +1814,8 @@
+ 		}
+ 
+ 		battmgr->error = le32_to_cpu(resp->intval.result);
++		if (battmgr->variant == QCOM_BATTMGR_UKE && battmgr->error)
++			battmgr->error = -EREMOTEIO;
+ 		if (battmgr->error)
+ 			goto out_complete;
+ 
+@@ -1675,6 +1857,8 @@
+ 		}
+ 
+ 		battmgr->error = le32_to_cpu(resp->intval.result);
++		if (battmgr->variant == QCOM_BATTMGR_UKE && battmgr->error)
++			battmgr->error = -EREMOTEIO;
+ 		if (battmgr->error)
+ 			goto out_complete;
+ 
+@@ -1705,6 +1889,8 @@
+ 		if (payload_len != sizeof(resp->intval))
+ 			return;
+ 		battmgr->error = le32_to_cpu(resp->intval.result);
++		if (battmgr->variant == QCOM_BATTMGR_UKE && battmgr->error)
++			battmgr->error = -EREMOTEIO;
+ 		break;
+ 	case BATTMGR_CHG_CTRL_LIMIT_EN:
+ 		battmgr->error = 0;
+@@ -1715,14 +1901,109 @@
+ 	}
+ 
+ out_complete:
++	if (battmgr->variant != QCOM_BATTMGR_UKE)
++		complete(&battmgr->ack);
++}
++
++static void qcom_battmgr_uke_callback(struct qcom_battmgr *battmgr,
++				      const struct qcom_battmgr_message *resp, size_t len)
++{
++	struct qcom_battmgr_uke_transaction *tx = &battmgr->transaction;
++	u32 opcode = le32_to_cpu(resp->hdr.opcode);
++	u32 property, raw;
++	size_t expected;
++	unsigned long flags;
++
++	if (le32_to_cpu(resp->hdr.owner) != PMIC_GLINK_OWNER_BATTMGR)
++		return;
++	if (opcode == BATTMGR_NOTIFICATION) {
++		if (le32_to_cpu(resp->hdr.type) != PMIC_GLINK_NOTIFY ||
++		    len != sizeof(resp->hdr) + sizeof(resp->notification))
++			return;
++		spin_lock_irqsave(&tx->lock, flags);
++		if (!battmgr->service_up || tx->removing || tx->suspended) {
++			spin_unlock_irqrestore(&tx->lock, flags);
++			return;
++		}
++		raw = le32_to_cpu(resp->notification) & 0xff;
++		if (raw == NOTIF_USB_PROPERTY || raw == NOTIF_BAT_INFO) {
++			tx->generation++;
++			if (raw == NOTIF_USB_PROPERTY)
++				tx->source_generation++;
++		}
++		spin_unlock_irqrestore(&tx->lock, flags);
++		qcom_battmgr_notification(battmgr, resp, len);
++		return;
++	}
++	if (le32_to_cpu(resp->hdr.type) != PMIC_GLINK_REQ_RESP &&
++	    !(opcode == BATTMGR_REQUEST_NOTIFICATION &&
++	      le32_to_cpu(resp->hdr.type) == PMIC_GLINK_NOTIFY))
++		return;
++
++	spin_lock_irqsave(&tx->lock, flags);
++	if (!tx->pending || tx->response_len || tx->desynced || tx->removing ||
++	    tx->suspended || !battmgr->service_up || opcode != tx->opcode ||
++	    time_after_eq(jiffies, tx->deadline))
++		goto out;
++	if (opcode == BATTMGR_REQUEST_NOTIFICATION) {
++		/* Serialize its reply without interpreting an undocumented payload. */
++		if (len > sizeof(*resp)) {
++			battmgr->error = -EPROTO;
++			tx->desynced = true;
++		} else {
++			memcpy(&tx->response.hdr, &resp->hdr, sizeof(resp->hdr));
++			tx->response_len = sizeof(resp->hdr);
++			tx->receipt_ns = ktime_get_boottime_ns();
++		}
++		complete(&battmgr->ack);
++		goto out;
++	}
++	if (len < sizeof(resp->hdr) + sizeof(resp->intval.property))
++		goto out;
++	property = le32_to_cpu(resp->intval.property);
++	if (property != tx->property)
++		goto out;
++	expected = sizeof(resp->hdr) + sizeof(resp->intval);
++	if (opcode == BATTMGR_BAT_PROPERTY_GET &&
++	    property == (u32)qcom_battmgr_uke_battery_property(BATT_MODEL_NAME, true))
++		expected = sizeof(resp->hdr) + sizeof(resp->strval);
++	if (len != expected) {
++		/* Model-name requests can receive a normal integer error response. */
++		if (expected != sizeof(resp->hdr) + sizeof(resp->strval) ||
++		    len != sizeof(resp->hdr) + sizeof(resp->intval) ||
++		    !le32_to_cpu(resp->intval.result)) {
++			battmgr->error = -EPROTO;
++			tx->desynced = true;
++			complete(&battmgr->ack);
++			goto out;
++		}
++	}
++	if (len == sizeof(resp->hdr) + sizeof(resp->intval)) {
++		tx->raw_result = le32_to_cpu(resp->intval.result);
++		if (tx->raw_result)
++			battmgr->error = -EREMOTEIO;
++	}
++	memcpy(&tx->response, resp, len);
++	tx->response_len = len;
++	tx->receipt_ns = ktime_get_boottime_ns();
+ 	complete(&battmgr->ack);
++out:
++	spin_unlock_irqrestore(&tx->lock, flags);
+ }
+ 
+ static void qcom_battmgr_callback(const void *data, size_t len, void *priv)
+ {
+ 	const struct pmic_glink_hdr *hdr = data;
+ 	struct qcom_battmgr *battmgr = priv;
+-	unsigned int opcode = le32_to_cpu(hdr->opcode);
++	unsigned int opcode;
++
++	if (len < sizeof(*hdr))
++		return;
++	if (battmgr->variant == QCOM_BATTMGR_UKE) {
++		qcom_battmgr_uke_callback(battmgr, data, len);
++		return;
++	}
++	opcode = le32_to_cpu(hdr->opcode);
+ 	/* Xiaomi status extensions are unsolicited, not a reply to our request. */
+ 	if (battmgr->variant == QCOM_BATTMGR_UKE && opcode == 0x50)
+ 		return;
+@@ -1746,7 +2027,9 @@
+ 	};
+ 	int ret;
+ 
++	mutex_lock(&battmgr->lock);
+ 	ret = qcom_battmgr_request(battmgr, &req, sizeof(req));
++	mutex_unlock(&battmgr->lock);
+ 	if (ret)
+ 		dev_err(battmgr->dev, "failed to request power notifications\n");
+ }
+@@ -1755,6 +2038,28 @@
+ {
+ 	struct qcom_battmgr *battmgr = priv;
+ 
++	if (battmgr->variant == QCOM_BATTMGR_UKE) {
++		struct qcom_battmgr_uke_transaction *tx = &battmgr->transaction;
++		unsigned long flags;
++		bool up = state == SERVREG_SERVICE_STATE_UP;
++
++		spin_lock_irqsave(&tx->lock, flags);
++		if (battmgr->service_up != up) {
++			tx->generation++;
++			tx->firmware_generation++;
++			tx->source_generation++;
++		}
++		WRITE_ONCE(battmgr->service_up, up);
++		if (!up && tx->pending) {
++			battmgr->error = -ECONNRESET;
++			tx->desynced = true;
++			complete(&battmgr->ack);
++		}
++		if (up && !tx->desynced && !tx->suspended && !tx->removing)
++			schedule_work(&battmgr->enable_work);
++		spin_unlock_irqrestore(&tx->lock, flags);
++		return;
++	}
+ 	if (state == SERVREG_SERVICE_STATE_UP) {
+ 		battmgr->service_up = true;
+ 		schedule_work(&battmgr->enable_work);
+@@ -1763,6 +2068,94 @@
+ 	}
+ }
+ 
++static ssize_t uke_battmgr_state_show(struct device *dev,
++				    struct device_attribute *attr, char *buf)
++{
++	struct qcom_battmgr *battmgr = dev_get_drvdata(dev);
++	struct qcom_battmgr_uke_transaction *tx = &battmgr->transaction;
++	unsigned long flags;
++	ssize_t len;
++
++	spin_lock_irqsave(&tx->lock, flags);
++	len = sysfs_emit(buf, "1 %u %u %u %u %u %u %u %d %u %llu %llu\n",
++			tx->generation, tx->firmware_generation, tx->source_generation,
++			battmgr->service_up, tx->desynced, tx->suspended, tx->removing,
++			battmgr->error, tx->raw_result, tx->receipt_ns, tx->instance_ns);
++	spin_unlock_irqrestore(&tx->lock, flags);
++	return len;
++}
++static DEVICE_ATTR_RO(uke_battmgr_state);
++
++static struct attribute *qcom_battmgr_uke_attrs[] = {
++	&dev_attr_uke_battmgr_state.attr,
++	NULL,
++};
++ATTRIBUTE_GROUPS(qcom_battmgr_uke);
++
++static void qcom_battmgr_uke_stop(void *data)
++{
++	struct qcom_battmgr *battmgr = data;
++	struct qcom_battmgr_uke_transaction *tx = &battmgr->transaction;
++	unsigned long flags;
++
++	spin_lock_irqsave(&tx->lock, flags);
++	tx->removing = true;
++	tx->generation++;
++	WRITE_ONCE(battmgr->service_up, false);
++	if (tx->pending) {
++		battmgr->error = -ENODEV;
++		tx->desynced = true;
++		complete(&battmgr->ack);
++	}
++	spin_unlock_irqrestore(&tx->lock, flags);
++	cancel_work_sync(&battmgr->enable_work);
++	mutex_lock(&battmgr->lock);
++	mutex_unlock(&battmgr->lock);
++}
++
++static int qcom_battmgr_suspend(struct device *dev)
++{
++	struct qcom_battmgr *battmgr = dev_get_drvdata(dev);
++	struct qcom_battmgr_uke_transaction *tx = &battmgr->transaction;
++	unsigned long flags;
++
++	if (battmgr->variant != QCOM_BATTMGR_UKE)
++		return 0;
++	spin_lock_irqsave(&tx->lock, flags);
++	tx->suspended = true;
++	tx->generation++;
++	if (tx->pending) {
++		battmgr->error = -EHOSTDOWN;
++		tx->desynced = true;
++		complete(&battmgr->ack);
++	}
++	spin_unlock_irqrestore(&tx->lock, flags);
++	cancel_work_sync(&battmgr->enable_work);
++	mutex_lock(&battmgr->lock);
++	mutex_unlock(&battmgr->lock);
++	return 0;
++}
++
++static int qcom_battmgr_resume(struct device *dev)
++{
++	struct qcom_battmgr *battmgr = dev_get_drvdata(dev);
++	struct qcom_battmgr_uke_transaction *tx = &battmgr->transaction;
++	unsigned long flags;
++
++	if (battmgr->variant != QCOM_BATTMGR_UKE)
++		return 0;
++	spin_lock_irqsave(&tx->lock, flags);
++	tx->suspended = false;
++	tx->generation++;
++	if (battmgr->service_up && !tx->desynced && !tx->removing)
++		schedule_work(&battmgr->enable_work);
++	spin_unlock_irqrestore(&tx->lock, flags);
++	return 0;
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(qcom_battmgr_pm_ops, qcom_battmgr_suspend,
++			       qcom_battmgr_resume);
++
+ static const struct of_device_id qcom_battmgr_of_variants[] = {
+ 	{ .compatible = "qcom,glymur-pmic-glink", .data = (void *)QCOM_BATTMGR_X1E80100 },
+ 	{ .compatible = "qcom,kaanapali-pmic-glink", .data = (void *)QCOM_BATTMGR_SM8550 },
+@@ -1792,6 +2185,9 @@
+ 		return -ENOMEM;
+ 
+ 	battmgr->dev = dev;
++	dev_set_drvdata(dev, battmgr);
++	spin_lock_init(&battmgr->transaction.lock);
++	battmgr->transaction.instance_ns = ktime_get_boottime_ns();
+ 
+ 	psy_cfg.drv_data = battmgr;
+ 	psy_cfg.fwnode = dev_fwnode(&adev->dev);
+@@ -1878,6 +2274,15 @@
+ 	if (IS_ERR(battmgr->client))
+ 		return PTR_ERR(battmgr->client);
+ 
++	if (battmgr->variant == QCOM_BATTMGR_UKE) {
++		ret = devm_device_add_groups(dev, qcom_battmgr_uke_groups);
++		if (ret)
++			return ret;
++		/* Drain request/worker users before devres unregisters the client. */
++		ret = devm_add_action_or_reset(dev, qcom_battmgr_uke_stop, battmgr);
++		if (ret)
++			return ret;
++	}
+ 	pmic_glink_client_register(battmgr->client);
+ 
+ 	return 0;
+@@ -1892,6 +2297,7 @@
+ static struct auxiliary_driver qcom_battmgr_driver = {
+ 	.name = "pmic_glink_power_supply",
+ 	.probe = qcom_battmgr_probe,
++	.driver.pm = pm_sleep_ptr(&qcom_battmgr_pm_ops),
+ 	.id_table = qcom_battmgr_id_table,
+ };
+ 
+--- /dev/null
++++ b/Documentation/ABI/testing/sysfs-driver-qcom-battmgr-uke
+@@ -0,0 +1,24 @@
++What:           /sys/bus/auxiliary/devices/pmic_glink.power-supply.*/uke_battmgr_state
++Date:           October 2026
++Contact:        https://github.com/MCC45TR/senemos-uke-kernel-mainline/issues
++Description:
++                Read-only exact-Uke diagnostic snapshot. Version 1 contains:
++                version generation firmware_generation source_event_generation
++                service_up desynced suspended removing linux_errno raw_result
++                last_reply_receipt_boottime_ns driver_instance_boottime_ns
++
++                All fields are decimal, space separated, terminated by newline.
++                Generations wrap modulo 2^32. Equality is useful only within one
++                driver instance and bounded observation interval. A collector
++                must also identify the provider, kernel/boot and instance.
++                source_event_generation counts USB property notifications and
++                service changes; it is not an atomic firmware attach ID or a
++                PD contract identifier. The final timestamp records receipt of
++                a matching reply, including error replies; it is not a sensor
++                measurement timestamp or the age of every cached property.
++
++                desynced blocks requests after an ambiguous send, timeout,
++                malformed matching reply or interrupted request. PDR up and
++                resume do not clear it. Reset requires a proven clean transport
++                boundary; live module reload is not an accepted recovery path.
++                No physical charge interruption is implied by an error flag.

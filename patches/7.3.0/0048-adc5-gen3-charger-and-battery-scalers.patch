@@ -1,0 +1,262 @@
+From: Senemos Uke maintainers
+Subject: [PATCH] iio: adc: expose Gen3 charger current and battery temperature
+
+Port PMIC7 charger temperature, signed IIN_FB and ICHG_FB conversions and the
+Gen3 battery 100k resistance curve from Qualcomm's Uke downstream driver.
+Normalize current to the processed IIO mA ABI and battery decidegrees to mC.
+Select the distinct battery curve with a documented channel property, rather
+than importing downstream private enum numbers into the upstream ABI.
+
+Source: MiCode/Xiaomi_Kernel_OpenSource
+Commit: 5712080a4b0c0b1a879e6d145c601c649ddaddfd
+Files: drivers/iio/adc/qcom-vadc-common.c, qcom-spmi-adc5-gen3.c
+License: GPL-2.0-only; retain upstream Qualcomm attribution.
+Cross-check: OnePlusOSS/android_kernel_oneplus_sm7675, fc892483f1d61f245924681eb5abd563564d9cba.
+The selected four formulas/table agree; unrelated Oplus curves are not copied.
+No charging limit, thermal trip, calibration storage or firmware is changed.
+
+--- a/drivers/iio/adc/qcom-spmi-adc5-gen3.c
++++ b/drivers/iio/adc/qcom-spmi-adc5-gen3.c
+@@ -379,8 +379,8 @@
+ 		if (ret)
+ 			return ret;
+ 
+-		if (chan->type == IIO_VOLTAGE) {
+-			/* Hardware scaling returns uV; the IIO voltage ABI uses mV. */
++		if (chan->type == IIO_VOLTAGE || chan->type == IIO_CURRENT) {
++			/* Hardware scaling returns uV/uA; processed IIO uses mV/mA. */
+ 			*val2 = 1000;
+ 			return IIO_VAL_FRACTIONAL;
+ 		}
+@@ -432,6 +432,9 @@
+ 	ADC5_CHAN(IIO_CURRENT, BIT(IIO_CHAN_INFO_PROCESSED), _pre, _scale)	\
+ 
+ static const struct adc5_channels adc5_gen3_chans_pmic[ADC5_MAX_CHANNEL] = {
++	[ADC5_GEN3_CHG_TEMP] = ADC5_CHAN_TEMP(0, SCALE_HW_CALIB_PM7_CHG_TEMP)
++	[ADC5_GEN3_IIN_FB] = ADC5_CHAN_CUR(9, SCALE_HW_CALIB_CURRENT)
++	[ADC5_GEN3_ICHG_FB] = ADC5_CHAN_CUR(10, SCALE_HW_CALIB_CURRENT_RAW)
+ 	[ADC5_GEN3_REF_GND]		= ADC5_CHAN_VOLT(0, SCALE_HW_CALIB_DEFAULT)
+ 	[ADC5_GEN3_1P25VREF]		= ADC5_CHAN_VOLT(0, SCALE_HW_CALIB_DEFAULT)
+ 	[ADC5_GEN3_VPH_PWR]		= ADC5_CHAN_VOLT(1, SCALE_HW_CALIB_DEFAULT)
+@@ -613,6 +616,11 @@
+ 		chan_props->chip = adc;
+ 		adc_chan = &adc->data->adc_chans[chan_props->common_props.channel];
+ 		chan_props->common_props.scale_fn_type = adc_chan->scale_fn_type;
++		if (fwnode_property_read_bool(child, "qcom,adc5-gen3-batt-therm-100k")) {
++			if (chan_props->common_props.channel != ADC5_GEN3_AMUX1_THM_100K_PU)
++				return dev_err_probe(dev, -EINVAL, "Invalid battery thermistor channel\n");
++			chan_props->common_props.scale_fn_type = SCALE_HW_CALIB_GEN3_BATT_THERM_100K;
++		}
+ 
+ 		iio_chan->channel = ADC5_GEN3_V_CHAN(chan_props->common_props);
+ 		iio_chan->info_mask_separate = adc_chan->info_mask;
+--- a/drivers/iio/adc/qcom-vadc-common.c
++++ b/drivers/iio/adc/qcom-vadc-common.c
+@@ -289,6 +289,79 @@
+ 	{ 2420, 130048 }
+ };
+ 
++static const struct vadc_map_pt adcmap_gen3_batt_therm_100k[] = {
++	{ 5319890, -400 },
++	{ 4555860, -380 },
++	{ 3911780, -360 },
++	{ 3367320, -340 },
++	{ 2905860, -320 },
++	{ 2513730, -300 },
++	{ 2179660, -280 },
++	{ 1894360, -260 },
++	{ 1650110, -240 },
++	{ 1440520, -220 },
++	{ 1260250, -200 },
++	{ 1104850, -180 },
++	{ 970600,  -160 },
++	{ 854370,  -140 },
++	{ 753530,  -120 },
++	{ 665860,  -100 },
++	{ 589490,  -80 },
++	{ 522830,  -60 },
++	{ 464540,  -40 },
++	{ 413470,  -20 },
++	{ 368640,  0 },
++	{ 329220,  20 },
++	{ 294490,  40 },
++	{ 263850,  60 },
++	{ 236770,  80 },
++	{ 212790,  100 },
++	{ 191530,  120 },
++	{ 172640,  140 },
++	{ 155840,  160 },
++	{ 140880,  180 },
++	{ 127520,  200 },
++	{ 115590,  220 },
++	{ 104910,  240 },
++	{ 95350,   260 },
++	{ 86760,   280 },
++	{ 79050,   300 },
++	{ 72110,   320 },
++	{ 65860,   340 },
++	{ 60220,   360 },
++	{ 55130,   380 },
++	{ 50520,   400 },
++	{ 46350,   420 },
++	{ 42570,   440 },
++	{ 39140,   460 },
++	{ 36030,   480 },
++	{ 33190,   500 },
++	{ 30620,   520 },
++	{ 28260,   540 },
++	{ 26120,   560 },
++	{ 24160,   580 },
++	{ 22370,   600 },
++	{ 20730,   620 },
++	{ 19230,   640 },
++	{ 17850,   660 },
++	{ 16580,   680 },
++	{ 15420,   700 },
++	{ 14350,   720 },
++	{ 13370,   740 },
++	{ 12470,   760 },
++	{ 11630,   780 },
++	{ 10860,   800 },
++	{ 10150,   820 },
++	{ 9490,    840 },
++	{ 8880,    860 },
++	{ 8320,    880 },
++	{ 7800,    900 },
++	{ 7310,    920 },
++	{ 6860,    940 },
++	{ 6450,    960 },
++	{ 6060,    980 }
++};
++
+ static const struct u32_fract adc5_prescale_ratios[] = {
+ 	{ .numerator =  1, .denominator =  1 },
+ 	{ .numerator =  1, .denominator =  3 },
+@@ -299,6 +372,8 @@
+ 	{ .numerator = 10, .denominator = 81 },
+ 	{ .numerator =  1, .denominator = 10 },
+ 	{ .numerator =  1, .denominator = 16 },
++	{ .numerator = 32, .denominator = 100 },
++	{ .numerator = 1000, .denominator = 366220 },
+ };
+ 
+ static int qcom_vadc_scale_hw_calib_volt(
+@@ -330,7 +405,20 @@
+ 				const struct adc5_data *data,
+ 				u16 adc_code, int *result_mdec);
+ 
++static int qcom_vadc_scale_hw_pm7_chg_temp(const struct u32_fract *prescale,
++		const struct adc5_data *data, u16 adc_code, int *result);
++static int qcom_vadc_scale_hw_calib_current(const struct u32_fract *prescale,
++		const struct adc5_data *data, u16 adc_code, int *result);
++static int qcom_vadc_scale_hw_calib_current_raw(const struct u32_fract *prescale,
++		const struct adc5_data *data, u16 adc_code, int *result);
++static int qcom_adc5_gen3_scale_hw_calib_batt_therm_100(const struct u32_fract *prescale,
++		const struct adc5_data *data, u16 adc_code, int *result);
++
+ static const struct qcom_adc5_scale_type scale_adc5_fn[] = {
++	[SCALE_HW_CALIB_GEN3_BATT_THERM_100K] = {qcom_adc5_gen3_scale_hw_calib_batt_therm_100},
++	[SCALE_HW_CALIB_CURRENT_RAW] = {qcom_vadc_scale_hw_calib_current_raw},
++	[SCALE_HW_CALIB_CURRENT] = {qcom_vadc_scale_hw_calib_current},
++	[SCALE_HW_CALIB_PM7_CHG_TEMP] = {qcom_vadc_scale_hw_pm7_chg_temp},
+ 	[SCALE_HW_CALIB_DEFAULT] = {qcom_vadc_scale_hw_calib_volt},
+ 	[SCALE_HW_CALIB_THERM_100K_PULLUP] = {qcom_vadc_scale_hw_calib_therm},
+ 	[SCALE_HW_CALIB_XOTHERM] = {qcom_vadc_scale_hw_calib_therm},
+@@ -556,6 +644,56 @@
+ 	return 0;
+ }
+ 
++/* PMIC7/Gen3 conversions from the Uke Qualcomm downstream driver. */
++static int qcom_vadc_scale_hw_pm7_chg_temp(const struct u32_fract *prescale,
++		const struct adc5_data *data, u16 adc_code, int *result)
++{
++	int uv = qcom_vadc_scale_code_voltage_factor(adc_code, prescale, data, 1);
++	s64 temp = div_s64(30303LL * uv - 27712 * 1000000LL, 100000);
++
++	*result = temp > 0 ? temp : 0;
++	return 0;
++}
++
++static int qcom_vadc_scale_hw_calib_current(const struct u32_fract *prescale,
++		const struct adc5_data *data, u16 adc_code, int *result)
++{
++	s64 voltage;
++
++	if (!prescale->numerator || !data->full_scale_code_volt)
++		return -EINVAL;
++	voltage = div_s64((s64)(s16)adc_code * 1875 * 1000, data->full_scale_code_volt);
++	*result = div_s64(voltage * prescale->denominator, prescale->numerator);
++	return 0;
++}
++
++static int qcom_vadc_scale_hw_calib_current_raw(const struct u32_fract *prescale,
++		const struct adc5_data *data, u16 adc_code, int *result)
++{
++	if (!prescale->numerator)
++		return -EINVAL;
++	*result = div_s64((s64)(s16)adc_code * prescale->denominator, prescale->numerator);
++	return 0;
++}
++
++static int qcom_adc5_gen3_scale_hw_calib_batt_therm_100(const struct u32_fract *prescale,
++		const struct adc5_data *data, u16 adc_code, int *result)
++{
++	s64 resistance;
++	int ret, decidegrees;
++
++	if (adc_code >= RATIO_MAX_ADC7)
++		return -EINVAL;
++	resistance = div64_s64((s64)adc_code * R_PU_100K, RATIO_MAX_ADC7 - adc_code);
++	ret = qcom_vadc_map_voltage_temp(adcmap_gen3_batt_therm_100k,
++			ARRAY_SIZE(adcmap_gen3_batt_therm_100k), resistance, &decidegrees);
++	if (ret)
++		return ret;
++	/* The downstream table uses decidegrees; IIO temperature uses millidegrees. */
++	*result = decidegrees * 100;
++	return 0;
++}
++
+ static int qcom_vadc_scale_hw_calib_volt(
+ 				const struct u32_fract *prescale,
+ 				const struct adc5_data *data,
+--- a/include/linux/iio/adc/qcom-vadc-common.h
++++ b/include/linux/iio/adc/qcom-vadc-common.h
+@@ -120,6 +120,10 @@
+ 	SCALE_HW_CALIB_PMIC_THERM_PM7,
+ 	SCALE_HW_CALIB_PM5_CHG_TEMP,
+ 	SCALE_HW_CALIB_PM5_SMB_TEMP,
++	SCALE_HW_CALIB_PM7_CHG_TEMP,
++	SCALE_HW_CALIB_CURRENT,
++	SCALE_HW_CALIB_CURRENT_RAW,
++	SCALE_HW_CALIB_GEN3_BATT_THERM_100K,
+ 	/* private: */
+ 	SCALE_HW_CALIB_INVALID,
+ };
+--- a/include/linux/iio/adc/qcom-adc5-gen3-common.h
++++ b/include/linux/iio/adc/qcom-adc5-gen3-common.h
+@@ -84,6 +84,9 @@
+ #define ADC5_GEN3_REF_GND			0x00
+ #define ADC5_GEN3_1P25VREF			0x01
+ #define ADC5_GEN3_DIE_TEMP			0x03
++#define ADC5_GEN3_CHG_TEMP			0x10
++#define ADC5_GEN3_IIN_FB				0x17
++#define ADC5_GEN3_ICHG_FB				0xa1
+ #define ADC5_GEN3_USB_SNS_V_16			0x11
+ #define ADC5_GEN3_VIN_DIV16_MUX			0x12
+ #define ADC5_GEN3_VPH_PWR			0x8e
+--- a/Documentation/devicetree/bindings/iio/adc/qcom,spmi-adc5-gen3.yaml
++++ b/Documentation/devicetree/bindings/iio/adc/qcom,spmi-adc5-gen3.yaml
+@@ -58,6 +58,13 @@
+       Represents the external channels which are connected to the ADC.
+ 
+     properties:
++      qcom,adc5-gen3-batt-therm-100k:
++        type: boolean
++        description:
++          Select the Gen3 battery NTC resistance curve with a 100 kOhm pull-up
++          on AMUX1_THM_100K_PU. Its curve differs from the board thermistor
++          curve. Processed temperature is reported in millidegrees Celsius.
++
+       qcom,decimation:
+         enum: [ 85, 340, 1360 ]
+         default: 1360

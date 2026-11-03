@@ -1,0 +1,90 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: codecs: lpass-tx-macro: track each active decimator
+
+A two-channel Uke capture completes, but disabling DEC1 then DEC0 leaves
+DEC0 selected: clearing the single active_decimator causes the next disable
+to return early. Duplicate enables can also inflate the channel count.
+
+Use the existing per-AIF bitmask to test each mixer transition, and mute
+all selected decimators. Remove the scalar selector. Preserve the native
+register addresses, mute values, DAPM update and stream/clock lifecycle.
+The pinned MiCode TX mixer uses per-bit state; no board routing is copied.
+
+--- a/sound/soc/codecs/lpass-tx-macro.c
++++ b/sound/soc/codecs/lpass-tx-macro.c
+@@ -272,7 +272,6 @@
+ 	struct tx_mute_work tx_mute_dwork[NUM_DECIMATORS];
+ 	unsigned long active_ch_mask[TX_MACRO_MAX_DAIS];
+ 	unsigned long active_ch_cnt[TX_MACRO_MAX_DAIS];
+-	int active_decimator[TX_MACRO_MAX_DAIS];
+ 	struct regmap *regmap;
+ 	struct clk *mclk;
+ 	struct clk *npl;
+@@ -889,19 +888,17 @@
+ 	struct tx_macro *tx = snd_soc_component_get_drvdata(component);
+ 
+ 	if (enable) {
+-		if (tx->active_decimator[dai_id] == dec_id)
++		if (test_bit(dec_id, &tx->active_ch_mask[dai_id]))
+ 			return 0;
+ 
+ 		set_bit(dec_id, &tx->active_ch_mask[dai_id]);
+ 		tx->active_ch_cnt[dai_id]++;
+-		tx->active_decimator[dai_id] = dec_id;
+ 	} else {
+-		if (tx->active_decimator[dai_id] == -1)
++		if (!test_bit(dec_id, &tx->active_ch_mask[dai_id]))
+ 			return 0;
+ 
+ 		tx->active_ch_cnt[dai_id]--;
+ 		clear_bit(dec_id, &tx->active_ch_mask[dai_id]);
+-		tx->active_decimator[dai_id] = -1;
+ 	}
+ 	snd_soc_dapm_mixer_update_power(widget->dapm, kcontrol, enable, update);
+ 
+@@ -1192,22 +1189,18 @@
+ {
+ 	struct snd_soc_component *component = dai->component;
+ 	struct tx_macro *tx = snd_soc_component_get_drvdata(component);
+-	u8 decimator;
+-
+-	/* active decimator not set yet */
+-	if (tx->active_decimator[dai->id] == -1)
+-		return 0;
++	unsigned int decimator;
+ 
+-	decimator = tx->active_decimator[dai->id];
+-
+-	if (mute)
+-		snd_soc_component_write_field(component,
+-					      CDC_TXn_TX_PATH_CTL(decimator),
+-					      CDC_TXn_PGA_MUTE_MASK, 0x1);
+-	else
+-		snd_soc_component_update_bits(component,
+-					      CDC_TXn_TX_PATH_CTL(decimator),
+-					      CDC_TXn_PGA_MUTE_MASK, 0x0);
++	for_each_set_bit(decimator, &tx->active_ch_mask[dai->id], TX_MACRO_DEC_MAX) {
++		if (mute)
++			snd_soc_component_write_field(component,
++						      CDC_TXn_TX_PATH_CTL(decimator),
++						      CDC_TXn_PGA_MUTE_MASK, 0x1);
++		else
++			snd_soc_component_update_bits(component,
++						      CDC_TXn_TX_PATH_CTL(decimator),
++						      CDC_TXn_PGA_MUTE_MASK, 0x0);
++	}
+ 
+ 	return 0;
+ }
+@@ -2314,11 +2307,6 @@
+ 
+ 	tx->dev = dev;
+ 
+-	/* Set active_decimator default value */
+-	tx->active_decimator[TX_MACRO_AIF1_CAP] = -1;
+-	tx->active_decimator[TX_MACRO_AIF2_CAP] = -1;
+-	tx->active_decimator[TX_MACRO_AIF3_CAP] = -1;
+-
+ 	/* set MCLK and NPL rates */
+ 	ret = clk_set_rate(tx->mclk, MCLK_FREQ);
+ 	if (ret)

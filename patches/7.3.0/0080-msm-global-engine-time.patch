@@ -1,0 +1,81 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] drm/msm: expose cumulative completed-engine time
+
+Account the existing hardware-timestamped retirement duration across all
+contexts, then expose its nanoseconds through a read-only devfreq attribute.
+This does not wake hardware, add polling, change a clock or consume the
+governor sampling window. It works independently of per-client proc access.
+
+Signed-off-by: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+---
+--- a/drivers/gpu/drm/msm/msm_gpu.c
++++ b/drivers/gpu/drm/msm/msm_gpu.c
+@@ -712,6 +712,7 @@
+ 
+ 	submit->queue->ctx->elapsed_ns += elapsed;
+ 	submit->queue->ctx->cycles     += cycles;
++	atomic64_add(elapsed, &gpu->engine_ns);
+ 
+ 	trace_msm_gpu_submit_retired(submit, elapsed, clock,
+ 		stats->alwayson_start, stats->alwayson_end);
+@@ -897,6 +898,7 @@
+ 	gpu->dev = drm;
+ 	gpu->funcs = funcs;
+ 	gpu->name = name;
++	atomic64_set(&gpu->engine_ns, 0);
+ 
+ 	gpu->worker = kthread_run_worker(0, "gpu-worker");
+ 	if (IS_ERR(gpu->worker)) {
+--- a/drivers/gpu/drm/msm/msm_gpu.h
++++ b/drivers/gpu/drm/msm/msm_gpu.h
+@@ -206,6 +206,9 @@
+ 	 */
+ 	int active_submits;
+ 
++	/** @engine_ns: completed GPU execution time across all clients */
++	atomic64_t engine_ns;
++
+ 	/** lock: protects active_submits and idle/active transitions */
+ 	struct mutex active_lock;
+ 
+--- a/drivers/gpu/drm/msm/msm_gpu_devfreq.c
++++ b/drivers/gpu/drm/msm/msm_gpu_devfreq.c
+@@ -136,6 +136,19 @@
+ 	return !!df->devfreq;
+ }
+ 
++static ssize_t gpu_engine_ns_show(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	struct msm_gpu *gpu = dev_to_gpu(dev->parent);
++
++	if (!gpu)
++		return -ENODEV;
++
++	/* The same completed-work timestamps as DRM fdinfo, across all clients. */
++	return sysfs_emit(buf, "%llu\n", (u64)atomic64_read(&gpu->engine_ns));
++}
++static DEVICE_ATTR_RO(gpu_engine_ns);
++
+ void msm_devfreq_init(struct msm_gpu *gpu)
+ {
+ 	struct msm_gpu_devfreq *df = &gpu->devfreq;
+@@ -189,6 +202,10 @@
+ 
+ 	devfreq_suspend_device(df->devfreq);
+ 
++	ret = device_create_file(&df->devfreq->dev, &dev_attr_gpu_engine_ns);
++	if (ret)
++		dev_warn(&gpu->pdev->dev, "Couldn't register GPU load status: %d\n", ret);
++
+ 	gpu->cooling = of_devfreq_cooling_register(gpu->pdev->dev.of_node, df->devfreq);
+ 	if (IS_ERR(gpu->cooling)) {
+ 		DRM_DEV_ERROR(&gpu->pdev->dev,
+@@ -221,6 +238,7 @@
+ 	if (!has_devfreq(gpu))
+ 		return;
+ 
++	device_remove_file(&df->devfreq->dev, &dev_attr_gpu_engine_ns);
+ 	devfreq_cooling_unregister(gpu->cooling);
+ 	dev_pm_qos_remove_request(&df->boost_freq);
+ }

@@ -1,0 +1,69 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: wcd939x: order Uke supplies before coordinated reset
+
+MiCode audio 8eb0eccbc4027ae4a4987e4bced03a4381039714 enables
+the static RX/TX supplies before the microphone-bias input, then
+enables PX.  The selected Uke DT ties RX/TX, IO, buck and PX to
+the same 1.8 V L7B provider and the microphone-bias input to the
+separate BOB provider.
+
+Validate all five supply phandles before acquiring any enable
+reference.  For Uke, use managed individual enables in the existing
+supply-list order so the shared digital rail precedes BOB and
+reset is reached only after all enables succeed. Devres releases
+earlier references on probe failure.  Other boards retain the
+existing bulk helper. No regulator voltage or load, bias enable,
+GPIO or board supply mapping is changed here.
+
+---
+diff --git a/sound/soc/codecs/wcd939x.c b/sound/soc/codecs/wcd939x.c
+--- a/sound/soc/codecs/wcd939x.c
++++ b/sound/soc/codecs/wcd939x.c
+@@ -3192,6 +3192,37 @@
+ }
+ #endif /* CONFIG_TYPEC */
+ 
++static int wcd939x_enable_supplies(struct device *dev)
++{
++	struct device_node *supply;
++	char property[32];
++	unsigned int i;
++	int ret;
++
++	if (!of_machine_is_compatible("xiaomi,uke"))
++		return devm_regulator_bulk_get_enable(dev, ARRAY_SIZE(wcd939x_supplies),
++						     wcd939x_supplies);
++
++	/* Uke must never substitute dummy regulators for its codec supplies. */
++	for (i = 0; i < ARRAY_SIZE(wcd939x_supplies); i++) {
++		snprintf(property, sizeof(property), "%s-supply", wcd939x_supplies[i]);
++		supply = of_parse_phandle(dev->of_node, property, 0);
++		if (!supply)
++			return dev_err_probe(dev, -EINVAL, "Missing codec supply %s\n", property);
++		of_node_put(supply);
++	}
++
++	/* L7B feeds RX/TX, IO, buck and PX; power it before the BOB bias input. */
++	for (i = 0; i < ARRAY_SIZE(wcd939x_supplies); i++) {
++		ret = devm_regulator_get_enable(dev, wcd939x_supplies[i]);
++		if (ret)
++			return dev_err_probe(dev, ret, "Failed to enable %s\n",
++					     wcd939x_supplies[i]);
++	}
++
++	return 0;
++}
++
+ static int wcd939x_populate_dt_data(struct wcd939x_priv *wcd939x, struct device *dev)
+ {
+ 	struct wcd_mbhc_config *cfg = &wcd939x->mbhc_cfg;
+@@ -3214,8 +3245,7 @@
+ 					     "Failed to get reset gpio\n");
+ 	}
+ 
+-	ret = devm_regulator_bulk_get_enable(dev, ARRAY_SIZE(wcd939x_supplies),
+-					     wcd939x_supplies);
++	ret = wcd939x_enable_supplies(dev);
+ 	if (ret)
+ 		return dev_err_probe(dev, ret, "Failed to get and enable supplies\n");
+ 

@@ -1,0 +1,56 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] power: supply: qcom_battmgr: use the managed single-group API
+
+The Uke diagnostic interface has one attribute group. Register it with
+Linux's devm_device_add_group API and retain its existing error return.
+Remove three unused getter snapshots; generation checks in coordinated
+power sampling and SDP validation remain unchanged.
+
+Signed-off-by: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+---
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -697,7 +697,6 @@
+ {
+ 	struct qcom_battmgr *battmgr = power_supply_get_drvdata(psy);
+ 	enum qcom_battmgr_unit unit = battmgr->unit;
+-	u32 generation = qcom_battmgr_uke_generation(battmgr);
+ 	int ret;
+ 
+ 	if (!battmgr->service_up)
+@@ -1184,7 +1183,6 @@
+ 					 union power_supply_propval *val)
+ {
+ 	struct qcom_battmgr *battmgr = power_supply_get_drvdata(psy);
+-	u32 generation = qcom_battmgr_uke_generation(battmgr);
+ 	int ret;
+ 
+ 	if (!battmgr->service_up)
+@@ -1371,7 +1369,6 @@
+ 					 union power_supply_propval *val)
+ {
+ 	struct qcom_battmgr *battmgr = power_supply_get_drvdata(psy);
+-	u32 generation = qcom_battmgr_uke_generation(battmgr);
+ 	int ret;
+ 
+ 	if (!battmgr->service_up)
+@@ -2090,7 +2087,9 @@
+ 	&dev_attr_uke_battmgr_state.attr,
+ 	NULL,
+ };
+-ATTRIBUTE_GROUPS(qcom_battmgr_uke);
++static const struct attribute_group qcom_battmgr_uke_group = {
++	.attrs = qcom_battmgr_uke_attrs,
++};
+ 
+ static void qcom_battmgr_uke_stop(void *data)
+ {
+@@ -2275,7 +2274,7 @@
+ 		return PTR_ERR(battmgr->client);
+ 
+ 	if (battmgr->variant == QCOM_BATTMGR_UKE) {
+-		ret = devm_device_add_groups(dev, qcom_battmgr_uke_groups);
++		ret = devm_device_add_group(dev, &qcom_battmgr_uke_group);
+ 		if (ret)
+ 			return ret;
+ 		/* Drain request/worker users before devres unregisters the client. */

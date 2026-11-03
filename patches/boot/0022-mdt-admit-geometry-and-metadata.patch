@@ -1,0 +1,209 @@
+From: Uke Linux contributors <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] soc: qcom: validate MDT ranges and metadata before PAS setup
+
+Port the reviewed project correction from 305575b to the signed Linux 7.3
+source. Retain Linux GPL attribution and the exact native APIs. The old
+7.2.12 result did not establish inclusion in this patch queue.
+
+Use qcom_pas_context memory bounds before metadata/PAS operations. Validate
+the actual ELF32 format and metadata header/table/hash extents before copying.
+Keep native context mapping and its error behavior. No firmware is included.
+
+Compared with Uke OEM 5712080a4b0c0b1a879e6d145c601c649ddaddfd, OnePlus
+fc892483f1d61f245924681eb5abd563564d9cba and Palawan
+0d9f7fdf720ae9f4ecfbee4fadaf1e3b5c442e95. Source/host checks do not
+qualify CDSP firmware startup, DMA quiescence or physical compute.
+
+--- a/drivers/soc/qcom/mdt_loader.c
++++ b/drivers/soc/qcom/mdt_loader.c
+@@ -25,15 +25,21 @@
+ 	size_t phend;
+ 	size_t shend;
+ 
+-	if (fw->size < sizeof(*ehdr))
++	if (!fw || !fw->data || fw->size < sizeof(*ehdr))
+ 		return false;
+ 
+ 	ehdr = (struct elf32_hdr *)fw->data;
+ 
+-	if (memcmp(ehdr->e_ident, ELFMAG, SELFMAG))
++	if (memcmp(ehdr->e_ident, ELFMAG, SELFMAG) ||
++	    ehdr->e_ident[EI_CLASS] != ELFCLASS32 ||
++	    ehdr->e_ident[EI_DATA] != ELFDATA2LSB ||
++	    ehdr->e_ident[EI_VERSION] != EV_CURRENT ||
++	    ehdr->e_ehsize != sizeof(*ehdr))
+ 		return false;
+ 
+-	if (ehdr->e_phentsize != sizeof(struct elf32_phdr))
++	if (ehdr->e_phentsize != sizeof(struct elf32_phdr) ||
++	    ehdr->e_phoff < sizeof(*ehdr) ||
++	    ehdr->e_phoff % __alignof__(struct elf32_phdr))
+ 		return false;
+ 
+ 	phend = size_add(size_mul(sizeof(struct elf32_phdr), ehdr->e_phnum), ehdr->e_phoff);
+@@ -41,7 +47,9 @@
+ 		return false;
+ 
+ 	if (ehdr->e_shentsize || ehdr->e_shnum) {
+-		if (ehdr->e_shentsize != sizeof(struct elf32_shdr))
++		if (ehdr->e_shentsize != sizeof(struct elf32_shdr) ||
++		    (ehdr->e_shnum && (ehdr->e_shoff < sizeof(*ehdr) ||
++				ehdr->e_shoff % __alignof__(struct elf32_shdr))))
+ 			return false;
+ 
+ 		shend = size_add(size_mul(sizeof(struct elf32_shdr), ehdr->e_shnum), ehdr->e_shoff);
+@@ -123,6 +131,8 @@
+ 	phdrs = (struct elf32_phdr *)(fw->data + ehdr->e_phoff);
+ 
+ 	for (i = 0; i < ehdr->e_phnum; i++) {
++		phys_addr_t end;
++
+ 		phdr = &phdrs[i];
+ 
+ 		if (!mdt_phdr_loadable(phdr))
+@@ -131,8 +141,9 @@
+ 		if (phdr->p_paddr < min_addr)
+ 			min_addr = phdr->p_paddr;
+ 
+-		if (phdr->p_paddr + phdr->p_memsz > max_addr)
+-			max_addr = ALIGN(phdr->p_paddr + phdr->p_memsz, SZ_4K);
++		end = (phys_addr_t)phdr->p_paddr + phdr->p_memsz;
++		if (end > max_addr)
++			max_addr = ALIGN(end, SZ_4K);
+ 	}
+ 
+ 	return min_addr < max_addr ? max_addr - min_addr : -EINVAL;
+@@ -167,6 +178,8 @@
+ 	size_t hash_offset;
+ 	size_t hash_size;
+ 	size_t ehdr_size;
++	size_t metadata_size;
++	size_t phend;
+ 	unsigned int i;
+ 	ssize_t ret;
+ 	void *data;
+@@ -198,18 +211,25 @@
+ 	ehdr_size = phdrs[0].p_filesz;
+ 	hash_size = phdrs[hash_segment].p_filesz;
+ 
+-	data = kmalloc(ehdr_size + hash_size, GFP_KERNEL);
++	metadata_size = size_add(ehdr_size, hash_size);
++	phend = size_add(ehdr->e_phoff, size_mul(ehdr->e_phnum, sizeof(*phdrs)));
++	if (ehdr_size < phend || ehdr_size > fw->size || !hash_size ||
++	    metadata_size == SIZE_MAX)
++		return ERR_PTR(-EINVAL);
++
++	data = kmalloc(metadata_size, GFP_KERNEL);
+ 	if (!data)
+ 		return ERR_PTR(-ENOMEM);
+ 
+ 	/* Copy ELF header */
+ 	memcpy(data, fw->data, ehdr_size);
+ 
+-	if (ehdr_size + hash_size == fw->size) {
++	if (metadata_size == fw->size) {
+ 		/* Firmware is split and hash is packed following the ELF header */
+ 		hash_offset = phdrs[0].p_filesz;
+ 		memcpy(data + ehdr_size, fw->data + hash_offset, hash_size);
+-	} else if (phdrs[hash_segment].p_offset + hash_size <= fw->size) {
++	} else if (phdrs[hash_segment].p_offset <= fw->size &&
++		   hash_size <= fw->size - phdrs[hash_segment].p_offset) {
+ 		/* Hash is in its own segment, but within the loaded file */
+ 		hash_offset = phdrs[hash_segment].p_offset;
+ 		memcpy(data + ehdr_size, fw->data + hash_offset, hash_size);
+@@ -222,7 +242,7 @@
+ 		}
+ 	}
+ 
+-	*data_len = ehdr_size + hash_size;
++	*data_len = metadata_size;
+ 
+ 	return data;
+ }
+@@ -230,41 +250,57 @@
+ 
+ static int __qcom_mdt_pas_init(struct device *dev, const struct firmware *fw,
+ 			       const char *fw_name, int pas_id, phys_addr_t mem_phys,
+-			       struct qcom_pas_context *ctx)
++			       size_t mem_size, struct qcom_pas_context *ctx)
+ {
+ 	const struct elf32_phdr *phdrs;
+ 	const struct elf32_phdr *phdr;
+ 	const struct elf32_hdr *ehdr;
+ 	phys_addr_t min_addr = PHYS_ADDR_MAX;
+ 	phys_addr_t max_addr = 0;
++	phys_addr_t mem_reloc;
+ 	bool relocate = false;
+ 	size_t metadata_len;
+ 	void *metadata;
+ 	int ret;
+ 	int i;
+ 
+-	if (!mdt_header_valid(fw))
++	if (!mem_phys || !mem_size || mem_size > PHYS_ADDR_MAX - mem_phys ||
++	    !mdt_header_valid(fw))
+ 		return -EINVAL;
+ 
+ 	ehdr = (struct elf32_hdr *)fw->data;
+ 	phdrs = (struct elf32_phdr *)(fw->data + ehdr->e_phoff);
+ 
+ 	for (i = 0; i < ehdr->e_phnum; i++) {
++		phys_addr_t end;
++
+ 		phdr = &phdrs[i];
+ 
+ 		if (!mdt_phdr_loadable(phdr))
+ 			continue;
+ 
++		if (phdr->p_filesz > phdr->p_memsz)
++			return -EINVAL;
++
+ 		if (phdr->p_flags & QCOM_MDT_RELOCATABLE)
+ 			relocate = true;
+ 
+ 		if (phdr->p_paddr < min_addr)
+ 			min_addr = phdr->p_paddr;
+ 
+-		if (phdr->p_paddr + phdr->p_memsz > max_addr)
+-			max_addr = ALIGN(phdr->p_paddr + phdr->p_memsz, SZ_4K);
++		end = (phys_addr_t)phdr->p_paddr + phdr->p_memsz;
++		if (end > max_addr)
++			max_addr = end;
+ 	}
+ 
++	mem_reloc = relocate ? min_addr : mem_phys;
++	if (relocate)
++		max_addr = ALIGN(max_addr, SZ_4K);
++	/* Refuse invalid geometry before changing secure PAS state. */
++	if (min_addr >= max_addr || min_addr < mem_reloc ||
++	    max_addr - mem_reloc > mem_size)
++		return -EINVAL;
++
+ 	metadata = qcom_mdt_read_metadata(fw, &metadata_len, fw_name, dev);
+ 	if (IS_ERR(metadata)) {
+ 		ret = PTR_ERR(metadata);
+@@ -458,7 +494,10 @@
+ {
+ 	int ret;
+ 
+-	ret = __qcom_mdt_pas_init(dev, fw, fw_name, pas_id, mem_phys, NULL);
++	if (!mem_region)
++		return -EINVAL;
++
++	ret = __qcom_mdt_pas_init(dev, fw, fw_name, pas_id, mem_phys, mem_size, NULL);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -489,7 +528,11 @@
+ 	void __iomem *mem_region;
+ 	int ret;
+ 
+-	ret = __qcom_mdt_pas_init(ctx->dev, fw, firmware, ctx->pas_id, ctx->mem_phys, ctx);
++	if (!ctx)
++		return -EINVAL;
++
++	ret = __qcom_mdt_pas_init(ctx->dev, fw, firmware, ctx->pas_id,
++				ctx->mem_phys, ctx->mem_size, ctx);
+ 	if (ret)
+ 		return ret;
+ 

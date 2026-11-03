@@ -1,0 +1,150 @@
+From: SenemOS Contributors <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] backlight: ktz8866: observe Uke paired dimming mode read-only
+
+Read the adopted BL_CFG1 on both bound Uke chips under the existing pair
+mutex. Report per-side read errors or mode mismatch without publishing a
+partial decoded mode. Expose the read-only group only on the ready primary.
+Do not alter mode, brightness mapping, GPIO, bias or HBM state. Register
+mode is not optical DC-dimming qualification.
+
+Base: exact prepared kernel24 source b818ce5f563e04462e33c6c6c504b5ed0660216d.
+Source and deferred fault validation: docs/KTZ8866-DIMMING-OBSERVATION-20261018.md.
+
+diff --git a/Documentation/ABI/testing/sysfs-driver-ktz8866-uke b/Documentation/ABI/testing/sysfs-driver-ktz8866-uke
+new file mode 100644
+index 0000000..621a1b0
+--- /dev/null
++++ b/Documentation/ABI/testing/sysfs-driver-ktz8866-uke
+@@ -0,0 +1,33 @@
++What:		/sys/bus/i2c/devices/.../uke_dimming_state
++Date:		October 2026
++Contact:	SenemOS Uke kernel project
++Description:
++		Read-only observation of BL_CFG1 (0x02) on both bound KTZ8866
++		chips of the Xiaomi Uke backlight. Present only on the successfully
++		bound primary device, also reachable through
++		/sys/class/backlight/uke-backlight/device/uke_dimming_state.
++		The existing paired brightness mutex covers both regmap reads.
++		These sequential I2C reads are not an atomic hardware snapshot.
++
++		One newline-terminated, space-separated key=value record:
++		status=ok primary_cfg1=0xNN secondary_cfg1=0xNN mode=MODE
++		mapping=MAP pwm_polarity=POLARITY
++
++		MODE is i2c (PWM_ENABLE bit 0 clear) or i2c-times-pwm (bit 0 set).
++		MAP is exponential (BLED_MAP bit 3 clear) or linear (bit 3 set).
++		POLARITY is active-high (PWM_CONFIG bit 2 clear) or active-low.
++		Both chips must agree on these bits (mask 0x0d). Other BL_CFG1
++		bits are reported raw but do not participate in this comparison.
++
++		A mismatch returns status=mismatch primary_cfg1=0xNN
++		secondary_cfg1=0xNN mismatch_mask=0xNN, without decoded mode.
++		A read failure returns status=read-error primary_errno=N
++		secondary_errno=N, without raw or decoded configuration. Each
++		errno is the negative regmap error, or zero for the successful read.
++		Both reads are attempted once; there are no retries or cached values.
++		Consumers must check status before interpreting the remaining fields.
++
++		This interface never writes a register, forces an I2C address, toggles
++		a GPIO, changes HBM or changes brightness limits. Register mode is
++		not a measurement of PWM duty, frequency, luminance, optical flicker
++		or DC dimming. External bus access is outside this driver's lock.
+diff --git a/drivers/video/backlight/ktz8866.c b/drivers/video/backlight/ktz8866.c
+index bbce706..2066140 100644
+--- a/drivers/video/backlight/ktz8866.c
++++ b/drivers/video/backlight/ktz8866.c
+@@ -13,6 +13,7 @@
+ #include <linux/mutex.h>
+ #include <linux/of.h>
+ #include <linux/regmap.h>
++#include <linux/sysfs.h>
+ 
+ #include "ktz8866-uke-levels.h"
+ 
+@@ -45,6 +46,10 @@
+ #define BL_EN_BIT BIT(6)
+ #define LCD_BIAS_EN 0x9F
+ #define PWM_HYST 0x5
++#define BL_CFG1_PWM_ENABLE BIT(0)
++#define BL_CFG1_PWM_CONFIG BIT(2)
++#define BL_CFG1_BLED_MAP BIT(3)
++#define BL_CFG1_MODE_MASK (BL_CFG1_PWM_ENABLE | BL_CFG1_PWM_CONFIG | BL_CFG1_BLED_MAP)
+ 
+ struct ktz8866 {
+ 	struct i2c_client *client;
+@@ -76,6 +81,67 @@ static int ktz8866_update_bits(struct ktz8866 *ktz, unsigned int reg,
+ 	return regmap_update_bits(ktz->regmap, reg, mask, val);
+ }
+ 
++/*
++ * Observe the firmware-adopted pair through its bound regmaps. The primary
++ * lock also serializes the paired brightness writer. No mode, bias, GPIO or
++ * brightness write is needed to read BL_CFG1 (KTZ8866-04b, Table 7).
++ */
++static ssize_t uke_dimming_state_show(struct device *dev,
++				    struct device_attribute *attr, char *buf)
++{
++	struct ktz8866 *ktz = dev_get_drvdata(dev);
++	unsigned int primary_cfg, secondary_cfg, mismatch;
++	int primary_error, secondary_error;
++
++	if (!ktz || !ktz->uke || ktz->secondary || !ktz->peer || !ktz->backlight)
++		return -ENODEV;
++
++	mutex_lock(&ktz->lock);
++	primary_error = regmap_read(ktz->regmap, BL_CFG1, &primary_cfg);
++	secondary_error = regmap_read(ktz->peer->regmap, BL_CFG1, &secondary_cfg);
++	mutex_unlock(&ktz->lock);
++
++	/* Never decode a failed read or silently publish only one chip's mode. */
++	if (primary_error || secondary_error)
++		return sysfs_emit(buf,
++			"status=read-error primary_errno=%d secondary_errno=%d\n",
++			primary_error, secondary_error);
++	mismatch = (primary_cfg ^ secondary_cfg) & BL_CFG1_MODE_MASK;
++	if (mismatch)
++		return sysfs_emit(buf,
++			"status=mismatch primary_cfg1=0x%02x secondary_cfg1=0x%02x mismatch_mask=0x%02x\n",
++			primary_cfg, secondary_cfg,
++			mismatch);
++
++	return sysfs_emit(buf,
++		"status=ok primary_cfg1=0x%02x secondary_cfg1=0x%02x mode=%s mapping=%s pwm_polarity=%s\n",
++		primary_cfg, secondary_cfg,
++		primary_cfg & BL_CFG1_PWM_ENABLE ? "i2c-times-pwm" : "i2c",
++		primary_cfg & BL_CFG1_BLED_MAP ? "linear" : "exponential",
++		primary_cfg & BL_CFG1_PWM_CONFIG ? "active-low" : "active-high");
++}
++static DEVICE_ATTR_RO(uke_dimming_state);
++
++static struct attribute *ktz8866_uke_attrs[] = {
++	&dev_attr_uke_dimming_state.attr,
++	NULL,
++};
++
++static umode_t ktz8866_uke_attr_is_visible(struct kobject *kobj,
++					struct attribute *attr, int index)
++{
++	struct ktz8866 *ktz = dev_get_drvdata(kobj_to_dev(kobj));
++
++	return ktz && ktz->uke && !ktz->secondary && ktz->peer && ktz->backlight ?
++		attr->mode : 0;
++}
++
++static const struct attribute_group ktz8866_uke_group = {
++	.attrs = ktz8866_uke_attrs,
++	.is_visible = ktz8866_uke_attr_is_visible,
++};
++__ATTRIBUTE_GROUPS(ktz8866_uke);
++
+ struct ktz8866_state {
+ 	unsigned int enable, lsb, msb;
+ };
+@@ -460,6 +526,7 @@ static struct i2c_driver ktz8866_driver = {
+ 	.driver = {
+ 		.name = "ktz8866",
+ 		.of_match_table = ktz8866_match_table,
++		.dev_groups = ktz8866_uke_groups,
+ 	},
+ 	.probe = ktz8866_probe,
+ 	.remove = ktz8866_remove,

@@ -90,6 +90,27 @@ static int UKE_INIT uke_pmic_adc(void *fdt)
 	ret = fdt_setprop(fdt, node, "io-channels", hwmon, count * sizeof(hwmon[0]));
 	if (ret)
 		return ret;
+	/* Fixed board thermistors for charge-command guards; no raw channel selector. */
+	{
+		fdt32_t protection[] = {
+			cpu_to_fdt32(phandle), cpu_to_fdt32(0x749),
+			cpu_to_fdt32(phandle), cpu_to_fdt32(0x747),
+			cpu_to_fdt32(phandle), cpu_to_fdt32(0x14d),
+		};
+		static const char names[] = "charger\0connector\0connector2";
+
+		node = fdt_path_offset(fdt, "/pmic-glink");
+		if (node < 0 ||
+		    (fdt_node_check_compatible(fdt, node, "xiaomi,uke-pmic-glink") &&
+		     fdt_node_check_compatible(fdt, node, "xiaomi,uke-typec-pmic-glink")))
+			return -FDT_ERR_BADVALUE;
+		ret = fdt_setprop(fdt, node, "io-channels", protection, sizeof(protection));
+		if (ret)
+			return ret;
+		ret = fdt_setprop(fdt, node, "io-channel-names", names, sizeof(names));
+		if (ret)
+			return ret;
+	}
 
 	for (i = 0; i < sizeof(thermistors) / sizeof(thermistors[0]); i++) {
 		unsigned int sensor;
@@ -128,6 +149,16 @@ static int UKE_INIT uke_pmic_adc(void *fdt)
 		ret = fdt_setprop_u32(fdt, zone, "thermal-sensors", sensor);
 		if (ret)
 			return ret;
+		if (thermistors[i].channel == 0x749 || thermistors[i].channel == 0x747 ||
+		    thermistors[i].channel == 0x14d) {
+			/* The generic ADC provider has no threshold interrupt callback. */
+			ret = fdt_setprop_u32(fdt, zone, "polling-delay", 1000);
+			if (ret)
+				return ret;
+			ret = fdt_setprop_u32(fdt, zone, "polling-delay-passive", 1000);
+			if (ret)
+				return ret;
+		}
 	}
 	return 0;
 }

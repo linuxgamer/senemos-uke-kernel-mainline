@@ -1,0 +1,963 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: codecs: add the FourSemi FS19xx smart amplifier
+
+Add an I2C/ASoC driver for the FS19xx amplifiers used as the Uke internal
+speakers (four devices, addresses 0x34-0x37). It follows the register
+sequences and preset layout of the FourSemi GPL driver, parses the preset
+with full bounds and CRC checks, holds the amplifier in reset while idle and
+runs the OEM start sequence on stream start. The DAC stays muted until the
+amplifier reports PLL lock, the output switch defaults to off and the digital
+volume is capped at the OEM uncalibrated limit. No OEM preset or calibration
+data is carried; the preset is loaded as firmware.
+
+The driver matches the OEM foursemi,fs16xx compatible as well. An amplifier
+that is not detected still registers its component, so the sound card and its
+other links bind; that speaker refuses to open a stream.
+
+diff --git a/sound/soc/codecs/Kconfig b/sound/soc/codecs/Kconfig
+index 8e251e1d8..a0bdb1b99 100644
+--- a/sound/soc/codecs/Kconfig
++++ b/sound/soc/codecs/Kconfig
+@@ -1339,6 +1339,17 @@ config SND_SOC_FS_AMP_LIB
+ 	select CRC16
+ 	tristate
+ 
++config SND_SOC_FS19XX
++	tristate "FourSemi FS19xx smart speaker amplifier"
++	depends on I2C
++	select GPIOLIB
++	select REGMAP_I2C
++	select CRC16
++	help
++	  Enable support for the FourSemi FS19xx smart speaker amplifier.
++	  The amplifier is configured from the OEM preset file and unmuted
++	  only after its PLL reports lock.
++
+ config SND_SOC_FS210X
+ 	tristate 'FourSemi FS2104/5S digital audio amplifier'
+ 	depends on I2C
+diff --git a/sound/soc/codecs/Makefile b/sound/soc/codecs/Makefile
+index 3d122ace7..df51f3ff5 100644
+--- a/sound/soc/codecs/Makefile
++++ b/sound/soc/codecs/Makefile
+@@ -144,6 +144,7 @@ snd-soc-es9356-y := es9356.o
+ snd-soc-framer-y := framer-codec.o
+ snd-soc-fs-amp-lib-y := fs-amp-lib.o
+ snd-soc-fs210x-y := fs210x.o
++snd-soc-fs19xx-y := fs19xx.o
+ snd-soc-gtm601-y := gtm601.o
+ snd-soc-hdac-hdmi-y := hdac_hdmi.o
+ snd-soc-hdac-hda-y := hdac_hda.o
+@@ -588,6 +589,7 @@ obj-$(CONFIG_SND_SOC_ES9356)    += snd-soc-es9356.o
+ obj-$(CONFIG_SND_SOC_FRAMER)	+= snd-soc-framer.o
+ obj-$(CONFIG_SND_SOC_FS_AMP_LIB)+= snd-soc-fs-amp-lib.o
+ obj-$(CONFIG_SND_SOC_FS210X)	+= snd-soc-fs210x.o
++obj-$(CONFIG_SND_SOC_FS19XX)	+= snd-soc-fs19xx.o
+ obj-$(CONFIG_SND_SOC_GTM601)    += snd-soc-gtm601.o
+ obj-$(CONFIG_SND_SOC_HDAC_HDMI) += snd-soc-hdac-hdmi.o
+ obj-$(CONFIG_SND_SOC_HDAC_HDA) += snd-soc-hdac-hda.o
+diff --git a/sound/soc/codecs/fs19xx.c b/sound/soc/codecs/fs19xx.c
+new file mode 100644
+index 000000000..ebd27f863
+--- /dev/null
++++ b/sound/soc/codecs/fs19xx.c
+@@ -0,0 +1,899 @@
++// SPDX-License-Identifier: GPL-2.0-only
++//
++// fs19xx.c -- Driver for the FourSemi FS19xx smart speaker amplifier
++//
++// Register sequences and the preset file layout follow the FourSemi GPL
++// driver published in MiCode/vendor_qcom_opensource_audio-kernel
++// (asoc/codecs/fs19xx, Copyright (C) Fourier Semiconductor Inc.).
++//
++// The amplifier runs its own speaker protection. It is held in reset while
++// idle, configured from the OEM preset on stream start and unmuted only after
++// the amplifier reports a locked PLL.
++
++#include <linux/bitfield.h>
++#include <linux/bits.h>
++#include <linux/cleanup.h>
++#include <linux/crc16.h>
++#include <linux/delay.h>
++#include <linux/firmware.h>
++#include <linux/gpio/consumer.h>
++#include <linux/i2c.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/overflow.h>
++#include <linux/of.h>
++#include <linux/regmap.h>
++#include <linux/unaligned.h>
++#include <linux/workqueue.h>
++#include <sound/pcm_params.h>
++#include <sound/soc.h>
++
++#define FS19XX_DEFAULT_FW_NAME		"qcom/uke/audio/fs19xx.fsm"
++
++#define FS19XX_REG_STATUS		0x00
++#define FS19XX_STATUS_PLLS		BIT(1)
++#define FS19XX_REG_CHIPID		0x03
++#define FS19XX_CHIPID_FS19XX		0x29
++#define FS19XX_CHIPID_FS1958		0x17
++#define FS19XX_REG_REVID		0x04
++#define FS19XX_REG_OTPACC		0x0b
++#define FS19XX_OTPACC_KEY		0xca91
++#define FS19XX_REG_CHIPINI		0x0e
++#define FS19XX_REG_PWRCTRL		0x10
++#define FS19XX_PWRCTRL_RUN		0x0000
++#define FS19XX_PWRCTRL_PWDN		0x0001
++#define FS19XX_PWRCTRL_RESET		0x0002
++#define FS19XX_REG_SYSCTRL		0x11
++#define FS19XX_SYSCTRL_ALL_ON		0x00ef
++#define FS19XX_REG_SPKCOEF		0x14
++#define FS19XX_REG_VOLCTRL		0x16
++#define FS19XX_REG_I2SCTRL		0x17
++#define FS19XX_I2SCTRL_SR		GENMASK(15, 12)
++#define FS19XX_I2SCTRL_DOE		BIT(11)
++#define FS19XX_I2SSR_48000		0x9
++#define FS19XX_REG_DACCTRL		0x30
++#define FS19XX_DACCTRL_MUTE		0x0310
++#define FS19XX_DACCTRL_RUN		0x0210
++#define FS19XX_REG_TSCTRL		0x4c
++#define FS19XX_TSCTRL_TSEN		BIT(3)
++#define FS19XX_REG_PLLCTRL1		0xa1
++#define FS19XX_REG_PLLCTRL2		0xa2
++#define FS19XX_REG_PLLCTRL3		0xa3
++#define FS19XX_REG_MAX			0xff
++
++#define FS19XX_CHIPINI_DONE_A		0x0003
++#define FS19XX_CHIPINI_DONE_B		0x0300
++#define FS19XX_RESET_RETRIES		5
++
++/* The graph sends four 32-bit slots at 48 kHz: BCLK = 6.144 MHz. */
++#define FS19XX_RATE			48000
++#define FS19XX_SLOT_WIDTH		32
++#define FS19XX_SLOTS			4
++#define FS19XX_BCLK			(FS19XX_RATE * FS19XX_SLOT_WIDTH * FS19XX_SLOTS)
++#define FS19XX_PLL_C1			0x0260
++#define FS19XX_PLL_C2			0x0540
++#define FS19XX_PLL_C3			0x0018
++
++#define FS19XX_VOL_DEFAULT		0xdf	/* OEM uncalibrated default, -12 dB */
++#define FS19XX_VOL_MAX			0xff
++
++#define FS19XX_LOCK_POLL_MS		10
++#define FS19XX_LOCK_POLL_COUNT		200
++#define FS19XX_UNMUTE_DELAY_MS		30
++
++/* Preset file layout; all integers are little endian. */
++#define FS19XX_SCENE_MUSIC		BIT(0)
++#define FS19XX_SCENE_COMMON		0xffff
++#define FS19XX_DSC_SPK_INFO		1
++#define FS19XX_DSC_REG_COMMON		2
++#define FS19XX_DSC_REG_SCENES		3
++#define FS19XX_INFO_TEMPR_COEF		1
++#define FS19XX_INFO_POSITION		16
++#define FS19XX_PRESET_VER_VALID		BIT(15)
++
++struct fs19xx_preset_header {
++	__le16 version;
++	char customer[8];
++	char project[8];
++	__le32 date;
++	__le16 size;
++	__le16 crc16;
++	__le16 ndev;
++} __packed;
++
++struct fs19xx_index {
++	__le16 offset;
++	__le16 type;
++} __packed;
++
++struct fs19xx_dev_list {
++	__le16 preset_ver;
++	char project[8];
++	char customer[8];
++	__le32 date;
++	__le16 data_len;
++	__le16 crc16;
++	__le16 len;
++	__le16 bus;
++	__le16 addr;
++	__le16 dev_type;
++	__le16 npreset;
++	__le16 reg_scenes;
++	__le16 eq_scenes;
++	struct fs19xx_index index[];
++} __packed;
++
++/* addr:8 pos:4 len:4, then a 16-bit value. pos 15 with len > 0 is a pseudo-op. */
++struct fs19xx_reg_unit {
++	__le16 ctrl;
++	__le16 value;
++} __packed;
++
++struct fs19xx_scene_unit {
++	__le16 scene;
++	struct fs19xx_reg_unit reg;
++} __packed;
++
++#define FS19XX_UNIT_ADDR		GENMASK(7, 0)
++#define FS19XX_UNIT_POS			GENMASK(11, 8)
++#define FS19XX_UNIT_LEN			GENMASK(15, 12)
++#define FS19XX_OP_DELAY			1
++#define FS19XX_OP_WAIT			2
++#define FS19XX_WAIT_VAL			GENMASK(7, 0)
++#define FS19XX_WAIT_POS			GENMASK(11, 8)
++#define FS19XX_WAIT_LEN			GENMASK(15, 12)
++#define FS19XX_WAIT_TRIES		35
++#define FS19XX_MAX_DELAY_MS		100
++
++struct fs19xx_priv {
++	struct i2c_client *i2c;
++	struct device *dev;
++	struct regmap *regmap;
++	struct gpio_desc *gpio_reset;
++	struct mutex lock;
++	struct delayed_work unmute_work;
++
++	/* Parsed view into @preset; NULL when no usable preset is loaded. */
++	u8 *preset;
++	size_t preset_size;
++	const struct fs19xx_reg_unit *common;
++	unsigned int ncommon;
++	const struct fs19xx_scene_unit *scenes;
++	unsigned int nscenes;
++	u16 tcoef;
++	u16 position;
++
++	unsigned int volume;
++	bool powered;
++	bool speaker_enabled;
++};
++
++static unsigned int max_volume = FS19XX_VOL_DEFAULT;
++module_param(max_volume, uint, 0644);
++MODULE_PARM_DESC(max_volume,
++		 "Highest digital volume register value accepted (default 0xdf, the OEM uncalibrated limit)");
++
++static bool force_unmute;
++module_param(force_unmute, bool, 0644);
++MODULE_PARM_DESC(force_unmute,
++		 "Unmute without waiting for the amplifier PLL lock flag (bring-up only)");
++
++/* Registers that are read-modify-written must be read twice to be trusted. */
++static int fs19xx_read_stable(struct fs19xx_priv *fs19xx, unsigned int reg,
++			      unsigned int *val)
++{
++	unsigned int prev = 0, cur = 0;
++	int ret, i;
++
++	for (i = 0; i < 5; i++) {
++		ret = regmap_read(fs19xx->regmap, reg, &cur);
++		if (ret)
++			return ret;
++		if (i && cur == prev)
++			break;
++		prev = cur;
++	}
++	*val = cur;
++	return 0;
++}
++
++static int fs19xx_apply_unit(struct fs19xx_priv *fs19xx,
++			     const struct fs19xx_reg_unit *unit)
++{
++	u16 ctrl = le16_to_cpu(unit->ctrl);
++	u16 value = le16_to_cpu(unit->value);
++	unsigned int addr = FIELD_GET(FS19XX_UNIT_ADDR, ctrl);
++	unsigned int pos = FIELD_GET(FS19XX_UNIT_POS, ctrl);
++	unsigned int len = FIELD_GET(FS19XX_UNIT_LEN, ctrl);
++	unsigned int cur, mask, tries;
++	int ret;
++
++	if (pos == 0xf && len > 0) {
++		switch (len) {
++		case FS19XX_OP_DELAY:
++			if (value > FS19XX_MAX_DELAY_MS)
++				return -EINVAL;
++			msleep(value);
++			return 0;
++		case FS19XX_OP_WAIT: {
++			unsigned int wlen = FIELD_GET(FS19XX_WAIT_LEN, value);
++			unsigned int wpos = FIELD_GET(FS19XX_WAIT_POS, value);
++			unsigned int want = FIELD_GET(FS19XX_WAIT_VAL, value);
++
++			if (wlen >= 8)
++				return -EINVAL;
++			mask = (1U << (wlen + 1)) - 1;
++			for (tries = 0; tries < FS19XX_WAIT_TRIES; tries++) {
++				usleep_range(1000, 1500);
++				ret = fs19xx_read_stable(fs19xx, addr, &cur);
++				if (ret)
++					return ret;
++				if (((cur >> wpos) & mask) == want)
++					return 0;
++			}
++			dev_dbg(fs19xx->dev, "wait on reg 0x%02x timed out\n", addr);
++			return 0;
++		}
++		default:
++			return 0;
++		}
++	}
++
++	if (pos == 0 && len == 15)
++		return regmap_write(fs19xx->regmap, addr, value);
++
++	/* The OEM driver keeps the mask in 16 bits; match that. */
++	mask = (((1U << (len + 1)) - 1) << pos) & 0xffff;
++	ret = fs19xx_read_stable(fs19xx, addr, &cur);
++	if (ret)
++		return ret;
++	cur = (cur & ~mask) | (((unsigned int)value << pos) & mask);
++	return regmap_write(fs19xx->regmap, addr, cur);
++}
++
++static int fs19xx_write_tables(struct fs19xx_priv *fs19xx)
++{
++	unsigned int i;
++	int ret;
++
++	for (i = 0; i < fs19xx->ncommon; i++) {
++		ret = fs19xx_apply_unit(fs19xx, &fs19xx->common[i]);
++		if (ret)
++			return ret;
++	}
++	for (i = 0; i < fs19xx->nscenes; i++) {
++		if (!(le16_to_cpu(fs19xx->scenes[i].scene) & FS19XX_SCENE_MUSIC))
++			continue;
++		ret = fs19xx_apply_unit(fs19xx, &fs19xx->scenes[i].reg);
++		if (ret)
++			return ret;
++	}
++	return 0;
++}
++
++static int fs19xx_reset_chip(struct fs19xx_priv *fs19xx)
++{
++	unsigned int val = 0;
++	int i;
++
++	if (fs19xx->gpio_reset) {
++		gpiod_set_value_cansleep(fs19xx->gpio_reset, 1);
++		msleep(10);
++		gpiod_set_value_cansleep(fs19xx->gpio_reset, 0);
++		msleep(1);
++	}
++
++	for (i = 0; i < FS19XX_RESET_RETRIES; i++) {
++		regmap_write(fs19xx->regmap, FS19XX_REG_PWRCTRL, FS19XX_PWRCTRL_RESET);
++		regmap_read(fs19xx->regmap, FS19XX_REG_PWRCTRL, &val);
++		msleep(15);
++		regmap_write(fs19xx->regmap, FS19XX_REG_PWRCTRL, FS19XX_PWRCTRL_PWDN);
++		if (regmap_read(fs19xx->regmap, FS19XX_REG_CHIPINI, &val))
++			continue;
++		if (val == FS19XX_CHIPINI_DONE_A || val == FS19XX_CHIPINI_DONE_B)
++			return 0;
++	}
++	return -ETIMEDOUT;
++}
++
++/* Leaves the amplifier configured, muted and powered down. */
++static int fs19xx_chip_init(struct fs19xx_priv *fs19xx)
++{
++	int ret;
++
++	ret = fs19xx_reset_chip(fs19xx);
++	if (ret)
++		return ret;
++	ret = regmap_write(fs19xx->regmap, FS19XX_REG_SPKCOEF, fs19xx->tcoef << 1);
++	if (ret)
++		return ret;
++	ret = fs19xx_write_tables(fs19xx);
++	if (ret)
++		return ret;
++	ret = regmap_write(fs19xx->regmap, FS19XX_REG_DACCTRL, FS19XX_DACCTRL_MUTE);
++	if (ret)
++		return ret;
++	msleep(10);
++	ret = regmap_write(fs19xx->regmap, FS19XX_REG_PWRCTRL, FS19XX_PWRCTRL_PWDN);
++	if (ret)
++		return ret;
++	return regmap_write(fs19xx->regmap, FS19XX_REG_SYSCTRL, 0);
++}
++
++static int fs19xx_set_volume_reg(struct fs19xx_priv *fs19xx)
++{
++	return regmap_write(fs19xx->regmap, FS19XX_REG_VOLCTRL,
++			    (fs19xx->volume << 8) | 0x00c0);
++}
++
++/* Everything except the DAC unmute and thermal sensing; DAC stays muted. */
++static int fs19xx_chip_start(struct fs19xx_priv *fs19xx)
++{
++	unsigned int i2sctrl;
++	int ret;
++
++	ret = fs19xx_read_stable(fs19xx, FS19XX_REG_I2SCTRL, &i2sctrl);
++	if (ret)
++		return ret;
++	i2sctrl &= ~FS19XX_I2SCTRL_SR;
++	i2sctrl |= FIELD_PREP(FS19XX_I2SCTRL_SR, FS19XX_I2SSR_48000) |
++		   FS19XX_I2SCTRL_DOE;
++	ret = regmap_write(fs19xx->regmap, FS19XX_REG_I2SCTRL, i2sctrl);
++	if (ret)
++		return ret;
++
++	/* The PLL registers sit behind the OTP access key. */
++	ret = regmap_write(fs19xx->regmap, FS19XX_REG_OTPACC, FS19XX_OTPACC_KEY);
++	if (ret)
++		return ret;
++	ret = regmap_write(fs19xx->regmap, FS19XX_REG_PLLCTRL1, FS19XX_PLL_C1);
++	if (!ret)
++		ret = regmap_write(fs19xx->regmap, FS19XX_REG_PLLCTRL2, FS19XX_PLL_C2);
++	if (!ret)
++		ret = regmap_write(fs19xx->regmap, FS19XX_REG_PLLCTRL3, FS19XX_PLL_C3);
++	regmap_write(fs19xx->regmap, FS19XX_REG_OTPACC, 0);
++	if (ret)
++		return ret;
++
++	ret = regmap_write(fs19xx->regmap, FS19XX_REG_SYSCTRL, FS19XX_SYSCTRL_ALL_ON);
++	if (ret)
++		return ret;
++	ret = regmap_write(fs19xx->regmap, FS19XX_REG_PWRCTRL, FS19XX_PWRCTRL_RUN);
++	if (ret)
++		return ret;
++	ret = fs19xx_set_volume_reg(fs19xx);
++	if (ret)
++		return ret;
++	return regmap_write(fs19xx->regmap, FS19XX_REG_DACCTRL, FS19XX_DACCTRL_MUTE);
++}
++
++static void fs19xx_chip_stop(struct fs19xx_priv *fs19xx)
++{
++	regmap_write(fs19xx->regmap, FS19XX_REG_DACCTRL, FS19XX_DACCTRL_MUTE);
++	msleep(10);
++	regmap_write(fs19xx->regmap, FS19XX_REG_PWRCTRL, FS19XX_PWRCTRL_PWDN);
++	regmap_write(fs19xx->regmap, FS19XX_REG_SYSCTRL, 0);
++	/* Hold the amplifier in reset while idle. */
++	if (fs19xx->gpio_reset)
++		gpiod_set_value_cansleep(fs19xx->gpio_reset, 1);
++}
++
++static void fs19xx_unmute_work(struct work_struct *work)
++{
++	struct fs19xx_priv *fs19xx = container_of(to_delayed_work(work),
++						  struct fs19xx_priv, unmute_work);
++	unsigned int status = 0, tsctrl;
++	bool locked = false;
++	int i, ret;
++
++	/*
++	 * The bit clock can take a while to appear after the stream starts. Poll
++	 * without holding the lock across the sleeps so a stream stop never waits.
++	 */
++	for (i = 0; i < FS19XX_LOCK_POLL_COUNT && !locked; i++) {
++		scoped_guard(mutex, &fs19xx->lock) {
++			if (!fs19xx->powered)
++				return;
++			ret = regmap_read(fs19xx->regmap, FS19XX_REG_STATUS, &status);
++			locked = !ret && (status & FS19XX_STATUS_PLLS);
++		}
++		if (!locked && force_unmute && i == 2)
++			locked = true;
++		if (!locked)
++			msleep(FS19XX_LOCK_POLL_MS);
++	}
++	dev_info_once(fs19xx->dev, "status 0x%04x after %d polls\n", status, i);
++	if (!locked) {
++		dev_warn(fs19xx->dev, "PLL not locked (status 0x%04x), staying muted\n", status);
++		return;
++	}
++
++	guard(mutex)(&fs19xx->lock);
++
++	if (!fs19xx->powered)
++		return;
++	if (regmap_write(fs19xx->regmap, FS19XX_REG_DACCTRL, FS19XX_DACCTRL_RUN))
++		return;
++	msleep(10);
++	if (!fs19xx_read_stable(fs19xx, FS19XX_REG_TSCTRL, &tsctrl) &&
++	    !(tsctrl & FS19XX_TSCTRL_TSEN))
++		regmap_write(fs19xx->regmap, FS19XX_REG_TSCTRL, tsctrl | FS19XX_TSCTRL_TSEN);
++}
++
++static int fs19xx_power_on(struct fs19xx_priv *fs19xx)
++{
++	int ret;
++
++	if (fs19xx->powered)
++		return 0;
++
++	ret = fs19xx_chip_init(fs19xx);
++	if (!ret)
++		ret = fs19xx_chip_start(fs19xx);
++	if (ret) {
++		dev_err(fs19xx->dev, "power on failed: %d\n", ret);
++		fs19xx_chip_stop(fs19xx);
++		return ret;
++	}
++	fs19xx->powered = true;
++	schedule_delayed_work(&fs19xx->unmute_work,
++			      msecs_to_jiffies(FS19XX_UNMUTE_DELAY_MS));
++	return 0;
++}
++
++static void fs19xx_power_off(struct fs19xx_priv *fs19xx)
++{
++	if (!fs19xx->powered)
++		return;
++	fs19xx->powered = false;
++	/* The work takes the lock; it sees !powered and returns. */
++	mutex_unlock(&fs19xx->lock);
++	cancel_delayed_work_sync(&fs19xx->unmute_work);
++	mutex_lock(&fs19xx->lock);
++	fs19xx_chip_stop(fs19xx);
++}
++
++static int fs19xx_dai_startup(struct snd_pcm_substream *substream,
++			      struct snd_soc_dai *dai)
++{
++	struct fs19xx_priv *fs19xx = snd_soc_component_get_drvdata(dai->component);
++
++	if (!fs19xx->preset) {
++		dev_err_once(fs19xx->dev, "amplifier or preset unavailable\n");
++		return -ENODEV;
++	}
++	return 0;
++}
++
++static int fs19xx_dai_hw_params(struct snd_pcm_substream *substream,
++				struct snd_pcm_hw_params *params,
++				struct snd_soc_dai *dai)
++{
++	/* Sample width is the DSP's choice; the 4 x 32-bit TDM frame fixes BCLK. */
++	if (params_rate(params) != FS19XX_RATE ||
++	    params_channels(params) != FS19XX_SLOTS)
++		return -EINVAL;
++	return 0;
++}
++
++static int fs19xx_dai_mute(struct snd_soc_dai *dai, int mute, int stream)
++{
++	struct fs19xx_priv *fs19xx = snd_soc_component_get_drvdata(dai->component);
++	int ret = 0;
++
++	guard(mutex)(&fs19xx->lock);
++
++	if (mute)
++		fs19xx_power_off(fs19xx);
++	else if (fs19xx->speaker_enabled)
++		ret = fs19xx_power_on(fs19xx);
++	return ret;
++}
++
++static const struct snd_soc_dai_ops fs19xx_dai_ops = {
++	.startup	= fs19xx_dai_startup,
++	.hw_params	= fs19xx_dai_hw_params,
++	.mute_stream	= fs19xx_dai_mute,
++	.no_capture_mute = 1,
++};
++
++static struct snd_soc_dai_driver fs19xx_dai = {
++	.name = "fs19xx-aif",
++	.playback = {
++		.stream_name = "AIF Playback",
++		.channels_min = 1,
++		.channels_max = FS19XX_SLOTS,
++		.rates = SNDRV_PCM_RATE_48000,
++		.formats = SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE |
++			   SNDRV_PCM_FMTBIT_S32_LE,
++	},
++	.ops = &fs19xx_dai_ops,
++};
++
++static int fs19xx_volume_info(struct snd_kcontrol *kcontrol,
++			      struct snd_ctl_elem_info *uinfo)
++{
++	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
++	uinfo->count = 1;
++	uinfo->value.integer.min = 0;
++	uinfo->value.integer.max = min_t(unsigned int, max_volume, FS19XX_VOL_MAX);
++	return 0;
++}
++
++static int fs19xx_volume_get(struct snd_kcontrol *kcontrol,
++			     struct snd_ctl_elem_value *ucontrol)
++{
++	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
++	struct fs19xx_priv *fs19xx = snd_soc_component_get_drvdata(component);
++
++	ucontrol->value.integer.value[0] = fs19xx->volume;
++	return 0;
++}
++
++static int fs19xx_volume_put(struct snd_kcontrol *kcontrol,
++			     struct snd_ctl_elem_value *ucontrol)
++{
++	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
++	struct fs19xx_priv *fs19xx = snd_soc_component_get_drvdata(component);
++	unsigned int limit = min_t(unsigned int, max_volume, FS19XX_VOL_MAX);
++	unsigned long val = ucontrol->value.integer.value[0];
++	int ret = 0;
++
++	if (val > limit)
++		return -EINVAL;
++
++	guard(mutex)(&fs19xx->lock);
++
++	if (val == fs19xx->volume)
++		return 0;
++	fs19xx->volume = val;
++	if (fs19xx->powered)
++		ret = fs19xx_set_volume_reg(fs19xx);
++	return ret ?: 1;
++}
++
++static int fs19xx_enable_get(struct snd_kcontrol *kcontrol,
++			     struct snd_ctl_elem_value *ucontrol)
++{
++	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
++	struct fs19xx_priv *fs19xx = snd_soc_component_get_drvdata(component);
++
++	ucontrol->value.integer.value[0] = fs19xx->speaker_enabled;
++	return 0;
++}
++
++static int fs19xx_enable_put(struct snd_kcontrol *kcontrol,
++			     struct snd_ctl_elem_value *ucontrol)
++{
++	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
++	struct fs19xx_priv *fs19xx = snd_soc_component_get_drvdata(component);
++	bool enable = ucontrol->value.integer.value[0];
++
++	guard(mutex)(&fs19xx->lock);
++
++	if (enable == fs19xx->speaker_enabled)
++		return 0;
++	fs19xx->speaker_enabled = enable;
++	if (!enable)
++		fs19xx_power_off(fs19xx);
++	return 1;
++}
++
++/*
++ * The amplifier output stays disabled until user space enables it. This
++ * keeps an unqualified preset from driving the speakers on its own.
++ */
++static const struct snd_kcontrol_new fs19xx_controls[] = {
++	{
++		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
++		.name = "Digital Volume",
++		.info = fs19xx_volume_info,
++		.get = fs19xx_volume_get,
++		.put = fs19xx_volume_put,
++	},
++	SOC_SINGLE_BOOL_EXT("Speaker Switch", 0, fs19xx_enable_get, fs19xx_enable_put),
++};
++
++static const struct snd_soc_dapm_widget fs19xx_dapm_widgets[] = {
++	SND_SOC_DAPM_AIF_IN("AIF IN", "AIF Playback", 0, SND_SOC_NOPM, 0, 0),
++	SND_SOC_DAPM_OUTPUT("SPK"),
++};
++
++static const struct snd_soc_dapm_route fs19xx_dapm_routes[] = {
++	{ "SPK", NULL, "AIF IN" },
++};
++
++static const struct snd_soc_component_driver fs19xx_component = {
++	.controls		= fs19xx_controls,
++	.num_controls		= ARRAY_SIZE(fs19xx_controls),
++	.dapm_widgets		= fs19xx_dapm_widgets,
++	.num_dapm_widgets	= ARRAY_SIZE(fs19xx_dapm_widgets),
++	.dapm_routes		= fs19xx_dapm_routes,
++	.num_dapm_routes	= ARRAY_SIZE(fs19xx_dapm_routes),
++};
++
++static const struct regmap_config fs19xx_regmap_config = {
++	.reg_bits		= 8,
++	.val_bits		= 16,
++	.max_register		= FS19XX_REG_MAX,
++	.val_format_endian	= REGMAP_ENDIAN_BIG,
++	.cache_type		= REGCACHE_NONE,
++};
++
++/* Returns a pointer to @count units of @unit_size at @offset, or NULL. */
++static const void *fs19xx_list_at(const u8 *base, size_t size, size_t offset,
++				  size_t count, size_t unit_size)
++{
++	size_t bytes;
++
++	if (check_mul_overflow(count, unit_size, &bytes))
++		return NULL;
++	if (offset > size || bytes > size - offset)
++		return NULL;
++	return base + offset;
++}
++
++static int fs19xx_find_sub(const u8 *preset, size_t size, size_t dev_off,
++			   const struct fs19xx_dev_list *dev, unsigned int type,
++			   size_t unit_size, const void **list, unsigned int *count)
++{
++	size_t idx_base = dev_off + offsetof(struct fs19xx_dev_list, index);
++	unsigned int nsub = le16_to_cpu(dev->len);
++	unsigned int i;
++
++	for (i = 0; i < nsub; i++) {
++		size_t off, n;
++		const void *hdr;
++
++		if (le16_to_cpu(dev->index[i].type) != type)
++			continue;
++		off = idx_base + le16_to_cpu(dev->index[i].offset);
++		hdr = fs19xx_list_at(preset, size, off, 1, sizeof(__le16));
++		if (!hdr)
++			return -EINVAL;
++		n = get_unaligned_le16(hdr);
++		*list = fs19xx_list_at(preset, size, off + sizeof(__le16), n, unit_size);
++		if (!*list)
++			return -EINVAL;
++		*count = n;
++		return 0;
++	}
++	return -ENOENT;
++}
++
++/* Locates this amplifier's lists inside @copy; on success the tables point into it. */
++static int fs19xx_parse_dev(struct fs19xx_priv *fs19xx, const u8 *copy, size_t fw_size,
++			    unsigned int chipid)
++{
++	const struct fs19xx_preset_header *hdr = (const void *)copy;
++	const struct fs19xx_index *index;
++	const struct fs19xx_dev_list *dev = NULL;
++	size_t dev_off = 0;
++	const void *list;
++	unsigned int count, ndev, i;
++	int ret;
++
++	ndev = le16_to_cpu(hdr->ndev);
++	index = fs19xx_list_at(copy, fw_size, sizeof(*hdr), ndev, sizeof(*index));
++	if (!index)
++		return -EINVAL;
++
++	for (i = 0; i < ndev; i++) {
++		const struct fs19xx_dev_list *cand;
++		size_t off = le16_to_cpu(index[i].offset);
++
++		if (le16_to_cpu(index[i].type) != 0)
++			continue;
++		cand = fs19xx_list_at(copy, fw_size, off, 1, sizeof(*cand));
++		if (!cand)
++			return -EINVAL;
++		if (le16_to_cpu(cand->addr) == fs19xx->i2c->addr) {
++			dev = cand;
++			dev_off = off;
++			break;
++		}
++	}
++	if (!dev)
++		return -ENOENT;
++
++	if (!(le16_to_cpu(dev->preset_ver) & FS19XX_PRESET_VER_VALID) ||
++	    (le16_to_cpu(dev->dev_type) >> 8) != chipid)
++		return -EINVAL;
++	if (!fs19xx_list_at(copy, fw_size, dev_off, 1,
++			    sizeof(*dev) + le16_to_cpu(dev->len) * sizeof(*dev->index)))
++		return -EINVAL;
++
++	ret = fs19xx_find_sub(copy, fw_size, dev_off, dev, FS19XX_DSC_SPK_INFO,
++			      sizeof(__le16), &list, &count);
++	if (ret)
++		return ret;
++	if (count <= FS19XX_INFO_POSITION)
++		return -EINVAL;
++	fs19xx->tcoef = get_unaligned_le16(list + FS19XX_INFO_TEMPR_COEF * sizeof(__le16));
++	fs19xx->position = get_unaligned_le16(list + FS19XX_INFO_POSITION * sizeof(__le16));
++
++	ret = fs19xx_find_sub(copy, fw_size, dev_off, dev, FS19XX_DSC_REG_COMMON,
++			      sizeof(struct fs19xx_reg_unit), &list, &count);
++	if (ret)
++		return ret;
++	fs19xx->common = list;
++	fs19xx->ncommon = count;
++
++	ret = fs19xx_find_sub(copy, fw_size, dev_off, dev, FS19XX_DSC_REG_SCENES,
++			      sizeof(struct fs19xx_scene_unit), &list, &count);
++	if (ret)
++		return ret;
++	fs19xx->scenes = list;
++	fs19xx->nscenes = count;
++	return 0;
++}
++
++static int fs19xx_parse_preset(struct fs19xx_priv *fs19xx, const u8 *fw_data,
++			       size_t fw_size, unsigned int chipid)
++{
++	const struct fs19xx_preset_header *hdr = (const void *)fw_data;
++	u8 *copy;
++	int ret;
++
++	if (fw_size < sizeof(*hdr) || le16_to_cpu(hdr->size) != fw_size)
++		return -EINVAL;
++	if (le16_to_cpu(hdr->crc16) !=
++	    crc16(0, fw_data + offsetof(struct fs19xx_preset_header, ndev),
++		  fw_size - offsetof(struct fs19xx_preset_header, ndev)))
++		return -EINVAL;
++
++	copy = devm_kmemdup(fs19xx->dev, fw_data, fw_size, GFP_KERNEL);
++	if (!copy)
++		return -ENOMEM;
++
++	ret = fs19xx_parse_dev(fs19xx, copy, fw_size, chipid);
++	if (ret) {
++		fs19xx->common = NULL;
++		fs19xx->scenes = NULL;
++		fs19xx->ncommon = fs19xx->nscenes = 0;
++		devm_kfree(fs19xx->dev, copy);
++		return ret;
++	}
++
++	fs19xx->preset = copy;
++	fs19xx->preset_size = fw_size;
++	return 0;
++}
++
++static int fs19xx_load_preset(struct fs19xx_priv *fs19xx, unsigned int chipid)
++{
++	const struct firmware *fw;
++	const char *name = FS19XX_DEFAULT_FW_NAME;
++	int ret;
++
++	of_property_read_string(fs19xx->dev->of_node, "firmware-name", &name);
++
++	ret = request_firmware(&fw, name, fs19xx->dev);
++	if (ret) {
++		dev_warn(fs19xx->dev, "preset %s unavailable (%d); speaker disabled\n",
++			 name, ret);
++		return ret;
++	}
++	ret = fs19xx_parse_preset(fs19xx, fw->data, fw->size, chipid);
++	release_firmware(fw);
++	if (ret)
++		dev_warn(fs19xx->dev, "preset %s rejected (%d); speaker disabled\n",
++			 name, ret);
++	return ret;
++}
++
++static int fs19xx_detect(struct fs19xx_priv *fs19xx, unsigned int *chipid)
++{
++	unsigned int id, rev;
++	int ret;
++
++	/* The chip only answers on I2C once it is out of reset. */
++	if (fs19xx->gpio_reset) {
++		gpiod_set_value_cansleep(fs19xx->gpio_reset, 1);
++		msleep(10);
++		gpiod_set_value_cansleep(fs19xx->gpio_reset, 0);
++		msleep(2);
++	}
++	ret = regmap_read(fs19xx->regmap, FS19XX_REG_CHIPID, &id);
++	if (!ret)
++		ret = regmap_read(fs19xx->regmap, FS19XX_REG_REVID, &rev);
++	if (fs19xx->gpio_reset)
++		gpiod_set_value_cansleep(fs19xx->gpio_reset, 1);
++	if (ret)
++		return ret;
++
++	*chipid = id >> 8;
++	if (*chipid != FS19XX_CHIPID_FS19XX && *chipid != FS19XX_CHIPID_FS1958)
++		return -ENODEV;
++	dev_info(fs19xx->dev, "FS19xx id 0x%04x rev 0x%04x\n", id, rev);
++	return 0;
++}
++
++static int fs19xx_i2c_probe(struct i2c_client *client)
++{
++	struct device *dev = &client->dev;
++	struct fs19xx_priv *fs19xx;
++	unsigned int chipid;
++	int ret;
++
++	fs19xx = devm_kzalloc(dev, sizeof(*fs19xx), GFP_KERNEL);
++	if (!fs19xx)
++		return -ENOMEM;
++
++	fs19xx->i2c = client;
++	fs19xx->dev = dev;
++	fs19xx->volume = min_t(unsigned int, FS19XX_VOL_DEFAULT, max_volume);
++	mutex_init(&fs19xx->lock);
++	INIT_DELAYED_WORK(&fs19xx->unmute_work, fs19xx_unmute_work);
++	i2c_set_clientdata(client, fs19xx);
++
++	fs19xx->regmap = devm_regmap_init_i2c(client, &fs19xx_regmap_config);
++	if (IS_ERR(fs19xx->regmap))
++		return dev_err_probe(dev, PTR_ERR(fs19xx->regmap), "regmap init failed\n");
++
++	/* Asserted (logical 1) holds the amplifier in reset. */
++	fs19xx->gpio_reset = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
++	if (IS_ERR(fs19xx->gpio_reset))
++		return dev_err_probe(dev, PTR_ERR(fs19xx->gpio_reset), "reset gpio\n");
++	if (fs19xx->gpio_reset && !gpiod_is_active_low(fs19xx->gpio_reset))
++		return dev_err_probe(dev, -EINVAL, "reset-gpios must be GPIO_ACTIVE_LOW\n");
++
++	ret = fs19xx_detect(fs19xx, &chipid);
++	if (ret == -EPROBE_DEFER)
++		return ret;
++	if (ret) {
++		/*
++		 * Keep the component so the sound card (and HDMI) still binds; this
++		 * speaker then refuses to open a stream.
++		 */
++		dev_err(dev, "amplifier not detected (%d); speaker disabled\n", ret);
++	} else {
++		/* A missing preset also leaves the card usable, speaker disabled. */
++		fs19xx_load_preset(fs19xx, chipid);
++		if (fs19xx->preset)
++			dev_info(dev, "preset loaded, position 0x%x\n", fs19xx->position);
++	}
++
++	return devm_snd_soc_register_component(dev, &fs19xx_component, &fs19xx_dai, 1);
++}
++
++static void fs19xx_i2c_remove(struct i2c_client *client)
++{
++	struct fs19xx_priv *fs19xx = i2c_get_clientdata(client);
++
++	cancel_delayed_work_sync(&fs19xx->unmute_work);
++	mutex_lock(&fs19xx->lock);
++	if (fs19xx->powered) {
++		fs19xx->powered = false;
++		fs19xx_chip_stop(fs19xx);
++	}
++	mutex_unlock(&fs19xx->lock);
++}
++
++static const struct i2c_device_id fs19xx_i2c_id[] = {
++	{ .name = "fs19xx" },
++	{ }
++};
++MODULE_DEVICE_TABLE(i2c, fs19xx_i2c_id);
++
++static const struct of_device_id fs19xx_of_match[] = {
++	{ .compatible = "foursemi,fs19xx" },
++	/* OEM device trees describe these amplifiers with the legacy name. */
++	{ .compatible = "foursemi,fs16xx" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, fs19xx_of_match);
++
++static struct i2c_driver fs19xx_i2c_driver = {
++	.driver = {
++		.name = "fs19xx",
++		.of_match_table = fs19xx_of_match,
++	},
++	.id_table = fs19xx_i2c_id,
++	.probe = fs19xx_i2c_probe,
++	.remove = fs19xx_i2c_remove,
++};
++module_i2c_driver(fs19xx_i2c_driver);
++
++MODULE_DESCRIPTION("FourSemi FS19xx smart amplifier driver");
++MODULE_LICENSE("GPL");

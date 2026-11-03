@@ -1,0 +1,33 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] wifi: ath11k: avoid full AHB teardown before registration
+
+An AHB device can bind while its QMI firmware service is still absent.
+Full core teardown assumes later resources exist. Use the REGISTERED
+boundary already present in the shutdown callback, and drain queued
+initialization work before choosing the partial cleanup path.
+The registered path retains its existing full teardown sequence.
+
+Signed-off-by: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+---
+--- a/drivers/net/wireless/ath/ath11k/ahb.c
++++ b/drivers/net/wireless/ath/ath11k/ahb.c
+@@ -1320,14 +1320,17 @@
+ {
+ 	struct ath11k_base *ab = platform_get_drvdata(pdev);
+ 
+-	if (test_bit(ATH11K_FLAG_QMI_FAIL, &ab->dev_flags)) {
++	ath11k_ahb_remove_prepare(ab);
++
++	/* Probe can finish before the firmware service creates the radios. */
++	if (test_bit(ATH11K_FLAG_QMI_FAIL, &ab->dev_flags) ||
++	    !test_bit(ATH11K_FLAG_REGISTERED, &ab->dev_flags)) {
+ 		ath11k_ahb_power_down(ab, false);
+ 		ath11k_debugfs_soc_destroy(ab);
+ 		ath11k_qmi_deinit_service(ab);
+ 		goto qmi_fail;
+ 	}
+ 
+-	ath11k_ahb_remove_prepare(ab);
+ 	ath11k_core_deinit(ab);
+ 
+ qmi_fail:

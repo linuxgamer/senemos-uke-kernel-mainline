@@ -1,0 +1,34 @@
+Subject: [PATCH] drm/sysfb: identify the Uke firmware handoff as an internal DSI panel
+
+The admitted Uke handoff describes its physical panel through the standard
+simple-framebuffer panel phandle. Keep other framebuffer connectors unchanged.
+This enables desktop backlight matching; native DPU/DSI modes remain separate.
+
+--- a/drivers/gpu/drm/sysfb/simpledrm.c
++++ b/drivers/gpu/drm/sysfb/simpledrm.c
+@@ -652,6 +652,7 @@
+ 	struct drm_device *dev;
+ 	int width, height, stride;
+ 	u16 width_mm = 0, height_mm = 0;
++	bool uke_internal_panel = false;
+ 	struct device_node *panel_node;
+ 	const struct drm_format_info *format;
+ 	struct resource *res, *mem = NULL;
+@@ -731,6 +732,9 @@
+ 			ret = simplefb_get_panel_height_mm_of(dev, panel_node);
+ 			if (ret > 0)
+ 				height_mm = ret;
++			uke_internal_panel = width_mm && height_mm &&
++				of_machine_is_compatible("xiaomi,uke") &&
++				of_device_is_compatible(panel_node, "xiaomi,uke-panel-handoff");
+ 			of_node_put(panel_node);
+ 		}
+ 	} else {
+@@ -868,6 +872,7 @@
+ 
+ 	connector = &sdev->connector;
+ 	ret = drm_connector_init(dev, connector, &simpledrm_connector_funcs,
++				 uke_internal_panel ? DRM_MODE_CONNECTOR_DSI :
+ 				 DRM_MODE_CONNECTOR_Unknown);
+ 	if (ret)
+ 		return ERR_PTR(ret);

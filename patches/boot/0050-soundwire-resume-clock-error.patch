@@ -1,0 +1,27 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] soundwire: qcom: stop resume when the interface clock fails
+
+Require the interface clock before changing wake IRQ state or touching the
+controller. A failed clock vote must leave wake enabled for a later retry.
+This does not change clock rates, runtime suspend policy or wake routing.
+
+---
+diff --git a/drivers/soundwire/qcom.c b/drivers/soundwire/qcom.c
+--- a/drivers/soundwire/qcom.c
++++ b/drivers/soundwire/qcom.c
+@@ -1745,11 +1745,13 @@ static int __maybe_unused swrm_runtime_resume(struct device *dev)
+ 	struct qcom_swrm_ctrl *ctrl = dev_get_drvdata(dev);
+ 	int ret;
+ 
++	ret = clk_prepare_enable(ctrl->hclk);
++	if (ret)
++		return ret;
++
+ 	if (ctrl->wake_irq > 0) {
+ 		if (!irqd_irq_disabled(irq_get_irq_data(ctrl->wake_irq)))
+ 			disable_irq_nosync(ctrl->wake_irq);
+ 	}
+ 
+-	clk_prepare_enable(ctrl->hclk);
+-
+ 	if (ctrl->clock_stop_not_supported) {

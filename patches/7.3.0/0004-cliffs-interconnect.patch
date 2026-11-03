@@ -1,0 +1,577 @@
+diff --git a/Documentation/devicetree/bindings/interconnect/qcom,cliffs-rpmh.yaml b/Documentation/devicetree/bindings/interconnect/qcom,cliffs-rpmh.yaml
+new file mode 100644
+index 000000000000..b0322ebeddf7
+--- /dev/null
++++ b/Documentation/devicetree/bindings/interconnect/qcom,cliffs-rpmh.yaml
+@@ -0,0 +1,36 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/interconnect/qcom,cliffs-rpmh.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Qualcomm Cliffs RPMh USB interconnects
++
++maintainers:
++  - Uke Linux contributors
++
++description: |
++  The Xiaomi Uke USB2 peripheral path uses these Cliffs Network-on-Chip
++  providers for DWC3 and WCD939x control I2C bandwidth votes.
++
++properties:
++  compatible:
++    enum:
++      - qcom,cliffs-aggre1_noc
++      - qcom,cliffs-clk_virt
++      - qcom,cliffs-cnoc_main
++      - qcom,cliffs-system_noc
++      - qcom,cliffs-cnoc_cfg
++      - qcom,cliffs-gem_noc
++      - qcom,cliffs-mc_virt
++
++required:
++  - compatible
++
++allOf:
++  - $ref: qcom,rpmh-common.yaml#
++
++unevaluatedProperties: false
++
++additionalProperties: true
++...
+diff --git a/drivers/interconnect/qcom/Kconfig b/drivers/interconnect/qcom/Kconfig
+index 5b8a094ca4ed..bd0c462ef01d 100644
+--- a/drivers/interconnect/qcom/Kconfig
++++ b/drivers/interconnect/qcom/Kconfig
+@@ -209,6 +209,15 @@ config INTERCONNECT_QCOM_RPMH_POSSIBLE
+ config INTERCONNECT_QCOM_RPMH
+ 	tristate
+ 
++config INTERCONNECT_QCOM_CLIFFS_USB
++	tristate "Cliffs USB interconnect paths"
++	depends on INTERCONNECT_QCOM_RPMH_POSSIBLE
++	select INTERCONNECT_QCOM_RPMH
++	select INTERCONNECT_QCOM_BCM_VOTER
++	help
++	  Enable the four Cliffs NoC providers used by the Uke USB controller.
++	  This is the USB-only subset of Xiaomi's public cliffs.c topology.
++
+ config INTERCONNECT_QCOM_SA8775P
+ 	tristate "Qualcomm SA8775P interconnect driver"
+ 	depends on INTERCONNECT_QCOM_RPMH_POSSIBLE
+diff --git a/drivers/interconnect/qcom/Makefile b/drivers/interconnect/qcom/Makefile
+index 1c7d410b40cc..b13ae1a4f59c 100644
+--- a/drivers/interconnect/qcom/Makefile
++++ b/drivers/interconnect/qcom/Makefile
+@@ -73,6 +73,7 @@ obj-$(CONFIG_INTERCONNECT_QCOM_QCS615) += qnoc-qcs615.o
+ obj-$(CONFIG_INTERCONNECT_QCOM_QCS8300) += qnoc-qcs8300.o
+ obj-$(CONFIG_INTERCONNECT_QCOM_QDU1000) += qnoc-qdu1000.o
+ obj-$(CONFIG_INTERCONNECT_QCOM_RPMH) += icc-rpmh.o
++obj-$(CONFIG_INTERCONNECT_QCOM_CLIFFS_USB) += qnoc-cliffs-usb.o
+ obj-$(CONFIG_INTERCONNECT_QCOM_SA8775P) += qnoc-sa8775p.o
+ obj-$(CONFIG_INTERCONNECT_QCOM_SAR2130P) += qnoc-sar2130p.o
+ obj-$(CONFIG_INTERCONNECT_QCOM_SC7180) += qnoc-sc7180.o
+diff --git a/drivers/interconnect/qcom/icc-rpmh.c b/drivers/interconnect/qcom/icc-rpmh.c
+index 3b445acefece..24038a1bd28c 100644
+--- a/drivers/interconnect/qcom/icc-rpmh.c
++++ b/drivers/interconnect/qcom/icc-rpmh.c
+@@ -312,11 +312,18 @@ int qcom_icc_rpmh_probe(struct platform_device *pdev)
+ 		qp->regmap = dev_get_regmap(dev->parent, NULL);
+ 		if (!qp->regmap) {
+ 			base = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
+-			if (IS_ERR(base))
++			if (IS_ERR(base)) {
++				ret = PTR_ERR(base);
++				if (desc->qos_required)
++					goto err_remove_nodes;
+ 				goto skip_qos_config;
++			}
+ 
+ 			qp->regmap = devm_regmap_init_mmio(dev, base, desc->config);
+ 			if (IS_ERR(qp->regmap)) {
++				ret = PTR_ERR(qp->regmap);
++				if (desc->qos_required)
++					goto err_remove_nodes;
+ 				dev_info(dev, "Skipping QoS, regmap failed; %ld\n",
+ 					 PTR_ERR(qp->regmap));
+ 				goto skip_qos_config;
+@@ -324,15 +331,22 @@ int qcom_icc_rpmh_probe(struct platform_device *pdev)
+ 		}
+ 
+ 		qp->num_clks = devm_clk_bulk_get_all(qp->dev, &qp->clks);
+-		if (qp->num_clks == -EPROBE_DEFER)
+-			return dev_err_probe(dev, qp->num_clks, "Failed to get QoS clocks\n");
++		if (qp->num_clks == -EPROBE_DEFER) {
++			ret = dev_err_probe(dev, qp->num_clks, "Failed to get QoS clocks\n");
++			goto err_remove_nodes;
++		}
+ 
+ 		if (qp->num_clks < 0 || (!qp->num_clks && desc->qos_requires_clocks)) {
++			ret = qp->num_clks < 0 ? qp->num_clks : -EINVAL;
++			if (desc->qos_required)
++				goto err_remove_nodes;
+ 			dev_info(dev, "Skipping QoS, failed to get clk: %d\n", qp->num_clks);
+ 			goto skip_qos_config;
+ 		}
+ 
+ 		ret = qcom_icc_rpmh_configure_qos(qp);
++		if (ret && desc->qos_required)
++			goto err_remove_nodes;
+ 		if (ret)
+ 			dev_info(dev, "Failed to program QoS: %d\n", ret);
+ 	}
+diff --git a/drivers/interconnect/qcom/icc-rpmh.h b/drivers/interconnect/qcom/icc-rpmh.h
+index 09d8791402dc..c41b840a967c 100644
+--- a/drivers/interconnect/qcom/icc-rpmh.h
++++ b/drivers/interconnect/qcom/icc-rpmh.h
+@@ -154,6 +154,7 @@ struct qcom_icc_desc {
+ 	struct qcom_icc_bcm * const *bcms;
+ 	size_t num_bcms;
+ 	bool qos_requires_clocks;
++	bool qos_required;
+ };
+ 
+ int qcom_icc_aggregate(struct icc_node *node, u32 tag, u32 avg_bw,
+diff --git a/drivers/interconnect/qcom/qnoc-cliffs-usb.c b/drivers/interconnect/qcom/qnoc-cliffs-usb.c
+new file mode 100644
+index 000000000000..97f3db5364a9
+--- /dev/null
++++ b/drivers/interconnect/qcom/qnoc-cliffs-usb.c
+@@ -0,0 +1,436 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Copyright (c) 2023-2024, Qualcomm Innovation Center, Inc. All rights reserved.
++ *
++ * USB and WCD I2C paths from Xiaomi public Cliffs interconnect topology.
++ * Preserve original edges, QoS and HLOS BCM membership on the retained paths.
++ * Adapted from the Uke v6.12 donor to the v7.2 pointer-link provider API.
++ */
++
++#include <linux/interconnect-provider.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++
++#include "icc-rpmh.h"
++
++#define MASTER_APPSS_PROC	2
++#define MASTER_LLCC	3
++#define MASTER_QUP_0	6
++#define MASTER_A1NOC_SNOC	8
++#define MASTER_GEM_NOC_CNOC	15
++#define MASTER_SNOC_SF_MEM_NOC	27
++#define MASTER_CNOC_CFG	32
++#define MASTER_QUP_CORE_0	36
++#define MASTER_USB3_0	49
++#define SLAVE_EBI1	512
++#define SLAVE_QUP_0	540
++#define SLAVE_USB3_0	547
++#define SLAVE_A1NOC_SNOC	551
++#define SLAVE_GEM_NOC_CNOC	553
++#define SLAVE_SNOC_GEM_NOC_SF	554
++#define SLAVE_LLCC	555
++#define SLAVE_CNOC_CFG	565
++#define SLAVE_QUP_CORE_0	572
++
++static const struct regmap_config cliffs_icc_regmap_config = {
++	.reg_bits = 32,
++	.reg_stride = 4,
++	.val_bits = 32,
++};
++
++static struct qcom_icc_node qhm_qup0;
++static struct qcom_icc_node xm_usb3_0;
++static struct qcom_icc_node qup0_core_master;
++static struct qcom_icc_node qsm_cfg;
++static struct qcom_icc_node qnm_gemnoc_cnoc;
++static struct qcom_icc_node chm_apps;
++static struct qcom_icc_node qnm_snoc_sf;
++static struct qcom_icc_node llcc_mc;
++static struct qcom_icc_node qnm_aggre1_noc;
++static struct qcom_icc_node qns_a1noc_snoc;
++static struct qcom_icc_node qup0_core_slave;
++static struct qcom_icc_node qhs_qup0;
++static struct qcom_icc_node qhs_usb3_0;
++static struct qcom_icc_node qss_cfg;
++static struct qcom_icc_node qns_gem_noc_cnoc;
++static struct qcom_icc_node qns_llcc;
++static struct qcom_icc_node ebi;
++static struct qcom_icc_node qns_gemnoc_sf;
++
++static const struct qcom_icc_qosbox qhm_qup0_qos = {
++	.num_ports = 1,
++	.port_offsets = { 0xd000 },
++	.prio = 2,
++	.urg_fwd = 0,
++	.prio_fwd_disable = 1,
++};
++
++static struct qcom_icc_node qhm_qup0 = {
++	.name = "qhm_qup0",
++	.channels = 1,
++	.buswidth = 4,
++	.qosbox = &qhm_qup0_qos,
++	.num_links = 1,
++	.link_nodes = { &qns_a1noc_snoc },
++};
++
++static const struct qcom_icc_qosbox xm_usb3_0_qos = {
++	.num_ports = 1,
++	.port_offsets = { 0x10000 },
++	.prio = 2,
++	.urg_fwd = 0,
++	.prio_fwd_disable = 1,
++};
++
++static struct qcom_icc_node xm_usb3_0 = {
++	.name = "xm_usb3_0",
++	.channels = 1,
++	.buswidth = 8,
++	.qosbox = &xm_usb3_0_qos,
++	.num_links = 1,
++	.link_nodes = { &qns_a1noc_snoc },
++};
++
++static struct qcom_icc_node qup0_core_master = {
++	.name = "qup0_core_master",
++	.channels = 1,
++	.buswidth = 4,
++	.num_links = 1,
++	.link_nodes = { &qup0_core_slave },
++};
++
++static struct qcom_icc_node qsm_cfg = {
++	.name = "qsm_cfg",
++	.channels = 1,
++	.buswidth = 4,
++	.num_links = 2,
++	.link_nodes = { &qhs_qup0, &qhs_usb3_0 },
++};
++
++static struct qcom_icc_node qnm_gemnoc_cnoc = {
++	.name = "qnm_gemnoc_cnoc",
++	.channels = 1,
++	.buswidth = 16,
++	.num_links = 1,
++	.link_nodes = { &qss_cfg },
++};
++
++static struct qcom_icc_node chm_apps = {
++	.name = "chm_apps",
++	.channels = 3,
++	.buswidth = 32,
++	.num_links = 2,
++	.link_nodes = { &qns_gem_noc_cnoc, &qns_llcc },
++};
++
++static const struct qcom_icc_qosbox qnm_snoc_sf_qos = {
++	.num_ports = 1,
++	.port_offsets = { 0xbb000 },
++	.prio = 0,
++	.urg_fwd = 1,
++	.prio_fwd_disable = 0,
++};
++
++static struct qcom_icc_node qnm_snoc_sf = {
++	.name = "qnm_snoc_sf",
++	.channels = 1,
++	.buswidth = 16,
++	.qosbox = &qnm_snoc_sf_qos,
++	.num_links = 2,
++	.link_nodes = { &qns_gem_noc_cnoc, &qns_llcc },
++};
++
++static struct qcom_icc_node llcc_mc = {
++	.name = "llcc_mc",
++	.channels = 4,
++	.buswidth = 4,
++	.num_links = 1,
++	.link_nodes = { &ebi },
++};
++
++static struct qcom_icc_node qnm_aggre1_noc = {
++	.name = "qnm_aggre1_noc",
++	.channels = 1,
++	.buswidth = 16,
++	.num_links = 1,
++	.link_nodes = { &qns_gemnoc_sf },
++};
++
++static struct qcom_icc_node qns_a1noc_snoc = {
++	.name = "qns_a1noc_snoc",
++	.channels = 1,
++	.buswidth = 16,
++	.num_links = 1,
++	.link_nodes = { &qnm_aggre1_noc },
++};
++
++static struct qcom_icc_node qup0_core_slave = {
++	.name = "qup0_core_slave",
++	.channels = 1,
++	.buswidth = 4,
++	.num_links = 0,
++};
++
++static struct qcom_icc_node qhs_qup0 = {
++	.name = "qhs_qup0",
++	.channels = 1,
++	.buswidth = 4,
++	.num_links = 0,
++};
++
++static struct qcom_icc_node qhs_usb3_0 = {
++	.name = "qhs_usb3_0",
++	.channels = 1,
++	.buswidth = 4,
++	.num_links = 0,
++};
++
++static struct qcom_icc_node qss_cfg = {
++	.name = "qss_cfg",
++	.channels = 1,
++	.buswidth = 4,
++	.num_links = 1,
++	.link_nodes = { &qsm_cfg },
++};
++
++static struct qcom_icc_node qns_gem_noc_cnoc = {
++	.name = "qns_gem_noc_cnoc",
++	.channels = 1,
++	.buswidth = 16,
++	.num_links = 1,
++	.link_nodes = { &qnm_gemnoc_cnoc },
++};
++
++static struct qcom_icc_node qns_llcc = {
++	.name = "qns_llcc",
++	.channels = 4,
++	.buswidth = 16,
++	.num_links = 1,
++	.link_nodes = { &llcc_mc },
++};
++
++static struct qcom_icc_node ebi = {
++	.name = "ebi",
++	.channels = 4,
++	.buswidth = 4,
++	.num_links = 0,
++};
++
++static struct qcom_icc_node qns_gemnoc_sf = {
++	.name = "qns_gemnoc_sf",
++	.channels = 1,
++	.buswidth = 16,
++	.num_links = 1,
++	.link_nodes = { &qnm_snoc_sf },
++};
++
++static struct qcom_icc_bcm bcm_acv = {
++	.name = "ACV",
++	.enable_mask = 0x1,
++	/* No downstream PERF_MODE tag in the fixed USB bandwidth requests. */
++	.num_nodes = 1,
++	.nodes = { &ebi },
++};
++
++static struct qcom_icc_bcm bcm_cn0 = {
++	.name = "CN0",
++	.enable_mask = 0x1,
++	.keepalive = true,
++	.num_nodes = 4,
++	.nodes = { &qsm_cfg, &qhs_usb3_0, &qnm_gemnoc_cnoc, &qss_cfg },
++};
++
++static struct qcom_icc_bcm bcm_cn1 = {
++	.name = "CN1",
++	.num_nodes = 1,
++	.nodes = { &qhs_qup0 },
++};
++
++static struct qcom_icc_bcm bcm_mc0 = {
++	.name = "MC0",
++	.keepalive = true,
++	.num_nodes = 1,
++	.nodes = { &ebi },
++};
++
++static struct qcom_icc_bcm bcm_qup0 = {
++	.name = "QUP0",
++	.keepalive = true,
++	.vote_scale = 1,
++	.num_nodes = 1,
++	.nodes = { &qup0_core_slave },
++};
++
++static struct qcom_icc_bcm bcm_sh0 = {
++	.name = "SH0",
++	.keepalive = true,
++	.num_nodes = 1,
++	.nodes = { &qns_llcc },
++};
++
++static struct qcom_icc_bcm bcm_sh1 = {
++	.name = "SH1",
++	.enable_mask = 0x1,
++	.num_nodes = 3,
++	.nodes = { &chm_apps, &qnm_snoc_sf, &qns_gem_noc_cnoc },
++};
++
++static struct qcom_icc_bcm bcm_sn0 = {
++	.name = "SN0",
++	.keepalive = true,
++	.num_nodes = 1,
++	.nodes = { &qns_gemnoc_sf },
++};
++
++static struct qcom_icc_bcm bcm_sn2 = {
++	.name = "SN2",
++	.num_nodes = 1,
++	.nodes = { &qnm_aggre1_noc },
++};
++
++static struct qcom_icc_node * const aggre1_noc_nodes[] = {
++	[MASTER_QUP_0] = &qhm_qup0,
++	[MASTER_USB3_0] = &xm_usb3_0,
++	[SLAVE_A1NOC_SNOC] = &qns_a1noc_snoc,
++};
++
++static const struct qcom_icc_desc cliffs_aggre1_noc = {
++	.config = &cliffs_icc_regmap_config,
++	.nodes = aggre1_noc_nodes,
++	.num_nodes = ARRAY_SIZE(aggre1_noc_nodes),
++	.qos_required = true,
++	.qos_requires_clocks = true,
++};
++
++static struct qcom_icc_node * const clk_virt_nodes[] = {
++	[MASTER_QUP_CORE_0] = &qup0_core_master,
++	[SLAVE_QUP_CORE_0] = &qup0_core_slave,
++};
++
++static struct qcom_icc_bcm * const clk_virt_bcms[] = {
++	&bcm_qup0,
++};
++
++static const struct qcom_icc_desc cliffs_clk_virt = {
++	.nodes = clk_virt_nodes,
++	.num_nodes = ARRAY_SIZE(clk_virt_nodes),
++	.bcms = clk_virt_bcms,
++	.num_bcms = ARRAY_SIZE(clk_virt_bcms),
++};
++
++static struct qcom_icc_node * const cnoc_cfg_nodes[] = {
++	[MASTER_CNOC_CFG] = &qsm_cfg,
++	[SLAVE_QUP_0] = &qhs_qup0,
++	[SLAVE_USB3_0] = &qhs_usb3_0,
++};
++
++static struct qcom_icc_bcm * const cnoc_cfg_bcms[] = {
++	&bcm_cn0,
++	&bcm_cn1,
++};
++
++static const struct qcom_icc_desc cliffs_cnoc_cfg = {
++	.nodes = cnoc_cfg_nodes,
++	.num_nodes = ARRAY_SIZE(cnoc_cfg_nodes),
++	.bcms = cnoc_cfg_bcms,
++	.num_bcms = ARRAY_SIZE(cnoc_cfg_bcms),
++};
++
++static struct qcom_icc_node * const cnoc_main_nodes[] = {
++	[MASTER_GEM_NOC_CNOC] = &qnm_gemnoc_cnoc,
++	[SLAVE_CNOC_CFG] = &qss_cfg,
++};
++
++static struct qcom_icc_bcm * const cnoc_main_bcms[] = {
++	&bcm_cn0,
++	&bcm_cn1,
++};
++
++static const struct qcom_icc_desc cliffs_cnoc_main = {
++	.nodes = cnoc_main_nodes,
++	.num_nodes = ARRAY_SIZE(cnoc_main_nodes),
++	.bcms = cnoc_main_bcms,
++	.num_bcms = ARRAY_SIZE(cnoc_main_bcms),
++};
++
++static struct qcom_icc_node * const gem_noc_nodes[] = {
++	[MASTER_APPSS_PROC] = &chm_apps,
++	[MASTER_SNOC_SF_MEM_NOC] = &qnm_snoc_sf,
++	[SLAVE_GEM_NOC_CNOC] = &qns_gem_noc_cnoc,
++	[SLAVE_LLCC] = &qns_llcc,
++};
++
++static struct qcom_icc_bcm * const gem_noc_bcms[] = {
++	&bcm_sh0,
++	&bcm_sh1,
++};
++
++static const struct qcom_icc_desc cliffs_gem_noc = {
++	.config = &cliffs_icc_regmap_config,
++	.nodes = gem_noc_nodes,
++	.num_nodes = ARRAY_SIZE(gem_noc_nodes),
++	.bcms = gem_noc_bcms,
++	.num_bcms = ARRAY_SIZE(gem_noc_bcms),
++	.qos_required = true,
++};
++
++static struct qcom_icc_node * const mc_virt_nodes[] = {
++	[MASTER_LLCC] = &llcc_mc,
++	[SLAVE_EBI1] = &ebi,
++};
++
++static struct qcom_icc_bcm * const mc_virt_bcms[] = {
++	&bcm_acv,
++	&bcm_mc0,
++};
++
++static const struct qcom_icc_desc cliffs_mc_virt = {
++	.nodes = mc_virt_nodes,
++	.num_nodes = ARRAY_SIZE(mc_virt_nodes),
++	.bcms = mc_virt_bcms,
++	.num_bcms = ARRAY_SIZE(mc_virt_bcms),
++};
++
++static struct qcom_icc_node * const system_noc_nodes[] = {
++	[MASTER_A1NOC_SNOC] = &qnm_aggre1_noc,
++	[SLAVE_SNOC_GEM_NOC_SF] = &qns_gemnoc_sf,
++};
++
++static struct qcom_icc_bcm * const system_noc_bcms[] = {
++	&bcm_sn0,
++	&bcm_sn2,
++};
++
++static const struct qcom_icc_desc cliffs_system_noc = {
++	.nodes = system_noc_nodes,
++	.num_nodes = ARRAY_SIZE(system_noc_nodes),
++	.bcms = system_noc_bcms,
++	.num_bcms = ARRAY_SIZE(system_noc_bcms),
++};
++
++static const struct of_device_id cliffs_usb_of_match[] = {
++	{ .compatible = "qcom,cliffs-aggre1_noc", .data = &cliffs_aggre1_noc },
++	{ .compatible = "qcom,cliffs-clk_virt", .data = &cliffs_clk_virt },
++	{ .compatible = "qcom,cliffs-cnoc_cfg", .data = &cliffs_cnoc_cfg },
++	{ .compatible = "qcom,cliffs-cnoc_main", .data = &cliffs_cnoc_main },
++	{ .compatible = "qcom,cliffs-gem_noc", .data = &cliffs_gem_noc },
++	{ .compatible = "qcom,cliffs-mc_virt", .data = &cliffs_mc_virt },
++	{ .compatible = "qcom,cliffs-system_noc", .data = &cliffs_system_noc },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, cliffs_usb_of_match);
++
++static struct platform_driver cliffs_usb_driver = {
++	.probe = qcom_icc_rpmh_probe,
++	.remove = qcom_icc_rpmh_remove,
++	.driver = {
++		.name = "qnoc-cliffs-usb",
++		.of_match_table = cliffs_usb_of_match,
++		.sync_state = icc_sync_state,
++	},
++};
++module_platform_driver(cliffs_usb_driver);
++
++MODULE_DESCRIPTION("Xiaomi Uke USB Cliffs interconnect paths");
++MODULE_LICENSE("GPL");

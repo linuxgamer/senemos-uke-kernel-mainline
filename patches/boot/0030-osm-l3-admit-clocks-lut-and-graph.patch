@@ -1,0 +1,58 @@
+From: Uke Linux project <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] interconnect: qcom: reject invalid L3 clocks, tables and links
+
+Preserve native vote-index selection while refusing zero or descending LUTs.
+Keep clock rates per probe, retain full native frequency width, and unwind
+created nodes if the ICC link cannot be allocated.
+
+Host fault injection is not tablet hardware evidence.
+
+--- a/drivers/interconnect/qcom/osm-l3.c
++++ b/drivers/interconnect/qcom/osm-l3.c
+@@ -156,8 +156,8 @@
+ 
+ static int qcom_osm_l3_probe(struct platform_device *pdev)
+ {
+-	u32 info, src, lval, i, prev_freq = 0, freq;
+-	static unsigned long hw_rate, xo_rate;
++	u32 info, src, lval, i;
++	unsigned long hw_rate, xo_rate, prev_freq = 0, freq;
+ 	struct qcom_osm_l3_icc_provider *qp;
+ 	const struct qcom_osm_l3_desc *desc;
+ 	struct icc_onecell_data *data;
+@@ -181,6 +181,10 @@
+ 
+ 	hw_rate = clk_get_rate(clk) / CLK_HW_DIV;
+ 	clk_put(clk);
++	if (!xo_rate || !hw_rate) {
++		dev_err(&pdev->dev, "invalid L3 clock rates\n");
++		return -EINVAL;
++	}
+ 
+ 	qp = devm_kzalloc(&pdev->dev, sizeof(*qp), GFP_KERNEL);
+ 	if (!qp)
+@@ -216,7 +220,12 @@
+ 		if (i > 0 && prev_freq == freq)
+ 			break;
+ 
+-		dev_dbg(&pdev->dev, "index=%d freq=%d\n", i, freq);
++		if (!freq || (i > 0 && freq < prev_freq)) {
++			dev_err(&pdev->dev, "invalid L3 frequency table at index %u\n", i);
++			return -EINVAL;
++		}
++
++		dev_dbg(&pdev->dev, "index=%u freq=%lu\n", i, freq);
+ 
+ 		qp->lut_tables[i] = freq;
+ 		prev_freq = freq;
+@@ -263,7 +272,9 @@
+ 	}
+ 
+ 	/* Create link */
+-	icc_link_nodes(data->nodes[MASTER_OSM_L3_APPS], &data->nodes[SLAVE_OSM_L3]);
++	ret = icc_link_nodes(data->nodes[MASTER_OSM_L3_APPS], &data->nodes[SLAVE_OSM_L3]);
++	if (ret)
++		goto err;
+ 
+ 	ret = icc_provider_register(provider);
+ 	if (ret)

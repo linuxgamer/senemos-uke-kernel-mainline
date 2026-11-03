@@ -36,11 +36,12 @@ confirmed explanation of the current physical black screen.
  };
  
  #define to_dsi_bridge(x) container_of(x, struct dsi_bridge, base)
-@@ -275,7 +280,7 @@
+@@ -275,8 +280,7 @@
  	dsi_mgr_phy_disable(id);
  }
  
--static void dsi_mgr_bridge_pre_enable(struct drm_bridge *bridge)
+-static void dsi_mgr_bridge_pre_enable(struct drm_bridge *bridge,
+-				      struct drm_atomic_commit *commit)
 +static int dsi_mgr_bridge_enable_hosts(struct drm_bridge *bridge)
  {
  	int id = dsi_mgr_bridge_get_id(bridge);
@@ -64,7 +65,7 @@ confirmed explanation of the current physical black screen.
  	ret = msm_dsi_host_enable(host);
  	if (ret) {
  		pr_err("%s: enable host %d failed, %d\n", __func__, id, ret);
-@@ -310,12 +303,72 @@
+@@ -310,12 +303,75 @@
  		}
  	}
  
@@ -78,7 +79,8 @@ confirmed explanation of the current physical black screen.
 +	return ret;
 +}
 +
-+static void dsi_mgr_bridge_pre_enable(struct drm_bridge *bridge)
++static void dsi_mgr_bridge_pre_enable(struct drm_bridge *bridge,
++				      struct drm_atomic_commit *commit)
 +{
 +	struct dsi_bridge *dsi_bridge = to_dsi_bridge(bridge);
 +	int id = dsi_mgr_bridge_get_id(bridge);
@@ -104,7 +106,8 @@ confirmed explanation of the current physical black screen.
 +		dsi_mgr_bridge_power_off(bridge);
 +}
 +
-+static void dsi_mgr_bridge_enable(struct drm_bridge *bridge)
++static void dsi_mgr_bridge_enable(struct drm_bridge *bridge,
++				      struct drm_atomic_commit *commit)
 +{
 +	struct dsi_bridge *dsi_bridge = to_dsi_bridge(bridge);
 +
@@ -116,7 +119,8 @@ confirmed explanation of the current physical black screen.
 +		dsi_bridge->video_enabled = true;
 +}
 +
-+static void dsi_mgr_bridge_disable(struct drm_bridge *bridge)
++static void dsi_mgr_bridge_disable(struct drm_bridge *bridge,
++				      struct drm_atomic_commit *commit)
 +{
 +	struct dsi_bridge *dsi_bridge = to_dsi_bridge(bridge);
 +	int id = dsi_mgr_bridge_get_id(bridge);
@@ -139,9 +143,10 @@ confirmed explanation of the current physical black screen.
  }
  
  void msm_dsi_manager_tpg_enable(void)
-@@ -333,6 +386,7 @@
+@@ -333,7 +386,8 @@
  
- static void dsi_mgr_bridge_post_disable(struct drm_bridge *bridge)
+ static void dsi_mgr_bridge_post_disable(struct drm_bridge *bridge,
+ 					struct drm_atomic_commit *commit)
  {
 +	struct dsi_bridge *dsi_bridge = to_dsi_bridge(bridge);
  	int id = dsi_mgr_bridge_get_id(bridge);
@@ -153,7 +158,7 @@ confirmed explanation of the current physical black screen.
  
 +	if (dsi_bridge->o82_panel) {
 +		if (dsi_bridge->powered) {
-+			dsi_mgr_bridge_disable(bridge);
++			dsi_mgr_bridge_disable(bridge, commit);
 +			msm_dsi_phy_pll_save_state(msm_dsi->phy);
 +			dsi_mgr_bridge_power_off(bridge);
 +			dsi_bridge->powered = false;
@@ -164,13 +169,16 @@ confirmed explanation of the current physical black screen.
  	ret = msm_dsi_host_disable(host);
  	if (ret)
  		pr_err("%s: host %d disable failed, %d\n", __func__, id, ret);
-@@ -447,11 +511,31 @@
+@@ -447,14 +511,34 @@
  static const struct drm_bridge_funcs dsi_mgr_bridge_funcs = {
+ 	.atomic_create_state = drm_atomic_helper_bridge_create_state,
+ 	.atomic_destroy_state = drm_atomic_helper_bridge_destroy_state,
+ 	.atomic_duplicate_state = drm_atomic_helper_bridge_duplicate_state,
  	.attach = dsi_mgr_bridge_attach,
- 	.pre_enable = dsi_mgr_bridge_pre_enable,
-+	.enable = dsi_mgr_bridge_enable,
-+	.disable = dsi_mgr_bridge_disable,
- 	.post_disable = dsi_mgr_bridge_post_disable,
+ 	.atomic_pre_enable = dsi_mgr_bridge_pre_enable,
++	.atomic_enable = dsi_mgr_bridge_enable,
++	.atomic_disable = dsi_mgr_bridge_disable,
+ 	.atomic_post_disable = dsi_mgr_bridge_post_disable,
  	.mode_set = dsi_mgr_bridge_mode_set,
  	.mode_valid = dsi_mgr_bridge_mode_valid,
  };

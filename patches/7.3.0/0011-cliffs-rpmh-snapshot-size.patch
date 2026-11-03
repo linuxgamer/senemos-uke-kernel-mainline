@@ -1,0 +1,28 @@
+From: Senemos Uke contributors
+Subject: [PATCH] clk: qcom: size the Cliffs probe snapshot from its actual table
+
+The v7.2 port preserves upstream RPMh clock IDs and assigns CXO_PAD IDs 29/30.
+The inherited 29-entry restore snapshot therefore rejected the 31-entry Cliffs
+provider before any clock could register. Derive all snapshot bounds from the
+provider itself. Keep the probe guard and failure restoration behavior.
+Stock DT consumers of downstream IDs 27/28 must be translated to 29/30 in the
+first-console adaptation; do not redefine upstream LN_BB_CLK4 IDs globally.
+
+Source: existing attributed clk-rpmh-uke.c port and upstream qcom,rpmh.h
+License: GPL-2.0-only
+
+--- a/drivers/clk/qcom/clk-rpmh-uke.c
++++ b/drivers/clk/qcom/clk-rpmh-uke.c
+@@ -433,9 +433,9 @@
+ 
+ struct clk_rpmh_uke_snapshot {
+ 	const struct clk_rpmh_desc *desc;
+-	struct clk_hw *clks[29];
+-	const struct clk_init_data *init[29];
+-	u32 addr[29];
++	struct clk_hw *clks[ARRAY_SIZE(cliffs_rpmh_clocks)];
++	const struct clk_init_data *init[ARRAY_SIZE(cliffs_rpmh_clocks)];
++	u32 addr[ARRAY_SIZE(cliffs_rpmh_clocks)];
+ };
+ 
+ static void clk_rpmh_uke_restore(void *data)

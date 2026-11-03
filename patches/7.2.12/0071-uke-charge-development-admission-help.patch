@@ -1,0 +1,38 @@
+From: Uke Linux maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] power: supply: clarify Uke development ABI compilation
+
+Distinguish a compiled EXPERT development interface from runtime firmware
+qualification. Keep both defaults n and every admission gate unchanged.
+Source only; no build, test or target operation performed.
+
+--- a/drivers/power/supply/Kconfig
++++ b/drivers/power/supply/Kconfig
+@@ -224,9 +224,12 @@
+ 	help
+ 	  Build the restricted Uke threshold backend. This is not a firmware
+ 	  qualification. Every operation also requires a privileged, per-source,
+-	  expiring admission lease and matching firmware readback. Leave disabled
+-	  until the exact active firmware, reply envelope, threshold semantics,
+-	  measurement units and autonomous protection evidence are reviewed.
++	  expiring admission lease and matching firmware readback. The default is
++	  off. An EXPERT development kernel may compile the guarded ABI for
++	  admission testing; compilation does not qualify firmware or permit an
++	  operation without reviewed per-boot runtime admission. Exact active
++	  firmware, reply envelope, threshold semantics, measurement units and
++	  autonomous protection evidence must be reviewed before operations.
+ 	  No PD, current, voltage, factory or gauge control is enabled here.
+ 
+ config BATTERY_QCOM_BATTMGR_UKE_CURRENT
+@@ -235,8 +238,10 @@
+ 	default n
+ 	help
+ 	  Build the separately admitted positive constant-current backend for
+-	  exact Uke OEM wire property 12. Per-boot evidence must establish its
+-	  units, readback, effective behavior and firmware-owned CV/protections.
++	  exact Uke OEM wire property 12. Development compilation alone permits
++	  no operation and leaves runtime qualification off. Per-boot evidence
++	  must establish its units, readback, effective behavior and firmware-owned
++	  CV/protections.
+ 	  This does not enable the ambiguous thermal-level property 10, voltage
+ 	  writes, raw properties, PD negotiation or negative/reset sentinels.
+ 

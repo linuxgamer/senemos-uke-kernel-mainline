@@ -12,6 +12,8 @@ cat > "$work/check.cpp" <<'CPP'
 #include <cstdio>
 #include <initializer_list>
 using u32=uint32_t;
+static uint64_t mock_now=100;
+static uint64_t ktime_get_boottime_ns() { return mock_now; }
 #define PMIC_GLINK_OWNER_USBC 32779
 #define MSG_TYPE_REQ_RESP 1
 #define MSG_TYPE_NOTIFY 2
@@ -28,6 +30,7 @@ struct work_struct {};
 struct pmic_glink_ucsi {
     int state_lock=0;
     bool pd_running=true,stopping=false,quarantined=false;
+    uint64_t notification_ns=0;
     work_struct notify_work;
 };
 static unsigned acks=0,notifications=0;
@@ -47,8 +50,11 @@ int main() {
     ucsi_notify_ind_msg message{{32779,2,0x13},0,0,0};
     pmic_glink_ucsi_callback(&message,sizeof(message),&state);
     assert(notifications==1 && !acks);
+    assert(state.notification_ns==100);
+    mock_now=110;
     message.hdr.type=1;pmic_glink_ucsi_callback(&message,sizeof(message),&state);
     assert(notifications==2);
+    assert(state.notification_ns==110);mock_now=120;
     for (u32 type:{0u,3u,UINT32_MAX}) {
         message.hdr.type=type;pmic_glink_ucsi_callback(&message,sizeof(message),&state);
     }
@@ -64,6 +70,7 @@ int main() {
     state.pd_running=true;state.stopping=true;pmic_glink_ucsi_callback(&message,sizeof(message),&state);
     state.stopping=false;state.quarantined=true;pmic_glink_ucsi_callback(&message,sizeof(message),&state);
     state.quarantined=false;assert(notifications==2);
+    assert(state.notification_ns==110);
     unsigned expected_acks=0;
     for (u32 opcode:{0x11u,0x12u}) {
         message.hdr.opcode=opcode;message.hdr.type=2;

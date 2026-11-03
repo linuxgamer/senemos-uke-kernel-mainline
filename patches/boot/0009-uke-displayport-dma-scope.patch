@@ -1,0 +1,44 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] iommu: admit the owned Uke DisplayPort DMA frontend
+
+Apply after the native sensor and display SMMU hooks. Match only the owned
+HDMI-only frontend and exact OEM audio-ion stream pair before allocating a
+normal DMA context. Preserve foreign SID/ACTLR refusals and display reservations.
+
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
+@@ -773,6 +773,24 @@
+ 	return match;
+ }
+ 
++static bool qcom_uke_hdmi_dma(struct device *dev)
++{
++	struct iommu_fwspec *spec = dev_iommu_fwspec_get(dev);
++	struct device_node *node;
++	bool match;
++
++	if (!of_machine_is_compatible("xiaomi,uke") ||
++	    !of_device_is_compatible(dev->of_node, "qcom,q6apm-dais") ||
++	    !of_property_read_bool(dev->of_node, "xiaomi,hdmi-only") ||
++	    !spec || spec->num_ids != 2)
++		return false;
++	node = of_find_node_by_path("/soc/remoteproc-adsp@03000000/glink-edge/qcom,gpr/service@1/dais");
++	match = node && dev->of_node == node &&
++		spec->ids[0] == 0x801001 && spec->ids[1] == 0x1061;
++	of_node_put(node);
++	return match;
++}
++
+ static int qcom_uke_smmu_cfg_probe(struct arm_smmu_device *smmu)
+ {
+ 	const __be32 *handoff;
+@@ -855,7 +873,8 @@
+ 		u32 sid = fwspec->ids[i];
+ 
+ 		if (sid != 0x40 && sid != 0xb6 &&
+-		    !((qcom_uke_sensor_cb(dev) || sid == 0x60 || sid == 0xa3 || sid == 0x423 ||
++		    !((qcom_uke_sensor_cb(dev) || qcom_uke_hdmi_dma(dev) ||
++		       sid == 0x60 || sid == 0xa3 || sid == 0x423 ||
+ 		       sid == 0x436 || sid == 0x11400) &&
+ 		      of_device_is_compatible(smmu->dev->of_node, "qcom,sm7675-boot-smmu")))
+ 			return dev_err_probe(dev, -EOPNOTSUPP, "outside Uke boot SMMU scope\n");

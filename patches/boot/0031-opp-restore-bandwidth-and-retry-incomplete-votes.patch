@@ -1,0 +1,189 @@
+From: Uke Linux project <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] opp: restore owned bandwidth requests and retry incomplete votes
+
+Keep the last complete per-path requests independently of current_opp.
+Restore every path on failure, preserve the original error, and retain
+uncertainty after rollback errors. Retry cached OPP and BWMON targets when
+a previous operation was incomplete, including initial vote removal.
+
+Allocate the snapshot with the owned paths, propagate resource exhaustion,
+and release it with the table. Existing NULL-table readiness callers retain
+their acquire/release-only behavior. Host fault tests do not qualify hardware.
+
+--- a/drivers/opp/core.c
++++ b/drivers/opp/core.c
+@@ -1147,15 +1147,17 @@
+ 	return 0;
+ }
+ 
+-static int _set_opp_bw(const struct opp_table *opp_table,
++static int _set_opp_bw(struct opp_table *opp_table,
+ 		       struct dev_pm_opp *opp, struct device *dev)
+ {
++	bool was_dirty = opp_table->bw_dirty;
+ 	u32 avg, peak;
+-	int i, ret;
++	int i, ret, restore_ret;
+ 
+-	if (!opp_table->paths)
++	if (!opp_table->paths || !opp_table->path_count)
+ 		return 0;
+ 
++	opp_table->bw_dirty = true;
+ 	for (i = 0; i < opp_table->path_count; i++) {
+ 		if (!opp) {
+ 			avg = 0;
+@@ -1168,11 +1170,32 @@
+ 		if (ret) {
+ 			dev_err(dev, "Failed to %s bandwidth[%d]: %d\n",
+ 				opp ? "set" : "remove", i, ret);
+-			return ret;
++			goto restore;
+ 		}
+ 	}
+ 
++	if (opp)
++		memcpy(opp_table->current_bw, opp->bandwidth,
++		       sizeof(*opp_table->current_bw) * opp_table->path_count);
++	else
++		memset(opp_table->current_bw, 0,
++		       sizeof(*opp_table->current_bw) * opp_table->path_count);
++
+ 	return 0;
++
++restore:
++	/* A previous failed restore can leave even an unvisited path uncertain. */
++	opp_table->bw_dirty = was_dirty;
++	for (i = opp_table->path_count - 1; i >= 0; i--) {
++		restore_ret = icc_set_bw(opp_table->paths[i],
++					 opp_table->current_bw[i].avg,
++					 opp_table->current_bw[i].peak);
++		if (restore_ret) {
++			opp_table->bw_dirty = true;
++			dev_err(dev, "Failed to restore bandwidth[%d]: %d\n", i, restore_ret);
++		}
++	}
++	return ret;
+ }
+ 
+ static int _set_opp_level(struct device *dev, struct dev_pm_opp *opp)
+@@ -1265,7 +1288,7 @@
+ {
+ 	int ret;
+ 
+-	if (!opp_table->enabled)
++	if (!opp_table->enabled && !opp_table->bw_dirty)
+ 		return 0;
+ 
+ 	/*
+@@ -1280,7 +1303,7 @@
+ 	if (ret)
+ 		return ret;
+ 
+-	if (opp_table->regulators)
++	if (opp_table->enabled && opp_table->regulators)
+ 		regulator_disable(opp_table->regulators[0]);
+ 
+ 	ret = _set_opp_level(dev, NULL);
+@@ -1291,6 +1314,8 @@
+ 
+ out:
+ 	opp_table->enabled = false;
++	if (!ret)
++		opp_table->bw_dirty = false;
+ 	return ret;
+ }
+ 
+@@ -1310,7 +1335,7 @@
+ 	old_opp = opp_table->current_opp;
+ 
+ 	/* Return early if nothing to do */
+-	if (!forced && old_opp == opp && opp_table->enabled) {
++	if (!forced && old_opp == opp && opp_table->enabled && !opp_table->bw_dirty) {
+ 		dev_dbg_ratelimited(dev, "%s: OPPs are same, nothing to do\n", __func__);
+ 		return 0;
+ 	}
+@@ -1391,6 +1416,7 @@
+ 	}
+ 
+ 	opp_table->enabled = true;
++	opp_table->bw_dirty = false;
+ 	dev_pm_opp_put(old_opp);
+ 
+ 	/* Make sure current_opp doesn't get freed */
+@@ -1555,7 +1581,7 @@
+ 	/* Find interconnect path(s) for the device */
+ 	ret = dev_pm_opp_of_find_icc_paths(dev, opp_table);
+ 	if (ret) {
+-		if (ret == -EPROBE_DEFER)
++		if (ret == -EPROBE_DEFER || ret == -ENOMEM)
+ 			goto remove_opp_dev;
+ 
+ 		dev_warn(dev, "%s: Error finding interconnect paths: %d\n",
+@@ -1722,6 +1748,7 @@
+ 		for (i = 0; i < opp_table->path_count; i++)
+ 			icc_put(opp_table->paths[i]);
+ 		kfree(opp_table->paths);
++		kfree(opp_table->current_bw);
+ 	}
+ 
+ 	WARN_ON(!list_empty(&opp_table->opp_list));
+--- a/drivers/opp/of.c
++++ b/drivers/opp/of.c
+@@ -482,6 +482,11 @@
+ 	}
+ 
+ 	if (opp_table) {
++		opp_table->current_bw = kzalloc_objs(*opp_table->current_bw, num_paths);
++		if (!opp_table->current_bw) {
++			ret = -ENOMEM;
++			goto err;
++		}
+ 		opp_table->paths = paths;
+ 		opp_table->path_count = num_paths;
+ 		return 0;
+--- a/drivers/opp/opp.h
++++ b/drivers/opp/opp.h
+@@ -191,7 +191,9 @@
+  * (uninitialized), 0 (no opp-microvolt property) or > 0 (has opp-microvolt
+  * property).
+  * @paths: Interconnect path handles
++ * @current_bw: Last fully applied bandwidth request for each path.
+  * @path_count: Number of interconnect paths
++ * @bw_dirty: Bandwidth may differ from the committed OPP; force recovery.
+  * @enabled: Set to true if the device's resources are enabled/configured.
+  * @is_genpd: Marks if the OPP table belongs to a genpd.
+  * @dentry:	debugfs dentry pointer of the real device directory (not links).
+@@ -239,7 +241,9 @@
+ 	struct regulator **regulators;
+ 	int regulator_count;
+ 	struct icc_path **paths;
++	struct dev_pm_opp_icc_bw *current_bw;
+ 	unsigned int path_count;
++	bool bw_dirty;
+ 	bool enabled;
+ 	bool is_genpd;
+ 
+--- a/drivers/soc/qcom/icc-bwmon.c
++++ b/drivers/soc/qcom/icc-bwmon.c
+@@ -192,6 +192,7 @@
+ 	unsigned int min_bw_kbps;
+ 	unsigned int target_kbps;
+ 	unsigned int current_kbps;
++	bool retry_opp;
+ };
+ 
+ /* BWMON v4 */
+@@ -703,10 +704,11 @@
+ 	bwmon_enable(bwmon, irq_enable);
+ 
+ 	trace_qcom_bwmon_update(dev_name(bwmon->dev), meas_kbps, up_kbps, down_kbps);
+-	if (bwmon->target_kbps == bwmon->current_kbps)
++	if (bwmon->target_kbps == bwmon->current_kbps && !bwmon->retry_opp)
+ 		goto out;
+ 
+ 	ret = dev_pm_opp_set_opp(bwmon->dev, target_opp);
++	bwmon->retry_opp = !!ret;
+ 	if (ret)
+ 		dev_err_ratelimited(bwmon->dev, "Failed to set bandwidth OPP: %d\n", ret);
+ 	else

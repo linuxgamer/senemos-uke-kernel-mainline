@@ -1,0 +1,27 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] backlight: ktz8866: keep a visible Uke minimum while unblanked
+
+Clamp user brightness to one percent while the panel is active. Preserve zero
+output when the backlight core blanks or suspends the display, and retain the
+requested level only after both chips accept the transaction.
+
+--- a/drivers/video/backlight/ktz8866.c
++++ b/drivers/video/backlight/ktz8866.c
+@@ -178,6 +178,8 @@ static int ktz8866_uke_update_status(struct backlight_device *backlight_dev)
+ 
+ 	if (level > MAX_BRIGHTNESS)
+ 		return -EINVAL;
++	if (!backlight_is_blank(backlight_dev) && level < DIV_ROUND_UP(MAX_BRIGHTNESS, 100))
++		level = DIV_ROUND_UP(MAX_BRIGHTNESS, 100);
+ 	code = ktz8866_uke_code(level);
+ 	mutex_lock(&ktz->lock);
+ 	for (i = 0; i < 2; i++) {
+@@ -212,6 +214,8 @@ static int ktz8866_uke_update_status(struct backlight_device *backlight_dev)
+ 		ret = rollback;
+ 	}
+ unlock:
++	if (!ret && !backlight_is_blank(backlight_dev))
++		backlight_dev->props.brightness = level;
+ 	mutex_unlock(&ktz->lock);
+ 	return ret;
+ }

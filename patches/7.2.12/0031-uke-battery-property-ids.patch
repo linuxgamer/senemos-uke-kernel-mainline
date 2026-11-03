@@ -1,0 +1,107 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] power: supply: qcom_battmgr: use the Uke OEM property IDs
+
+Uke OEM commit 5712080a4b0c0b1a879e6d145c601c649ddaddfd inserts
+BATT_CONSTANT_CURRENT at property 12. Translate battery GET IDs and replies
+only on the exact xiaomi,uke machine; preserve USB and other platforms.
+Use the OEM signed temperature conversion and retain the read-only
+SM8350 descriptor. Reject battery SET requests for this unqualified port.
+This does not start ADSP, set charging limits or establish charging support.
+
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -9,6 +9,7 @@
+ #include <linux/module.h>
+ #include <linux/mutex.h>
+ #include <linux/nvmem-consumer.h>
++#include <linux/of.h>
+ #include <linux/of_device.h>
+ #include <linux/power_supply.h>
+ #include <linux/property.h>
+@@ -25,6 +26,7 @@
+ 	QCOM_BATTMGR_SM8350,
+ 	QCOM_BATTMGR_SM8550,
+ 	QCOM_BATTMGR_X1E80100,
++	QCOM_BATTMGR_UKE,
+ };
+ 
+ #define BATTMGR_BAT_STATUS		0x1
+@@ -361,6 +363,21 @@
+ 	return battmgr->error;
+ }
+ 
++/* Uke inserts BATT_CONSTANT_CURRENT at wire ID 12 in the OEM protocol. */
++static int qcom_battmgr_uke_battery_property(int property, bool to_wire)
++{
++	if (to_wire) {
++		if (property < 0 || property > BATT_CHG_CTRL_END_THR)
++			return -EINVAL;
++		return property >= BATT_TEMP ? property + 1 : property;
++	}
++
++	if (property < 0 || property > BATT_CHG_CTRL_END_THR + 1 ||
++	    property == BATT_TEMP)
++		return -EINVAL;
++	return property > BATT_TEMP ? property - 1 : property;
++}
++
+ static int qcom_battmgr_request_property(struct qcom_battmgr *battmgr, int opcode,
+ 					 int property, u32 value)
+ {
+@@ -373,6 +390,17 @@
+ 		.value = cpu_to_le32(value),
+ 	};
+ 
++	if (battmgr->variant == QCOM_BATTMGR_UKE) {
++		if (opcode == BATTMGR_BAT_PROPERTY_SET)
++			return -EOPNOTSUPP;
++		if (opcode == BATTMGR_BAT_PROPERTY_GET) {
++			property = qcom_battmgr_uke_battery_property(property, true);
++			if (property < 0)
++				return property;
++			request.property = cpu_to_le32(property);
++		}
++	}
++
+ 	return qcom_battmgr_request(battmgr, &request, sizeof(request));
+ }
+ 
+@@ -1382,6 +1410,15 @@
+ 	switch (opcode) {
+ 	case BATTMGR_BAT_PROPERTY_GET:
+ 		property = le32_to_cpu(resp->intval.property);
++		if (battmgr->variant == QCOM_BATTMGR_UKE) {
++			int decoded = qcom_battmgr_uke_battery_property(property, false);
++
++			if (decoded < 0) {
++				battmgr->error = -ENODATA;
++				goto out_complete;
++			}
++			property = decoded;
++		}
+ 		if (property == BATT_MODEL_NAME) {
+ 			if (payload_len != sizeof(resp->strval)) {
+ 				dev_warn(battmgr->dev,
+@@ -1437,7 +1474,10 @@
+ 			break;
+ 		case BATT_TEMP:
+ 			val = le32_to_cpu(resp->intval.value);
+-			battmgr->status.temperature = DIV_ROUND_CLOSEST(val, 10);
++			if (battmgr->variant == QCOM_BATTMGR_UKE)
++				battmgr->status.temperature = DIV_ROUND_CLOSEST((int)val, 10);
++			else
++				battmgr->status.temperature = DIV_ROUND_CLOSEST(val, 10);
+ 			break;
+ 		case BATT_TECHNOLOGY:
+ 			battmgr->info.technology = le32_to_cpu(resp->intval.value);
+@@ -1653,7 +1693,9 @@
+ 	init_completion(&battmgr->ack);
+ 
+ 	match = of_match_device(qcom_battmgr_of_variants, dev->parent);
+-	if (match)
++	if (of_machine_is_compatible("xiaomi,uke"))
++		battmgr->variant = QCOM_BATTMGR_UKE;
++	else if (match)
+ 		battmgr->variant = (unsigned long)match->data;
+ 	else
+ 		battmgr->variant = QCOM_BATTMGR_SM8350;

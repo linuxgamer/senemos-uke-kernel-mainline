@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-31",
+  "scope": "Stable raw microphone identities and qualitative physical positions",
+  "sources": [
+    {
+      "id": "uke-static-mic-routes",
+      "url": "https://github.com/delano-git/android_vendor_xiaomi_uke",
+      "commit": "87f59fc5c2ef1ee04e494e5258853d36a3346059",
+      "file": "proprietary/odm/etc/audio/sku_cliffs/mixer_paths_overlay_static.xml",
+      "sha256": "2cb2cfc48ff22b76e67783753203a0367f4e447b398db6d7eb61ef5a2e8a8b4c",
+      "local_path": "referances/uke-microphone-oem-20261031/mixer_paths_overlay_static.xml",
+      "classification": "uke_oem_data_reference",
+      "license": "Not established from file header; reference data not redistributed",
+      "executed": false
+    },
+    {
+      "id": "uke-resource-manager",
+      "url": "https://github.com/delano-git/android_device_xiaomi_uke",
+      "commit": "0f03fdc4432a86e8aefa0b71d395391f18dc8ad5",
+      "file": "configs/audio/resourcemanager_cliffs_mtp.xml",
+      "sha256": "ec2fd1eea221ff0d7ade65f6054055fc3bb65dc4cc95c9914b1a75a321173e7b",
+      "local_path": "referances/uke-microphone-oem-20261031/resourcemanager_cliffs_mtp.xml",
+      "classification": "uke_oem_data_reference",
+      "executed": false
+    },
+    {
+      "id": "native-wcd-adc-outputs",
+      "url": "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git",
+      "commit": "79a907609d53d5cd645b42c11550d295d43abf99",
+      "files": [
+        "sound/soc/codecs/wcd939x.c",
+        "sound/soc/codecs/wcd939x-sdw.c"
+      ],
+      "classification": "native_shared_ip",
+      "license": "GPL-2.0"
+    }
+  ],
+  "board_reference": "Live unmodified OEM audio-routing property; bias voltages unchanged",
+  "inputs": [
+    {
+      "id": "uke-amic1",
+      "oem_route_alias": "sidebottom-mic",
+      "physical_position": "Top edge, right",
+      "position_verified": true,
+      "amic": 1,
+      "adc": 1,
+      "bias": 1,
+      "swr_input": 0,
+      "position_evidence": "Qualitative aperture identification reported through KDE",
+      "desktop_microphone": "Microphone 1",
+      "pcm_index": 0,
+      "decimator": 0
+    },
+    {
+      "id": "uke-amic3",
+      "oem_route_alias": "top-mic",
+      "physical_position": "Left edge",
+      "position_verified": true,
+      "amic": 3,
+      "adc": 3,
+      "bias": 3,
+      "swr_input": 2,
+      "position_evidence": "Qualitative aperture identification reported through KDE",
+      "desktop_microphone": "Microphone 2",
+      "pcm_index": 1,
+      "decimator": 1
+    },
+    {
+      "id": "uke-amic4",
+      "oem_route_alias": "back-mic",
+      "physical_position": "Beside camera",
+      "position_verified": true,
+      "amic": 4,
+      "adc": 4,
+      "bias": 3,
+      "swr_input": 3,
+      "position_evidence": "Qualitative aperture identification reported through KDE",
+      "desktop_microphone": "Microphone 3",
+      "pcm_index": 2,
+      "decimator": 2
+    },
+    {
+      "id": "uke-amic5",
+      "oem_route_alias": "sidetop-mic",
+      "physical_position": "Top edge, left",
+      "position_verified": true,
+      "amic": 5,
+      "adc": 2,
+      "bias": 4,
+      "swr_input": 1,
+      "position_evidence": "Qualitative aperture identification reported through KDE",
+      "desktop_microphone": "Microphone 4",
+      "pcm_index": 3,
+      "decimator": 3
+    }
+  ],
+  "geometry_review": {
+    "source": "delano-git/android_vendor_xiaomi_sm8635-common",
+    "commit": "475e955b3780aee6dd007178e08bf8a231143681",
+    "file": "proprietary/vendor/etc/microphone_characteristics.xml",
+    "sha256": "618133e7ddd73dba10d45036856127b91b9e649299e1fd8b30fcb2e1002744bb",
+    "matches_live_read_only_vendor_file": true,
+    "accepted_as_uke_geometry": false,
+    "reason": "Two declared microphones share identical coordinates/orientation; no explicit builtin_mic ID to AMIC association or qualified Uke body-frame mapping",
+    "raw_response_and_geometry_values_redistributed": false
+  },
+  "native_policy": {
+    "channels": 4,
+    "rate": 48000,
+    "format": "S16_LE",
+    "channel_counts": [
+      1,
+      2,
+      4
+    ],
+    "mono_decimator": 0,
+    "decimator_masks": {
+      "1": 1,
+      "2": 3,
+      "4": 15
+    }
+  },
+  "validation_limits": [
+    "Physical positions are qualitative user identifications in the documented body frame",
+    "Metric coordinates, spacing and orientation vectors remain unmeasured",
+    "Android builtin_mic IDs are not assigned to Linux AMIC identities",
+    "No proprietary DSP preset, response curve or unit calibration is installed",
+    "Full suspend/resume and power-cycle regression acceptance remains separate from raw capture"
+  ],
+  "individual_data_observation": {
+    "release": "7.3.1-13",
+    "source_commit": "058b8add5f80c1f39fdde72e5c37488f68a84c7e",
+    "copr_build": 11234647,
+    "inputs": [
+      1,
+      3,
+      4,
+      5
+    ],
+    "duration_seconds_each": 10,
+    "samples_each": 480000,
+    "clipped_samples_each": 0,
+    "only_selected_adc_active": true,
+    "positions_verified": false
+  },
+  "position_reference_frame": "Screen facing user, landscape, USB-C at right",
+  "geometry_measured": false,
+  "multichannel_data_observation": {
+    "release": "7.3.1-102",
+    "source_commit": "dcc59b39094d9875be91114cd838d85d9faa0002",
+    "copr_build": 11235075,
+    "channels": 4,
+    "pcm_order": [
+      "uke-amic1",
+      "uke-amic3",
+      "uke-amic4",
+      "uke-amic5"
+    ],
+    "sample_rate": 48000,
+    "format": "S16_LE",
+    "frames_per_channel": 480000,
+    "nonzero_on_all_channels": true,
+    "clipping": false,
+    "reopen_passed": true,
+    "per_decimator_isolation_passed": true
+  }
+}

@@ -1,0 +1,45 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] leds: qcom-flash: bound cleanup for torch-only children
+
+Count registered children before indexing. Torch-only children have no V4L2
+flash object, so release only non-null slots within the allocation.
+
+--- a/drivers/leds/flash/leds-qcom-flash.c
++++ b/drivers/leds/flash/leds-qcom-flash.c
+@@ -835,6 +835,16 @@
+ 	return qcom_flash_v4l2_init(dev, led, node);
+ }
+ 
++static void qcom_flash_release(struct qcom_flash_data *flash_data)
++{
++	while (flash_data->leds_count) {
++		unsigned int index = --flash_data->leds_count;
++
++		if (flash_data->v4l2_flash[index])
++			v4l2_flash_release(flash_data->v4l2_flash[index]);
++	}
++}
++
+ static int qcom_flash_led_probe(struct platform_device *pdev)
+ {
+ 	struct qcom_flash_data *flash_data;
+@@ -953,8 +963,7 @@
+ 
+ 	return regmap_field_write(flash_data->r_fields[REG_TORCH_CLAMP], flash_data->torch_clamp);
+ release:
+-	while (flash_data->v4l2_flash[flash_data->leds_count] && flash_data->leds_count)
+-		v4l2_flash_release(flash_data->v4l2_flash[flash_data->leds_count--]);
++	qcom_flash_release(flash_data);
+ 	return rc;
+ }
+ 
+@@ -962,8 +971,7 @@
+ {
+ 	struct qcom_flash_data *flash_data = platform_get_drvdata(pdev);
+ 
+-	while (flash_data->v4l2_flash[flash_data->leds_count] && flash_data->leds_count)
+-		v4l2_flash_release(flash_data->v4l2_flash[flash_data->leds_count--]);
++	qcom_flash_release(flash_data);
+ 
+ 	mutex_destroy(&flash_data->lock);
+ }

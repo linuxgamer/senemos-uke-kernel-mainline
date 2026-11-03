@@ -1,0 +1,98 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: qcom: validate DMA completion results
+
+A mismatched address currently advances the hardware pointer even when
+the client is not notified. A failed DSP status also reaches the client's
+normal period-completion path. Reject those responses without advancing
+or notifying. Bound echoed write lengths and capture offset/data length
+against the selected fragment before accepting the completion.
+
+This does not provide XRUN/restart recovery or detect every duplicate or
+late period after ring reuse. Those lifecycle requirements remain open.
+No DSP command format, audio profile or physical route is changed.
+
+---
+--- a/sound/soc/qcom/qdsp6/q6apm.c
++++ b/sound/soc/qcom/qdsp6/q6apm.c
+@@ -632,25 +632,28 @@
+ 			return -EINVAL;
+ 		if (!graph->ar_graph)
+ 			break;
++		done = data->payload;
++		if (done->status)
++			return -EIO;
+ 		client_event = APM_CLIENT_EVENT_DATA_WRITE_DONE;
+ 		mutex_lock(&graph->lock);
+ 		token = hdr->token & APM_WRITE_TOKEN_MASK;
+ 
+-		done = data->payload;
+ 		if (!graph->rx_data.buf) {
+ 			mutex_unlock(&graph->lock);
+ 			break;
+ 		}
+-		if (token >= graph->rx_data.num_periods) {
++		if (token >= graph->rx_data.num_periods ||
++		    (hdr->token >> APM_WRITE_TOKEN_LEN_SHIFT) > graph->rx_data.buf[token].size) {
+ 			mutex_unlock(&graph->lock);
+ 			return -EINVAL;
+ 		}
+ 		phys = graph->rx_data.buf[token].phys;
+ 		mutex_unlock(&graph->lock);
+-		/* token numbering starts at 0 */
+-		atomic_set(&graph->rx_data.hw_ptr, token + 1);
+ 		if (lower_32_bits(phys) == done->buf_addr_lsw &&
+ 		    upper_32_bits(phys) == done->buf_addr_msw) {
++			/* token numbering starts at 0 */
++			atomic_set(&graph->rx_data.hw_ptr, token + 1);
+ 			graph->result.opcode = hdr->opcode;
+ 			graph->result.status = done->status;
+ 			if (graph->cb)
+@@ -658,6 +661,7 @@
+ 		} else {
+ 			dev_err(dev, "WR BUFF Unexpected addr %08x-%08x\n", done->buf_addr_lsw,
+ 				done->buf_addr_msw);
++			return -EINVAL;
+ 		}
+ 
+ 		break;
+@@ -666,24 +670,27 @@
+ 			return -EINVAL;
+ 		if (!graph->ar_graph)
+ 			break;
++		rd_done = data->payload;
++		if (rd_done->status)
++			return -EIO;
+ 		client_event = APM_CLIENT_EVENT_DATA_READ_DONE;
+ 		mutex_lock(&graph->lock);
+-		rd_done = data->payload;
+ 		if (!graph->tx_data.buf) {
+ 			mutex_unlock(&graph->lock);
+ 			break;
+ 		}
+-		if (hdr->token >= graph->tx_data.num_periods) {
++		if (hdr->token >= graph->tx_data.num_periods ||
++		    rd_done->offset > graph->tx_data.buf[hdr->token].size ||
++		    rd_done->data_size > graph->tx_data.buf[hdr->token].size - rd_done->offset) {
+ 			mutex_unlock(&graph->lock);
+ 			return -EINVAL;
+ 		}
+ 		phys = graph->tx_data.buf[hdr->token].phys;
+ 		mutex_unlock(&graph->lock);
+-		/* token numbering starts at 0 */
+-		atomic_set(&graph->tx_data.hw_ptr, hdr->token + 1);
+-
+ 		if (upper_32_bits(phys) == rd_done->buf_addr_msw &&
+ 		    lower_32_bits(phys) == rd_done->buf_addr_lsw) {
++			/* token numbering starts at 0 */
++			atomic_set(&graph->tx_data.hw_ptr, hdr->token + 1);
+ 			graph->result.opcode = hdr->opcode;
+ 			graph->result.status = rd_done->status;
+ 			if (graph->cb)
+@@ -691,6 +698,7 @@
+ 		} else {
+ 			dev_err(dev, "RD BUFF Unexpected addr %08x-%08x\n", rd_done->buf_addr_lsw,
+ 				rd_done->buf_addr_msw);
++			return -EINVAL;
+ 		}
+ 		break;
+ 	case DATA_CMD_WR_SH_MEM_EP_EOS_RENDERED:

@@ -12,10 +12,12 @@ cat <<'CPP'
 #include <cstring>
 #define ARRAY_SIZE(a) int(sizeof(a)/sizeof((a)[0]))
 struct node { bool uke = true; unsigned int supplies = 7; };
-struct device { node *of_node; };
 struct regulator { int index; };
 regulator rails[] = {{0}, {1}, {2}};
 struct regulator_bulk_data { const char *supply = nullptr; regulator *consumer = nullptr; };
+// Power-sequence checks need storage independent of ath11k core memory.
+// The separate lifetime fixture exercises delayed devres cleanup under ASan.
+struct device { node *of_node; regulator_bulk_data managed[3]{}; };
 struct ath11k_ahb {
     int *tgt_rproc = nullptr;
     regulator_bulk_data uke_regs[3];
@@ -40,6 +42,14 @@ int devm_regulator_bulk_get(device *, int count, regulator_bulk_data *regs) {
     assert(count == 3); ++gets;
     for (int i=0; i<count; ++i) regs[i].consumer = &rails[i];
     return get_error;
+}
+int devm_regulator_bulk_get_const(device *dev, int count,
+                                 const regulator_bulk_data *input,
+                                 regulator_bulk_data **output) {
+    assert(count == 3 && input != dev->managed);
+    std::memcpy(dev->managed, input, sizeof(dev->managed));
+    *output = dev->managed;
+    return devm_regulator_bulk_get(dev, count, *output);
 }
 int regulator_enable(regulator *rail) {
     assert(rail->index == enables); // Exact OEM forward sequence, without duplicate votes.
@@ -101,6 +111,6 @@ int main() {
 }
 CPP
 } > "$work/check.cpp"
-g++ -include initializer_list -std=c++20 -O2 -Wall -Wextra -Werror -Wno-unused-parameter "$work/check.cpp" -o "$work/check"
+"${CXX:-g++}" -include initializer_list -std=c++20 -O2 -Wall -Wextra -Werror -Wno-unused-parameter "$work/check.cpp" -o "$work/check"
 "$work/check"
 echo 'Uke WLAN OEM order, every rail fault, partial cleanup retry, provider defer and legacy path: passed'

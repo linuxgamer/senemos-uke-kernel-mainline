@@ -1,0 +1,23 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: wcd939x: require coordinated reset on Uke
+
+Uke must not fall back to an uncoordinated GPIO pulse if its reset phandle
+is missing. Reject that description before requesting a GPIO or enabling
+any supply. The existing USBSS child owns reset timing and protection.
+Other boards retain the legacy GPIO path.
+
+---
+diff --git a/sound/soc/codecs/wcd939x.c b/sound/soc/codecs/wcd939x.c
+--- a/sound/soc/codecs/wcd939x.c
++++ b/sound/soc/codecs/wcd939x.c
+@@ -3270,6 +3270,10 @@ static int wcd939x_populate_dt_data(struct wcd939x_priv *wcd939x, struct device *dev)
+ #endif /* CONFIG_TYPEC */
+ 	int ret;
+ 
++	if (of_machine_is_compatible("xiaomi,uke") &&
++	    !of_property_present(dev->of_node, "resets"))
++		return dev_err_probe(dev, -EINVAL, "Uke requires coordinated codec reset\n");
++
+ 	if (of_property_present(dev->of_node, "resets")) {
+ 		if (of_property_present(dev->of_node, "reset-gpios"))
+ 			return -EINVAL;

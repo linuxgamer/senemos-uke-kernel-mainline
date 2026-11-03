@@ -1,0 +1,70 @@
+From: Senemos Uke contributors
+Subject: [PATCH] soc: qcom: scope Uke UFS DMA and GDSC admission explicitly
+
+Keep the original USB SMMU profile unchanged. The additional boot compatible
+admits only OEM UFS SID 0x60 alongside USB/GPI, reserves firmware display context
+banks and requires translated DMA. Reject ACTLR overrides and unrelated SIDs.
+Name the UFS GDSC match explicitly instead of advertising a USB controller.
+Both UFS GDSCs use the existing bounded OEM GDSCR/CFG_GDSCR sequencer. The DT
+must hold their reviewed parent votes and keep the domains always on for this
+first-console phase. No bypass, runtime-PM or storage acceptance is inferred.
+
+Source: MiCode/Xiaomi_Kernel_OpenSource
+Commit: 5712080a4b0c0b1a879e6d145c601c649ddaddfd
+Files: drivers/iommu/arm/arm-smmu/arm-smmu.c,
+       drivers/regulator/gdsc-regulator.c
+Source: MiCode/vendor_qcom_opensource_devicetree
+Commit: 94c84aeb9e517dbde546fc732033c184094c8e57
+Files: qcom/cliffs.dtsi, qcom/msm-arm-smmu-cliffs.dtsi, qcom/cliffs-regulators.dtsi
+License: GPL-2.0-only
+
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
+@@ -815,7 +815,7 @@
+ 	const __be32 *actlr;
+ 	int len, i, j;
+ 
+-	/* Keep this port scoped to the proven DT streams: DWC3 and GPI0. */
++	/* OEM Cliffs streams: DWC3/GPI0, plus UFS only in the boot profile. */
+ 	if (!fwspec || !fwspec->num_ids)
+ 		return -EINVAL;
+ 	actlr = of_get_property(smmu->dev->of_node, "qcom,actlr", &len);
+@@ -824,13 +824,15 @@
+ 	for (i = 0; i < fwspec->num_ids; i++) {
+ 		u32 sid = fwspec->ids[i];
+ 
+-		if (sid != 0x40 && sid != 0xb6)
+-			return dev_err_probe(dev, -EOPNOTSUPP, "outside Uke USB SMMU scope\n");
+-		/* Neither USB stream has an ACTLR override in the public Uke DT. */
++		if (sid != 0x40 && sid != 0xb6 &&
++		    !(sid == 0x60 && of_device_is_compatible(smmu->dev->of_node,
++						"qcom,sm7675-boot-smmu")))
++			return dev_err_probe(dev, -EOPNOTSUPP, "outside Uke boot SMMU scope\n");
++		/* None of these streams has an ACTLR override in OEM Cliffs DT. */
+ 		for (j = 0; actlr && j < len / sizeof(u32); j += 3)
+ 			if (!((sid ^ be32_to_cpu(actlr[j])) & ~be32_to_cpu(actlr[j + 1])))
+ 				return dev_err_probe(dev, -EOPNOTSUPP,
+-						     "USB stream needs an ACTLR override\n");
++						     "boot stream needs an ACTLR override\n");
+ 	}
+ 	return __arm_smmu_alloc_bitmap(smmu->context_map, start, smmu->num_context_banks);
+ }
+@@ -878,6 +880,7 @@
+ 	{ .compatible = "qcom,sm8450-smmu-500", .data = &qcom_smmu_500_impl0_data },
+ 	{ .compatible = "qcom,smmu-500", .data = &qcom_smmu_500_impl0_data },
+ 	{ .compatible = "qcom,sm7675-usb-smmu", .data = &qcom_uke_smmu_data },
++	{ .compatible = "qcom,sm7675-boot-smmu", .data = &qcom_uke_smmu_data },
+ 	{ }
+ };
+ 
+--- a/drivers/clk/qcom/gdsc-regulator-uke.c
++++ b/drivers/clk/qcom/gdsc-regulator-uke.c
+@@ -279,6 +279,8 @@
+ 
+ static const struct of_device_id uke_gdsc_of_match[] = {
+ 	{ .compatible = "qcom,sm7675-usb-gdsc" },
++	/* OEM UFS domains use the same GDSCR/CFG_GDSCR state machine. */
++	{ .compatible = "qcom,sm7675-ufs-gdsc" },
+ 	{ }
+ };
+ MODULE_DEVICE_TABLE(of, uke_gdsc_of_match);

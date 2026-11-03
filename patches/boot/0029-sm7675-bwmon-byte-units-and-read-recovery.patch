@@ -1,0 +1,125 @@
+From: Uke Linux contributors <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] soc: qcom: use exact SM7675 counter bytes and recover read faults
+
+Uke declares a 65536-byte count and a 19.2-MHz hardware timer. ICC bandwidth
+uses decimal kB/s. Add exact SM7675 data and byte-based threshold/sample
+conversion without changing the established legacy compatible scaling.
+
+An owned IRQ whose counter read fails must not leave the monitor disabled.
+Discard the failed sample, clear/rearm the known zones and retain the applied
+vote. The normal MMIO backend does not prove that this fault occurs on Uke.
+
+Compared with Uke OEM kernel 5712080a4b0c0b1a879e6d145c601c649ddaddfd,
+DT 94c84aeb9e517dbde546fc732033c184094c8e57 and OnePlus SM7675 kernel
+fc892483f1d61f245924681eb5abd563564d9cba. Peridot
+2ed9eadbecae21ef51134e556951e7305ba65f88 is shared-IP reference only;
+its OPP values are not copied. Retain Linux/Qualcomm/Linaro GPL attribution.
+
+--- a/drivers/soc/qcom/icc-bwmon.c
++++ b/drivers/soc/qcom/icc-bwmon.c
+@@ -11,6 +11,7 @@
+ #include <linux/interrupt.h>
+ #include <linux/io.h>
+ #include <linux/kernel.h>
++#include <linux/math64.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
+@@ -167,6 +168,7 @@
+ struct icc_bwmon_data {
+ 	unsigned int sample_ms;
+ 	unsigned int count_unit_kb; /* kbytes */
++	unsigned int count_unit_bytes; /* Exact byte units for SM7675 ICC votes. */
+ 	u8 zone1_thres_count;
+ 	u8 zone3_thres_count;
+ 	unsigned int quirks;
+@@ -555,8 +557,12 @@
+ {
+ 	unsigned int thres;
+ 
+-	thres = mult_frac(bwmon_kbps_to_count(bwmon, kbps),
+-			  bwmon->data->sample_ms, MSEC_PER_SEC);
++	if (bwmon->data->count_unit_bytes)
++		thres = div_u64((u64)kbps * bwmon->data->sample_ms,
++				bwmon->data->count_unit_bytes);
++	else
++		thres = mult_frac(bwmon_kbps_to_count(bwmon, kbps),
++				  bwmon->data->sample_ms, MSEC_PER_SEC);
+ 	regmap_field_write(reg, thres);
+ }
+ 
+@@ -632,12 +638,22 @@
+ 	 * window.  Downstream kernel for BWMONv4 (called BWMON type 2 in
+ 	 * downstream) always increments the max bytes count by one.
+ 	 */
+-	if (regmap_field_read(bwmon->regs[F_ZONE0_MAX + zone], &max))
+-		return IRQ_NONE;
++	if (regmap_field_read(bwmon->regs[F_ZONE0_MAX + zone], &max)) {
++		dev_err_ratelimited(bwmon->dev, "Failed to read bandwidth counter\n");
++		bwmon_clear_counters(bwmon, false);
++		bwmon_clear_irq(bwmon);
++		bwmon_enable(bwmon, BWMON_IRQ_ENABLE_MASK);
++		return IRQ_HANDLED;
++	}
+ 
+ 	max += 1;
+-	max *= bwmon->data->count_unit_kb;
+-	bwmon->target_kbps = mult_frac(max, MSEC_PER_SEC, bwmon->data->sample_ms);
++	if (bwmon->data->count_unit_bytes)
++		bwmon->target_kbps = div_u64((u64)max * bwmon->data->count_unit_bytes,
++					   bwmon->data->sample_ms);
++	else {
++		max *= bwmon->data->count_unit_kb;
++		bwmon->target_kbps = mult_frac(max, MSEC_PER_SEC, bwmon->data->sample_ms);
++	}
+ 
+ 	return IRQ_WAKE_THREAD;
+ }
+@@ -860,7 +876,29 @@
+ 	.regmap_cfg = &sdm845_llcc_bwmon_regmap_cfg,
+ };
+ 
++static const struct icc_bwmon_data sm7675_cpu_bwmon_data = {
++	.sample_ms = 4,
++	.count_unit_bytes = SZ_64K,
++	.zone1_thres_count = 16,
++	.zone3_thres_count = 1,
++	.quirks = BWMON_HAS_GLOBAL_IRQ,
++	.regmap_fields = sdm845_cpu_bwmon_reg_fields,
++	.regmap_cfg = &sdm845_cpu_bwmon_regmap_cfg,
++};
++
++static const struct icc_bwmon_data sm7675_llcc_bwmon_data = {
++	.sample_ms = 4,
++	.count_unit_bytes = SZ_64K,
++	.zone1_thres_count = 16,
++	.zone3_thres_count = 1,
++	.quirks = BWMON_NEEDS_FORCE_CLEAR,
++	.regmap_fields = sdm845_llcc_bwmon_reg_fields,
++	.regmap_cfg = &sdm845_llcc_bwmon_regmap_cfg,
++};
++
+ static const struct of_device_id bwmon_of_match[] = {
++	{ .compatible = "qcom,sm7675-cpu-bwmon", .data = &sm7675_cpu_bwmon_data },
++	{ .compatible = "qcom,sm7675-llcc-bwmon", .data = &sm7675_llcc_bwmon_data },
+ 	/* BWMONv4, separate monitor and global register spaces */
+ 	{ .compatible = "qcom,msm8998-bwmon", .data = &msm8998_bwmon_data },
+ 	/* BWMONv4, unified register space */
+--- a/Documentation/devicetree/bindings/interconnect/qcom,msm8998-bwmon.yaml
++++ b/Documentation/devicetree/bindings/interconnect/qcom,msm8998-bwmon.yaml
+@@ -40,6 +40,7 @@
+               - qcom,sdm845-cpu-bwmon
+               - qcom,sm6115-cpu-bwmon
+               - qcom,sm6350-llcc-bwmon
++              - qcom,sm7675-cpu-bwmon
+               - qcom,sm8250-cpu-bwmon
+               - qcom,sm8550-cpu-bwmon
+               - qcom,sm8650-cpu-bwmon
+@@ -57,6 +58,7 @@
+               - qcom,sc8280xp-llcc-bwmon
+               - qcom,shikra-cpu-bwmon
+               - qcom,sm6350-cpu-bwmon
++              - qcom,sm7675-llcc-bwmon
+               - qcom,sm8250-llcc-bwmon
+               - qcom,sm8550-llcc-bwmon
+               - qcom,sm8650-llcc-bwmon

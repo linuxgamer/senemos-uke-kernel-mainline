@@ -1,0 +1,285 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] drm/msm: serialise framebuffer pins and unwind prepare failures
+
+Serialize the framebuffer pin counter and cached addresses across parallel
+prepare and cleanup callbacks. Initialise the private state before publishing
+the framebuffer. Failed prepares drop only the references actually acquired,
+clear partial addresses and restore the counter and dirtyfb vote.
+
+Based on Dmitry Baryshkov's GPL-2.0-only v5 framebuffer pin proposals:
+https://lists.openwall.net/linux-kernel/2026/10/23/2239
+https://lkml.iu.edu/2610.2/19692.html
+Retain atomic_t under the mutex for this Linux 7.3 adaptation. Propagate DPU
+writeback preparation errors to DRM, unwind earlier physical encoders and
+publish writeback ownership/configuration only after preparation succeeds.
+This also handles format validation failure after a successful pin; a failed
+DRM writeback job must not be marked prepared or cleaned up a second time.
+
+The v5 review identifies the swallowed writeback error as a dependency of the
+prepare-unwind fix. Async flush/scanout retirement needs its own validation;
+this patch does not claim to resolve every historical display SMMU fault.
+
+Upstream-Status: Pending [Linux 7.3 adaptation of the linked framebuffer fixes]
+Signed-off-by: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+---
+--- a/drivers/gpu/drm/msm/msm_fb.c
++++ b/drivers/gpu/drm/msm/msm_fb.c
+@@ -10,6 +10,7 @@
+ #include <drm/drm_framebuffer.h>
+ #include <drm/drm_gem_framebuffer_helper.h>
+ #include <drm/drm_probe_helper.h>
++#include <linux/mutex.h>
+ 
+ #include "msm_drv.h"
+ #include "msm_kms.h"
+@@ -21,6 +22,8 @@
+ 
+ 	/* Count of # of attached planes which need dirtyfb: */
+ 	refcount_t dirtyfb;
++	/* Serialises prepare/cleanup, including the cached plane addresses. */
++	struct mutex pin_lock;
+ 
+ 	/* Framebuffer per-plane address, if pinned, else zero: */
+ 	uint64_t iova[DRM_FORMAT_MAX_PLANES];
+@@ -45,9 +48,17 @@
+ 					 clips, num_clips);
+ }
+ 
++static void msm_framebuffer_destroy(struct drm_framebuffer *fb)
++{
++	struct msm_framebuffer *msm_fb = to_msm_framebuffer(fb);
++
++	mutex_destroy(&msm_fb->pin_lock);
++	drm_gem_fb_destroy(fb);
++}
++
+ static const struct drm_framebuffer_funcs msm_framebuffer_funcs = {
+ 	.create_handle = drm_gem_fb_create_handle,
+-	.destroy = drm_gem_fb_destroy,
++	.destroy = msm_framebuffer_destroy,
+ 	.dirty = msm_framebuffer_dirtyfb,
+ };
+ 
+@@ -69,6 +80,18 @@
+ }
+ #endif
+ 
++static void msm_framebuffer_unpin_planes(struct drm_framebuffer *fb, int n)
++{
++	struct msm_drm_private *priv = fb->dev->dev_private;
++	struct drm_gpuvm *vm = priv->kms->vm;
++	int i;
++
++	for (i = 0; i < n; i++) {
++		msm_gem_unpin_iova(fb->obj[i], vm);
++		msm_gem_vma_put(fb->obj[i]);
++	}
++}
++
+ /* prepare/pin all the fb's bo's for scanout.
+  */
+ int msm_framebuffer_prepare(struct drm_framebuffer *fb, bool needs_dirtyfb)
+@@ -78,6 +101,8 @@
+ 	struct msm_framebuffer *msm_fb = to_msm_framebuffer(fb);
+ 	int ret, i, n = fb->format->num_planes;
+ 
++	guard(mutex)(&msm_fb->pin_lock);
++
+ 	if (needs_dirtyfb)
+ 		refcount_inc(&msm_fb->dirtyfb);
+ 
+@@ -89,8 +114,15 @@
+ 		ret = msm_gem_get_and_pin_iova(fb->obj[i], vm, &msm_fb->iova[i]);
+ 		drm_dbg_state(fb->dev, "FB[%u]: iova[%d]: %08llx (%d)\n",
+ 			      fb->base.id, i, msm_fb->iova[i], ret);
+-		if (ret)
++		if (ret) {
++			msm_gem_vma_put(fb->obj[i]);
++			msm_framebuffer_unpin_planes(fb, i);
++			memset(msm_fb->iova, 0, sizeof(msm_fb->iova));
++			atomic_dec(&msm_fb->prepare_count);
++			if (needs_dirtyfb)
++				refcount_dec(&msm_fb->dirtyfb);
+ 			return ret;
++		}
+ 	}
+ 
+ 	return 0;
+@@ -98,10 +130,9 @@
+ 
+ void msm_framebuffer_cleanup(struct drm_framebuffer *fb, bool needed_dirtyfb)
+ {
+-	struct msm_drm_private *priv = fb->dev->dev_private;
+-	struct drm_gpuvm *vm = priv->kms->vm;
+ 	struct msm_framebuffer *msm_fb = to_msm_framebuffer(fb);
+-	int i, n = fb->format->num_planes;
++
++	guard(mutex)(&msm_fb->pin_lock);
+ 
+ 	if (needed_dirtyfb)
+ 		refcount_dec(&msm_fb->dirtyfb);
+@@ -111,10 +142,7 @@
+ 
+ 	memset(msm_fb->iova, 0, sizeof(msm_fb->iova));
+ 
+-	for (i = 0; i < n; i++) {
+-		msm_gem_unpin_iova(fb->obj[i], vm);
+-		msm_gem_vma_put(fb->obj[i]);
+-	}
++	msm_framebuffer_unpin_planes(fb, fb->format->num_planes);
+ }
+ 
+ uint32_t msm_framebuffer_iova(struct drm_framebuffer *fb, int plane)
+@@ -199,14 +227,16 @@
+ 
+ 	drm_helper_mode_fill_fb_struct(dev, fb, info, mode_cmd);
+ 
++	refcount_set(&msm_fb->dirtyfb, 1);
++	mutex_init(&msm_fb->pin_lock);
++
+ 	ret = drm_framebuffer_init(dev, fb, &msm_framebuffer_funcs);
+ 	if (ret) {
+ 		DRM_DEV_ERROR(dev->dev, "framebuffer init failed: %d\n", ret);
++		mutex_destroy(&msm_fb->pin_lock);
+ 		goto fail;
+ 	}
+ 
+-	refcount_set(&msm_fb->dirtyfb, 1);
+-
+ 	drm_dbg_state(dev, "create: FB ID: %d (%p)\n", fb->base.id, fb);
+ 
+ 	return fb;
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c
+@@ -1109,21 +1109,34 @@
+  * @drm_enc:    Pointer to previously created drm encoder structure
+  * @job:        Pointer to the current drm writeback job
+  */
+-void dpu_encoder_prepare_wb_job(struct drm_encoder *drm_enc,
++int dpu_encoder_prepare_wb_job(struct drm_encoder *drm_enc,
+ 		struct drm_writeback_job *job)
+ {
+ 	struct dpu_encoder_virt *dpu_enc;
+-	int i;
++	int i, ret;
+ 
+ 	dpu_enc = to_dpu_encoder_virt(drm_enc);
+ 
+ 	for (i = 0; i < dpu_enc->num_phys_encs; i++) {
+ 		struct dpu_encoder_phys *phys = dpu_enc->phys_encs[i];
+ 
+-		if (phys->ops.prepare_wb_job)
+-			phys->ops.prepare_wb_job(phys, job);
++		if (!phys->ops.prepare_wb_job)
++			continue;
++		ret = phys->ops.prepare_wb_job(phys, job);
++		if (ret)
++			goto unwind;
+ 
+ 	}
++	return 0;
++
++unwind:
++	while (i--) {
++		struct dpu_encoder_phys *phys = dpu_enc->phys_encs[i];
++
++		if (phys->ops.prepare_wb_job && phys->ops.cleanup_wb_job)
++			phys->ops.cleanup_wb_job(phys, job);
++	}
++	return ret;
+ }
+ 
+ /**
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.h
+@@ -89,7 +89,7 @@
+ 
+ bool dpu_encoder_needs_modeset(struct drm_encoder *drm_enc, struct drm_atomic_commit *state);
+ 
+-void dpu_encoder_prepare_wb_job(struct drm_encoder *drm_enc,
++int dpu_encoder_prepare_wb_job(struct drm_encoder *drm_enc,
+ 		struct drm_writeback_job *job);
+ 
+ void dpu_encoder_cleanup_wb_job(struct drm_encoder *drm_enc,
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys.h
+@@ -113,7 +113,7 @@
+ 	void (*restore)(struct dpu_encoder_phys *phys);
+ 	int (*get_line_count)(struct dpu_encoder_phys *phys);
+ 	int (*get_frame_count)(struct dpu_encoder_phys *phys);
+-	void (*prepare_wb_job)(struct dpu_encoder_phys *phys_enc,
++	int (*prepare_wb_job)(struct dpu_encoder_phys *phys_enc,
+ 			struct drm_writeback_job *job);
+ 	void (*cleanup_wb_job)(struct dpu_encoder_phys *phys_enc,
+ 			struct drm_writeback_job *job);
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_wb.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_wb.c
+@@ -556,28 +556,26 @@
+ 	phys_enc->enable_state = DPU_ENC_DISABLED;
+ }
+ 
+-static void dpu_encoder_phys_wb_prepare_wb_job(struct dpu_encoder_phys *phys_enc,
++static int dpu_encoder_phys_wb_prepare_wb_job(struct dpu_encoder_phys *phys_enc,
+ 		struct drm_writeback_job *job)
+ {
+ 	const struct msm_format *format;
++	struct dpu_hw_wb_cfg next_cfg = {};
+ 	struct dpu_hw_wb_cfg *wb_cfg;
+ 	int ret;
+ 	struct dpu_encoder_phys_wb *wb_enc = to_dpu_encoder_phys_wb(phys_enc);
+ 
+ 	if (!job->fb)
+-		return;
++		return 0;
+ 
+-	wb_enc->wb_job = job;
+-	wb_enc->wb_conn = job->connector;
+-
+-	wb_cfg = &wb_enc->wb_cfg;
++	wb_cfg = &next_cfg;
+ 
+ 	memset(wb_cfg, 0, sizeof(struct dpu_hw_wb_cfg));
+ 
+ 	ret = msm_framebuffer_prepare(job->fb, false);
+ 	if (ret) {
+ 		DPU_ERROR("prep fb failed, %d\n", ret);
+-		return;
++		return ret;
+ 	}
+ 
+ 	format = msm_framebuffer_format(job->fb);
+@@ -585,7 +583,8 @@
+ 	ret = dpu_format_populate_plane_sizes(job->fb, &wb_cfg->dest);
+ 	if (ret) {
+ 		DPU_DEBUG("failed to populate plane sizes%d\n", ret);
+-		return;
++		msm_framebuffer_cleanup(job->fb, false);
++		return ret;
+ 	}
+ 
+ 	dpu_format_populate_addrs(job->fb, &wb_cfg->dest);
+@@ -605,6 +604,11 @@
+ 	DPU_DEBUG("[fb_stride:%8.8x,%8.8x,%8.8x,%8.8x]\n",
+ 			wb_cfg->dest.plane_pitch[0], wb_cfg->dest.plane_pitch[1],
+ 			wb_cfg->dest.plane_pitch[2], wb_cfg->dest.plane_pitch[3]);
++
++	wb_enc->wb_cfg = next_cfg;
++	wb_enc->wb_job = job;
++	wb_enc->wb_conn = job->connector;
++	return 0;
+ }
+ 
+ static void dpu_encoder_phys_wb_cleanup_wb_job(struct dpu_encoder_phys *phys_enc,
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_writeback.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_writeback.c
+@@ -97,9 +97,7 @@
+ 	if (!job->fb)
+ 		return 0;
+ 
+-	dpu_encoder_prepare_wb_job(dpu_wb_conn->wb_enc, job);
+-
+-	return 0;
++	return dpu_encoder_prepare_wb_job(dpu_wb_conn->wb_enc, job);
+ }
+ 
+ static void dpu_wb_conn_cleanup_job(struct drm_writeback_connector *connector,

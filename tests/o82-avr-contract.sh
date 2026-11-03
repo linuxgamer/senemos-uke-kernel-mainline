@@ -404,8 +404,14 @@ C
 printf 'Actual watchdog: all seven AVR bases retain five maximum frame periods through entry and exit; fixed, failed, inactive and foreign paths remain nominal\n'
 
 # Execute the actual encoder disable caller, including its DSI ownership boundary.
-cat > "$work/disable.c" <<'C'
+if grep -Fq 'retire_stop_error' "$encoder";then
+    printf '#define UKE_RETIRE_PROOF 1\n' > "$work/disable.c"
+else
+    : > "$work/disable.c"
+fi
+cat >> "$work/disable.c" <<'C'
 #include <assert.h>
+#include <errno.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
@@ -413,10 +419,13 @@ struct drm_crtc_state {bool self_refresh_active;};
 struct drm_crtc {struct drm_crtc_state *state;};
 struct drm_encoder {struct {int id;} base;};
 struct drm_atomic_commit {struct drm_crtc *crtc;};
-struct dpu_encoder_phys {struct {void (*disable)(struct dpu_encoder_phys *);} ops;int id;};
+enum {DPU_ENC_DISABLED,DPU_ENC_ENABLED};
+enum {INTF_MODE_VIDEO,INTF_MODE_CMD};
+struct dpu_encoder_phys {struct {void (*disable)(struct dpu_encoder_phys *);} ops;int id,enable_state,retire_disable_error;};
 struct dpu_encoder_virt {struct drm_encoder base;int enc_lock,num_phys_encs;bool enabled;
- struct dpu_encoder_phys *phys_encs[2];int frame_done_timer;void *connector;};
+ struct dpu_encoder_phys *phys_encs[2];int frame_done_timer;void *connector;int retire_stop_error;};
 static char events[32];static unsigned n,errors;static int stop_error;
+static int tx_error,phys_error[2],mode=INTF_MODE_VIDEO;
 static void event(char value) {assert(n+1<sizeof(events));events[n++]=value;events[n]=0;}
 static struct dpu_encoder_virt *to_dpu_encoder_virt(struct drm_encoder *e) {return (void *)e;}
 static struct drm_crtc *drm_atomic_get_old_crtc_for_encoder(struct drm_atomic_commit *s,struct drm_encoder *e) {(void)e;return s->crtc;}
@@ -430,16 +439,23 @@ static void mutex_unlock(int *l) {assert(*l==1);--*l;}
 #define DRMID(e) ((e)->base.id)
 enum {DPU_ENC_RC_EVENT_PRE_STOP,DPU_ENC_RC_EVENT_STOP};
 static void dpu_encoder_uke_avr_disable(struct dpu_encoder_virt *e) {assert(!e->enabled);event('A');}
-static void dpu_encoder_wait_for_tx_complete(struct drm_encoder *e) {(void)e;event('W');}
+static int dpu_encoder_wait_for_tx_complete(struct drm_encoder *e) {(void)e;event('W');return tx_error;}
+static int dpu_encoder_get_intf_mode(struct drm_encoder *e) {(void)e;return mode;}
 static void dpu_encoder_resource_control(struct drm_encoder *e,int value) {(void)e;event(value==DPU_ENC_RC_EVENT_PRE_STOP?'P':'S');}
-static void disable(struct dpu_encoder_phys *p) {event('0'+p->id);}
+static void disable(struct dpu_encoder_phys *p) {
+#ifdef UKE_RETIRE_PROOF
+ if(p->enable_state!=DPU_ENC_DISABLED)assert(p->retire_disable_error==-EINPROGRESS);
+#endif
+ event('0'+p->id);p->enable_state=DPU_ENC_DISABLED;p->retire_disable_error=phys_error[p->id];
+}
 static int msm_dsi_manager_uke_video_stop(struct drm_encoder *e) {(void)e;event('D');return stop_error;}
 static void timer_delete_sync(int *t) {*t=0;event('T');}
 C
 awk '/^static void dpu_encoder_virt_atomic_disable\(/ {emit=1;found=1} emit {print} emit&&/^}/ {exit} END {if(!found)exit 1}' "$encoder" >> "$work/disable.c"
 cat >> "$work/disable.c" <<'C'
 int main(void) {
- struct dpu_encoder_phys phys[2]={{{disable},0},{{disable},1}};
+ struct dpu_encoder_phys phys[2]={{.ops={disable},.id=0,.enable_state=DPU_ENC_ENABLED},
+                                {.ops={disable},.id=1,.enable_state=DPU_ENC_ENABLED}};
  struct dpu_encoder_virt e={.num_phys_encs=2,.phys_encs={&phys[0],&phys[1]},.enabled=true,.connector=&e};
  struct drm_crtc_state old={0};struct drm_crtc crtc={&old};struct drm_atomic_commit s={&crtc};
  dpu_encoder_virt_atomic_disable(&e.base,&s);
@@ -451,8 +467,32 @@ int main(void) {
  dpu_encoder_virt_atomic_disable(&e.base,&s);
  assert(!strcmp(events,"AWP01DTS")&&errors==1&&!e.frame_done_timer&&!e.enc_lock);
  n=errors=0;events[0]=0;stop_error=0;s.crtc=NULL;phys[0].ops.disable=NULL;
+ phys[0].enable_state=DPU_ENC_ENABLED;phys[0].retire_disable_error=0;
  dpu_encoder_virt_atomic_disable(&e.base,&s);
  assert(!strcmp(events,"AWP1DTS")&&!errors&&!e.enc_lock);
+ (void)dpu_encoder_get_intf_mode;
+#ifdef UKE_RETIRE_PROOF
+ assert(e.retire_stop_error==-EINPROGRESS);
+ const int expected[]={-ETIMEDOUT,0,0,-EIO,-EBUSY,-EIO,-ETIMEDOUT,-EIO};
+ for(unsigned trial=0;trial<sizeof(expected)/sizeof(expected[0]);++trial) {
+  n=errors=0;events[0]=0;mode=INTF_MODE_VIDEO;tx_error=stop_error=0;phys_error[0]=phys_error[1]=0;
+  for(unsigned i=0;i<2;++i){phys[i].ops.disable=disable;phys[i].enable_state=DPU_ENC_ENABLED;}
+  e.enabled=true;e.connector=&e;e.frame_done_timer=1;s.crtc=&crtc;
+  switch(trial) {
+   case 0:mode=INTF_MODE_CMD;tx_error=-ETIMEDOUT;break;
+   case 1:mode=INTF_MODE_CMD;tx_error=-EWOULDBLOCK;break;
+   case 2:tx_error=-ETIMEDOUT;break;
+   case 3:phys_error[0]=-EIO;break;
+   case 4:phys_error[1]=-EBUSY;break;
+   case 5:phys_error[0]=-EIO;phys_error[1]=-EBUSY;break;
+   case 6:mode=INTF_MODE_CMD;tx_error=-ETIMEDOUT;phys_error[0]=-EIO;stop_error=-EBUSY;break;
+   case 7:stop_error=-EIO;break;
+  }
+  dpu_encoder_virt_atomic_disable(&e.base,&s);
+  assert(!strcmp(events,"AWP01DTS")&&e.retire_stop_error==expected[trial]&&!e.enc_lock&&!e.connector&&!e.frame_done_timer);
+  assert(errors==(stop_error!=0));
+ }
+#endif
 }
 C
 "${CC:-cc}" -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined -fsanitize-undefined-trap-on-error "$work/disable.c" -o "$work/disable"

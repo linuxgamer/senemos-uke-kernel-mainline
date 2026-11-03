@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "device": "POCO Pad X1",
+  "date": "2026-10-31",
+  "provenance": "Qualitative physical aperture identification and native channel isolation",
+  "reference_frame": "Screen facing user, landscape, USB-C at right",
+  "camera_front_or_rear": null,
+  "geometry_measured": false,
+  "coordinates_m": null,
+  "spacing_m": null,
+  "logical_input": {
+    "ucm_device": "Mic",
+    "channels": 4,
+    "channel_positions": ["AUX0", "AUX1", "AUX2", "AUX3"]
+  },
+  "microphones": [
+    {
+      "id": "uke-amic1",
+      "ucm_device": "Mic",
+      "pcm_index": 0,
+      "amic": 1,
+      "adc": 1,
+      "swr_input": 0,
+      "decimator": 0,
+      "position": "Top edge, right"
+    },
+    {
+      "id": "uke-amic3",
+      "ucm_device": "Mic",
+      "pcm_index": 1,
+      "amic": 3,
+      "adc": 3,
+      "swr_input": 2,
+      "decimator": 1,
+      "position": "Left edge"
+    },
+    {
+      "id": "uke-amic4",
+      "ucm_device": "Mic",
+      "pcm_index": 2,
+      "amic": 4,
+      "adc": 4,
+      "swr_input": 3,
+      "decimator": 2,
+      "position": "Beside camera"
+    },
+    {
+      "id": "uke-amic5",
+      "ucm_device": "Mic",
+      "pcm_index": 3,
+      "amic": 5,
+      "adc": 2,
+      "swr_input": 1,
+      "decimator": 3,
+      "position": "Top edge, left"
+    }
+  ]
+}

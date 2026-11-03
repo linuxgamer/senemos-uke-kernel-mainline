@@ -68,6 +68,14 @@ static int UKE_INIT uke_hall(void *fdt)
 		if (ret)
 			return ret;
 	}
+	node = fdt_path_offset(fdt, "/hall-lid");
+	ret = fdt_setprop(fdt, node, "wakeup-source", NULL, 0);
+	if (ret)
+		return ret;
+	node = fdt_path_offset(fdt, "/soc/qcom,smp2p-adsp");
+	ret = fdt_setprop(fdt, node, "qcom,selective-wakeup", NULL, 0);
+	if (ret)
+		return ret;
 	parent = fdt_path_offset(fdt, "/soc/xiaomi_hall");
 	return fdt_setprop_string(fdt, parent, "status", "disabled");
 }

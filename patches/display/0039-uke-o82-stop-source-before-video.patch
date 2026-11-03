@@ -35,11 +35,12 @@ Signed-off-by: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
  		DPU_ERROR("enc%d timeout pending\n", drm_enc->base.id);
 --- a/drivers/gpu/drm/msm/dsi/dsi_manager.c
 +++ b/drivers/gpu/drm/msm/dsi/dsi_manager.c
-@@ -381,7 +381,7 @@
+@@ -381,8 +381,7 @@
  		dsi_bridge->video_enabled = true;
  }
  
--static void dsi_mgr_bridge_disable(struct drm_bridge *bridge)
+-static void dsi_mgr_bridge_disable(struct drm_bridge *bridge,
+-				      struct drm_atomic_commit *commit)
 +static int dsi_mgr_bridge_stop_video(struct drm_bridge *bridge)
  {
  	struct dsi_bridge *dsi_bridge = to_dsi_bridge(bridge);
@@ -79,7 +80,7 @@ Signed-off-by: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
  
  	if (dsi_bridge->o82_panel) {
  		if (dsi_bridge->powered) {
--			dsi_mgr_bridge_disable(bridge);
+-			dsi_mgr_bridge_disable(bridge, commit);
 +			ret = dsi_mgr_bridge_stop_video(bridge);
 +			if (ret)
 +				return;
@@ -88,10 +89,10 @@ Signed-off-by: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
  				return;
 @@ -562,12 +574,27 @@
  	.attach = dsi_mgr_bridge_attach,
- 	.pre_enable = dsi_mgr_bridge_pre_enable,
- 	.enable = dsi_mgr_bridge_enable,
--	.disable = dsi_mgr_bridge_disable,
- 	.post_disable = dsi_mgr_bridge_post_disable,
+ 	.atomic_pre_enable = dsi_mgr_bridge_pre_enable,
+ 	.atomic_enable = dsi_mgr_bridge_enable,
+-	.atomic_disable = dsi_mgr_bridge_disable,
+ 	.atomic_post_disable = dsi_mgr_bridge_post_disable,
  	.mode_set = dsi_mgr_bridge_mode_set,
  	.mode_valid = dsi_mgr_bridge_mode_valid,
  };

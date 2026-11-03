@@ -48,7 +48,9 @@ static void check(void *f) {
         assert(code && bytes==4 && fdt32_to_cpu(*code)==i);
         assert(!fdt_getprop(f,n,"gpios",nullptr));
         assert(!fdt_getprop(f,n,"hall_pin",nullptr));
+        assert(bool(fdt_getprop(f,n,"wakeup-source",nullptr)) == !i);
     }
+    assert(fdt_getprop(f,fdt_path_offset(f,"/soc/qcom,smp2p-adsp"),"qcom,selective-wakeup",nullptr));
 }
 int main(int argc,char **argv) {
     auto base=fixture(), b=base;

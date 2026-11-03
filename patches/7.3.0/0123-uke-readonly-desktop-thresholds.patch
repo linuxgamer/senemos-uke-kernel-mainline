@@ -1,0 +1,85 @@
+Subject: [PATCH] power: supply: qcom_battmgr: expose observed Uke thresholds
+
+Original KDE exposes separate stop and restart thresholds through the standard
+power-supply getters. Uke currently requires a writer lease even to read the
+firmware's existing charge band, hiding 70/80 from desktop discovery.
+
+Reuse the bounded three-property settings GET when admitted standard-client
+readback is unavailable. Preserve its lifecycle, epoch, active-lease and
+partial-read checks. Do not renew a control lease or authorize a SET. Existing
+admitted clients continue to use their verified cache. Disabled firmware
+thresholds use the standard 0/100 representation.
+
+Uke OEM 5712080a4b0c0b1a879e6d145c601c649ddaddfd and shared GLINK donors expose
+threshold reads independently of writer authorization. Retain original
+GPL-2.0-only Linux Foundation/Linaro/Qualcomm attribution. Physical cutoff,
+calibration and desktop writes remain separate validation requirements.
+
+Reject pairs outside the existing OEM start50..95/end55..100 bounds before
+any guard or firmware operation. Preserve the standard0/100 disable request;
+KDE's wider generic UI range does not authorize an unsupported Uke target.
+
+--- a/drivers/power/supply/qcom_battmgr_uke_control.h
++++ b/drivers/power/supply/qcom_battmgr_uke_control.h
+@@ -681,7 +681,10 @@
+ 
+ 	lockdep_assert_held(&battmgr->lock);
+ 	battmgr->control.verified = false;
+-	if (start >= end || end > 100)
++	if (start >= end || end > CHARGE_CTRL_END_THR_MAX ||
++	    ((start || end != 100) &&
++	     (start < CHARGE_CTRL_START_THR_MIN || start > CHARGE_CTRL_START_THR_MAX ||
++	      end < CHARGE_CTRL_END_THR_MIN)))
+ 		return -EINVAL;
+ 	ret = qcom_battmgr_uke_control_guard(battmgr);
+ 	if (ret)
+@@ -773,6 +776,10 @@
+ 	return ret;
+ }
+ 
++static int qcom_battmgr_uke_observed_threshold(struct qcom_battmgr *battmgr,
++					    enum power_supply_property prop,
++					    union power_supply_propval *value);
++
+ static int qcom_battmgr_uke_control_get_property(struct power_supply *psy,
+ 					       enum power_supply_property prop,
+ 					       union power_supply_propval *value)
+@@ -806,6 +813,8 @@
+ 			(battmgr->control.enabled ? battmgr->info.charge_ctrl_start : 0) :
+ 			(battmgr->control.enabled ? battmgr->info.charge_ctrl_end : 100);
+ 	spin_unlock_irqrestore(&battmgr->transaction.lock, flags);
++	if (ret == -ENODATA)
++		ret = qcom_battmgr_uke_observed_threshold(battmgr, prop, value);
+ 	mutex_unlock(&battmgr->lock);
+ 	return ret;
+ }
+@@ -874,7 +883,7 @@
+ 	u32 generation, firmware, source, enabled, start, end;
+ };
+ 
+-/* Explicit diagnostic GETs only; no admission, setters or verified-cache renewal. */
++/* Fixed observational GETs; no admission, setters or verified-cache renewal. */
+ static int qcom_battmgr_uke_settings_read(struct qcom_battmgr *battmgr,
+ 					struct qcom_battmgr_uke_settings *result, bool rate_limit)
+ {
+@@ -943,6 +952,20 @@
+ 	return ret;
+ }
+ 
++static int qcom_battmgr_uke_observed_threshold(struct qcom_battmgr *battmgr,
++					    enum power_supply_property prop,
++					    union power_supply_propval *value)
++{
++	struct qcom_battmgr_uke_settings result;
++	int ret;
++
++	ret = qcom_battmgr_uke_settings_read(battmgr, &result, false);
++	if (!ret)
++		value->intval = prop == POWER_SUPPLY_PROP_CHARGE_CONTROL_START_THRESHOLD ?
++			(result.enabled ? result.start : 0) : (result.enabled ? result.end : 100);
++	return ret;
++}
++
+ static ssize_t uke_charge_settings_show(struct device *dev,
+ 				      struct device_attribute *attr, char *buf)
+ {

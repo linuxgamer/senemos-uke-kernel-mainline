@@ -2,9 +2,12 @@
 # Compile the actual kernel C graph and verify QUP/LPASS routes on the host.
 set -Eeuo pipefail
 source_file=${1:?Pass the prepared qnoc-cliffs-usb.c}
+expect_cdsp=${2:-0}
+case $expect_cdsp in 0|1) ;; *) exit 2;; esac
 work=$(mktemp -d)
 trap 'rm -r -- "$work"' EXIT
 {
+    printf '#define EXPECT_CDSP %s\n' "$expect_cdsp"
     cat <<'C'
 #include <assert.h>
 #include <stdbool.h>
@@ -40,8 +43,11 @@ C
 static const struct qcom_icc_desc *providers[] = {
     &cliffs_aggre1_noc, &cliffs_aggre2_noc, &cliffs_clk_virt,
     &cliffs_cnoc_cfg, &cliffs_cnoc_main, &cliffs_gem_noc,
-    &cliffs_mc_virt, &cliffs_system_noc,
+    &cliffs_mc_virt, &cliffs_system_noc, &cliffs_mmss_noc,
     &cliffs_lpass_ag_noc, &cliffs_lpass_lpiaon_noc, &cliffs_lpass_lpicx_noc,
+#if EXPECT_CDSP
+    &cliffs_nsp_noc,
+#endif
 };
 static bool registered(const struct qcom_icc_node *node) {
     for (size_t p = 0; p < ARRAY_SIZE(providers); ++p)
@@ -81,7 +87,8 @@ int main(void) {
     assert(qnm_gpu.qosbox == &qnm_gpu_qos && qnm_gpu_qos.num_ports == 2);
     assert(qnm_gpu_qos.port_offsets[0] == 0x31000 && qnm_gpu_qos.port_offsets[1] == 0x71000);
     assert(!qnm_gpu_qos.prio && !qnm_gpu_qos.urg_fwd && qnm_gpu_qos.prio_fwd_disable);
-    assert(bcm_sh1.num_nodes == 4 && bcm_sh1.nodes[1] == &qnm_gpu);
+    assert(bcm_sh1.num_nodes == 6 + EXPECT_CDSP && bcm_sh1.nodes[1] == &qnm_gpu);
+    assert(bcm_sh1.nodes[4] == &qnm_mnoc_hf && bcm_sh1.nodes[5] == &qnm_mnoc_sf);
     assert(reaches(&qhm_qup0, &ebi, 0));
     assert(reaches(&qhm_qup1, &ebi, 0));
     assert(reaches(&xm_usb3_0, &ebi, 0));
@@ -110,9 +117,38 @@ int main(void) {
     assert(bcm_lp0.nodes[1] == &qns_lpass_aggnoc);
     for (unsigned int i = 0; i < bcm_sh1.num_nodes; ++i)
         assert(bcm_sh1.nodes[i] != &qnm_lpass_gemnoc);
+#if EXPECT_CDSP
+    assert(nsp_noc_nodes[41] == &qxm_nsp && nsp_noc_nodes[561] == &qns_nsp_gemnoc);
+    assert(gem_noc_nodes[25] == &qnm_nsp_gemnoc);
+    assert(qxm_nsp.channels == 2 && qxm_nsp.buswidth == 32);
+    assert(qxm_nsp.num_links == 1 && qxm_nsp.link_nodes[0] == &qns_nsp_gemnoc);
+    assert(qns_nsp_gemnoc.num_links == 1 && qns_nsp_gemnoc.link_nodes[0] == &qnm_nsp_gemnoc);
+    assert(qnm_nsp_gemnoc.channels == 2 && qnm_nsp_gemnoc.buswidth == 32);
+    assert(qnm_nsp_gemnoc.qosbox == &qnm_nsp_gemnoc_qos);
+    assert(qnm_nsp_gemnoc_qos.num_ports == 2);
+    assert(qnm_nsp_gemnoc_qos.port_offsets[0] == 0x37000 && qnm_nsp_gemnoc_qos.port_offsets[1] == 0x77000);
+    assert(!qnm_nsp_gemnoc_qos.prio && !qnm_nsp_gemnoc_qos.urg_fwd && qnm_nsp_gemnoc_qos.prio_fwd_disable == 1);
+    assert(reaches(&qxm_nsp, &ebi, 0));
+    assert(!reaches(&qxm_nsp, &xm_usb3_0, 0) && !reaches(&qxm_nsp, &xm_ufs_mem, 0));
+    assert(bcm_co0.num_nodes == 2 && bcm_co0.enable_mask == 1);
+    assert(bcm_co0.nodes[0] == &qxm_nsp && bcm_co0.nodes[1] == &qns_nsp_gemnoc);
+    unsigned int nsp_members = 0;
+    for (unsigned int i=0; i<bcm_sh1.num_nodes; i++) nsp_members += bcm_sh1.nodes[i] == &qnm_nsp_gemnoc;
+    assert(nsp_members == 1 && bcm_sh1.num_nodes == 7);
+    assert(bcm_sh1.nodes[4] == &qnm_mnoc_hf && bcm_sh1.nodes[5] == &qnm_mnoc_sf);
+    assert(aggre2_noc_nodes[38] == &qxm_crypto);
+    assert(qxm_crypto.channels == 1 && qxm_crypto.buswidth == 8);
+    assert(qxm_crypto.qosbox == &qxm_crypto_qos);
+    assert(qxm_crypto_qos.num_ports == 1 && qxm_crypto_qos.port_offsets[0] == 0x15000);
+    assert(qxm_crypto_qos.prio == 2 && !qxm_crypto_qos.urg_fwd && qxm_crypto_qos.prio_fwd_disable == 1);
+    assert(reaches(&qxm_crypto, &ebi, 0));
+    assert(!reaches(&qxm_crypto, &xm_usb3_0, 0) && !reaches(&qxm_crypto, &xm_ufs_mem, 0));
+    assert(cliffs_aggre2_noc.num_bcms == 1 && cliffs_aggre2_noc.bcms[0] == &bcm_ce0);
+    assert(!bcm_ce0.keepalive && !bcm_ce0.enable_mask && bcm_ce0.num_nodes == 1 && bcm_ce0.nodes[0] == &qxm_crypto);
+#endif
 }
 C
 } > "$work/check.c"
-cc -std=gnu11 -O2 -Wall -Wextra -Werror "$work/check.c" -o "$work/check"
+"${CC:-cc}" -std=gnu11 -O2 -Wall -Wextra -Werror -I "$(dirname "$source_file")" "$work/check.c" -o "$work/check"
 "$work/check"
-printf 'Registered QUP0/QUP1 and OEM LPASS DDR paths, LP0/QoS and USB/UFS regression: passed\n'
+printf 'Registered QUP/LPASS and selected CDSP/crypto graph, BCM/QoS and USB/UFS/display membership: passed (CDSP=%s)\n' "$expect_cdsp"

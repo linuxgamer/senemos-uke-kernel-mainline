@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-31",
+  "scope": "Read-only shared AudioReach wire ABI research; no board settings or physical acceptance",
+  "sources": [
+    {
+      "id": "audioreach-read-completion-v2",
+      "url": "https://github.com/AudioReach/audioreach-engine",
+      "commit": "b38cb85a1a2543aa28aa1b27f4c380cafa5024bb",
+      "file": "fwk/api/modules/rd_sh_mem_ep_api.h",
+      "blob": "968966e79c17a3670608bb1d1b9e65b32a43dca6",
+      "sha256": "37ddf9ca720d10444ce5fd67e978178936df42778c6ecf364a9370d774d33404",
+      "local_path": "referances/audioreach-engine/rd_sh_mem_ep_api.h",
+      "license": "BSD-3-Clause",
+      "attribution": "Qualcomm Technologies, Inc. and/or its subsidiaries",
+      "match_class": "shared_wire_protocol",
+      "read_reply_v2_bytes": 56,
+      "offset_field": false,
+      "source_executed": false,
+      "physical_acceptance": false
+    }
+  ]
+}

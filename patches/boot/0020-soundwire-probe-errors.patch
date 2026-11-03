@@ -1,0 +1,136 @@
+From: Uke Linux contributors
+Subject: [PATCH] soundwire: qcom: preserve probe failures and quiesce IRQs
+
+Stop before register access when the iface clock cannot be enabled.
+Preserve port and controller identification read errors, and defer a
+missing wake IRQ supplier. Unwind acquired IRQs synchronously before
+deleting a published bus or disabling its clock. A wake-IRQ request
+failure must also release the iface clock.
+
+The current Uke profile keeps both physical controllers disabled. This
+change enables no SoundWire bus, codec, microphone bias or audio stream.
+The independent runtime-PM/remove issue is outside this probe-only change.
+
+Related lifecycle review: Myeonghun Pak and Ijae Kim.
+Link: https://lists.openwall.net/linux-kernel/2026/09/13/32
+---
+diff --git a/drivers/soundwire/qcom.c b/drivers/soundwire/qcom.c
+--- a/drivers/soundwire/qcom.c
++++ b/drivers/soundwire/qcom.c
+@@ -1419,7 +1419,9 @@
+ 	struct qcom_swrm_port_config *pcfg;
+ 	int i, ret, val;
+ 
+-	ctrl->reg_read(ctrl, SWRM_COMP_PARAMS, &val);
++	ret = ctrl->reg_read(ctrl, SWRM_COMP_PARAMS, &val);
++	if (ret)
++		return ret;
+ 
+ 	ctrl->num_dout_ports = FIELD_GET(SWRM_COMP_PARAMS_DOUT_PORTS_MASK, val);
+ 	ctrl->num_din_ports = FIELD_GET(SWRM_COMP_PARAMS_DIN_PORTS_MASK, val);
+@@ -1537,6 +1539,7 @@
+ 	struct sdw_bus_params *params;
+ 	struct qcom_swrm_ctrl *ctrl;
+ 	const struct qcom_swrm_data *data;
++	bool master_added = false;
+ 	int ret;
+ 	u32 val;
+ 
+@@ -1588,7 +1591,9 @@
+ 		goto err_init;
+ 	}
+ 
+-	clk_prepare_enable(ctrl->hclk);
++	ret = clk_prepare_enable(ctrl->hclk);
++	if (ret)
++		return dev_err_probe(dev, ret, "unable to enable iface clock\n");
+ 
+ 	ctrl->dev = dev;
+ 	dev_set_drvdata(&pdev->dev, ctrl);
+@@ -1610,7 +1615,9 @@
+ 	params->curr_dr_freq = DEFAULT_CLK_FREQ;
+ 	params->col = data->default_cols;
+ 	params->row = data->default_rows;
+-	ctrl->reg_read(ctrl, SWRM_MCP_STATUS, &val);
++	ret = ctrl->reg_read(ctrl, SWRM_MCP_STATUS, &val);
++	if (ret)
++		goto err_clk;
+ 	params->curr_bank = val & SWRM_MCP_STATUS_BANK_NUM_MASK;
+ 	params->next_bank = !params->curr_bank;
+ 
+@@ -1622,7 +1629,9 @@
+ 	prop->default_col = data->default_cols;
+ 	prop->default_row = data->default_rows;
+ 
+-	ctrl->reg_read(ctrl, SWRM_COMP_HW_VERSION, &ctrl->version);
++	ret = ctrl->reg_read(ctrl, SWRM_COMP_HW_VERSION, &ctrl->version);
++	if (ret)
++		goto err_clk;
+ 
+ 	ret = devm_request_threaded_irq(dev, ctrl->irq, NULL,
+ 					qcom_swrm_irq_handler,
+@@ -1635,6 +1644,10 @@
+ 	}
+ 
+ 	ctrl->wake_irq = of_irq_get(dev->of_node, 1);
++	if (ctrl->wake_irq == -EPROBE_DEFER) {
++		ret = ctrl->wake_irq;
++		goto err_irq;
++	}
+ 	if (ctrl->wake_irq > 0) {
+ 		ret = devm_request_threaded_irq(dev, ctrl->wake_irq, NULL,
+ 						qcom_swrm_wake_irq_handler,
+@@ -1642,14 +1655,16 @@
+ 						"swr_wake_irq", ctrl);
+ 		if (ret) {
+ 			dev_err(dev, "Failed to request soundwire wake irq\n");
+-			goto err_init;
++			goto err_irq;
+ 		}
+ 	}
+ 
+ 	ctrl->bus.controller_id = -1;
+ 
+ 	if (ctrl->version > SWRM_VERSION_1_3_0) {
+-		ctrl->reg_read(ctrl, SWRM_COMP_MASTER_ID, &val);
++		ret = ctrl->reg_read(ctrl, SWRM_COMP_MASTER_ID, &val);
++		if (ret)
++			goto err_wake_irq;
+ 		ctrl->bus.controller_id = val;
+ 	}
+ 
+@@ -1657,15 +1672,16 @@
+ 	if (ret) {
+ 		dev_err(dev, "Failed to register Soundwire controller (%d)\n",
+ 			ret);
+-		goto err_clk;
++		goto err_wake_irq;
+ 	}
++	master_added = true;
+ 
+ 	qcom_swrm_init(ctrl);
+ 	wait_for_completion_timeout(&ctrl->enumeration,
+ 				    msecs_to_jiffies(TIMEOUT_MS));
+ 	ret = qcom_swrm_register_dais(ctrl);
+ 	if (ret)
+-		goto err_master_add;
++		goto err_wake_irq;
+ 
+ 	dev_dbg(dev, "Qualcomm Soundwire controller v%x.%x.%x registered\n",
+ 		(ctrl->version >> 24) & 0xff, (ctrl->version >> 16) & 0xff,
+@@ -1685,8 +1701,13 @@
+ 
+ 	return 0;
+ 
+-err_master_add:
+-	sdw_bus_master_delete(&ctrl->bus);
++err_wake_irq:
++	if (ctrl->wake_irq > 0)
++		devm_free_irq(dev, ctrl->wake_irq, ctrl);
++err_irq:
++	devm_free_irq(dev, ctrl->irq, ctrl);
++	if (master_added)
++		sdw_bus_master_delete(&ctrl->bus);
+ err_clk:
+ 	clk_disable_unprepare(ctrl->hclk);
+ err_init:

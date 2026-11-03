@@ -1,0 +1,58 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] usb: dwc3: qcom: restore the selected USB2 UTMI route on resume
+
+Adapt the shared-IP finding by Yassin Rezai in redzrush101/linux commit 0ca0f54453cf83502e868faae8a9aa394dbb102d, GPL-2.0-only. Retain the existing helper rather than moving its register sequence. Remember the explicit USB2-only property and reapply it after clock/interconnect restoration. No new MMIO values, power limits, role policy or physical Uke suspend result are introduced.
+
+Link: https://github.com/redzrush101/linux/commit/0ca0f54453cf83502e868faae8a9aa394dbb102d
+
+diff --git a/drivers/usb/dwc3/dwc3-qcom.c b/drivers/usb/dwc3/dwc3-qcom.c
+index e29cfdc..f4b2a3d 100644
+--- a/drivers/usb/dwc3/dwc3-qcom.c
++++ b/drivers/usb/dwc3/dwc3-qcom.c
+@@ -84,6 +84,7 @@ struct dwc3_qcom {
+ 	enum usb_dr_mode	mode;
+ 	bool			is_suspended;
+ 	bool			pm_suspended;
++	bool			ignore_pipe_clk;
+ 	struct icc_path		*icc_path_ddr;
+ 	struct icc_path		*icc_path_apps;
+ 
+@@ -372,6 +373,8 @@ static int dwc3_qcom_suspend(struct dwc3_qcom *qcom, bool wakeup)
+ 	return 0;
+ }
+ 
++static void dwc3_qcom_select_utmi_clk(struct dwc3_qcom *qcom);
++
+ static int dwc3_qcom_resume(struct dwc3_qcom *qcom, bool wakeup)
+ {
+ 	int ret;
+@@ -390,6 +393,9 @@ static int dwc3_qcom_resume(struct dwc3_qcom *qcom, bool wakeup)
+ 	ret = dwc3_qcom_interconnect_enable(qcom);
+ 	if (ret)
+ 		dev_warn(qcom->dev, "failed to enable interconnect: %d\n", ret);
++	/* Power collapse can lose the USB2-only PIPE-to-UTMI selection. */
++	if (qcom->ignore_pipe_clk)
++		dwc3_qcom_select_utmi_clk(qcom);
+ 
+ 	/* Clear existing events from PHY related to L2 in/out */
+ 	for (i = 0; i < qcom->num_ports; i++) {
+@@ -661,7 +667,6 @@ static int dwc3_qcom_probe(struct platform_device *pdev)
+ 	struct resource		res;
+ 	struct resource		*r;
+ 	int			ret;
+-	bool			ignore_pipe_clk;
+ 	bool			wakeup_source;
+ 
+ 	qcom = devm_kzalloc(&pdev->dev, sizeof(*qcom), GFP_KERNEL);
+@@ -732,9 +737,9 @@ static int dwc3_qcom_probe(struct platform_device *pdev)
+ 	 * Disable pipe_clk requirement if specified. Used when dwc3
+ 	 * operates without SSPHY and only HS/FS/LS modes are supported.
+ 	 */
+-	ignore_pipe_clk = device_property_read_bool(dev,
++	qcom->ignore_pipe_clk = device_property_read_bool(dev,
+ 				"qcom,select-utmi-as-pipe-clk");
+-	if (ignore_pipe_clk)
++	if (qcom->ignore_pipe_clk)
+ 		dwc3_qcom_select_utmi_clk(qcom);
+ 
+ 	qcom->mode = usb_get_dr_mode(dev);

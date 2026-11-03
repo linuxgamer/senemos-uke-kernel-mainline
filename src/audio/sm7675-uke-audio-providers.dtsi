@@ -1,0 +1,84 @@
+/* SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause */
+/* Uke stock OS3 / MiCode 8eb0eccb; Palawan shared-IP clock model.
+ * Register providers only: no WCD codec, SoundWire bus, bias or PCM route.
+ */
+#include <dt-bindings/sound/qcom,q6dsp-lpass-ports.h>
+
+&{/soc} {
+	uke_lpass_va: codec@6d44000 {
+		compatible = "qcom,sm8550-lpass-va-macro";
+		reg = <0x06d44000 0x1000>;
+		clocks = <&uke_q6prm_clocks LPASS_CLK_ID_TX_CORE_MCLK LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+			 <&uke_q6prm_clocks LPASS_HW_MACRO_VOTE LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+			 <&uke_q6prm_clocks LPASS_HW_DCODEC_VOTE LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
+		clock-names = "mclk", "macro", "dcodec";
+		clock-output-names = "uke-va-fsgen";
+		#clock-cells = <0>;
+		#sound-dai-cells = <1>;
+		qcom,dmic-sample-rate = <600000>;
+	};
+
+	uke_lpass_tx: codec@6ae0000 {
+		compatible = "qcom,sm8550-lpass-tx-macro";
+		reg = <0x06ae0000 0x1000>;
+		clocks = <&uke_q6prm_clocks LPASS_CLK_ID_TX_CORE_MCLK LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+			 <&uke_q6prm_clocks LPASS_HW_MACRO_VOTE LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+			 <&uke_q6prm_clocks LPASS_HW_DCODEC_VOTE LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+			 <&uke_lpass_va>;
+		clock-names = "mclk", "macro", "dcodec", "fsgen";
+		clock-output-names = "uke-tx-mclk";
+		#clock-cells = <0>;
+		#sound-dai-cells = <1>;
+	};
+
+	uke_lpass_rx: codec@6ac0000 {
+		compatible = "qcom,sm8550-lpass-rx-macro";
+		reg = <0x06ac0000 0x1000>;
+		clocks = <&uke_q6prm_clocks LPASS_CLK_ID_RX_CORE_TX_MCLK LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+			 <&uke_q6prm_clocks LPASS_HW_MACRO_VOTE LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+			 <&uke_q6prm_clocks LPASS_HW_DCODEC_VOTE LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+			 <&uke_lpass_va>;
+		clock-names = "mclk", "macro", "dcodec", "fsgen";
+		clock-output-names = "uke-rx-mclk";
+		#clock-cells = <0>;
+		#sound-dai-cells = <1>;
+	};
+
+	uke_lpass_tlmm: uke_lpass_pins: pinctrl@6e80000 {
+		compatible = "qcom,sm7675-lpass-lpi-pinctrl";
+		reg = <0x06e80000 0x17000>;
+		clocks = <&uke_q6prm_clocks LPASS_HW_MACRO_VOTE LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+			 <&uke_q6prm_clocks LPASS_HW_DCODEC_VOTE LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
+		clock-names = "core", "audio";
+		gpio-controller;
+		#gpio-cells = <2>;
+		gpio-ranges = <&uke_lpass_pins 0 0 23>;
+		gpio-reserved-ranges = <0 12>, <13 10>;
+
+		uke_codec_reset_active: codec-reset-active-state {
+			pins = "gpio12";
+			function = "gpio";
+			drive-strength = <16>;
+			bias-disable;
+			output-high;
+		};
+		uke_codec_reset_sleep: codec-reset-sleep-state {
+			pins = "gpio12";
+			function = "gpio";
+			drive-strength = <2>;
+			bias-pull-down;
+			input-enable;
+		};
+	};
+};
+
+&wcd_usbss {
+	uke_codec_reset: codec-reset {
+		compatible = "xiaomi,uke-wcd939x-codec-reset";
+		#reset-cells = <1>;
+		/* No default state: registration must not pulse or configure GPIO12. */
+		pinctrl-names = "active", "sleep";
+		pinctrl-0 = <&uke_codec_reset_active>;
+		pinctrl-1 = <&uke_codec_reset_sleep>;
+	};
+};

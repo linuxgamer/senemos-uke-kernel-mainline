@@ -1,5 +1,24 @@
 # Uke Linux 7.2.11 adaptation
 
+**20 October 2026, release 12 source:** patch 0084 connects PRM basic firmware
+errors to the existing request/release error path and handles token-matched APM
+readiness errors. It validates APM basic payloads before parsing and preserves
+the specific-response requirement after a successful ACK. Actual-source host
+fixtures and AArch64 objects are separate from package, firmware and physical
+acceptance. The native audio profile remains disabled.
+
+Patch 0085 preserves unmap firmware status and the data/position buffer token.
+Only a successful reply clears the selected mapping. Source fixtures cover
+success, rejection, missing graph, allocation/send failure and timeout. DMA
+recovery in callers and stale graph-token reuse retain separate limits.
+
+The 20 October source continuation adds patches 0086–0092: PRM transaction
+matching, graph response bounds, dynamic GPR callback draining, receive queue
+ownership, a sleepable compressed-state lock, complete 128 KiB token lengths
+and validated buffer submissions/completions. GCC/Clang fault fixtures and
+AArch64 objects pass. Static service/PDR and full DMA/stream recovery remain
+unqualified. Audio stays disabled and no physical result is promoted.
+
 18 October 2026: carry the complete 77-patch Uke queue from 7.2.10-30 onto
 signed Linux 7.2.11. The native profile also preserves an explicit charger boot
 through standard bootconfig and an initramfs switch-root wrapper. Build, package,
@@ -66,3 +85,20 @@ Release 8 also validates the four-byte discovery header before reading the
 returned count. A zero-byte response cannot qualify as an empty list. The
 regression fails on release 7 source and passes after the correction; normal
 consumer matching and base initialization behavior remain unchanged.
+
+**20 October 2026, release 10 source:** patch 0082 adds fixed moisture status,
+an offline enable-only detector request, fresh moisture/three-thermistor guards
+and a qualified wet-input latch using the exact retained OS3.0.304.0 input-suspend
+contract. Version-2 leases require independent external thermal ranges. The boot
+ADC graph supplies those fixed consumers and periodic thermal updates without
+changing OEM trips. Unknown or ambiguous outcomes do not release the latch.
+No raw XM selector, pack defaults or new JEITA/CV/PD writer is exposed.
+Host fixtures and an AArch64 driver object are separate from full package,
+matched boot and physical moisture/electrical acceptance.
+
+**20 October 2026, release 15 source candidate:** patches 0095–0097 add the
+four-bank/v5 Cliffs7 LLCC policy, five-window binding and managed Adreno supplier
+ordering. Native source preparation selects the admitted private-DT conversion.
+The first 94 patch hashes and existing charging, thermal and recovery policies
+are preserved. Host source checks do not qualify cache coherency, supplier
+lifetime, recovery after partial programming, suspend or a performance gain.

@@ -1,0 +1,43 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] soc: qcom: pmic_glink: add the Uke battery-only endpoint
+
+The stock-ABL bring-up keeps the OEM GLINK/UCSI graph disabled. Admit a
+separate upstream endpoint with only the battery client and the OEM ADSP
+charger service. Do not change the fixed USB peripheral route or enable
+unqualified altmode/UCSI clients. Physical charging still needs validation.
+
+--- a/drivers/soc/qcom/pmic_glink.c
++++ b/drivers/soc/qcom/pmic_glink.c
+@@ -389,6 +389,13 @@
+ 	__pmic_glink = NULL;
+ }
+ 
++/* Keep the fixed USB peripheral route independent of unqualified role drivers. */
++static const struct pmic_glink_data pmic_glink_uke_data = {
++	.client_mask = BIT(PMIC_GLINK_CLIENT_BATT),
++	.charger_pdr_service_name = "tms/servreg",
++	.charger_pdr_service_path = "msm/adsp/charger_pd",
++};
++
+ static const struct pmic_glink_data pmic_glink_adsp_data = {
+ 	.client_mask = BIT(PMIC_GLINK_CLIENT_BATT) |
+ 		       BIT(PMIC_GLINK_CLIENT_ALTMODE) |
+@@ -404,6 +411,7 @@
+ };
+ 
+ static const struct of_device_id pmic_glink_of_match[] = {
++	{ .compatible = "xiaomi,uke-pmic-glink", .data = &pmic_glink_uke_data },
+ 	{ .compatible = "qcom,glymur-pmic-glink", .data = &pmic_glink_soccp_data },
+ 	{ .compatible = "qcom,kaanapali-pmic-glink", .data = &pmic_glink_soccp_data },
+ 	{ .compatible = "qcom,pmic-glink", .data = &pmic_glink_adsp_data },
+--- a/Documentation/devicetree/bindings/soc/qcom/qcom,pmic-glink.yaml
++++ b/Documentation/devicetree/bindings/soc/qcom/qcom,pmic-glink.yaml
+@@ -23,6 +23,8 @@
+ properties:
+   compatible:
+     oneOf:
++      - const: xiaomi,uke-pmic-glink
++        description: Battery-only endpoint; USB role clients remain separate.
+       - items:
+           - enum:
+               - qcom,glymur-pmic-glink

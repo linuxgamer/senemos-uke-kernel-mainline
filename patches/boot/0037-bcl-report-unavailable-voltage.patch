@@ -1,0 +1,19 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: hwmon: qcom-bcl: do not cache an unavailable ADC code as voltage
+
+Retain the OEM no-reading contract for 8-bit and 16-bit voltage
+readings, with ENODATA instead of publishing a fresh false value.
+
+--- a/drivers/hwmon/qcom-bcl-hwmon.c
++++ b/drivers/hwmon/qcom-bcl-hwmon.c
+@@ -882,6 +882,10 @@
+ 			return ret;
+ 	}
+ 
++	/* The ADC's positive full-scale code denotes an unavailable reading. */
++	if (raw_val == BIT(desc->data_field_bits_size - 1) - 1)
++		return -ENODATA;
++
+ 	bcl->last_in_input =
+ 		bcl_convert_raw_to_milliunit(bcl, raw_val, CHANNEL_IN,
+ 					     desc->data_field_bits_size);

@@ -1,0 +1,630 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] media: iris: bound Cliffs codec caps and retain Q16 frame rates
+
+Intersect the exact Uke OS3.0.304.0 Cliffs codec XML limits with the
+same-SoC OnePlus 1138e00f instance tables. Both OEM XML variants hash to
+748f378bb70638e464023767ec2bb5f9c113b38bb586f46f5ecda3dc2894160f.
+Select encoder/decoder and codec limits without cloning HFI tables.
+Apply profile/level/bitrate bounds before control publication and retain
+the explicit Main10-encode implementation gate.
+
+Use the encoder's physical platform pipe count rather than its absent
+PIPE firmware capability in the shared clock estimate. Keep decoder
+routing behavior, with a maximum-rate fallback for invalid zero pipes.
+
+Preserve fractional rates as Q16 from S_PARM through G_PARM and both HFI
+packet writers. Round up only clock estimates, compare exact Q16 rate
+budgets with 64-bit arithmetic, and restore previous settings on failure.
+Use per-codec frame interval budgets, reject oversize frames and round
+maximum enumerated FPS down. This is source/host evidence, not target
+codec or sustained-performance acceptance.
+
+---
+
+--- a/drivers/media/platform/qcom/iris/iris_buffer.c
++++ b/drivers/media/platform/qcom/iris/iris_buffer.c
+@@ -392,7 +392,7 @@
+ 
+ static u32 iris_dec_bitstream_buffer_size(struct iris_inst *inst)
+ {
+-	struct platform_inst_caps *caps = inst->core->iris_platform_data->inst_caps;
++	const struct platform_inst_caps *caps = iris_get_inst_caps(inst, inst->codec);
+ 	u32 base_res_mbs = NUM_MBS_4K;
+ 	u32 frame_size, num_mbs;
+ 	u32 div_factor = 2;
+--- a/drivers/media/platform/qcom/iris/iris_ctrls.c
++++ b/drivers/media/platform/qcom/iris/iris_ctrls.c
+@@ -447,6 +447,43 @@
+ 	return ret;
+ }
+ 
++static void iris_sm7675_limit_level(struct platform_inst_fw_cap *cap, s64 level)
++{
++	if (!cap->cap_id)
++		return;
++	cap->max = min(cap->max, level);
++	cap->step_or_mask &= GENMASK_ULL(level, 0);
++	cap->value = min(cap->value, cap->max);
++}
++
++static void iris_sm7675_limit_caps(struct iris_core *core)
++{
++	struct platform_inst_fw_cap *caps;
++	u32 domain, id;
++
++	if (core->iris_platform_data != &sm7675_data)
++		return;
++	for (domain = 0; domain < 2; domain++) {
++		caps = domain ? core->inst_fw_caps_enc : core->inst_fw_caps_dec;
++		iris_sm7675_limit_level(&caps[LEVEL_H264], V4L2_MPEG_VIDEO_H264_LEVEL_5_2);
++		iris_sm7675_limit_level(&caps[LEVEL_HEVC], V4L2_MPEG_VIDEO_HEVC_LEVEL_5_1);
++		iris_sm7675_limit_level(&caps[LEVEL_VP9], V4L2_MPEG_VIDEO_VP9_LEVEL_5_1);
++	}
++	caps = core->inst_fw_caps_enc;
++	for (id = 1; id < INST_FW_CAP_MAX; id++) {
++		if (id == BITRATE || id == BITRATE_PEAK ||
++		    (id >= LAYER0_BITRATE_H264 && id <= LAYER5_BITRATE_HEVC)) {
++			caps[id].max = min_t(s64, caps[id].max, 100000000);
++			caps[id].value = min(caps[id].value, caps[id].max);
++		}
++	}
++	/* shortcut: expose Main10 encode after the P010 buffer/HFI chain is implemented. */
++	caps[PROFILE_HEVC].max = V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN_STILL_PICTURE;
++	caps[PROFILE_HEVC].step_or_mask &= BIT(V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN) |
++					BIT(V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN_STILL_PICTURE);
++	caps[PROFILE_HEVC].value = min(caps[PROFILE_HEVC].value, caps[PROFILE_HEVC].max);
++}
++
+ void iris_session_init_caps(struct iris_core *core)
+ {
+ 	const struct platform_inst_fw_cap *caps;
+@@ -497,6 +534,7 @@
+ 		core->inst_fw_caps_enc[cap_id].hfi_id = caps[i].hfi_id;
+ 		core->inst_fw_caps_enc[cap_id].set = caps[i].set;
+ 	}
++	iris_sm7675_limit_caps(core);
+ }
+ 
+ static u32 iris_get_port_info(struct iris_inst *inst,
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
+@@ -1011,7 +1011,7 @@
+ 		return 0;
+ 
+ 	frate.buffer_type = HFI_BUFFER_OUTPUT;
+-	frate.framerate = inst->frame_rate << 16;
++	frate.framerate = inst->frame_rate_q16 ? inst->frame_rate_q16 : inst->frame_rate << 16;
+ 
+ 	return hfi_gen1_set_property(inst, ptype, &frate, sizeof(frate));
+ }
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
+@@ -620,7 +620,7 @@
+ static int iris_hfi_gen2_set_frame_rate(struct iris_inst *inst, u32 plane)
+ {
+ 	u32 port = iris_hfi_gen2_get_port(inst, V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE);
+-	u32 frame_rate = inst->frame_rate << 16;
++	u32 frame_rate = inst->frame_rate_q16 ? inst->frame_rate_q16 : inst->frame_rate << 16;
+ 
+ 	return iris_hfi_gen2_session_set_property(inst,
+ 						  HFI_PROP_FRAME_RATE,
+--- a/drivers/media/platform/qcom/iris/iris_instance.h
++++ b/drivers/media/platform/qcom/iris/iris_instance.h
+@@ -118,6 +118,8 @@
+ 	u32				frame_counter;
+ 	u32				frame_rate;
+ 	u32				operating_rate;
++	u32				frame_rate_q16;
++	u32				operating_rate_q16;
+ 	u32				hfi_rc_type;
+ 	u32				enc_raw_width;
+ 	u32				enc_raw_height;
+--- a/drivers/media/platform/qcom/iris/iris_platform_common.h
++++ b/drivers/media/platform/qcom/iris/iris_platform_common.h
+@@ -97,6 +97,8 @@
+ 	u32 min_frame_height;
+ 	u32 max_frame_height;
+ 	u32 max_mbpf;
++	/* Zero retains the platform's aggregate admission policy. */
++	u32 max_mbps;
+ 	u32 mb_cycles_vsp;
+ 	u32 mb_cycles_vpp;
+ 	u32 mb_cycles_fw;
+@@ -323,6 +325,7 @@
+ 	const u32 *inst_iris_fmts;
+ 	u32 inst_iris_fmts_size;
+ 	struct platform_inst_caps *inst_caps;
++	const struct platform_inst_caps *(*get_inst_caps)(struct iris_inst *inst, u32 codec);
+ 	const struct tz_cp_config *tz_cp_config_data;
+ 	u32 tz_cp_config_data_size;
+ 	u32 num_vpp_pipe;
+--- a/drivers/media/platform/qcom/iris/iris_platform_sm7675.h
++++ b/drivers/media/platform/qcom/iris/iris_platform_sm7675.h
+@@ -3,23 +3,46 @@
+ #ifndef __IRIS_PLATFORM_SM7675_H__
+ #define __IRIS_PLATFORM_SM7675_H__
+ 
+-/* Native startup names: GCC AXI reset and MVS0C clock ARES, not OEM IDs. */
++/* Native reset names, not the OEM numeric reset ABI. */
+ static const char * const sm7675_clk_reset_table[] = { "bus", "core", "vcodec" };
+ static const char * const sm7675_controller_reset_table[] = { "xo" };
+ 
+-/* Common non-AV1 decoder limits across the inspected Cliffs SKU tables. */
+-static struct platform_inst_caps platform_inst_cap_sm7675 = {
+-	.min_frame_width = 96,
+-	.max_frame_width = 4096,
+-	.min_frame_height = 96,
+-	.max_frame_height = 4096,
+-	.max_mbpf = (4096 * 2160) / 256,
+-	.mb_cycles_vsp = 60,
+-	.mb_cycles_vpp = 200,
+-	.mb_cycles_fw = 489583,
+-	.mb_cycles_fw_vpp = 66234,
+-	.max_frame_rate = 180,
+-	.max_operating_rate = 180,
+-};
++/* Clear-video intersection: Uke Cliffs XML and OnePlus SM7675 1138e00f.
++ * shortcut: 4096x2176 and larger coded-height conflicts need target acceptance.
++ */
++#define SM7675_CAPS(minimum, mbps, fps, vsp, vpp, fw_vpp) { \
++	.min_frame_width = minimum, .max_frame_width = 4096, \
++	.min_frame_height = minimum, .max_frame_height = 4096, \
++	.max_mbpf = 34560, .max_mbps = mbps, \
++	.mb_cycles_vsp = vsp, .mb_cycles_vpp = vpp, \
++	.mb_cycles_fw = 489583, .mb_cycles_fw_vpp = fw_vpp, \
++	.max_frame_rate = fps, .max_operating_rate = fps, \
++}
++
++static struct platform_inst_caps platform_inst_cap_sm7675 =
++	SM7675_CAPS(96, 2073600, 480, 25, 200, 66234);
++static const struct platform_inst_caps sm7675_hevc_dec_caps =
++	SM7675_CAPS(96, 2088960, 480, 25, 200, 66234);
++static const struct platform_inst_caps sm7675_vp9_dec_caps =
++	SM7675_CAPS(96, 2073600, 200, 60, 200, 66234);
++static const struct platform_inst_caps sm7675_h264_enc_caps =
++	SM7675_CAPS(128, 2073600, 480, 25, 675, 48405);
++static const struct platform_inst_caps sm7675_hevc_enc_caps =
++	SM7675_CAPS(96, 2088960, 480, 25, 675, 48405);
++#undef SM7675_CAPS
++
++static const struct platform_inst_caps *sm7675_get_inst_caps(struct iris_inst *inst, u32 codec)
++{
++	if (codec != V4L2_PIX_FMT_H264 && codec != V4L2_PIX_FMT_HEVC &&
++	    codec != V4L2_PIX_FMT_VP9)
++		codec = inst->codec;
++	if (inst->domain == ENCODER)
++		return codec == V4L2_PIX_FMT_HEVC ? &sm7675_hevc_enc_caps : &sm7675_h264_enc_caps;
++	if (codec == V4L2_PIX_FMT_HEVC)
++		return &sm7675_hevc_dec_caps;
++	if (codec == V4L2_PIX_FMT_VP9)
++		return &sm7675_vp9_dec_caps;
++	return &platform_inst_cap_sm7675;
++}
+ 
+ #endif
+--- a/drivers/media/platform/qcom/iris/iris_platform_vpu3x.c
++++ b/drivers/media/platform/qcom/iris/iris_platform_vpu3x.c
+@@ -5,6 +5,7 @@
+  */
+ 
+ #include "iris_core.h"
++#include "iris_instance.h"
+ #include "iris_ctrls.h"
+ #include "iris_hfi_gen2.h"
+ #include "iris_hfi_gen2_defines.h"
+@@ -219,12 +220,14 @@
+ 	.inst_iris_fmts = iris_fmts_sm7675_dec,
+ 	.inst_iris_fmts_size = ARRAY_SIZE(iris_fmts_sm7675_dec),
+ 	.inst_caps = &platform_inst_cap_sm7675,
++	.get_inst_caps = sm7675_get_inst_caps,
+ 	.tz_cp_config_data = tz_cp_config_vpu3,
+ 	.tz_cp_config_data_size = ARRAY_SIZE(tz_cp_config_vpu3),
+ 	.num_vpp_pipe = 2,
+ 	.max_session_count = 16,
+ 	.max_core_mbpf = 104448,
+-	.max_core_mbps = 2203200,
++	/* shortcut: qualify aggregate scheduling before raising this OEM codec budget. */
++	.max_core_mbps = 2088960,
+ };
+ 
+ const struct iris_platform_data sm8750_data = {
+--- a/drivers/media/platform/qcom/iris/iris_utils.c
++++ b/drivers/media/platform/qcom/iris/iris_utils.c
+@@ -9,6 +9,13 @@
+ #include "iris_instance.h"
+ #include "iris_utils.h"
+ 
++const struct platform_inst_caps *iris_get_inst_caps(struct iris_inst *inst, u32 codec)
++{
++	const struct iris_platform_data *data = inst->core->iris_platform_data;
++
++	return data->get_inst_caps ? data->get_inst_caps(inst, codec) : data->inst_caps;
++}
++
+ bool iris_res_is_less_than(u32 width, u32 height,
+ 			   u32 ref_width, u32 ref_height)
+ {
+@@ -32,6 +39,23 @@
+ 	return NUM_MBS_PER_FRAME(height, width);
+ }
+ 
++int iris_check_inst_mbps(struct iris_inst *inst)
++{
++	const struct platform_inst_caps *caps = iris_get_inst_caps(inst, inst->codec);
++	u32 frame_rate = inst->frame_rate_q16 ? inst->frame_rate_q16 : inst->frame_rate << 16;
++	u32 operating_rate = inst->operating_rate_q16 ? inst->operating_rate_q16 :
++								inst->operating_rate << 16;
++	u64 rate = max(frame_rate, operating_rate);
++
++	/* Decoder rate is measured during queueing, not a declared stream interval. */
++	if (inst->domain != ENCODER || !caps->max_mbps)
++		return 0;
++	if (rate > ((u64)min(caps->max_frame_rate, caps->max_operating_rate) << 16) ||
++	    (u64)iris_get_mbpf(inst) * rate > ((u64)caps->max_mbps << 16))
++		return -ENOMEM;
++	return 0;
++}
++
+ bool iris_split_mode_enabled(struct iris_inst *inst)
+ {
+ 	return inst->fmt_dst->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_NV12 ||
+@@ -122,16 +146,20 @@
+ {
+ 	struct iris_core *core = inst->core;
+ 	struct iris_inst *instance;
+-	u32 total_mbps = 0, fps = 0;
++	u64 total_mbps_q16 = 0;
++	u32 frame_rate, operating_rate;
+ 
+ 	mutex_lock(&core->lock);
+ 	list_for_each_entry(instance, &core->instances, list) {
+-		fps = max(instance->frame_rate, instance->operating_rate);
+-		total_mbps += iris_get_mbpf(instance) * fps;
++		frame_rate = instance->frame_rate_q16 ? instance->frame_rate_q16 :
++								instance->frame_rate << 16;
++		operating_rate = instance->operating_rate_q16 ? instance->operating_rate_q16 :
++								instance->operating_rate << 16;
++		total_mbps_q16 += (u64)iris_get_mbpf(instance) * max(frame_rate, operating_rate);
+ 	}
+ 	mutex_unlock(&core->lock);
+ 
+-	if (total_mbps > core->iris_platform_data->max_core_mbps)
++	if (total_mbps_q16 > ((u64)core->iris_platform_data->max_core_mbps << 16))
+ 		return -ENOMEM;
+ 
+ 	return 0;
+--- a/drivers/media/platform/qcom/iris/iris_utils.h
++++ b/drivers/media/platform/qcom/iris/iris_utils.h
+@@ -7,6 +7,7 @@
+ #define __IRIS_UTILS_H__
+ 
+ struct iris_core;
++struct platform_inst_caps;
+ #include "iris_buffer.h"
+ 
+ struct iris_hfi_rect_desc {
+@@ -44,6 +45,8 @@
+ bool iris_res_is_less_than(u32 width, u32 height,
+ 			   u32 ref_width, u32 ref_height);
+ int iris_get_mbpf(struct iris_inst *inst);
++int iris_check_inst_mbps(struct iris_inst *inst);
++const struct platform_inst_caps *iris_get_inst_caps(struct iris_inst *inst, u32 codec);
+ bool iris_split_mode_enabled(struct iris_inst *inst);
+ bool iris_fmt_is_8bit(u32 pixelformat);
+ bool iris_fmt_is_10bit(u32 pixelformat);
+--- a/drivers/media/platform/qcom/iris/iris_vb2.c
++++ b/drivers/media/platform/qcom/iris/iris_vb2.c
+@@ -16,10 +16,10 @@
+ 
+ static int iris_check_inst_mbpf(struct iris_inst *inst)
+ {
+-	struct platform_inst_caps *caps;
++	const struct platform_inst_caps *caps;
+ 	u32 mbpf, max_mbpf;
+ 
+-	caps = inst->core->iris_platform_data->inst_caps;
++	caps = iris_get_inst_caps(inst, inst->codec);
+ 	max_mbpf = caps->max_mbpf;
+ 	mbpf = iris_get_mbpf(inst);
+ 	if (mbpf > max_mbpf)
+@@ -31,9 +31,9 @@
+ static int iris_check_resolution_supported(struct iris_inst *inst)
+ {
+ 	u32 width, height, min_width, min_height, max_width, max_height;
+-	struct platform_inst_caps *caps;
++	const struct platform_inst_caps *caps;
+ 
+-	caps = inst->core->iris_platform_data->inst_caps;
++	caps = iris_get_inst_caps(inst, inst->codec);
+ 	width = inst->fmt_src->fmt.pix_mp.width;
+ 	height = inst->fmt_src->fmt.pix_mp.height;
+ 
+@@ -73,6 +73,9 @@
+ 	ret = iris_check_inst_mbpf(inst);
+ 	if (ret)
+ 		goto exit;
++	ret = iris_check_inst_mbps(inst);
++	if (ret)
++		goto exit;
+ 
+ 	ret = iris_check_resolution_supported(inst);
+ 	if (ret)
+--- a/drivers/media/platform/qcom/iris/iris_venc.c
++++ b/drivers/media/platform/qcom/iris/iris_venc.c
+@@ -377,13 +377,13 @@
+ 
+ int iris_venc_s_param(struct iris_inst *inst, struct v4l2_streamparm *s_parm)
+ {
+-	struct platform_inst_caps *caps = inst->core->iris_platform_data->inst_caps;
++	const struct platform_inst_caps *caps = iris_get_inst_caps(inst, inst->codec);
+ 	struct vb2_queue *src_q = v4l2_m2m_get_src_vq(inst->m2m_ctx);
+ 	struct vb2_queue *dst_q = v4l2_m2m_get_dst_vq(inst->m2m_ctx);
+ 	struct v4l2_fract *timeperframe = NULL;
+ 	u32 default_rate = DEFAULT_FPS;
+ 	bool is_frame_rate = false;
+-	u32 fps, max_rate;
++	u32 fps, rate_q16, max_rate, old_rate, old_q16;
+ 
+ 	int ret = 0;
+ 
+@@ -397,27 +397,35 @@
+ 		max_rate = caps->max_frame_rate;
+ 		s_parm->parm.capture.capability = V4L2_CAP_TIMEPERFRAME;
+ 	}
++	old_rate = is_frame_rate ? inst->frame_rate : inst->operating_rate;
++	old_q16 = is_frame_rate ? inst->frame_rate_q16 : inst->operating_rate_q16;
+ 
+ 	if (!timeperframe->denominator || !timeperframe->numerator) {
+-		if (!timeperframe->numerator)
+-			timeperframe->numerator = 1;
+-		if (!timeperframe->denominator)
+-			timeperframe->denominator = default_rate;
++		timeperframe->numerator = 1;
++		timeperframe->denominator = default_rate;
+ 	}
+ 
+-	fps = timeperframe->denominator / timeperframe->numerator;
+-	if (!fps)
++	if (timeperframe->denominator < timeperframe->numerator)
+ 		return -EINVAL;
+ 
+-	if (fps > max_rate) {
++	if ((u64)timeperframe->denominator > (u64)max_rate * timeperframe->numerator) {
+ 		ret = -ENOMEM;
+ 		goto reset_rate;
+ 	}
++	rate_q16 = div_u64((u64)timeperframe->denominator << 16, timeperframe->numerator);
++	/* Clock estimates round up; HFI and the API retain the fractional rate. */
++	fps = DIV_ROUND_UP(rate_q16, 1U << 16);
+ 
+-	if (is_frame_rate)
++	if (is_frame_rate) {
+ 		inst->frame_rate = fps;
+-	else
++		inst->frame_rate_q16 = rate_q16;
++	} else {
+ 		inst->operating_rate = fps;
++		inst->operating_rate_q16 = rate_q16;
++	}
++	ret = iris_check_inst_mbps(inst);
++	if (ret)
++		goto reset_rate;
+ 
+ 	if ((s_parm->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE && vb2_is_streaming(src_q)) ||
+ 	    (s_parm->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE && vb2_is_streaming(dst_q))) {
+@@ -429,14 +437,19 @@
+ 			goto reset_rate;
+ 	}
+ 
++	timeperframe->numerator = 1U << 16;
++	timeperframe->denominator = rate_q16;
+ 	return 0;
+ 
+ reset_rate:
+ 	if (ret) {
+-		if (is_frame_rate)
+-			inst->frame_rate = default_rate;
+-		else
+-			inst->operating_rate = default_rate;
++		if (is_frame_rate) {
++			inst->frame_rate = old_rate;
++			inst->frame_rate_q16 = old_q16;
++		} else {
++			inst->operating_rate = old_rate;
++			inst->operating_rate_q16 = old_q16;
++		}
+ 	}
+ 
+ 	return ret;
+@@ -448,13 +461,15 @@
+ 
+ 	if (s_parm->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
+ 		timeperframe = &s_parm->parm.output.timeperframe;
+-		timeperframe->numerator = 1;
+-		timeperframe->denominator = inst->operating_rate;
++		timeperframe->numerator = inst->operating_rate_q16 ? 1U << 16 : 1;
++		timeperframe->denominator = inst->operating_rate_q16 ?
++			inst->operating_rate_q16 : inst->operating_rate;
+ 		s_parm->parm.output.capability = V4L2_CAP_TIMEPERFRAME;
+ 	} else {
+ 		timeperframe = &s_parm->parm.capture.timeperframe;
+-		timeperframe->numerator = 1;
+-		timeperframe->denominator = inst->frame_rate;
++		timeperframe->numerator = inst->frame_rate_q16 ? 1U << 16 : 1;
++		timeperframe->denominator = inst->frame_rate_q16 ?
++			inst->frame_rate_q16 : inst->frame_rate;
+ 		s_parm->parm.capture.capability = V4L2_CAP_TIMEPERFRAME;
+ 	}
+ 
+--- a/drivers/media/platform/qcom/iris/iris_vidc.c
++++ b/drivers/media/platform/qcom/iris/iris_vidc.c
+@@ -381,7 +381,7 @@
+ 				struct v4l2_frmsizeenum *fsize)
+ {
+ 	struct iris_inst *inst = iris_get_inst(filp);
+-	struct platform_inst_caps *caps;
++	const struct platform_inst_caps *caps;
+ 	int ret = 0;
+ 
+ 	if (fsize->index)
+@@ -395,7 +395,7 @@
+ 	if (ret)
+ 		return ret;
+ 
+-	caps = inst->core->iris_platform_data->inst_caps;
++	caps = iris_get_inst_caps(inst, fsize->pixel_format);
+ 
+ 	fsize->type = V4L2_FRMSIZE_TYPE_STEPWISE;
+ 	fsize->stepwise.min_width = caps->min_frame_width;
+@@ -414,7 +414,7 @@
+ {
+ 	struct iris_inst *inst = iris_get_inst(filp);
+ 	struct iris_core *core = inst->core;
+-	struct platform_inst_caps *caps;
++	const struct platform_inst_caps *caps;
+ 	u32 fps, mbpf;
+ 	int ret = 0;
+ 
+@@ -431,7 +431,7 @@
+ 	if (!fival->width || !fival->height)
+ 		return -EINVAL;
+ 
+-	caps = inst->core->iris_platform_data->inst_caps;
++	caps = iris_get_inst_caps(inst, fival->pixel_format);
+ 	if (fival->width > caps->max_frame_width ||
+ 	    fival->width < caps->min_frame_width ||
+ 	    fival->height > caps->max_frame_height ||
+@@ -439,16 +439,21 @@
+ 		return -EINVAL;
+ 
+ 	mbpf = NUM_MBS_PER_FRAME(fival->height, fival->width);
+-	fps = DIV_ROUND_UP(core->iris_platform_data->max_core_mbps, mbpf);
++	if (mbpf > caps->max_mbpf)
++		return -EINVAL;
++	fps = (caps->max_mbps ? caps->max_mbps : core->iris_platform_data->max_core_mbps) / mbpf;
++	fps = min(fps, caps->max_frame_rate);
++	if (!fps)
++		return -EINVAL;
+ 
+ 	fival->type = V4L2_FRMIVAL_TYPE_STEPWISE;
+ 	fival->stepwise.min.numerator = 1;
+ 	fival->stepwise.min.denominator =
+-			min_t(u32, fps, MAXIMUM_FPS);
++			fps;
+ 	fival->stepwise.max.numerator = 1;
+ 	fival->stepwise.max.denominator = 1;
+ 	fival->stepwise.step.numerator = 1;
+-	fival->stepwise.step.denominator = MAXIMUM_FPS;
++	fival->stepwise.step.denominator = caps->max_frame_rate;
+ 
+ 	return 0;
+ }
+@@ -551,29 +556,35 @@
+ static int iris_s_parm(struct file *filp, void *fh, struct v4l2_streamparm *a)
+ {
+ 	struct iris_inst *inst = iris_get_inst(filp);
++	int ret;
+ 
+ 	if (a->type != V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE &&
+ 	    a->type != V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
+ 		return -EINVAL;
+ 
+-	if (inst->domain == ENCODER)
+-		return iris_venc_s_param(inst, a);
+-	else
++	if (inst->domain != ENCODER)
+ 		return -EINVAL;
++	mutex_lock(&inst->lock);
++	ret = iris_venc_s_param(inst, a);
++	mutex_unlock(&inst->lock);
++	return ret;
+ }
+ 
+ static int iris_g_parm(struct file *filp, void *fh, struct v4l2_streamparm *a)
+ {
+ 	struct iris_inst *inst = iris_get_inst(filp);
++	int ret;
+ 
+ 	if (a->type != V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE &&
+ 	    a->type != V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
+ 		return -EINVAL;
+ 
+-	if (inst->domain == ENCODER)
+-		return iris_venc_g_param(inst, a);
+-	else
++	if (inst->domain != ENCODER)
+ 		return -EINVAL;
++	mutex_lock(&inst->lock);
++	ret = iris_venc_g_param(inst, a);
++	mutex_unlock(&inst->lock);
++	return ret;
+ }
+ 
+ static int iris_dec_cmd(struct file *filp, void *fh,
+--- a/drivers/media/platform/qcom/iris/iris_vpu2.c
++++ b/drivers/media/platform/qcom/iris/iris_vpu2.c
+@@ -14,7 +14,7 @@
+ 
+ static u64 iris_vpu2_calc_freq(struct iris_inst *inst, size_t data_size)
+ {
+-	struct platform_inst_caps *caps = inst->core->iris_platform_data->inst_caps;
++	const struct platform_inst_caps *caps = iris_get_inst_caps(inst, inst->codec);
+ 	struct v4l2_format *inp_f = inst->fmt_src;
+ 	u32 mbs_per_second, mbpf, height, width;
+ 	unsigned long vpp_freq, vsp_freq;
+--- a/drivers/media/platform/qcom/iris/iris_vpu_buffer.c
++++ b/drivers/media/platform/qcom/iris/iris_vpu_buffer.c
+@@ -765,7 +765,7 @@
+ 
+ static u32 iris_vpu_dec_persist_size(struct iris_inst *inst)
+ {
+-	struct platform_inst_caps *caps;
++	const struct platform_inst_caps *caps;
+ 
+ 	if (inst->codec == V4L2_PIX_FMT_H264)
+ 		return hfi_buffer_persist_h264d();
+@@ -774,7 +774,7 @@
+ 	else if (inst->codec == V4L2_PIX_FMT_VP9)
+ 		return hfi_buffer_persist_vp9d();
+ 	else if (inst->codec == V4L2_PIX_FMT_AV1) {
+-		caps = inst->core->iris_platform_data->inst_caps;
++		caps = iris_get_inst_caps(inst, inst->codec);
+ 		if (inst->fw_caps[DRAP].value)
+ 			return hfi_buffer_persist_av1d(caps->max_frame_width,
+ 			caps->max_frame_height, 16);
+--- a/drivers/media/platform/qcom/iris/iris_vpu_common.c
++++ b/drivers/media/platform/qcom/iris/iris_vpu_common.c
+@@ -461,12 +461,17 @@
+ 
+ u64 iris_vpu3x_vpu4x_calculate_frequency(struct iris_inst *inst, size_t data_size)
+ {
+-	struct platform_inst_caps *caps = inst->core->iris_platform_data->inst_caps;
++	const struct platform_inst_caps *caps = iris_get_inst_caps(inst, inst->codec);
+ 	struct v4l2_format *inp_f = inst->fmt_src;
+ 	u32 height, width, mbs_per_second, mbpf;
+ 	u64 fw_cycles, fw_vpp_cycles;
+ 	u64 vsp_cycles, vpp_cycles;
+ 	u32 fps = inst->frame_rate;
++	u32 pipes = inst->domain == ENCODER ? inst->core->iris_platform_data->num_vpp_pipe :
++					     inst->fw_caps[PIPE].value;
++
++	if (!pipes)
++		return ULONG_MAX;
+ 
+ 	width = max(inp_f->fmt.pix_mp.width, inst->crop.width);
+ 	height = max(inp_f->fmt.pix_mp.height, inst->crop.height);
+@@ -477,12 +482,12 @@
+ 	fw_cycles = fps * caps->mb_cycles_fw;
+ 	fw_vpp_cycles = fps * caps->mb_cycles_fw_vpp;
+ 
+-	vpp_cycles = mult_frac(mbs_per_second, caps->mb_cycles_vpp, (u32)inst->fw_caps[PIPE].value);
++	vpp_cycles = mult_frac(mbs_per_second, caps->mb_cycles_vpp, pipes);
+ 	/* 21 / 20 is minimum overhead factor */
+ 	vpp_cycles += max(div_u64(vpp_cycles, 20), fw_vpp_cycles);
+ 
+ 	/* 1.059 is multi-pipe overhead */
+-	if (inst->fw_caps[PIPE].value > 1)
++	if (pipes > 1)
+ 		vpp_cycles += div_u64(vpp_cycles * 59, 1000);
+ 
+ 	/* 1.05 is VPP FW overhead */

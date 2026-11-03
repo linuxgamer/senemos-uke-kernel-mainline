@@ -1,0 +1,38 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: qcom: preserve Uke raw microphone channel IDs
+
+The native codec-DMA source reports contiguous channel IDs 1,2,3,4. The
+quad speaker mapping requests 1,2,4,5 from the frontend MFC, which folds the
+third input into the first pair, moves the fourth to output 3 and produces
+silence on output 4. Independent decimator attenuation reproduces this on Uke.
+
+Request the matching contiguous IDs only for four-channel capture on graph 2
+of the explicit Uke microphone card. Preserve generic mappings, all playback,
+other cards and other capture formats. These DSP IDs are transport labels,
+not physical microphone locations. No electrical or gain settings change.
+
+--- a/sound/soc/qcom/qdsp6/q6apm-dai.c
++++ b/sound/soc/qcom/qdsp6/q6apm-dai.c
+@@ -214,6 +214,7 @@
+ static int q6apm_dai_prepare(struct snd_soc_component *component,
+ 			     struct snd_pcm_substream *substream)
+ {
++	struct snd_soc_pcm_runtime *soc_prtd = snd_soc_substream_to_rtd(substream);
+ 	struct snd_pcm_runtime *runtime = substream->runtime;
+ 	struct q6apm_dai_rtd *prtd = runtime->private_data;
+ 	struct audioreach_module_config cfg = {};
+@@ -236,6 +237,14 @@
+ 	cfg.bit_width = prtd->bits_per_sample;
+ 	cfg.fmt = SND_AUDIOCODEC_PCM;
+ 	audioreach_set_default_channel_mapping(cfg.channel_map, runtime->channels);
++	/* Keep codec-DMA input IDs instead of applying a quad speaker layout. */
++	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE && runtime->channels == 4 &&
++	    of_machine_is_compatible("xiaomi,uke") && soc_prtd->dai_link->id == 2 &&
++	    of_device_is_compatible(soc_prtd->card->dev->of_node,
++				"xiaomi,uke-microphone-audio-card")) {
++		cfg.channel_map[2] = PCM_CHANNEL_FC;
++		cfg.channel_map[3] = PCM_CHANNEL_LS;
++	}
+ 	if (prtd->state) {
+ 		/* clear the previous setup if any  */
+ 		q6apm_graph_stop(prtd->graph);

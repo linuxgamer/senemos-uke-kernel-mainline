@@ -7,6 +7,61 @@ kernel=${3:?Pass the prepared kernel source}
 [[ $(awk '/ctx->panel.prepare_prev_first = true;/ {ready=1} /drm_panel_add\(&ctx->panel\)/ {print ready+0; exit}' "$source_file") == 1 ]]
 work=$(mktemp -d)
 trap 'rm -r -- "$work"' EXIT
+cat > "$work/registration.c" <<'C'
+#include <assert.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <errno.h>
+#define __init
+#define __exit
+#define THIS_MODULE ((void *)1)
+#define MODULE_DESCRIPTION(...)
+#define MODULE_LICENSE(...)
+#define module_init(fn) static int (*test_init)(void) = fn
+static void (*test_exit)(void);
+#define module_exit(fn) static void __attribute__((constructor)) expose_exit(void) { test_exit = fn; }
+struct mipi_dsi_device { int unused; };
+struct mipi_dsi_driver {
+    int (*probe)(struct mipi_dsi_device *);
+    void (*remove)(struct mipi_dsi_device *), (*shutdown)(struct mipi_dsi_device *);
+    struct { const char *name; const void *of_match_table, *dev_groups;
+             bool suppress_bind_attrs; } driver;
+};
+static int o82_probe(struct mipi_dsi_device *d) { (void)d; return 0; }
+static void o82_remove(struct mipi_dsi_device *d) { (void)d; }
+static void o82_shutdown(struct mipi_dsi_device *d) { (void)d; }
+static const int o82_match[1], o82_groups[1];
+static int registration_error;
+static struct mipi_dsi_driver *registered;
+static int mipi_dsi_driver_register_full(struct mipi_dsi_driver *d, void *owner) {
+    assert(owner == THIS_MODULE && !registered);
+    if (!registration_error) registered = d;
+    return registration_error;
+}
+static void __attribute__((unused)) mipi_dsi_driver_unregister(struct mipi_dsi_driver *d) {
+    assert(registered == d); registered = NULL;
+}
+C
+# Use the selected kernel's registration helpers, including their exit semantics.
+for definition in 'module_driver' 'mipi_dsi_driver_register' 'module_mipi_dsi_driver'; do
+    awk -v name="$definition" '$1=="#define" && index($2,name "(")==1 {emit=1;found=1}
+        emit {print; if ($0 !~ /\\$/) exit} END {if(!found)exit 1}' \
+        "$kernel/include/linux/device/driver.h" "$kernel/include/drm/drm_mipi_dsi.h" >> "$work/registration.c"
+done
+sed -n '/^static struct mipi_dsi_driver o82_driver = {/,/^MODULE_LICENSE/p' "$source_file" >> "$work/registration.c"
+cat >> "$work/registration.c" <<'C'
+int main(void) {
+    registration_error = -EIO;
+    assert(test_init() == -EIO && !registered);
+    registration_error = 0;
+    assert(test_init() == 0 && registered == &o82_driver);
+    assert(!test_exit && registered->driver.suppress_bind_attrs);
+    assert(registered->probe == o82_probe && registered->remove == o82_remove);
+    assert(registered->shutdown == o82_shutdown);
+}
+C
+"${CC:-cc}" -std=gnu11 -O2 -Wall -Wextra -Werror "$work/registration.c" -o "$work/registration"
+"$work/registration"
 cat > "$work/check.c" <<'C'
 #include <assert.h>
 #include <stdbool.h>
@@ -20,9 +75,11 @@ cat > "$work/check.c" <<'C'
 static char last_error[512];
 static int on_complete;
 static void info(const char *format,...) {
-    if(!strcmp(format,"Uke O82 LP ON batching complete: commands=108 chunks=%u bytes=%u\n")) {
-        va_list args;va_start(args,format);assert(va_arg(args,unsigned int)==8);
-        assert(va_arg(args,unsigned int)==884);va_end(args);++on_complete;
+    if(!strcmp(format,"Uke O82 LP ON batching complete: commands=%u chunks=%u bytes=%u\n")) {
+        va_list args;va_start(args,format);unsigned int commands=va_arg(args,unsigned int);
+        assert(commands==108 || commands==171);
+        assert(va_arg(args,unsigned int)==(commands==171 ? 10U:8U));
+        assert(va_arg(args,unsigned int)==(commands==171 ? 1448U:884U));va_end(args);++on_complete;
     }
 }
 typedef uint8_t u8; typedef uint16_t u16; typedef uint32_t u32; typedef uint64_t u64; typedef uint16_t __be16; typedef long ssize_t;
@@ -38,6 +95,10 @@ typedef uint8_t u8; typedef uint16_t u16; typedef uint32_t u32; typedef uint64_t
 #define ARRAY_SIZE(a) (sizeof(a)/sizeof((a)[0]))
 #define ALIGN(n,a) (((n)+(a)-1)&~((a)-1))
 #define BIT(n) (1U<<(n))
+#define GENMASK(h,l) (((~0U) << (l)) & ((~0U) >> (31-(h))))
+#define NOTIFY_STOP 0x8001
+#define UKE_O82_TOUCH_RETAIN 1
+#define UKE_O82_TOUCH_RELEASE 2
 #define dev_err(dev,fmt,...) ((void)snprintf(last_error,sizeof(last_error),fmt,##__VA_ARGS__))
 #define dev_info(dev,fmt,...) info(fmt,##__VA_ARGS__)
 #define dev_warn(...) ((void)0)
@@ -63,19 +124,25 @@ awk '/^u8 drm_dsc_initial_scale_value\(/ {p=1} p && /^EXPORT_SYMBOL/ {exit} p' \
 } >> "$work/check.c"
 cat >> "$work/check.c" <<'C'
 struct device_node { const char *compatible; };
-static bool requested_initial60,requested_initial120,requested_oem_modes,requested_trial_rates,requested_all_rates;
+static bool requested_initial60,requested_initial120,requested_oem_modes;
 static bool of_property_read_bool(struct device_node *node,const char *property) {
     assert(node);
     if(!strcmp(property,"xiaomi,initial-60hz-only")) return requested_initial60;
     if(!strcmp(property,"xiaomi,initial-120hz-only")) return requested_initial120;
-    if(!strcmp(property,"xiaomi,oem-refresh-modes")) return requested_oem_modes;
-    if(!strcmp(property,"xiaomi,o82-36-60-120-trial")) return requested_trial_rates;
-    assert(!strcmp(property,"xiaomi,o82-36-all-rates-trial")); return requested_all_rates;
+    assert(!strcmp(property,"xiaomi,oem-refresh-modes")); return requested_oem_modes;
 }
 struct device { struct device_node *of_node; int kobj; };
 typedef struct {u64 value;} atomic64_t;
 static u64 atomic64_read(const atomic64_t *state) {return state->value;}
 static void atomic64_set(atomic64_t *state,u64 value) {state->value=value;}
+struct blocking_notifier_head {u64 last; unsigned int calls;};
+static int gesture_notify_result, gesture_retains, gesture_releases;
+static int blocking_notifier_call_chain(struct blocking_notifier_head *head,unsigned long event,void *data) {
+    assert(head && data);
+    if(event==UKE_O82_TOUCH_RETAIN) {++gesture_retains; return gesture_notify_result;}
+    if(event==UKE_O82_TOUCH_RELEASE) {++gesture_releases; return 0;}
+    assert(!event); head->last=*(u64 *)data; ++head->calls; return 0;
+}
 static void sysfs_notify(int *kobj,const char *directory,const char *name) {
     assert(kobj&&!directory&&!strcmp(name,"touch_reset_state"));
 }
@@ -108,7 +175,8 @@ struct drm_panel_follower {const struct follower_ops *funcs;};
 static int backlight_calls,backlight_disable_calls,normal_transfers,hs_transfers,dimming_transfers;
 static int batch_api_calls,batch_api_error;
 static int lp_api_calls,lp_api_error,lp_api_fail_call=-1;
-static int on_batch_calls,on_batch_error=-1,on_batch_counts[8],on_batch_sizes[8],on_batch_total;
+static int on_batch_calls,on_batch_error=-1,on_batch_counts[10],on_batch_sizes[10],on_batch_total;
+static bool pa_on;
 static int backlight_enable_error,backlight_disable_error,positive_brightness=1;
 static bool boundary_seen;
 static bool video_started;
@@ -164,8 +232,9 @@ static void first_boundary(struct drm_vblank_work *work) {
     assert(work->pending); boundary_seen=true;
     work->crtc->count=work->count; work->pending=false; work->base.func(&work->base);
 }
-struct drm_connector_state { struct drm_crtc *crtc; };
+struct drm_connector_state { struct drm_crtc *crtc; unsigned int abm_level; };
 struct drm_connector { struct drm_connector_state *state; void *dev;
+    void *abm_level_property;
     struct { int bpc,width_mm,height_mm; } display_info; };
 static unsigned int published, preferred, preferred_rate, duplication_failure;
 static struct drm_display_mode copies[7];
@@ -300,8 +369,10 @@ static int qcom_uke_dsi_lp_batch(struct mipi_dsi_device *dsi,const struct mipi_d
     return 0;
 }
 static int qcom_uke_dsi_on_batch(struct mipi_dsi_device *dsi,const struct mipi_dsi_msg *msgs,unsigned int count) {
-    static const int counts[8]={7,6,31,31,28,3,1,1},sizes[8]={56,48,248,248,244,24,8,8};
-    assert(!video_started&&!boundary_seen&&dsi->id==0&&count<=31&&on_batch_calls<8);
+    static const int pb_counts[8]={7,6,31,31,28,3,1,1},pb_sizes[8]={56,48,248,248,244,24,8,8};
+    static const int pa_counts[10]={7,6,31,31,27,28,28,11,1,1},pa_sizes[10]={56,48,248,248,248,248,228,108,8,8};
+    const int *counts=pa_on ? pa_counts:pb_counts,*sizes=pa_on ? pa_sizes:pb_sizes;
+    assert(!video_started&&!boundary_seen&&dsi->id==0&&count<=31&&on_batch_calls<(pa_on ? 10:8));
     unsigned int bytes=0;
     for(unsigned int i=0;i<count;i++) {
         assert(msgs[i].type==0x39&&msgs[i].channel==0&&msgs[i].flags==MIPI_DSI_MSG_USE_LPM);
@@ -416,6 +487,7 @@ cat >> "$work/check.c" <<'C'
     return 0;
 }
 static struct o82_panel context(int variant,int mode) {
+    gesture_notify_result=gesture_retains=gesture_releases=0;
     static const struct drm_panel_funcs funcs={.enable=o82_enable,.disable=o82_disable};
     static struct host_ops ops={transfer};
     static struct mipi_dsi_host hosts[2]={{&ops,0},{&ops,1}};
@@ -424,7 +496,7 @@ static struct o82_panel context(int variant,int mode) {
     static struct regulator supplies[3]={{0},{1},{2}};
     static struct drm_crtc_state cs;
     static struct drm_crtc crtc={.state=&cs};
-    static struct drm_connector_state state={&crtc};
+    static struct drm_connector_state state={.crtc=&crtc};
     static struct drm_connector connector={.state=&state};
     static struct backlight_device backlight;
     memset(balance,0,sizeof(balance)); memset(loads,0,sizeof(loads));
@@ -441,14 +513,14 @@ static struct o82_panel context(int variant,int mode) {
     last_error[0]=0;
     failure=transfer_failure=disable_failure=transfer_short=-1;
     cs.adjusted_mode=o82_modes[mode].mode;
-    const struct o82_profile *p=(variant==0 || variant==3 || variant==4) ? o82_36_02_0a_profiles : o82_42_02_0b_profiles;
+    pa_on=variant==0 || variant==3;
+    const struct o82_profile *p=pa_on ? o82_36_02_0a_profiles:o82_42_02_0b_profiles;
     struct o82_panel ctx={.panel={.funcs=&funcs},.dsi={&dsis[0],&dsis[1]},.supplies={&supplies[0],&supplies[1],&supplies[2]},
         .connector=&connector,.backlight=&backlight,.profiles=p,.active=p,
-        .initial_120hz_only=variant==1 && mode==5,.oem_refresh_modes=variant>=2,
-        .trial_60_120_only=variant==3 || variant==4,.trial_all_rates=variant==4};
+        .initial_120hz_only=variant==1 && mode==5,.oem_refresh_modes=variant>=2};
     mutex_init(&ctx.lock);
     pps_start=2*p[o82_modes[mode].group].on_count;
-    struct device_node node={(variant==0 || variant==3 || variant==4) ? "xiaomi,o82-36-02-0a" : "xiaomi,o82-42-02-0b"};
+    struct device_node node={pa_on ? "xiaomi,o82-36-02-0a":"xiaomi,o82-42-02-0b"};
     struct platform_device platform={.dev={.of_node=&node}};
     struct msm_dsi_host h={&platform};
     ctx.dsc=(struct drm_dsc_config){.dsc_version_major=1,.dsc_version_minor=1,
@@ -461,6 +533,24 @@ static struct o82_panel context(int variant,int mode) {
     return ctx;
 }
 int main(void) {
+    {
+        struct o82_panel c=context(0,3);
+        assert(!o82_prepare(&c.panel));
+        gesture_notify_result=NOTIFY_STOP;
+        assert(!o82_unprepare(&c.panel));
+        assert(!c.prepared && c.gesture_retained && gesture_retains==1);
+        for(int i=0;i<3;i++) assert(balance[i]==1);
+        assert(!o82_unprepare(&c.panel) && gesture_retains==1);
+        const int released=gesture_releases;
+        pps_start=transfers+2*c.active->on_count-pps_transfers;
+        assert(!o82_prepare(&c.panel) && !c.gesture_retained);
+        assert(gesture_releases==released+1);
+        for(int i=0;i<3;i++) assert(balance[i]==1);
+        assert(!o82_unprepare(&c.panel) && c.gesture_retained);
+        c.removing=true;
+        assert(!o82_unprepare(&c.panel) && !c.gesture_retained);
+        for(int i=0;i<3;i++) assert(!balance[i]);
+    }
     for(int result=0;result<4;result++) {
         struct o82_panel ctx=context(0,3);
         probe_backlight=result==0 ? ctx.backlight:result==1 ? NULL:ERR_PTR(result==2 ? -EIO:-ENODEV);
@@ -479,34 +569,13 @@ int main(void) {
         struct o82_panel ctx=context(variant,3);
         struct device_node node={variant ? "xiaomi,o82-42-02-0b" : "xiaomi,o82-36-02-0a"};
         requested_initial60=flags&1; requested_initial120=flags&2; requested_oem_modes=flags&4;
-        requested_trial_rates=requested_all_rates=false;
         const bool invalid=(requested_initial60 && requested_initial120) ||
             (requested_oem_modes && (requested_initial60 || requested_initial120)) ||
-            ((requested_initial120 || requested_oem_modes) && !variant);
+            (requested_initial120 && !variant);
         assert(o82_probe_initial_mode(&ctx,&node)==(invalid ? -EINVAL:0));
         assert(!enables && !transfers && !operation && !ctx.prepared);
         assert(ctx.initial_60hz_only==requested_initial60 && ctx.initial_120hz_only==requested_initial120 &&
                ctx.oem_refresh_modes==requested_oem_modes);
-    }
-    {
-        struct o82_panel ctx=context(3,3);
-        struct device_node node={"xiaomi,o82-36-02-0a"};
-        requested_initial60=requested_initial120=false;
-        requested_oem_modes=requested_trial_rates=true;
-        assert(o82_probe_initial_mode(&ctx,&node)==0 && ctx.trial_60_120_only);
-        requested_oem_modes=false;
-        assert(o82_probe_initial_mode(&ctx,&node)==-EINVAL);
-        requested_oem_modes=true;
-        node.compatible="xiaomi,o82-42-02-0b";
-        assert(o82_probe_initial_mode(&ctx,&node)==-EINVAL);
-        requested_trial_rates=requested_oem_modes=false;
-        requested_all_rates=true;
-        assert(o82_probe_initial_mode(&ctx,&node)==-EINVAL);
-        node.compatible="xiaomi,o82-36-02-0a";
-        requested_trial_rates=requested_oem_modes=true;
-        assert(o82_probe_initial_mode(&ctx,&node)==0 && ctx.trial_all_rates);
-        requested_trial_rates=requested_oem_modes=false;
-        requested_all_rates=false;
     }
     {
         struct o82_panel ctx=context(0,3);
@@ -559,35 +628,6 @@ int main(void) {
     duplication_failure=1; published=0;
     assert(o82_get_modes(&selection.panel,selection.connector)==-ENOMEM && !published);
     duplication_failure=0;
-    selection=context(3,3); published=preferred=0;
-    assert(o82_get_modes(&selection.panel,selection.connector)==2 && published==2 && preferred==1 && preferred_rate==60);
-    assert(drm_mode_vrefresh(&copies[0])==60 && drm_mode_vrefresh(&copies[1])==120);
-    selection=context(4,3); published=preferred=0;
-    assert(o82_get_modes(&selection.panel,selection.connector)==7 && published==7 && preferred==1 && preferred_rate==60);
-    for(unsigned int m=0;m<ARRAY_SIZE(rates);m++) assert(drm_mode_vrefresh(&copies[m])==rates[m]);
-    for(int trial_mode=3;trial_mode<=5;trial_mode+=2) {
-        struct o82_panel trial=context(3,trial_mode);
-        assert(o82_prepare(&trial.panel)==0 && trial.prepared && !on_batch_calls);
-        video_started=true;
-        drm_panel_enable(&trial.panel);
-        first_boundary(&trial.first_frame_work);
-        assert(trial.backlight->on && atomic64_read(&trial.touch_state)==3);
-        assert(!on_batch_calls && !batch_api_calls && !lp_api_calls && !dimming_transfers);
-        drm_panel_disable(&trial.panel);
-        video_started=false;
-        assert(o82_unprepare(&trial.panel)==0 && !trial.prepared);
-    }
-    for(int trial_mode=0;trial_mode<7;trial_mode++) {
-        struct o82_panel trial=context(4,trial_mode);
-        assert(o82_prepare(&trial.panel)==0 && trial.prepared && !on_batch_calls);
-        video_started=true;
-        drm_panel_enable(&trial.panel);
-        first_boundary(&trial.first_frame_work);
-        assert(trial.backlight->on && atomic64_read(&trial.touch_state)==3);
-        drm_panel_disable(&trial.panel);
-        video_started=false;
-        assert(o82_unprepare(&trial.panel)==0 && !trial.prepared);
-    }
     for(int mode=0;mode<7;mode++) {
         if(mode==5) continue;
         struct o82_panel ctx=context(1,mode); ctx.initial_120hz_only=true;
@@ -595,7 +635,7 @@ int main(void) {
     }
     selection=context(1,5); selection.connector->state->crtc->state->adjusted_mode.clock++;
     assert(o82_prepare(&selection.panel)==-EINVAL && !enables && !transfers && !operation);
-    for(unsigned int v=0;v<3;v++) for(unsigned int m=0;m<7;m++) {
+    for(unsigned int v=0;v<4;v++) for(unsigned int m=0;m<7;m++) {
         const struct drm_display_mode *mode=&o82_modes[m].mode;
         const uint64_t divisor=(uint64_t)mode->htotal*mode->vtotal;
         assert(((uint64_t)mode->clock*1000+divisor/2)/divisor==rates[m]);
@@ -612,7 +652,7 @@ int main(void) {
         assert(pre_video_reads==(batched ? 0:2));
         const int full=transfers;
         assert(full==2*(int)(c.active->on_count+1));
-        if(batched)assert(on_batch_calls==8&&on_batch_total==884&&on_complete==1);
+        if(batched)assert(on_batch_calls==(v==3 ? 10:8)&&on_batch_total==(v==3 ? 1448:884)&&on_complete==1);
         else assert(!on_batch_calls&&!on_complete);
         assert(lpm_transfers==2*(int)(c.active->on_count+1));
         assert(!hs_transfers && !c.panel.enabled && !backlight_calls);
@@ -632,6 +672,7 @@ int main(void) {
         first_boundary(&c.first_frame_work);
         assert(c.backlight->on);
         assert(atomic64_read(&c.touch_state)==3); /* all post-frame groups complete */
+        assert(c.touch_notifiers.calls && c.touch_notifiers.last==3);
         assert(post_frame_reads==0);
         assert(settle_ms==before_enable_wait);
         assert(batch_api_calls==batched);
@@ -739,7 +780,7 @@ int main(void) {
         assert(o82_prepare(&c.panel)==-EINVAL && enables==0);
     }
     struct o82_panel c=context(0,3);
-    for(int variant=0;variant<3;variant++) {
+    for(int variant=0;variant<4;variant++) {
         for(int refusal=0;refusal<3;refusal++) {
             c=context(variant,3); assert(o82_prepare(&c.panel)==0);
             const int before=transfers;
@@ -757,8 +798,14 @@ int main(void) {
             else positive_brightness=fault==1 ? 0:-1;
             first_boundary(&c.first_frame_work);
             assert(c.panel.enabled && c.first_frame_initialized);
-            assert(strstr(last_error,fault==0 ? "result=-5 blank_result=0":"result=-34 blank_result=0"));
-            assert(normal_transfers==4 && !c.backlight->on && backlight_calls==1);
+            if(fault==1) {
+                assert(!last_error[0] && atomic64_read(&c.touch_state)==3);
+                assert(c.backlight->on && positive_brightness==0);
+            } else {
+                assert(strstr(last_error,fault==0 ? "result=-5 blank_result=0":"result=-1 blank_result=0"));
+                assert(!c.backlight->on && !(atomic64_read(&c.touch_state)&1));
+            }
+            assert(normal_transfers==4 && backlight_calls==1);
             drm_panel_disable(&c.panel); assert(cancelled==1 && !c.first_frame_initialized);
             video_started=false; assert(o82_unprepare(&c.panel)==0);
         }
@@ -805,7 +852,7 @@ int main(void) {
             video_started=false;
             if(callback) o82_shutdown(c.dsi[0]); else o82_remove(c.dsi[0]);
             assert(c.removing && !c.prepared && !c.first_frame_initialized && cancelled==1);
-            assert(dfps_unregister_calls==(variant==2));
+            assert(dfps_unregister_calls==(variant>=2));
             assert(!c.backlight->on && !backlight_calls && !normal_transfers);
             assert(detached==(callback ? 0:2) && panel_removed==!callback && secondary_removed==!callback);
             const int after_remove=transfers;

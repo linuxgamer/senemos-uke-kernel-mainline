@@ -10,6 +10,7 @@
 
 #include <dt-bindings/clock/qcom,rpmh.h>
 #include <dt-bindings/clock/qcom,tcsrcc-pineapple.h>
+#include <dt-bindings/interrupt-controller/irq.h>
 #include "sm7675-uke-pinctrl.dtsi"
 
 /* OEM GLINK children do not implement the upstream connector binding.
@@ -107,6 +108,19 @@
 	status = "okay";
 };
 
+/* Uke OEM QUP0 SE1 drives the IR emitter through MOSI. */
+&{/soc/qcom,qupv3_0_geni_se@ac0000/spi@a84000} {
+	compatible = "qcom,geni-spi";
+	clock-names = "se";
+	dmas = <&gpi_dma0 0 1 1>, <&gpi_dma0 1 1 1>;
+	status = "okay";
+
+	ir-spi@0 {
+		compatible = "ir-spi-led";
+		label = "Uke infrared transmitter";
+	};
+};
+
 &{/soc/qcom,qupv3_1_geni_se@8c0000} {
 	status = "okay";
 };
@@ -125,6 +139,14 @@
 	clock-frequency = <400000>;
 	dmas = <&gpi_dma1 0 4 3>, <&gpi_dma1 1 4 3>;
 	status = "okay";
+
+	ntag@57 {
+		model = "FM19511 NFC tag";
+		interrupt-parent = <&tlmm>;
+		interrupts = <170 IRQ_TYPE_EDGE_FALLING>;
+		/* The admitted POCO SKU enables this before I2C population. */
+		status = "disabled";
+	};
 };
 
 &aggre2_noc {

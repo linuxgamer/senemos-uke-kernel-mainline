@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/sound/xiaomi,uke-microphone-gain.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Uke microphone capture startup gains
+
+maintainers:
+  - Uke Linux Maintainers <75160848+MCC45TR@users.noreply.github.com>
+
+description: |
+  Downstream startup constraints for the qualified Uke four-input capture
+  card. Analog entries are WCD939x ADC1..4 control indices, not calibrated dB.
+  Digital entries are LPASS DEC0..3 gain in dB. Values apply before capture
+  power-up. These properties do not control microphone bias or supply voltage.
+  The remaining card graph is checked by the component's native FDT contracts.
+
+select:
+  properties:
+    compatible:
+      contains:
+        const: xiaomi,uke-microphone-audio-card
+  required:
+    - compatible
+
+properties:
+  compatible:
+    const: xiaomi,uke-microphone-audio-card
+
+  xiaomi,microphone-analog-gain:
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    description: Initial ADC1 through ADC4 gain control indices.
+    minItems: 4
+    maxItems: 4
+    items:
+      minimum: 1
+      maximum: 8
+
+  xiaomi,microphone-digital-gain-db:
+    description: Initial DEC0 through DEC3 digital gain in dB.
+    minItems: 4
+    maxItems: 4
+    items:
+      minimum: 0
+      maximum: 24
+
+required:
+  - compatible
+  - xiaomi,microphone-analog-gain
+  - xiaomi,microphone-digital-gain-db
+
+additionalProperties: true

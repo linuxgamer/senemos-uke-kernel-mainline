@@ -1,0 +1,205 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: qcom: correlate PRM resource transactions
+
+PRM uses token zero for every request and accepts resource replies by
+opcode alone. A delayed reply can therefore complete a later request.
+Serialize each transaction, allocate a nonzero token and require matching
+command/response and resource parameter identities. Use a completion and
+spinlock to publish exactly one result; retire the pending token after
+success, send failure or timeout. Keep a module-wide token sequence across
+device reprobe. Token wrap still has the limits of a 32-bit wire field.
+
+The three native producers supply their existing resource parameter IDs.
+The OEM Uke audio and same-SoC OnePlus sources document the response's
+parameter/status pair but retain token-zero requests. No board values or
+firmware selectors are added. The GPR echo contract still needs exact
+firmware verification before admitting this disabled audio profile.
+
+---
+--- a/sound/soc/qcom/qdsp6/q6prm.c
++++ b/sound/soc/qcom/qdsp6/q6prm.c
+@@ -1,14 +1,16 @@
+ // SPDX-License-Identifier: GPL-2.0
+ // Copyright (c) 2021, Linaro Limited
+ 
++#include <linux/atomic.h>
+ #include <linux/slab.h>
+-#include <linux/wait.h>
++#include <linux/completion.h>
+ #include <linux/kernel.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/delay.h>
+ #include <linux/of_platform.h>
+ #include <linux/jiffies.h>
++#include <linux/spinlock.h>
+ #include <linux/soc/qcom/apr.h>
+ #include <dt-bindings/soc/qcom,gpr.h>
+ #include <dt-bindings/sound/qcom,q6dsp-lpass-ports.h>
+@@ -19,11 +21,18 @@
+ struct q6prm {
+ 	struct device *dev;
+ 	gpr_device_t *gdev;
+-	wait_queue_head_t wait;
+-	struct gpr_ibasic_rsp_result_t result;
+ 	struct mutex lock;
++	struct completion done;
++	spinlock_t response_lock;
++	u32 token;
++	u32 request_opcode;
++	u32 response_opcode;
++	u32 param_id;
++	u32 status;
+ };
+ 
++static atomic_t prm_next_token = ATOMIC_INIT(0);
++
+ #define PRM_CMD_REQUEST_HW_RSC		0x0100100F
+ #define PRM_CMD_RSP_REQUEST_HW_RSC	0x02001002
+ #define PRM_CMD_RELEASE_HW_RSC		0x01001010
+@@ -49,10 +58,48 @@
+ 	struct audio_hw_clk_rel_cfg clock_id;
+ } __packed;
+ 
+-static int q6prm_send_cmd_sync(struct q6prm *prm, struct gpr_pkt *pkt, uint32_t rsp_opcode)
++static int q6prm_send_cmd_sync(struct q6prm *prm, struct gpr_pkt *pkt,
++			     u32 rsp_opcode, u32 param_id)
+ {
+-	return audioreach_send_cmd_sync(prm->dev, prm->gdev, &prm->result, &prm->lock,
+-					NULL, &prm->wait, pkt, rsp_opcode);
++	unsigned long flags;
++	u32 token, status;
++	int ret;
++
++	mutex_lock(&prm->lock);
++	token = atomic_inc_return(&prm_next_token);
++	if (!token)
++		token = atomic_inc_return(&prm_next_token);
++	pkt->hdr.token = token;
++	reinit_completion(&prm->done);
++	spin_lock_irqsave(&prm->response_lock, flags);
++	prm->token = token;
++	prm->request_opcode = pkt->hdr.opcode;
++	prm->response_opcode = rsp_opcode;
++	prm->param_id = param_id;
++	prm->status = 0;
++	spin_unlock_irqrestore(&prm->response_lock, flags);
++
++	ret = gpr_send_pkt(prm->gdev, pkt);
++	if (ret >= 0) {
++		if (!wait_for_completion_timeout(&prm->done, 5 * HZ)) {
++			dev_err(prm->dev, "CMD timeout for [%x] opcode\n", pkt->hdr.opcode);
++			ret = -ETIMEDOUT;
++		} else {
++			ret = 0;
++		}
++	}
++
++	spin_lock_irqsave(&prm->response_lock, flags);
++	prm->token = 0;
++	status = prm->status;
++	spin_unlock_irqrestore(&prm->response_lock, flags);
++	if (!ret && status) {
++		dev_err(prm->dev, "DSP returned error[%x] %x\n", pkt->hdr.opcode, status);
++		ret = -EINVAL;
++	}
++	mutex_unlock(&prm->lock);
++
++	return ret;
+ }
+ 
+ static int q6prm_set_hw_core_req(struct device *dev, uint32_t hw_block_id, bool enable)
+@@ -87,7 +134,7 @@
+ 
+ 	req->hw_clk_id = hw_block_id;
+ 
+-	return q6prm_send_cmd_sync(prm, pkt, rsp_opcode);
++	return q6prm_send_cmd_sync(prm, pkt, rsp_opcode, PARAM_ID_RSC_HW_CORE);
+ }
+ 
+ int q6prm_vote_lpass_core_hw(struct device *dev, uint32_t hw_block_id,
+@@ -133,7 +180,8 @@
+ 	req->clock_id.clock_attri = clk_attr;
+ 	req->clock_id.clock_root = clk_root;
+ 
+-	return q6prm_send_cmd_sync(prm, pkt, PRM_CMD_RSP_REQUEST_HW_RSC);
++	return q6prm_send_cmd_sync(prm, pkt, PRM_CMD_RSP_REQUEST_HW_RSC,
++				 PARAM_ID_RSC_AUDIO_HW_CLK);
+ }
+ 
+ static int q6prm_release_lpass_clock(struct device *dev, int clk_id, int clk_attr, int clk_root,
+@@ -162,7 +210,8 @@
+ 	rel->num_clk_id = 1;
+ 	rel->clock_id.clock_id = clk_id;
+ 
+-	return q6prm_send_cmd_sync(prm, pkt, PRM_CMD_RSP_RELEASE_HW_RSC);
++	return q6prm_send_cmd_sync(prm, pkt, PRM_CMD_RSP_RELEASE_HW_RSC,
++				 PARAM_ID_RSC_AUDIO_HW_CLK);
+ }
+ 
+ int q6prm_set_lpass_clock(struct device *dev, int clk_id, int clk_attr, int clk_root,
+@@ -181,33 +230,35 @@
+ 	struct q6prm *prm = dev_get_drvdata(&gdev->dev);
+ 	const struct gpr_ibasic_rsp_result_t *result;
+ 	const struct gpr_hdr *hdr = &data->hdr;
++	unsigned long flags;
+ 
+ 	switch (hdr->opcode) {
+ 	case GPR_BASIC_RSP_RESULT:
+-		if (!data->payload || data->payload_size < (int)sizeof(*result))
+-			return -EINVAL;
+-		result = data->payload;
+-		if (result->opcode != PRM_CMD_REQUEST_HW_RSC &&
+-		    result->opcode != PRM_CMD_RELEASE_HW_RSC)
+-			break;
+-		/* A successful ACK does not replace the resource response. */
+-		if (!result->status)
+-			break;
+-		prm->result = *result;
+-		wake_up(&prm->wait);
+-		break;
+ 	case PRM_CMD_RSP_REQUEST_HW_RSC:
+ 	case PRM_CMD_RSP_RELEASE_HW_RSC:
+-		if (!data->payload || data->payload_size < (int)sizeof(*result))
+-			return -EINVAL;
+-		result = data->payload;
+-		prm->result.opcode = hdr->opcode;
+-		prm->result.status = result->status;
+-		wake_up(&prm->wait);
+ 		break;
+ 	default:
+-		break;
++		return 0;
++	}
++	if (!data->payload || data->payload_size < (int)sizeof(*result))
++		return -EINVAL;
++	result = data->payload;
++
++	spin_lock_irqsave(&prm->response_lock, flags);
++	if (!prm->token || hdr->token != prm->token)
++		goto unlock;
++	if (hdr->opcode == GPR_BASIC_RSP_RESULT) {
++		/* A successful ACK does not replace the resource response. */
++		if (result->opcode != prm->request_opcode || !result->status)
++			goto unlock;
++	} else if (hdr->opcode != prm->response_opcode || result->opcode != prm->param_id) {
++		goto unlock;
+ 	}
++	prm->status = result->status;
++	prm->token = 0;
++	complete(&prm->done);
++unlock:
++	spin_unlock_irqrestore(&prm->response_lock, flags);
+ 
+ 	return 0;
+ }
+@@ -224,7 +275,8 @@
+ 	cc->dev = dev;
+ 	cc->gdev = gdev;
+ 	mutex_init(&cc->lock);
+-	init_waitqueue_head(&cc->wait);
++	spin_lock_init(&cc->response_lock);
++	init_completion(&cc->done);
+ 	dev_set_drvdata(dev, cc);
+ 
+ 	if (!q6apm_is_adsp_ready())

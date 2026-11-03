@@ -1,0 +1,31 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] regulator: admit the exact Uke microphone bias supply
+
+The Uke stock WCD microphone-bias input references PMXR2230 BOB. The
+existing regulator implements the pmic5-bob type but refuses its
+exact bobb1 command-DB resource before supplier registration.
+
+Admit only this resource name. Retain command-DB
+validation, supported PMIC modes, the selected OEM DT
+constraints and existing request/error ownership. MiCode DT
+94c84aeb9e517dbde546fc732033c184094c8e57 identifies the resource
+in qcom/cliffs-regulators.dtsi; the selected running Uke DT fixes
+the BOB voltage constraints to 3296000 microvolts.
+
+This does not select a codec, enable bias or establish physical
+capture.
+
+---
+diff --git a/drivers/regulator/qcom-rpmh-regulator-uke.c b/drivers/regulator/qcom-rpmh-regulator-uke.c
+--- a/drivers/regulator/qcom-rpmh-regulator-uke.c
++++ b/drivers/regulator/qcom-rpmh-regulator-uke.c
+@@ -2013,7 +2013,8 @@
+ 	    strcmp(aggr_vreg->resource_name, "ldob12") &&
+ 	    strcmp(aggr_vreg->resource_name, "ldob8") &&
+ 	    strcmp(aggr_vreg->resource_name, "ldod3") &&
+-	    strcmp(aggr_vreg->resource_name, "ldoe7"))
++	    strcmp(aggr_vreg->resource_name, "ldoe7") &&
++	    strcmp(aggr_vreg->resource_name, "bobb1"))
+ 		return -ENODEV;
+ 
+ 	aggr_vreg->addr = cmd_db_read_addr(aggr_vreg->resource_name);

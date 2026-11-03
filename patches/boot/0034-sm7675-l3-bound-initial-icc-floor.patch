@@ -1,0 +1,82 @@
+From: Uke Linux contributors <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] interconnect: qcom: bound the SM7675 initial L3 floor
+
+ICC defaults an unknown provider's initial vote to INT_MAX. On Uke this
+floor remains while global provider synchronization is incomplete, so the
+strict SM7675 overvote guard rejects even valid CPU monitor transactions.
+Real release-35 inspection and native initialization fixtures reproduce it.
+
+Preserve the conservative boot floor at the maximum firmware-LUT capacity,
+with checked width/units conversion. Keep rejecting real requests beyond
+that capacity and retain all existing platforms' initialization behavior.
+This is not measured-current-bandwidth telemetry or permission to force
+unrelated providers into a synchronized state. Qualcomm/Linux GPL
+attribution and the exact Uke OEM L3/clock contract remain unchanged.
+
+--- a/drivers/interconnect/qcom/osm-l3.c
++++ b/drivers/interconnect/qcom/osm-l3.c
+@@ -12,6 +12,7 @@
+ #include <linux/kernel.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
++#include <linux/overflow.h>
+ #include <linux/platform_device.h>
+ 
+ #include <dt-bindings/interconnect/qcom,osm-l3.h>
+@@ -41,6 +42,7 @@
+ 	unsigned int max_state;
+ 	unsigned int reg_perf_state;
+ 	bool reject_overvote;
++	u32 init_peak_bw;
+ 	unsigned long lut_tables[LUT_MAX_ENTRIES];
+ 	struct icc_provider provider;
+ };
+@@ -133,6 +135,15 @@
+ 	.reject_overvote = true,
+ };
+ 
++static int qcom_osm_l3_get_bw(struct icc_node *node, u32 *avg, u32 *peak)
++{
++	struct qcom_osm_l3_icc_provider *qp = to_osm_l3_provider(node->provider);
++
++	*avg = 0;
++	*peak = qp->init_peak_bw;
++	return 0;
++}
++
+ static int qcom_osm_l3_set(struct icc_node *src, struct icc_node *dst)
+ {
+ 	struct qcom_osm_l3_icc_provider *qp;
+@@ -172,6 +183,7 @@
+ {
+ 	u32 info, src, lval, i;
+ 	unsigned long hw_rate, xo_rate, prev_freq = 0, freq;
++	u64 initial_bw;
+ 	struct qcom_osm_l3_icc_provider *qp;
+ 	const struct qcom_osm_l3_desc *desc;
+ 	struct icc_onecell_data *data;
+@@ -249,6 +261,15 @@
+ 
+ 	qnodes = desc->nodes;
+ 	num_nodes = desc->num_nodes;
++	if (qp->reject_overvote) {
++		/* Bound ICC's conservative boot floor to the real LUT, not INT_MAX. */
++		if (check_mul_overflow((u64)prev_freq, (u64)qnodes[0]->buswidth, &initial_bw))
++			return -ERANGE;
++		do_div(initial_bw, 1000);
++		if (!initial_bw || initial_bw > U32_MAX)
++			return -ERANGE;
++		qp->init_peak_bw = initial_bw;
++	}
+ 
+ 	data = devm_kzalloc(&pdev->dev, struct_size(data, nodes, num_nodes), GFP_KERNEL);
+ 	if (!data)
+@@ -258,6 +279,8 @@
+ 	provider = &qp->provider;
+ 	provider->dev = &pdev->dev;
+ 	provider->set = qcom_osm_l3_set;
++	if (qp->reject_overvote)
++		provider->get_bw = qcom_osm_l3_get_bw;
+ 	provider->aggregate = icc_std_aggregate;
+ 	provider->xlate = of_icc_xlate_onecell;
+ 	provider->data = data;

@@ -13,10 +13,12 @@
 #include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/notifier.h>
 #include <linux/of.h>
 #include <linux/of_graph.h>
 #include <linux/qcom-uke-display.h>
 #include <linux/regulator/consumer.h>
+#include <linux/uke-o82-touch.h>
 #include <drm/display/drm_dsc_helper.h>
 #include <drm/drm_connector.h>
 #include <drm/drm_crtc.h>
@@ -65,25 +67,43 @@ struct o82_panel {
 	unsigned int loaded_supplies;
 	bool reset_output;
 	bool prepared;
+	bool gesture_retained;
 	bool first_frame_initialized;
 	bool removing;
 	bool initial_60hz_only;
 	bool initial_120hz_only;
 	bool oem_refresh_modes;
-	bool trial_60_120_only;
-	bool trial_all_rates;
 	atomic64_t touch_state;
+	struct mutex touch_lock;
+	struct blocking_notifier_head touch_notifiers;
 };
 
 static void o82_touch_state(struct o82_panel *ctx, bool reset, bool ready)
 {
-	u64 state = (u64)atomic64_read(&ctx->touch_state) & ~1ULL;
+	u64 state;
 
-	/* Lifecycle writers are serialized; readers receive one generation/ready pair. */
+	/* First-frame work runs after .enable; followers alone are too early. */
+	mutex_lock(&ctx->touch_lock);
+	state = (u64)atomic64_read(&ctx->touch_state) & ~1ULL;
 	if (reset)
 		state += 2;
-	atomic64_set(&ctx->touch_state, state | ready);
+	state |= ready;
+	atomic64_set(&ctx->touch_state, state);
+	blocking_notifier_call_chain(&ctx->touch_notifiers, 0, &state);
 	sysfs_notify(&ctx->dsi[0]->dev.kobj, NULL, "touch_reset_state");
+	mutex_unlock(&ctx->touch_lock);
+}
+
+static int o82_touch_gesture(struct o82_panel *ctx, unsigned long event)
+{
+	u64 state;
+	int ret;
+
+	mutex_lock(&ctx->touch_lock);
+	state = atomic64_read(&ctx->touch_state);
+	ret = blocking_notifier_call_chain(&ctx->touch_notifiers, event, &state);
+	mutex_unlock(&ctx->touch_lock);
+	return ret;
 }
 
 static int o82_send(struct o82_panel *ctx, const struct o82_command *cmd, bool lpm)
@@ -134,6 +154,28 @@ static int o82_off(struct o82_panel *ctx)
 	return first_error;
 }
 
+static int o82_apply_abm(struct o82_panel *ctx, unsigned int level)
+{
+	/* Exact O82 micommon CABC modes: off/UI/still/movie. Bias-min shares UI. */
+	static const u8 modes[] = { 0, 1, 1, 2, 3 };
+	const u8 page[] = { 0xff, 0x10 };
+	u8 value[] = { 0x55, 0 };
+	struct o82_command command = {
+		.type = MIPI_DSI_DCS_SHORT_WRITE_PARAM,
+		.len = sizeof(page), .data = page,
+	};
+	int ret;
+
+	if (level >= ARRAY_SIZE(modes))
+		return -EINVAL;
+	value[1] = modes[level];
+	ret = o82_send(ctx, &command, true);
+	if (ret)
+		return ret;
+	command.data = value;
+	return o82_send(ctx, &command, true);
+}
+
 static int o82_lp_batch(struct o82_panel *ctx,
 			const struct o82_command *commands, unsigned int count)
 {
@@ -164,6 +206,8 @@ static int o82_on_batch(struct o82_panel *ctx)
 {
 	struct mipi_dsi_msg msgs[31] = { };
 	const struct o82_profile *profile = ctx->active;
+	bool pa = ctx->profiles == o82_36_02_0a_profiles;
+	unsigned int commands = pa ? 171 : 108;
 	unsigned int i, count = 0, bytes = 0, chunks = 0, total = 0;
 	int ret;
 
@@ -171,17 +215,18 @@ static int o82_on_batch(struct o82_panel *ctx)
 	    (profile != &ctx->profiles[0] &&
 	     !(ctx->oem_refresh_modes && (profile == &ctx->profiles[1] ||
 					profile == &ctx->profiles[2]))) ||
-	    profile->on_count != 108)
+	    profile->on_count != commands)
 		return -EINVAL;
 	/* Reject changed metadata before the first ON chunk can reach the panel. */
 	for (i = 0; i < profile->on_count; i++) {
 		const struct o82_command *cmd = &profile->on[i];
-		bool terminal = i == 6 || i == 12 || i == 74 || i >= 105;
+		bool terminal = i == 6 || i == 12 || i == 74 ||
+			(pa ? i == 157 || i >= 168 : i >= 105);
 
 		if (cmd->type != MIPI_DSI_DCS_LONG_WRITE || cmd->channel ||
 		    !cmd->data || !cmd->len || cmd->len > 17 ||
 		    cmd->downstream_flags != (terminal ? 0 : BIT(6)) ||
-		    cmd->delay_ms != (i == 106 ? 120 : 0))
+		    cmd->delay_ms != (i == commands - 2 ? 120 : 0))
 			return -EINVAL;
 		count++;
 		bytes += ALIGN(cmd->len + 4, 4);
@@ -193,7 +238,7 @@ static int o82_on_batch(struct o82_panel *ctx)
 			count = bytes = 0;
 		}
 	}
-	if (count || chunks != 8 || total != 884)
+	if (count || chunks != (pa ? 10 : 8) || total != (pa ? 1448 : 884))
 		return -EINVAL;
 	chunks = total = 0;
 	for (i = 0; i < profile->on_count; i++) {
@@ -225,8 +270,8 @@ static int o82_on_batch(struct o82_panel *ctx)
 		}
 	}
 	dev_info(&ctx->dsi[0]->dev,
-		 "Uke O82 LP ON batching complete: commands=108 chunks=%u bytes=%u\n",
-		 chunks, total);
+		 "Uke O82 LP ON batching complete: commands=%u chunks=%u bytes=%u\n",
+		 commands, chunks, total);
 	return 0;
 }
 
@@ -234,6 +279,8 @@ static int o82_power_off(struct o82_panel *ctx)
 {
 	int i, ret, first_error = 0;
 
+	o82_touch_gesture(ctx, UKE_O82_TOUCH_RELEASE);
+	ctx->gesture_retained = false;
 	o82_touch_state(ctx, false, false);
 	if (ctx->reset_output)
 		gpiod_set_value_cansleep(ctx->reset, 0);
@@ -271,8 +318,7 @@ static void o82_readback(struct o82_panel *ctx, bool post_frame)
 	int i;
 
 	/* Isolate initial120 optics from advisory bus-turnaround traffic. */
-	if (ctx->initial_120hz_only ||
-	    (ctx->oem_refresh_modes && !ctx->trial_60_120_only))
+	if (ctx->initial_120hz_only || ctx->oem_refresh_modes)
 		return;
 
 	for (i = 0; i < count; i++) {
@@ -302,17 +348,13 @@ static int o82_read_initial_mode(struct o82_panel *ctx, struct device_node *node
 	ctx->initial_60hz_only = of_property_read_bool(node, "xiaomi,initial-60hz-only");
 	ctx->initial_120hz_only = of_property_read_bool(node, "xiaomi,initial-120hz-only");
 	ctx->oem_refresh_modes = of_property_read_bool(node, "xiaomi,oem-refresh-modes");
-	ctx->trial_60_120_only = of_property_read_bool(node, "xiaomi,o82-36-60-120-trial");
-	ctx->trial_all_rates = of_property_read_bool(node, "xiaomi,o82-36-all-rates-trial");
 	if ((ctx->initial_60hz_only && ctx->initial_120hz_only) ||
 	    (ctx->oem_refresh_modes && (ctx->initial_60hz_only || ctx->initial_120hz_only)) ||
-	    (ctx->trial_all_rates && !ctx->trial_60_120_only) ||
-	    (ctx->trial_60_120_only &&
-	     (!ctx->oem_refresh_modes ||
-	      !of_device_is_compatible(node, "xiaomi,o82-36-02-0a"))) ||
-	    ((ctx->initial_120hz_only || ctx->oem_refresh_modes) &&
+	    (ctx->initial_120hz_only &&
+	     !of_device_is_compatible(node, "xiaomi,o82-42-02-0b")) ||
+	    (ctx->oem_refresh_modes &&
 	     !of_device_is_compatible(node, "xiaomi,o82-42-02-0b") &&
-	     !ctx->trial_60_120_only))
+	     !of_device_is_compatible(node, "xiaomi,o82-36-02-0a")))
 		return -EINVAL;
 	return 0;
 }
@@ -341,10 +383,6 @@ static int o82_prepare_locked(struct drm_panel *panel)
 		/* The isolated OEM 120 Hz comparison must not power another mode. */
 		if (ctx->initial_120hz_only && drm_mode_vrefresh(&o82_modes[i].mode) != 120)
 			continue;
-		if (ctx->trial_60_120_only && !ctx->trial_all_rates &&
-		    drm_mode_vrefresh(&o82_modes[i].mode) != 60 &&
-		    drm_mode_vrefresh(&o82_modes[i].mode) != 120)
-			continue;
 		if (drm_mode_equal(mode, &o82_modes[i].mode)) {
 			profile = &ctx->profiles[o82_modes[i].group];
 			break;
@@ -364,6 +402,11 @@ static int o82_prepare_locked(struct drm_panel *panel)
 	    ctx->dsc.first_line_bpg_offset != 13 ||
 	    ctx->dsc.rc_range_params[0].range_max_qp != 8)
 		return -EINVAL;
+	if (ctx->gesture_retained) {
+		ret = o82_power_off(ctx);
+		if (ret)
+			return ret;
+	}
 	/* Do not accumulate enable references after a failed power-down. */
 	if (ctx->enabled_supplies || ctx->loaded_supplies)
 		return -EBUSY;
@@ -402,8 +445,7 @@ static int o82_prepare_locked(struct drm_panel *panel)
 	msleep(3);
 	gpiod_set_value_cansleep(ctx->reset, 1);
 	msleep(15);
-	if (ctx->initial_120hz_only ||
-	    (ctx->oem_refresh_modes && !ctx->trial_60_120_only)) {
+	if (ctx->initial_120hz_only || ctx->oem_refresh_modes) {
 		ret = o82_on_batch(ctx);
 		if (ret)
 			goto failed_on;
@@ -423,6 +465,11 @@ static int o82_prepare_locked(struct drm_panel *panel)
 		o82_off(ctx);
 		o82_power_off(ctx);
 		return ret;
+	}
+	if (ctx->connector->abm_level_property) {
+		ret = o82_apply_abm(ctx, ctx->connector->state->abm_level);
+		if (ret)
+			goto failed_on;
 	}
 	o82_readback(ctx, false);
 	ctx->prepared = true;
@@ -485,8 +532,7 @@ static void o82_first_frame(struct kthread_work *work)
 	}
 	/* OEM starts DPU timing before its four HS TP-FPS updates. */
 	stage = "timing-switch";
-	if (ctx->initial_120hz_only ||
-	    (ctx->oem_refresh_modes && !ctx->trial_60_120_only)) {
+	if (ctx->initial_120hz_only || ctx->oem_refresh_modes) {
 		struct mipi_dsi_msg msgs[4] = { };
 
 		if (ctx->active->switch_count != ARRAY_SIZE(msgs)) {
@@ -518,8 +564,7 @@ static void o82_first_frame(struct kthread_work *work)
 	}
 	i = -1;
 	stage = "normal-pixels";
-	if (ctx->initial_120hz_only ||
-	    (ctx->oem_refresh_modes && !ctx->trial_60_120_only)) {
+	if (ctx->initial_120hz_only || ctx->oem_refresh_modes) {
 		i = -1;
 		ret = o82_lp_batch(ctx, normal_pixels, ARRAY_SIZE(normal_pixels));
 		if (ret)
@@ -532,8 +577,7 @@ static void o82_first_frame(struct kthread_work *work)
 		}
 	}
 	dev_info(&ctx->dsi[0]->dev, "O82 first-frame normal-pixels complete\n");
-	if (ctx->initial_120hz_only ||
-	    (ctx->oem_refresh_modes && !ctx->trial_60_120_only)) {
+	if (ctx->initial_120hz_only || ctx->oem_refresh_modes) {
 		/* Installed OEM uses a separate four-packet LP dimming group. */
 		stage = "dimming-on";
 		i = -1;
@@ -548,8 +592,9 @@ static void o82_first_frame(struct kthread_work *work)
 	if (ret)
 		goto failed;
 	brightness = backlight_get_brightness(ctx->backlight);
-	if (brightness <= 0) {
-		ret = -ERANGE;
+	/* A deliberately black first frame still completes panel/touch restoration. */
+	if (brightness < 0) {
+		ret = brightness;
 		goto failed;
 	}
 	dev_info(&ctx->dsi[0]->dev,
@@ -637,9 +682,18 @@ static int o82_unprepare(struct drm_panel *panel)
 
 	mutex_lock(&ctx->lock);
 	o82_disable_locked(ctx);
+	if (ctx->gesture_retained && !ctx->removing)
+		goto out;
 	if (!ctx->prepared && !ctx->enabled_supplies && !ctx->loaded_supplies)
 		goto out;
 	ret = ctx->prepared ? o82_off(ctx) : 0;
+	if (!ret && !ctx->removing &&
+	    ctx->enabled_supplies == GENMASK(ARRAY_SIZE(ctx->supplies) - 1, 0) &&
+	    o82_touch_gesture(ctx, UKE_O82_TOUCH_RETAIN) == NOTIFY_STOP) {
+		ctx->gesture_retained = true;
+		ctx->prepared = false;
+		goto out;
+	}
 	power_ret = o82_power_off(ctx);
 	ctx->prepared = false;
 	ret = ret ? ret : power_ret;
@@ -658,10 +712,6 @@ static int o82_get_modes(struct drm_panel *panel, struct drm_connector *connecto
 		struct drm_display_mode *mode;
 		if (ctx->initial_60hz_only && drm_mode_vrefresh(&o82_modes[i].mode) != 60)
 			continue;
-		if (ctx->trial_60_120_only && !ctx->trial_all_rates &&
-		    drm_mode_vrefresh(&o82_modes[i].mode) != 60 &&
-		    drm_mode_vrefresh(&o82_modes[i].mode) != 120)
-			continue;
 		if (ctx->initial_120hz_only && drm_mode_vrefresh(&o82_modes[i].mode) != 120)
 			continue;
 		mode = drm_mode_duplicate(connector->dev, &o82_modes[i].mode);
@@ -670,8 +720,7 @@ static int o82_get_modes(struct drm_panel *panel, struct drm_connector *connecto
 		drm_mode_set_name(mode);
 		mode->type = DRM_MODE_TYPE_DRIVER;
 		if (drm_mode_vrefresh(mode) ==
-		    (ctx->initial_120hz_only ||
-		     (ctx->oem_refresh_modes && !ctx->trial_60_120_only) ? 120 : 60))
+		    (ctx->initial_120hz_only || ctx->oem_refresh_modes ? 120 : 60))
 			mode->type |= DRM_MODE_TYPE_PREFERRED;
 		drm_mode_probed_add(connector, mode);
 		count++;
@@ -690,12 +739,8 @@ static bool o82_dfps_check_locked(struct o82_panel *ctx,
 
 	return qcom_uke_o82_live_change(old, new_mode) &&
 		ctx->oem_refresh_modes &&
-		((ctx->profiles == o82_42_02_0b_profiles && !ctx->trial_60_120_only) ||
-		 (ctx->profiles == o82_36_02_0a_profiles && ctx->trial_60_120_only &&
-		  (ctx->trial_all_rates ||
-		   ((drm_mode_vrefresh(old) == 60 || drm_mode_vrefresh(old) == 120) &&
-		    (drm_mode_vrefresh(new_mode) == 60 ||
-		     drm_mode_vrefresh(new_mode) == 120))))) &&
+		(ctx->profiles == o82_42_02_0b_profiles ||
+		 ctx->profiles == o82_36_02_0a_profiles) &&
 		ctx->active == &ctx->profiles[old_group] && ctx->prepared &&
 		!ctx->removing && (atomic64_read(&ctx->touch_state) & 1);
 }
@@ -783,6 +828,36 @@ static const struct drm_panel_funcs o82_funcs = {
 	.get_modes = o82_get_modes,
 };
 
+int uke_o82_touch_register(struct drm_panel *panel, struct notifier_block *nb)
+{
+	struct o82_panel *ctx;
+	u64 state;
+	int ret;
+
+	if (!panel || panel->funcs != &o82_funcs || !nb || !nb->notifier_call)
+		return -EINVAL;
+	ctx = container_of(panel, struct o82_panel, panel);
+	mutex_lock(&ctx->touch_lock);
+	ret = blocking_notifier_chain_register(&ctx->touch_notifiers, nb);
+	if (!ret) {
+		state = (u64)atomic64_read(&ctx->touch_state);
+		nb->notifier_call(nb, 0, &state);
+	}
+	mutex_unlock(&ctx->touch_lock);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(uke_o82_touch_register);
+
+void uke_o82_touch_unregister(struct drm_panel *panel, struct notifier_block *nb)
+{
+	struct o82_panel *ctx = container_of(panel, struct o82_panel, panel);
+
+	mutex_lock(&ctx->touch_lock);
+	blocking_notifier_chain_unregister(&ctx->touch_notifiers, nb);
+	mutex_unlock(&ctx->touch_lock);
+}
+EXPORT_SYMBOL_GPL(uke_o82_touch_unregister);
+
 static ssize_t touch_reset_state_show(struct device *dev,
 				     struct device_attribute *attr, char *buf)
 {
@@ -811,6 +886,8 @@ static int o82_probe(struct mipi_dsi_device *dsi)
 	if (IS_ERR(ctx))
 		return PTR_ERR(ctx);
 	mutex_init(&ctx->lock);
+	mutex_init(&ctx->touch_lock);
+	BLOCKING_INIT_NOTIFIER_HEAD(&ctx->touch_notifiers);
 	atomic64_set(&ctx->touch_state, 0);
 	ctx->dsi[0] = dsi;
 	ctx->profiles = of_device_get_match_data(dev);
@@ -937,8 +1014,13 @@ static struct mipi_dsi_driver o82_driver = {
 	.remove = o82_remove,
 	.shutdown = o82_shutdown,
 	.driver = { .name = "panel-xiaomi-o82", .of_match_table = o82_match,
-		    .dev_groups = o82_groups },
+		    .dev_groups = o82_groups, .suppress_bind_attrs = true },
 };
-module_mipi_dsi_driver(o82_driver);
+/* shortcut: no live panel removal until MSM GEM/bridge teardown is safe. */
+static int __init o82_init(void)
+{
+	return mipi_dsi_driver_register(&o82_driver);
+}
+module_init(o82_init);
 MODULE_DESCRIPTION("Xiaomi O82 dual-DSI panel with OEM timing groups");
 MODULE_LICENSE("GPL");

@@ -1,0 +1,158 @@
+diff --git a/Documentation/ABI/testing/sysfs-driver-qcom-battmgr-uke-control b/Documentation/ABI/testing/sysfs-driver-qcom-battmgr-uke-control
+index 5dc4ae9..0736741 100644
+--- a/Documentation/ABI/testing/sysfs-driver-qcom-battmgr-uke-control
++++ b/Documentation/ABI/testing/sysfs-driver-qcom-battmgr-uke-control
+@@ -102,3 +102,28 @@ Description:
+                 Xiaomi raw property, USB current, PD/QC/PPS/EPR negotiation or
+                 factory/calibration API is exposed. Firmware owns CV and all
+                 autonomous protections. This driver is not a real-time cutoff.
++
++What:           /sys/bus/auxiliary/devices/*/uke_charge_settings
++Date:           October 2026
++Contact:        Uke Linux maintainers
++Description:
++                Root-readable (0400), CAP_SYS_ADMIN, Uke threshold build only.
++                Deliberate firmware read, unlike metadata-only uke_charge_state.
++                Reads only the three OEM standard threshold fields (wire25/26/27),
++                using the existing serialized and matched GET transport. No FCC,
++                voltage, Xiaomi property, setter, lease or service activation.
++                An unexpired control lease or busy driver rejects the query.
++                At most one attempt per second, three GETs without replay, stop
++                at the first error/lifecycle change; no partial result. Invalid
++                booleans/percentages, changed epochs or a batch older than three
++                seconds fail. No verified configuration cache is renewed.
++
++                Version1 line:
++                version instance generation firmware_epoch source_epoch
++                  received_boottime_ns reported_enabled reported_start reported_end
++
++                Successful readback reports firmware settings only. It does not
++                qualify their electrical effect, autonomous protection, pack
++                profile, battery isolation or a control permission. In particular,
++                disabled thresholds are not converted to invented0/100 settings.
++                Existing standard threshold clients still require admission.
+diff --git a/drivers/power/supply/qcom_battmgr.c b/drivers/power/supply/qcom_battmgr.c
+index a9ebaa0..b9063f0 100644
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -369,7 +369,7 @@ struct qcom_battmgr {
+ 	struct {
+ 		struct pid *owner;
+ 		u64 expires_ns, instance_ns, verified_ns, verified_until_ns;
+-		u64 reviewed_ns, invalidation_ns;
++		u64 reviewed_ns, invalidation_ns, settings_probe_ns;
+ 		u32 firmware_generation, source_generation, ack_bytes, usb_type;
+ 		u32 verified_generation, verified_firmware, verified_source;
+ 		u32 readback_generation;
+@@ -2295,6 +2295,7 @@ static struct attribute *qcom_battmgr_uke_attrs[] = {
+ 	&dev_attr_uke_battmgr_state.attr,
+ 	&dev_attr_uke_usb_source_state.attr,
+ 	&dev_attr_uke_charge_state.attr,
++	&dev_attr_uke_charge_settings.attr,
+ 	&dev_attr_uke_charge_lease.attr,
+ 	&dev_attr_uke_charge_thresholds.attr,
+ 	&dev_attr_uke_charge_refresh.attr,
+diff --git a/drivers/power/supply/qcom_battmgr_uke_control.h b/drivers/power/supply/qcom_battmgr_uke_control.h
+index d174609..f26deee 100644
+--- a/drivers/power/supply/qcom_battmgr_uke_control.h
++++ b/drivers/power/supply/qcom_battmgr_uke_control.h
+@@ -447,6 +447,99 @@ static ssize_t uke_charge_state_show(struct device *dev, struct device_attribute
+ }
+ static DEVICE_ATTR_RO(uke_charge_state);
+ 
++struct qcom_battmgr_uke_settings {
++	u64 instance, received_ns;
++	u32 generation, firmware, source, enabled, start, end;
++};
++
++/* Explicit diagnostic GETs only; no admission, setters or verified-cache renewal. */
++static int qcom_battmgr_uke_settings_read(struct qcom_battmgr *battmgr,
++					struct qcom_battmgr_uke_settings *result)
++{
++	const unsigned int props[] = {
++		BATT_CHG_CTRL_EN, BATT_CHG_CTRL_START_THR, BATT_CHG_CTRL_END_THR,
++	};
++	struct qcom_battmgr_uke_transaction *tx = &battmgr->transaction;
++	struct qcom_battmgr_uke_settings next = { };
++	u64 began = ktime_get_boottime_ns();
++	unsigned long flags;
++	unsigned int i;
++	int ret = 0;
++
++	lockdep_assert_held(&battmgr->lock);
++	if (!IS_ENABLED(CONFIG_BATTERY_QCOM_BATTMGR_UKE_THRESHOLDS) ||
++	    battmgr->variant != QCOM_BATTMGR_UKE)
++		return -EOPNOTSUPP;
++	spin_lock_irqsave(&tx->lock, flags);
++	if (!battmgr->service_up || !tx->instance_ns ||
++	    tx->desynced || tx->suspended || tx->removing)
++		ret = -EHOSTDOWN;
++	else if (battmgr->control.expires_ns > began)
++		ret = -EBUSY;
++	else if (battmgr->control.settings_probe_ns &&
++		 (began < battmgr->control.settings_probe_ns ||
++		  began - battmgr->control.settings_probe_ns < NSEC_PER_SEC))
++		ret = -EAGAIN;
++	else {
++		next.instance = tx->instance_ns;
++		next.generation = tx->generation;
++		next.firmware = tx->firmware_generation;
++		next.source = tx->source_generation;
++		battmgr->control.settings_probe_ns = began;
++	}
++	spin_unlock_irqrestore(&tx->lock, flags);
++	if (ret)
++		return ret;
++	for (i = 0; i < ARRAY_SIZE(props); i++) {
++		ret = qcom_battmgr_request_property(battmgr, BATTMGR_BAT_PROPERTY_GET,
++						  props[i], 0);
++		if (ret)
++			return ret;
++		if (next.generation != qcom_battmgr_uke_generation(battmgr))
++			return -ESTALE;
++	}
++	next.received_ns = ktime_get_boottime_ns();
++	spin_lock_irqsave(&tx->lock, flags);
++	if (!battmgr->service_up || tx->desynced || tx->suspended || tx->removing ||
++	    next.instance != tx->instance_ns || next.generation != tx->generation ||
++	    next.firmware != tx->firmware_generation || next.source != tx->source_generation ||
++	    next.received_ns < began || next.received_ns - began > 3ULL * NSEC_PER_SEC)
++		ret = -ESTALE;
++	else {
++		next.enabled = battmgr->control.enabled;
++		next.start = battmgr->info.charge_ctrl_start;
++		next.end = battmgr->info.charge_ctrl_end;
++		if (!next.instance || next.start > next.end || next.end > 100)
++			ret = -ENODATA;
++	}
++	spin_unlock_irqrestore(&tx->lock, flags);
++	if (!ret)
++		*result = next;
++	return ret;
++}
++
++static ssize_t uke_charge_settings_show(struct device *dev,
++				      struct device_attribute *attr, char *buf)
++{
++	struct qcom_battmgr *battmgr = dev_get_drvdata(dev);
++	struct qcom_battmgr_uke_settings result;
++	int ret;
++
++	if (!capable(CAP_SYS_ADMIN))
++		return -EPERM;
++	if (!mutex_trylock(&battmgr->lock))
++		return -EBUSY;
++	ret = qcom_battmgr_uke_settings_read(battmgr, &result);
++	mutex_unlock(&battmgr->lock);
++	if (ret)
++		return ret;
++	return sysfs_emit(buf, "1 %llu %u %u %u %llu %u %u %u\n",
++		result.instance, result.generation, result.firmware, result.source,
++		result.received_ns, result.enabled, result.start, result.end);
++}
++static struct device_attribute dev_attr_uke_charge_settings =
++	__ATTR(uke_charge_settings, 0400, uke_charge_settings_show, NULL);
++
+ static int qcom_battmgr_uke_control_split(const char *buf, size_t count,
+ 					 char *data, size_t size, char **words, size_t capacity)
+ {

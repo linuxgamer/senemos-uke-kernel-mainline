@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "product": "senemos-uke-linux-kernel-mainline",
+  "source": {
+    "schema_version": 1,
+    "version": "7.2.9",
+    "upstream_commit": "5fce161649b4d779d1b76d9fcd52dc77779774b8",
+    "source_sha256": "b4c5dfbe51a364a6c7f03869200f88c8e1f77403539005f14b7fc6bc91b8d8ba",
+    "source_url": "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.2.9.tar.xz",
+    "signature_url": "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.2.9.tar.sign",
+    "signer": "647F28654894E3BD457199BE38DBBDC86092693E",
+    "source_date_epoch": 1791024250,
+    "donor_commit": "32cad9ccd383ff4b37d8a5e7f88a8bfdcc07307e",
+    "patches": [
+      {
+        "path": "patches/7.2.9/0001-cliffs-clock-handoff.patch",
+        "sha256": "a5946597c24f89d9750ecc807d48a28215877d8f59100cbcde63f4717c3a51f9"
+      },
+      {
+        "path": "patches/7.2.9/0002-uke-rpmh-regulators.patch",
+        "sha256": "bc5b9634c6be79345545f86cdcb17bc6ce252f163034a66dbfd7dbd9fd1d0b47"
+      },
+      {
+        "path": "patches/7.2.9/0003-cliffs-tlmm.patch",
+        "sha256": "8040aecc97ad055d8dad9a6b0dc76a9087e4742f2d5003b846f2af97906b53e4"
+      },
+      {
+        "path": "patches/7.2.9/0004-cliffs-interconnect.patch",
+        "sha256": "ced8b8823875f77076638ecec583b1e2aac09d1a89d738a686b2e938f1a89dcd"
+      },
+      {
+        "path": "patches/7.2.9/0005-uke-smmu-handoff.patch",
+        "sha256": "4e2e00cbfe6bf28819553f110de4e1b11004516934b8e3b6a15b11a413a7729b"
+      },
+      {
+        "path": "patches/7.2.9/0006-uke-usb-v7-api.patch",
+        "sha256": "d744bd253d46ce6c96fdd3d0ed26f56ec5aa7f2dd7aabb6774dd08d2f6a0ecef"
+      },
+      {
+        "path": "patches/7.2.9/0007-uke-independent-dts.patch",
+        "sha256": "119a715ca253a32f1ef5d4e20eb88aa619c1f7443458d35cc708014ff3575690"
+      },
+      {
+        "path": "patches/7.2.9/0008-sm7675-ufs-phy.patch",
+        "sha256": "80aefafd680136bf187dc20c632e7d71b19644528055fe41c262b97e0826a968"
+      }
+    ],
+    "dtb": "qcom/sm7675-xiaomi-uke.dtb",
+    "hardware_tested": false,
+    "configs": [
+      {
+        "path": "configs/arm64-qcom.config",
+        "sha256": "ea08a26d2afe7d27411ca603c5e7690116f796a1c7956408156f24a09f8fdf06"
+      },
+      {
+        "path": "configs/uke.config",
+        "sha256": "f84cf917915682a1214cbb06c0caee1956b1d27711ee196212fea6ec67d563fa"
+      },
+      {
+        "path": "configs/fedora.config",
+        "sha256": "3d7ad09fbd77ecd803eb5d09be59114093d469260e0f6dc2b15fc0a849479744"
+      }
+    ]
+  },
+  "packages": [
+    {
+      "file": "senemos-uke-linux-kernel-mainline-7.2.9-1.4.fc46.aarch64.rpm",
+      "kind": "binary",
+      "nevra": "senemos-uke-linux-kernel-mainline-0:7.2.9-1.4.fc46.aarch64",
+      "sha256": "9aa6149b4b3622e997a2e376eb23b6f7c179b8ff87218a290ad3e3e8060af443"
+    },
+    {
+      "file": "senemos-uke-linux-kernel-mainline-core-7.2.9-1.4.fc46.aarch64.rpm",
+      "kind": "binary",
+      "nevra": "senemos-uke-linux-kernel-mainline-core-0:7.2.9-1.4.fc46.aarch64",
+      "sha256": "1495a875c8071458c0a97e53b3652459fa388a24db4d7c41934297d74631c38a"
+    },
+    {
+      "file": "senemos-uke-linux-kernel-mainline-dtbs-7.2.9-1.4.fc46.aarch64.rpm",
+      "kind": "binary",
+      "nevra": "senemos-uke-linux-kernel-mainline-dtbs-0:7.2.9-1.4.fc46.aarch64",
+      "sha256": "de08cb05b10e2998df93426591f0210e4852d863c7652fba16ae073603d8f9d4"
+    },
+    {
+      "file": "senemos-uke-linux-kernel-mainline-modules-7.2.9-1.4.fc46.aarch64.rpm",
+      "kind": "binary",
+      "nevra": "senemos-uke-linux-kernel-mainline-modules-0:7.2.9-1.4.fc46.aarch64",
+      "sha256": "af5bbd5a1992fd56e5cc043613b8d0a44289bdf62acc67486d258aadc76a063a"
+    },
+    {
+      "file": "senemos-uke-linux-kernel-mainline-7.2.9-1.4.fc46.src.rpm",
+      "kind": "source",
+      "nevra": "senemos-uke-linux-kernel-mainline-0:7.2.9-1.4.fc46.aarch64",
+      "sha256": "170bd6d1a65f191ed878a1d579cc9594bd2d49080f6eeffc97023e5cf05b0187"
+    }
+  ],
+  "toolchain_image": "a6fb262f41c060702100f704f5c63ac48957682e84befb0812f08e248f2bec7e",
+  "toolchain_recipe_sha256": "6ae3d280518b365dd503672482de691fb4554b4c799d89b1b86b926a2d8c017c",
+  "base_image": "registry.fedoraproject.org/fedora@sha256:f7d3478d02965da40131211c19fb827b4d6e3de0904e9d582a9354af47949c14",
+  "config_sha256": "e2995d52f963778ba13e48329dad9fb8fbcd784b6c7a43e97ec1a2940ab020ac",
+  "kernel_release": "7.2.9-senemos-uke",
+  "target": "fedora-rawhide-aarch64",
+  "compile_validation": "passed",
+  "payload_validation": "passed",
+  "source_rpm_preparation": "passed",
+  "module_count": 1146,
+  "module_abi_sha256": "4f89bf2bddd98dda770ac20640fe5fc2faae11bc5f10df66b35264e89a62b5a7",
+  "package_lifecycle_tested": true,
+  "package_test_image": "62074f590cc7137ac4a92469648c3fae2b2ba3958432b92b112041a793afc9c0",
+  "build_host_architecture": "x86_64",
+  "hardware_tested": false,
+  "boot_tested": false,
+  "signature_state": "unsigned-development-RPM",
+  "date": "2026-10-06",
+  "scope": "Local cross compilation and isolated AArch64 package lifecycle",
+  "image_sha256": "fe62e9fc7bce684081be719b2baa5d12ae392fbd8f9390153409cecdb6b5ff57",
+  "dtb_sha256": "f56014471bfb5bbcd5a02ab8d21506747f15ff076aaca1c840dd1f99a8239229",
+  "host_self_test_groups_passed": 9,
+  "stock_dt_malformed_fixtures_rejected": 6,
+  "ufs_table_comparison": {
+    "addresses_per_configuration": 79,
+    "configurations": [
+      "G4/A",
+      "G4/B",
+      "G5/A",
+      "G5/B"
+    ],
+    "result": "passed"
+  },
+  "console_config": {
+    "efi_stub": true,
+    "efi_framebuffer": true,
+    "simple_framebuffer": true,
+    "fbcon": true,
+    "terminus_16x32": true
+  },
+  "native_copr_validation": "separate subsequent build",
+  "board_ufs_enabled": false,
+  "board_usb_enabled": false,
+  "exact_installed_firmware_handoff_verified": false,
+  "flash_performed": false
+}

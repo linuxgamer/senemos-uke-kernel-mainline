@@ -1,0 +1,63 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: qcom: require the Uke DisplayPort DMA domain
+
+Require a real DMA domain before ASoC can construct or map the selected
+HDMI-only frontend PCM. Keep the closed registration profile unchanged.
+Select the existing DP codec and common jack helpers for the Uke card.
+The native provider's matching SID admission is applied after its existing
+sensor/display hooks by the separately checked native-profile preparation.
+
+--- a/sound/soc/qcom/qdsp6/q6apm-dai.c
++++ b/sound/soc/qcom/qdsp6/q6apm-dai.c
+@@ -14,6 +14,7 @@
+ #include <asm/div64.h>
+ #include <asm/dma.h>
+ #include <linux/dma-mapping.h>
++#include <linux/iommu.h>
+ #include <sound/pcm_params.h>
+ #include "q6apm.h"
+ 
+@@ -1037,6 +1038,20 @@
+ 	.remove_order   = SND_SOC_COMP_ORDER_EARLY,
+ };
+ 
++static int q6apm_hdmi_dma_ready(struct device *dev)
++{
++	struct iommu_domain *domain;
++
++	if (!of_property_read_bool(dev->of_node, "xiaomi,hdmi-only"))
++		return 0;
++	if (!of_machine_is_compatible("xiaomi,uke"))
++		return -ENODEV;
++	domain = iommu_get_domain_for_dev(dev);
++	if (!domain)
++		return -EPROBE_DEFER;
++	return iommu_is_dma_domain(domain) ? 0 : -EINVAL;
++}
++
+ static int q6apm_dai_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+@@ -1045,6 +1060,11 @@
+ 	struct of_phandle_args args;
+ 	int rc;
+ 
++	/* PCM construction maps DSP buffers before the first stream open. */
++	rc = q6apm_hdmi_dma_ready(dev);
++	if (rc)
++		return dev_err_probe(dev, rc, "HDMI frontend requires its DMA domain\n");
++
+ 	pdata = devm_kzalloc(dev, sizeof(*pdata), GFP_KERNEL);
+ 	if (!pdata)
+ 		return -ENOMEM;
+--- a/sound/soc/qcom/Kconfig
++++ b/sound/soc/qcom/Kconfig
+@@ -198,6 +198,8 @@
+ config SND_SOC_UKE
+ 	tristate "Uke AudioReach card registration"
+ 	depends on QCOM_APR && OF
++	select SND_SOC_QCOM_COMMON
++	select SND_SOC_HDMI_CODEC
+ 	select SND_SOC_QDSP6_APM
+ 	select SND_SOC_QDSP6_APM_DAI
+ 	help

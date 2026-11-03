@@ -1,0 +1,57 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] soc: qcom: detach APR receive batches under the queue lock
+
+RPMSG appends packets under rx_lock while the worker traverses the same
+list without holding it. Detach one batch under the spinlock, then walk
+and release that private list outside the lock. Newly queued packets stay
+in the shared list for the next scheduled worker pass. No callback or
+packet release runs under the queue spinlock.
+
+This is native queue ownership only; protocol parsing, static service
+unbind and transport teardown retain separate requirements.
+
+---
+--- a/drivers/soc/qcom/apr.c
++++ b/drivers/soc/qcom/apr.c
+@@ -329,24 +329,25 @@
+ 	struct packet_router *apr = container_of(work, struct packet_router, rx_work);
+ 	struct apr_rx_buf *abuf, *b;
+ 	unsigned long flags;
++	LIST_HEAD(packets);
+ 
+-	if (!list_empty(&apr->rx_list)) {
+-		list_for_each_entry_safe(abuf, b, &apr->rx_list, node) {
+-			switch (apr->type) {
+-			case PR_TYPE_APR:
+-				apr_do_rx_callback(apr, abuf);
+-				break;
+-			case PR_TYPE_GPR:
+-				gpr_do_rx_callback(apr, abuf);
+-				break;
+-			default:
+-				break;
+-			}
+-			spin_lock_irqsave(&apr->rx_lock, flags);
+-			list_del(&abuf->node);
+-			spin_unlock_irqrestore(&apr->rx_lock, flags);
+-			kfree(abuf);
++	spin_lock_irqsave(&apr->rx_lock, flags);
++	list_splice_init(&apr->rx_list, &packets);
++	spin_unlock_irqrestore(&apr->rx_lock, flags);
++
++	list_for_each_entry_safe(abuf, b, &packets, node) {
++		switch (apr->type) {
++		case PR_TYPE_APR:
++			apr_do_rx_callback(apr, abuf);
++			break;
++		case PR_TYPE_GPR:
++			gpr_do_rx_callback(apr, abuf);
++			break;
++		default:
++			break;
+ 		}
++		list_del(&abuf->node);
++		kfree(abuf);
+ 	}
+ }
+ 

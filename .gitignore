@@ -1,4 +1,5 @@
-/source-cache/
+/referances/*
+!/referances/README.md
 /build/
 /artifacts/
 /reports/private/

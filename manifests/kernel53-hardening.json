@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-30",
+  "kernel_release": "7.3.0-53",
+  "parent_copr_build": 11228578,
+  "parent_srpm_sha256": "31a8aca3d1da77d3b7ee7e19a68e2739d5119391160892fe3298aee5c4dfe261",
+  "protections": ["module-signature-enforcement", "integrity-lockdown", "fortify", "hardened-usercopy", "yama", "restricted-dmesg"],
+  "module_signing": {
+    "key_origin": "ephemeral COPR worker generation",
+    "algorithm": "RSA-4096/SHA-256",
+    "public_certificate": "versioned kernel identity/module-signing.x509",
+    "private_key_shipped": false,
+    "stable_cross_build_key": false,
+    "secure_boot_established": false
+  },
+  "research": [
+    {"id": "micode-uke-kernel", "commit": "5712080a4b0c0b1a879e6d145c601c649ddaddfd", "file": "arch/arm64/configs/gki_defconfig", "result": "FORTIFY, hardened usercopy and Android module signature protection enabled"},
+    {"id": "oneplus-nord4-common", "commit": "9006cd15161f1c628957b4a4ccbaf11e4db7e459", "file": "arch/arm64/configs/gki_defconfig", "result": "Same generic protection settings; Android signature policy is not portable"},
+    {"id": "upstream-linux", "commit": "4056b3c9d3c92ea45955641dbafeb9b960e146ef", "files": ["certs/Kconfig", "security/lockdown/Kconfig", "scripts/extract-module-sig.pl"], "result": "Standard per-build signing and integrity lockdown interfaces"}
+  ],
+  "physical_acceptance": false,
+  "remaining": "COPR build, cryptographic package checks, approved activation and recoverable tablet regression"
+}

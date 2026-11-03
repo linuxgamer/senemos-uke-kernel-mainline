@@ -1,0 +1,260 @@
+diff --git a/drivers/interconnect/qcom/qnoc-cliffs-usb.c b/drivers/interconnect/qcom/qnoc-cliffs-usb.c
+index 5ad22b0..ac61255 100644
+--- a/drivers/interconnect/qcom/qnoc-cliffs-usb.c
++++ b/drivers/interconnect/qcom/qnoc-cliffs-usb.c
+@@ -17,23 +17,29 @@
+ #define MASTER_APPSS_PROC	2
+ #define MASTER_LLCC	3
+ #define MASTER_QUP_0	6
++#define MASTER_QUP_1	7
+ #define MASTER_A1NOC_SNOC	8
++#define MASTER_A2NOC_SNOC	9
+ #define MASTER_GEM_NOC_CNOC	15
+ #define MASTER_SNOC_SF_MEM_NOC	27
+ #define MASTER_CNOC_CFG	32
+ #define MASTER_QUP_CORE_0	36
++#define MASTER_QUP_CORE_1	37
+ #define MASTER_UFS_MEM	48
+ #define MASTER_USB3_0	49
+ #define SLAVE_EBI1	512
+ #define SLAVE_QUP_0	540
++#define SLAVE_QUP_1	541
+ #define SLAVE_UFS_MEM_CFG	546
+ #define SLAVE_USB3_0	547
+ #define SLAVE_A1NOC_SNOC	551
++#define SLAVE_A2NOC_SNOC	552
+ #define SLAVE_GEM_NOC_CNOC	553
+ #define SLAVE_SNOC_GEM_NOC_SF	554
+ #define SLAVE_LLCC	555
+ #define SLAVE_CNOC_CFG	565
+ #define SLAVE_QUP_CORE_0	572
++#define SLAVE_QUP_CORE_1	573
+ 
+ static const struct regmap_config cliffs_icc_regmap_config = {
+ 	.reg_bits = 32,
+@@ -42,18 +48,24 @@ static const struct regmap_config cliffs_icc_regmap_config = {
+ };
+ 
+ static struct qcom_icc_node qhm_qup0;
++static struct qcom_icc_node qhm_qup1;
+ static struct qcom_icc_node xm_usb3_0;
+ static struct qcom_icc_node xm_ufs_mem;
+ static struct qcom_icc_node qup0_core_master;
++static struct qcom_icc_node qup1_core_master;
+ static struct qcom_icc_node qsm_cfg;
+ static struct qcom_icc_node qnm_gemnoc_cnoc;
+ static struct qcom_icc_node chm_apps;
+ static struct qcom_icc_node qnm_snoc_sf;
+ static struct qcom_icc_node llcc_mc;
+ static struct qcom_icc_node qnm_aggre1_noc;
++static struct qcom_icc_node qnm_aggre2_noc;
+ static struct qcom_icc_node qns_a1noc_snoc;
++static struct qcom_icc_node qns_a2noc_snoc;
+ static struct qcom_icc_node qup0_core_slave;
++static struct qcom_icc_node qup1_core_slave;
+ static struct qcom_icc_node qhs_qup0;
++static struct qcom_icc_node qhs_qup1;
+ static struct qcom_icc_node qhs_usb3_0;
+ static struct qcom_icc_node qhs_ufs_mem_cfg;
+ static struct qcom_icc_node qss_cfg;
+@@ -79,6 +91,23 @@ static struct qcom_icc_node qhm_qup0 = {
+ 	.link_nodes = { &qns_a1noc_snoc },
+ };
+ 
++static const struct qcom_icc_qosbox qhm_qup1_qos = {
++	.num_ports = 1,
++	.port_offsets = { 0x13000 },
++	.prio = 2,
++	.urg_fwd = 0,
++	.prio_fwd_disable = 1,
++};
++
++static struct qcom_icc_node qhm_qup1 = {
++	.name = "qhm_qup1",
++	.channels = 1,
++	.buswidth = 4,
++	.qosbox = &qhm_qup1_qos,
++	.num_links = 1,
++	.link_nodes = { &qns_a2noc_snoc },
++};
++
+ static const struct qcom_icc_qosbox xm_usb3_0_qos = {
+ 	.num_ports = 1,
+ 	.port_offsets = { 0x10000 },
+@@ -113,12 +142,20 @@ static struct qcom_icc_node qup0_core_master = {
+ 	.link_nodes = { &qup0_core_slave },
+ };
+ 
++static struct qcom_icc_node qup1_core_master = {
++	.name = "qup1_core_master",
++	.channels = 1,
++	.buswidth = 4,
++	.num_links = 1,
++	.link_nodes = { &qup1_core_slave },
++};
++
+ static struct qcom_icc_node qsm_cfg = {
+ 	.name = "qsm_cfg",
+ 	.channels = 1,
+ 	.buswidth = 4,
+-	.num_links = 3,
+-	.link_nodes = { &qhs_qup0, &qhs_usb3_0, &qhs_ufs_mem_cfg },
++	.num_links = 4,
++	.link_nodes = { &qhs_qup0, &qhs_qup1, &qhs_usb3_0, &qhs_ufs_mem_cfg },
+ };
+ 
+ static struct qcom_icc_node qnm_gemnoc_cnoc = {
+@@ -170,6 +207,14 @@ static struct qcom_icc_node qnm_aggre1_noc = {
+ 	.link_nodes = { &qns_gemnoc_sf },
+ };
+ 
++static struct qcom_icc_node qnm_aggre2_noc = {
++	.name = "qnm_aggre2_noc",
++	.channels = 1,
++	.buswidth = 16,
++	.num_links = 1,
++	.link_nodes = { &qns_gemnoc_sf },
++};
++
+ static struct qcom_icc_node qns_a1noc_snoc = {
+ 	.name = "qns_a1noc_snoc",
+ 	.channels = 1,
+@@ -178,6 +223,14 @@ static struct qcom_icc_node qns_a1noc_snoc = {
+ 	.link_nodes = { &qnm_aggre1_noc },
+ };
+ 
++static struct qcom_icc_node qns_a2noc_snoc = {
++	.name = "qns_a2noc_snoc",
++	.channels = 1,
++	.buswidth = 16,
++	.num_links = 1,
++	.link_nodes = { &qnm_aggre2_noc },
++};
++
+ static struct qcom_icc_node qup0_core_slave = {
+ 	.name = "qup0_core_slave",
+ 	.channels = 1,
+@@ -185,6 +238,13 @@ static struct qcom_icc_node qup0_core_slave = {
+ 	.num_links = 0,
+ };
+ 
++static struct qcom_icc_node qup1_core_slave = {
++	.name = "qup1_core_slave",
++	.channels = 1,
++	.buswidth = 4,
++	.num_links = 0,
++};
++
+ static struct qcom_icc_node qhs_qup0 = {
+ 	.name = "qhs_qup0",
+ 	.channels = 1,
+@@ -192,6 +252,13 @@ static struct qcom_icc_node qhs_qup0 = {
+ 	.num_links = 0,
+ };
+ 
++static struct qcom_icc_node qhs_qup1 = {
++	.name = "qhs_qup1",
++	.channels = 1,
++	.buswidth = 4,
++	.num_links = 0,
++};
++
+ static struct qcom_icc_node qhs_usb3_0 = {
+ 	.name = "qhs_usb3_0",
+ 	.channels = 1,
+@@ -310,6 +377,20 @@ static struct qcom_icc_bcm bcm_sn2 = {
+ 	.nodes = { &qnm_aggre1_noc },
+ };
+ 
++static struct qcom_icc_bcm bcm_sn3 = {
++	.name = "SN3",
++	.num_nodes = 1,
++	.nodes = { &qnm_aggre2_noc },
++};
++
++static struct qcom_icc_bcm bcm_qup1 = {
++	.name = "QUP1",
++	.keepalive = true,
++	.vote_scale = 1,
++	.num_nodes = 1,
++	.nodes = { &qup1_core_slave },
++};
++
+ static struct qcom_icc_node * const aggre1_noc_nodes[] = {
+ 	[MASTER_QUP_0] = &qhm_qup0,
+ 	[MASTER_UFS_MEM] = &xm_ufs_mem,
+@@ -325,13 +406,29 @@ static const struct qcom_icc_desc cliffs_aggre1_noc = {
+ 	.qos_requires_clocks = true,
+ };
+ 
++static struct qcom_icc_node * const aggre2_noc_nodes[] = {
++	[MASTER_QUP_1] = &qhm_qup1,
++	[SLAVE_A2NOC_SNOC] = &qns_a2noc_snoc,
++};
++
++static const struct qcom_icc_desc cliffs_aggre2_noc = {
++	.config = &cliffs_icc_regmap_config,
++	.nodes = aggre2_noc_nodes,
++	.num_nodes = ARRAY_SIZE(aggre2_noc_nodes),
++	.qos_required = true,
++	.qos_requires_clocks = true,
++};
++
+ static struct qcom_icc_node * const clk_virt_nodes[] = {
+ 	[MASTER_QUP_CORE_0] = &qup0_core_master,
+ 	[SLAVE_QUP_CORE_0] = &qup0_core_slave,
++	[MASTER_QUP_CORE_1] = &qup1_core_master,
++	[SLAVE_QUP_CORE_1] = &qup1_core_slave,
+ };
+ 
+ static struct qcom_icc_bcm * const clk_virt_bcms[] = {
+ 	&bcm_qup0,
++	&bcm_qup1,
+ };
+ 
+ static const struct qcom_icc_desc cliffs_clk_virt = {
+@@ -344,6 +441,7 @@ static const struct qcom_icc_desc cliffs_clk_virt = {
+ static struct qcom_icc_node * const cnoc_cfg_nodes[] = {
+ 	[MASTER_CNOC_CFG] = &qsm_cfg,
+ 	[SLAVE_QUP_0] = &qhs_qup0,
++	[SLAVE_QUP_1] = &qhs_qup1,
+ 	[SLAVE_UFS_MEM_CFG] = &qhs_ufs_mem_cfg,
+ 	[SLAVE_USB3_0] = &qhs_usb3_0,
+ };
+@@ -417,12 +515,14 @@ static const struct qcom_icc_desc cliffs_mc_virt = {
+ 
+ static struct qcom_icc_node * const system_noc_nodes[] = {
+ 	[MASTER_A1NOC_SNOC] = &qnm_aggre1_noc,
++	[MASTER_A2NOC_SNOC] = &qnm_aggre2_noc,
+ 	[SLAVE_SNOC_GEM_NOC_SF] = &qns_gemnoc_sf,
+ };
+ 
+ static struct qcom_icc_bcm * const system_noc_bcms[] = {
+ 	&bcm_sn0,
+ 	&bcm_sn2,
++	&bcm_sn3,
+ };
+ 
+ static const struct qcom_icc_desc cliffs_system_noc = {
+@@ -434,6 +534,7 @@ static const struct qcom_icc_desc cliffs_system_noc = {
+ 
+ static const struct of_device_id cliffs_usb_of_match[] = {
+ 	{ .compatible = "qcom,cliffs-aggre1_noc", .data = &cliffs_aggre1_noc },
++	{ .compatible = "qcom,cliffs-aggre2_noc", .data = &cliffs_aggre2_noc },
+ 	{ .compatible = "qcom,cliffs-clk_virt", .data = &cliffs_clk_virt },
+ 	{ .compatible = "qcom,cliffs-cnoc_cfg", .data = &cliffs_cnoc_cfg },
+ 	{ .compatible = "qcom,cliffs-cnoc_main", .data = &cliffs_cnoc_main },
+diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c b/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
+index ba090e4..0ace62b 100644
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
+@@ -830,7 +830,8 @@ static int qcom_uke_smmu_alloc_context_bank(struct arm_smmu_domain *domain,
+ 		u32 sid = fwspec->ids[i];
+ 
+ 		if (sid != 0x40 && sid != 0xb6 &&
+-		    !((sid == 0x60 || sid == 0xa3 || sid == 0x11400) &&
++		    !((sid == 0x60 || sid == 0xa3 || sid == 0x423 ||
++		       sid == 0x436 || sid == 0x11400) &&
+ 		      of_device_is_compatible(smmu->dev->of_node, "qcom,sm7675-boot-smmu")))
+ 			return dev_err_probe(dev, -EOPNOTSUPP, "outside Uke boot SMMU scope\n");
+ 		/* None of these streams has an ACTLR override in OEM Cliffs DT. */

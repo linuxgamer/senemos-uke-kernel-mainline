@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-18",
+  "scope": "Research identities, not accepted Uke firmware or a physical boot result",
+  "sources": [
+    {
+      "id": "uke-oem-dt",
+      "url": "https://github.com/MiCode/kernel_devicetree",
+      "commit": "94c84aeb9e517dbde546fc732033c184094c8e57",
+      "files": [
+        "qcom/cliffs.dtsi",
+        "qcom/cliffs-reserved-memory.dtsi"
+      ],
+      "license": "No SPDX marker in the two reviewed DT files; no OEM DT code copied",
+      "finding": "Uke PSCI SMC, timer and reservations; no EL2-exit firmware service implementation"
+    },
+    {
+      "id": "qualcomm-kodiak-exit",
+      "url": "https://github.com/tianocore/edk2-platforms",
+      "commit": "1c500d13a653cf0f556ecf7ce703c12874247efc",
+      "files": [
+        "Silicon/Qualcomm/KodiakPkg/Library/KodiakLib/KodiakHelper.S",
+        "Silicon/Qualcomm/KodiakPkg/Library/KodiakLib/KodiakHelper.h"
+      ],
+      "license": "BSD-2-Clause-Patent",
+      "finding": "Qualcomm early EL2 SMC ABI; SMMU reset to bypass is described; no Uke qualification"
+    },
+    {
+      "id": "uboot-exit-v5",
+      "url": "https://mail-archive.com/u-boot@lists.u-boot-project.org/msg09190.html",
+      "date": "2026-10-13",
+      "author": "Aswin Murugan",
+      "file": "arch/arm/mach-snapdragon/include/mach/gunyah_exit_boot0.h",
+      "license": "GPL-2.0-only",
+      "finding": "Early call before EL register initialization, preserving FDT; Dragonwing example, not Uke"
+    },
+    {
+      "id": "mu-silicium-palawan",
+      "url": "https://github.com/Project-Silicium/Mu-Silicium",
+      "commit": "3aa95a72d469234755e2bcf2841ec6c0e83863e9",
+      "files": [
+        "Silicon/Qualcomm/PalawanPkg",
+        "Platforms/Xiaomi/peridotPkg"
+      ],
+      "finding": "Shared platform comparison; no reviewed Uke EL2-exit implementation"
+    },
+    {
+      "id": "openabl",
+      "url": "https://github.com/OpenHandheldCollective/OpenABL",
+      "commit": "78b81b585f0f82882e9272cead99e1d395622de5",
+      "files": [
+        "Efi/Handover.c",
+        "Core/Carveouts.c"
+      ],
+      "finding": "Entry/page-table handling does not prove acquisition of EL2; board carveouts not copied"
+    },
+    {
+      "id": "arm64-boot",
+      "url": "https://docs.kernel.org/arch/arm64/booting.html",
+      "reviewed": "2026-10-18",
+      "finding": "FDT, cache, MMU, DMA, timer, GIC and all-CPU entry contract"
+    }
+  ],
+  "uke_firmware_service_supported": null,
+  "firmware_allowlist": [],
+  "hardware_tested": false,
+  "stock_early_firmware_modified": false
+}

@@ -1,0 +1,87 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] media: iris: match Cliffs after checking firmware availability
+
+Match the native SM7675 consumer with its checked power and firmware
+memory implementation. Check the existing firmware selection path before
+resource initialization and V4L2 registration, without authentication or
+powering the controller. Missing private firmware must not start a
+powered cleanup transaction merely because udev opens a codec node.
+
+---
+
+--- a/drivers/media/platform/qcom/iris/iris_probe.c
++++ b/drivers/media/platform/qcom/iris/iris_probe.c
+@@ -14,6 +14,7 @@
+ 
+ #include "iris_core.h"
+ #include "iris_ctrls.h"
++#include "iris_firmware.h"
+ #include "iris_vidc.h"
+ #include "iris_vpu_common.h"
+ 
+@@ -262,6 +263,12 @@
+ 		return core->irq;
+ 
+ 	core->iris_platform_data = of_device_get_match_data(core->dev);
++	/* Avoid a powered startup/unwind when the private Uke firmware is absent. */
++	if (core->iris_platform_data == &sm7675_data) {
++		ret = iris_fw_check_available(core);
++		if (ret)
++			return dev_err_probe(dev, ret, "native video firmware unavailable\n");
++	}
+ 
+ 	core->ubwc_cfg = qcom_ubwc_config_get_data();
+ 	if (IS_ERR(core->ubwc_cfg))
+@@ -374,6 +381,10 @@
+ 
+ static const struct of_device_id iris_dt_match[] = {
+ 	{
++		.compatible = "qcom,sm7675-iris",
++		.data = &sm7675_data,
++	},
++	{
+ 		.compatible = "qcom,milos-iris",
+ 		.data = &milos_data,
+ 	},
+--- a/drivers/media/platform/qcom/iris/iris_platform_vpu3x.c
++++ b/drivers/media/platform/qcom/iris/iris_platform_vpu3x.c
+@@ -198,7 +198,7 @@
+ 	.max_core_mbps = ((7680 * 4320) / 256) * 60,
+ };
+ 
+-/* Dormant until firmware mapping, providers and controller retention are closed. */
++/* Uke's native graph supplies the exact Cliffs firmware, domains and SMMU pair. */
+ const struct iris_platform_data sm7675_data = {
+ 	.firmware_desc_gen2 = &iris_vpu33_2p_gen2_desc,
+ 	.vpu_ops = &iris_vpu33_2p_ops,
+--- a/drivers/media/platform/qcom/iris/iris_firmware.c
++++ b/drivers/media/platform/qcom/iris/iris_firmware.c
+@@ -108,6 +108,18 @@
+ 	return firmware;
+ }
+ 
++int iris_fw_check_available(struct iris_core *core)
++{
++	const struct firmware *firmware;
++	const char *fw_name;
++
++	firmware = iris_detect_firmware(core, &fw_name);
++	if (IS_ERR(firmware))
++		return PTR_ERR(firmware);
++	release_firmware(firmware);
++	return 0;
++}
++
+ static int iris_load_fw_to_memory(struct iris_core *core)
+ {
+ 	const struct firmware *firmware = NULL;
+--- a/drivers/media/platform/qcom/iris/iris_firmware.h
++++ b/drivers/media/platform/qcom/iris/iris_firmware.h
+@@ -8,6 +8,7 @@
+ 
+ struct iris_core;
+ 
++int iris_fw_check_available(struct iris_core *core);
+ int iris_fw_load(struct iris_core *core);
+ int iris_fw_unload(struct iris_core *core);
+ int iris_set_hw_state(struct iris_core *core, bool resume);

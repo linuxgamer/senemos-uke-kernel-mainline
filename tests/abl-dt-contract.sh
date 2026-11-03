@@ -7,6 +7,12 @@ mkdir -p "$out"
 "$binary" "$input" "$ufs" "$usb" "$out/admitted.dtb"
 [[ $(fdtget -t s "$out/admitted.dtb" / compatible) == 'xiaomi,uke qcom,sm7675 qcom,cliffs' ]]
 [[ $(fdtget -t s "$out/admitted.dtb" / model) == 'Xiaomi Pad 7' ]]
+resin=/soc/qcom,spmi@c42d000/qcom,pmk8550@0/pon_hlos@1300/resin
+fdtget -t x "$out/admitted.dtb" "$resin" wakeup-source > "$out/resin-wakeup-source"
+[[ -z $(cat "$out/resin-wakeup-source") ]]
+for property in compatible linux,code interrupts; do
+    [[ $(fdtget -t x "$out/admitted.dtb" "$resin" "$property") == "$(fdtget -t x "$input" "$resin" "$property")" ]]
+done
 [[ $(fdtget -t s "$out/admitted.dtb" /soc/reboot_reason compatible) == nvmem-reboot-mode ]]
 [[ $(fdtget -t s "$out/admitted.dtb" /soc/reboot_reason nvmem-cell-names) == reboot-mode ]]
 [[ $(fdtget -t x "$out/admitted.dtb" /soc/reboot_reason nvmem-cells) == "$(fdtget -t x "$input" /soc/reboot_reason nvmem-cells)" ]]

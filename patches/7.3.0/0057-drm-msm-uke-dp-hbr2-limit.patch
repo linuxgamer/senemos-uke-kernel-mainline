@@ -1,0 +1,42 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] drm/msm/dp: retain the Uke OEM HBR2 source ceiling
+
+The Uke display override at MiCode display DT 4a3e1c391130237c5e8c2b250d1c94f3e25b9b11 limits max-lclk-frequency-khz to 540000. Bound any endpoint frequency by this limit. This adds no controller compatible, PHY tuning, DP graph or hardware acceptance.
+
+diff --git a/drivers/gpu/drm/msm/dp/dp_link.c b/drivers/gpu/drm/msm/dp/dp_link.c
+index 34a91e1..9363400 100644
+--- a/drivers/gpu/drm/msm/dp/dp_link.c
++++ b/drivers/gpu/drm/msm/dp/dp_link.c
+@@ -8,6 +8,7 @@
+ #include <drm/drm_device.h>
+ #include <drm/drm_of.h>
+ #include <drm/drm_print.h>
++#include <linux/of.h>
+ 
+ #include "dp_reg.h"
+ #include "dp_link.h"
+@@ -1318,6 +1319,9 @@ static int msm_dp_link_parse_dt(struct device *dev, struct msm_dp_link *msm_dp_l
+ 	msm_dp_link->max_dp_link_rate = msm_dp_link_link_frequencies(of_node);
+ 	if (!msm_dp_link->max_dp_link_rate)
+ 		msm_dp_link->max_dp_link_rate = DP_LINK_RATE_HBR2;
++	/* Uke OEM display override caps max-lclk-frequency-khz at 540000. */
++	if (of_machine_is_compatible("xiaomi,uke"))
++		msm_dp_link->max_dp_link_rate = min_t(u32, msm_dp_link->max_dp_link_rate, DP_LINK_RATE_HBR2);
+ 
+ 	return 0;
+ }
+diff --git a/drivers/phy/qualcomm/phy-qcom-qmp-combo.c b/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
+index 5b278fd..a26bc09 100644
+--- a/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
++++ b/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
+@@ -3598,6 +3598,10 @@ static int qmp_combo_dp_configure(struct phy *phy, union phy_configure_opts *opt
+ 	struct qmp_combo *qmp = phy_get_drvdata(phy);
+ 	const struct qmp_phy_cfg *cfg = qmp->cfg;
+ 
++	/* Keep sink compliance/debug requests within the Uke OEM HBR2 ceiling. */
++	if (of_machine_is_compatible("xiaomi,uke") && dp_opts->link_rate > 5400)
++		return -EINVAL;
++
+ 	mutex_lock(&qmp->phy_mutex);
+ 
+ 	memcpy(&qmp->dp_opts, dp_opts, sizeof(*dp_opts));

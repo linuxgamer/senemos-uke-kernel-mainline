@@ -1,0 +1,75 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] cpufreq: preserve all SM7675 EPSS core-count operating points
+
+Uke OEM qcom-cpufreq-hw.c disables the old turbo-indicator interpretation
+for EPSS and marks reduced-core rows as boost. A count of one is a real
+core count in the single-core Prime domain. Keep all fused frequency/voltage
+LUT rows there instead of exposing only the final row as boost.
+Scope the interpretation to qcom,sm7675; retain other platforms behavior.
+
+Source: MiCode/Xiaomi_Kernel_OpenSource uke-v-oss
+Commit: 5712080a4b0c0b1a879e6d145c601c649ddaddfd
+Path: drivers/cpufreq/qcom-cpufreq-hw.c (GPL-2.0-only)
+Validation: real LUT parser host fixtures and ARM64 object compilation.
+No hardware frequency or voltage limits are invented. Tablet validation open.
+
+--- a/drivers/cpufreq/qcom-cpufreq-hw.c
++++ b/drivers/cpufreq/qcom-cpufreq-hw.c
+@@ -204,7 +204,7 @@
+ static int qcom_cpufreq_hw_read_lut(struct device *cpu_dev,
+ 				    struct cpufreq_policy *policy)
+ {
+-	u32 data, src, lval, i, core_count, prev_freq = 0, freq;
++	u32 data, src, lval, i, core_count, max_core_count = 0, prev_freq = 0, freq;
+ 	u32 volt;
+ 	struct cpufreq_frequency_table	*table;
+ 	struct dev_pm_opp *opp;
+@@ -212,6 +212,8 @@
+ 	int ret;
+ 	struct qcom_cpufreq_data *drv_data = policy->driver_data;
+ 	const struct qcom_cpufreq_soc_data *soc_data = qcom_cpufreq.soc_data;
++	/* SM7675 EPSS uses core counts, not the older count-one turbo sentinel. */
++	bool core_count_boost = of_machine_is_compatible("qcom,sm7675");
+ 
+ 	table = kzalloc_objs(*table, soc_data->lut_max_entries + 1);
+ 	if (!table)
+@@ -244,6 +246,8 @@
+ 		src = FIELD_GET(LUT_SRC, data);
+ 		lval = FIELD_GET(LUT_L_VAL, data);
+ 		core_count = FIELD_GET(LUT_CORE_COUNT, data);
++		if (!i)
++			max_core_count = core_count;
+ 
+ 		data = readl_relaxed(drv_data->base + soc_data->reg_volt_lut +
+ 				      i * soc_data->lut_row_size);
+@@ -254,9 +258,11 @@
+ 		else
+ 			freq = cpu_hw_rate / 1000;
+ 
+-		if (freq != prev_freq && core_count != LUT_TURBO_IND) {
++		if (freq != prev_freq && (core_count_boost || core_count != LUT_TURBO_IND)) {
+ 			if (!qcom_cpufreq_update_opp(cpu_dev, freq, volt)) {
+ 				table[i].frequency = freq;
++				if (core_count_boost && core_count < max_core_count)
++					table[i].flags = CPUFREQ_BOOST_FREQ;
+ 				dev_dbg(cpu_dev, "index=%d freq=%d, core_count %d\n", i,
+ 				freq, core_count);
+ 			} else {
+@@ -264,7 +270,7 @@
+ 				table[i].frequency = CPUFREQ_ENTRY_INVALID;
+ 			}
+ 
+-		} else if (core_count == LUT_TURBO_IND) {
++		} else if (!core_count_boost && core_count == LUT_TURBO_IND) {
+ 			table[i].frequency = CPUFREQ_ENTRY_INVALID;
+ 		}
+ 
+@@ -279,7 +285,7 @@
+ 			 * Only treat the last frequency that might be a boost
+ 			 * as the boost frequency
+ 			 */
+-			if (prev->frequency == CPUFREQ_ENTRY_INVALID) {
++			if (!core_count_boost && prev->frequency == CPUFREQ_ENTRY_INVALID) {
+ 				if (!qcom_cpufreq_update_opp(cpu_dev, prev_freq, volt)) {
+ 					prev->frequency = prev_freq;
+ 					prev->flags = CPUFREQ_BOOST_FREQ;

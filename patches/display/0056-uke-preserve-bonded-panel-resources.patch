@@ -1,0 +1,85 @@
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_rm.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_rm.c
+@@ -353,13 +353,14 @@
+ static int _dpu_rm_reserve_lms(struct dpu_rm *rm,
+ 			       struct dpu_global_state *global_state,
+ 			       uint32_t crtc_id,
+-			       struct msm_display_topology *topology)
++			       struct msm_display_topology *topology,
++			       unsigned int lm_start)
+ 
+ {
+ 	int lm_idx[MAX_BLOCKS];
+ 	int pp_idx[MAX_BLOCKS];
+ 	int dspp_idx[MAX_BLOCKS] = {0};
+-	int i, lm_count = 0;
++	int i, p, lm_count = 0;
+ 
+ 	if (!topology->num_lm) {
+ 		DPU_ERROR("zero LMs in topology\n");
+@@ -367,8 +368,9 @@
+ 	}
+ 
+ 	/* Find a primary mixer */
+-	for (i = 0; i < ARRAY_SIZE(rm->mixer_blks) &&
+-			lm_count < topology->num_lm; i++) {
++	for (p = 0; p < ARRAY_SIZE(rm->mixer_blks) &&
++			lm_count < topology->num_lm; p++) {
++		i = (p + lm_start) % ARRAY_SIZE(rm->mixer_blks);
+ 		if (!rm->mixer_blks[i])
+ 			continue;
+ 
+@@ -418,8 +420,9 @@
+ 	for (i = 0; i < lm_count; i++) {
+ 		global_state->mixer_to_crtc_id[lm_idx[i]] = crtc_id;
+ 		global_state->pingpong_to_crtc_id[pp_idx[i]] = crtc_id;
+-		global_state->dspp_to_crtc_id[dspp_idx[i]] =
+-			topology->num_dspp ? crtc_id : 0;
++		/* A stream without color blocks must not clear another stream's DSPP. */
++		if (topology->num_dspp)
++			global_state->dspp_to_crtc_id[dspp_idx[i]] = crtc_id;
+ 
+ 		trace_dpu_rm_reserve_lms(lm_idx[i] + LM_0, crtc_id,
+ 					 pp_idx[i] + PINGPONG_0);
+@@ -669,11 +672,12 @@
+ 		struct dpu_rm *rm,
+ 		struct dpu_global_state *global_state,
+ 		uint32_t crtc_id,
+-		struct msm_display_topology *topology)
++		struct msm_display_topology *topology,
++		unsigned int lm_start)
+ {
+ 	int ret;
+ 
+-	ret = _dpu_rm_reserve_lms(rm, global_state, crtc_id, topology);
++	ret = _dpu_rm_reserve_lms(rm, global_state, crtc_id, topology, lm_start);
+ 	if (ret) {
+ 		DPU_ERROR("unable to find appropriate mixers\n");
+ 		return ret;
+@@ -765,6 +769,9 @@
+ 		struct drm_crtc *crtc,
+ 		struct msm_display_topology *topology)
+ {
++	struct msm_drm_private *priv;
++	struct dpu_kms *kms;
++	unsigned int lm_start = 0;
+ 	int ret;
+ 
+ 	if (IS_ERR(global_state)) {
+@@ -778,7 +785,15 @@
+ 		      topology->num_lm, topology->num_dsc,
+ 		      topology->num_intf);
+ 
+-	ret = _dpu_rm_make_reservation(rm, global_state, crtc->base.id, topology);
++	priv = crtc->dev->dev_private;
++	kms = to_dpu_kms(priv->kms);
++	/* Leave the bonded panel's DSPP pair available even when it starts off. */
++	if (kms->catalog == &dpu_sm7675_cfg && topology->num_lm == 1 &&
++	    topology->num_intf == 1 && !topology->num_dsc && !topology->cwb_enabled &&
++	    kms->catalog->dspp_count &&
++	    kms->catalog->dspp_count <= ARRAY_SIZE(rm->mixer_blks))
++		lm_start = kms->catalog->dspp_count - 1;
++	ret = _dpu_rm_make_reservation(rm, global_state, crtc->base.id, topology, lm_start);
+ 	if (ret)
+ 		DPU_ERROR("failed to reserve hw resources: %d\n", ret);
+ 

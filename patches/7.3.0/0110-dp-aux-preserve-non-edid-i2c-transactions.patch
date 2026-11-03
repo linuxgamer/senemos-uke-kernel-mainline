@@ -1,0 +1,51 @@
+From: Uke Linux contributors
+Subject: [PATCH] drm/msm/dp: preserve non-EDID I2C transaction boundaries
+
+The EDID workaround injects offset writes into DDC/CI reads at address
+0x37. It also forces write transactions to remain open while acknowledging
+the zero-sized stop without sending it. A GET_VCP request therefore lacks
+its terminating stop, and subsequent reads return zero-filled replies.
+
+Use the existing no_zero_sized contract so the DRM helper marks the final
+payload, honor MOT outside the EDID protocol, and limit offset emulation to
+EDID reads. Keep the EDID workaround for the final payload too. Native AUX,
+PM, link admission and error handling are unchanged.
+
+--- a/drivers/gpu/drm/msm/dp/dp_aux.c
++++ b/drivers/gpu/drm/msm/dp/dp_aux.c
+@@ -281,11 +281,11 @@ static void msm_dp_aux_transfer_helper(struct msm_dp_aux_private *aux,
+ 	u32 message_size = 0x10;
+ 	u32 segment_address = 0x30;
+ 	u32 const edid_block_length = 0x80;
+-	bool i2c_mot = input_msg->request & DP_AUX_I2C_MOT;
+ 	bool i2c_read = input_msg->request &
+ 		(DP_AUX_I2C_READ & DP_AUX_NATIVE_READ);
+ 
+-	if (!i2c_mot || !i2c_read || (input_msg->size == 0))
++	if (aux->native || input_msg->address != 0x50 ||
++	    !i2c_read || input_msg->size == 0)
+ 		return;
+ 
+ 	/*
+@@ -396,7 +396,11 @@ static ssize_t msm_dp_aux_transfer(struct drm_dp_aux *msm_dp_aux,
+ 	aux->read = msg->request & (DP_AUX_I2C_READ & DP_AUX_NATIVE_READ);
+ 	aux->cmd_busy = true;
+ 
+-	if (aux->read) {
++	if (!aux->native && msg->address != 0x50 && msg->address != 0x30) {
++		/* DDC/CI needs the caller's STOP, not EDID offset emulation. */
++		aux->no_send_addr = true;
++		aux->no_send_stop = msg->request & DP_AUX_I2C_MOT;
++	} else if (aux->read) {
+ 		aux->no_send_addr = true;
+ 		aux->no_send_stop = false;
+ 	} else {
+@@ -708,6 +712,8 @@ struct drm_dp_aux *msm_dp_aux_get(struct device *dev,
+ 	aux->msm_dp_aux.name = "dpu_dp_aux";
+ 	aux->msm_dp_aux.dev = dev;
+ 	aux->msm_dp_aux.transfer = msm_dp_aux_transfer;
++	/* The transfer callback acknowledges but cannot send bare addresses. */
++	aux->msm_dp_aux.no_zero_sized = true;
+ 	aux->msm_dp_aux.wait_hpd_asserted = msm_dp_wait_hpd_asserted;
+ 	drm_dp_aux_init(&aux->msm_dp_aux);
+ 

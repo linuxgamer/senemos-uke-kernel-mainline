@@ -1,0 +1,170 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: hwmon: qcom-bcl: admit the exact retained Uke PM7550BA node
+
+Keep the OEM thermal graph and PMXR2230 separate. Admit only the measured
+revision, base, parent, IRQ layout and legacy names before BCL registration.
+Use the OEM rising-edge IRQ request without rewriting the retained FDT.
+
+--- a/drivers/hwmon/qcom-bcl-hwmon.c
++++ b/drivers/hwmon/qcom-bcl-hwmon.c
+@@ -15,6 +15,7 @@
+ #include <linux/math64.h>
+ #include <linux/module.h>
+ #include <linux/mutex.h>
++#include <linux/of.h>
+ #include <linux/platform_device.h>
+ #include <linux/property.h>
+ #include <linux/regmap.h>
+@@ -222,6 +223,7 @@
+ 
+ /**
+  * struct bcl_device - Main BCL device structure
++ * @legacy_uke: Exact retained Uke vendor DT resource contract
+  * @dev: Pointer to device structure
+  * @regmap: Regmap for accessing PMIC registers
+  * @base: the BCL regbase offset from regmap
+@@ -243,6 +245,7 @@
+  * and alarm handling.
+  */
+ struct bcl_device {
++	bool legacy_uke;
+ 	struct device		*dev;
+ 	struct regmap		*regmap;
+ 	u16			base;
+@@ -297,6 +300,71 @@
+ 	[BCL_LIMIT_ALARM_LVL2] = "emergency",
+ };
+ 
++static const char * const bcl_uke_int_names[BCL_LIMIT_ALARM_MAX] = {
++	"bcl-lvl0", "bcl-lvl1", "bcl-lvl2",
++};
++
++/* Preserve the retained vendor thermal graph; admit only this measured PMIC. */
++static bool bcl_legacy_uke_match(struct device *dev)
++{
++	static const u32 expected_reg[] = { 0x4700, 0x100 };
++	static const u32 expected_irqs[] = { 7, 0x47, 0, 0, 7, 0x47, 1, 0, 7, 0x47, 2, 0 };
++	struct device_node *node;
++	u32 reg[2], irqs[12];
++	bool match;
++	int i;
++
++	if (!of_machine_is_compatible("xiaomi,uke") ||
++	    !of_machine_is_compatible("qcom,sm7675") ||
++	    !of_device_is_compatible(dev->of_node, "qcom,bcl-v5"))
++		return false;
++	node = of_find_node_by_path("/soc/qcom,spmi@c42d000/qcom,pm7550ba@7/bcl@4700");
++	match = node && node == dev->of_node;
++	of_node_put(node);
++	if (!match || !dev->parent || dev->parent->of_node != dev->of_node->parent ||
++	    of_property_present(dev->of_node, "interrupts-extended") ||
++	    of_property_present(dev->of_node, "interrupt-parent") ||
++	    of_property_present(dev->parent->of_node, "interrupt-parent") ||
++	    !of_device_is_compatible(dev->parent->of_node, "qcom,spmi-pmic") ||
++	    of_property_count_u32_elems(dev->parent->of_node, "reg") != 2 ||
++	    of_property_read_u32_array(dev->parent->of_node, "reg", reg, 2) ||
++	    reg[0] != 7 || reg[1] != 0 ||
++	    of_property_count_u32_elems(dev->of_node, "reg") != 2 ||
++	    of_property_read_u32_array(dev->of_node, "reg", reg, 2) ||
++	    memcmp(reg, expected_reg, sizeof(reg)) ||
++	    of_property_count_u32_elems(dev->of_node, "interrupts") != 12 ||
++	    of_property_read_u32_array(dev->of_node, "interrupts", irqs, 12) ||
++	    memcmp(irqs, expected_irqs, sizeof(irqs)) ||
++	    of_property_count_strings(dev->of_node, "interrupt-names") != 3)
++		return false;
++	for (i = 0; i < ARRAY_SIZE(bcl_uke_int_names); i++) {
++		const char *name;
++
++		if (of_property_read_string_index(dev->of_node, "interrupt-names", i, &name) ||
++		    strcmp(name, bcl_uke_int_names[i]))
++			return false;
++	}
++	return true;
++}
++
++static int bcl_legacy_uke_revision(struct bcl_device *bcl)
++{
++	static const struct { u8 offset, value; } metadata[] = {
++		{ 0, 2 }, { 1, 4 }, { 3, 2 }, { 4, 9 }, { 5, 2 }, { 0xe, 0x47 }, { 0xf, 0 },
++	};
++	unsigned int value;
++	int i, ret;
++
++	for (i = 0; i < ARRAY_SIZE(metadata); i++) {
++		ret = regmap_read(bcl->regmap, bcl->base + metadata[i].offset, &value);
++		if (ret)
++			return ret;
++		if (value != metadata[i].value)
++			return -ENODEV;
++	}
++	return 0;
++}
++
+ static const struct reg_field bcl_pm7250b_reg_fields[] = {
+ 	[F_V_MAJOR]	= REG_FIELD(REVISION2, 0, 7),
+ 	[F_V_MINOR]	= REG_FIELD(REVISION1, 0, 7),
+@@ -1257,6 +1325,8 @@
+ static int bcl_alarm_irq_init(struct platform_device *pdev,
+ 			      struct bcl_device *bcl)
+ {
++	const char * const *names = bcl->legacy_uke ? bcl_uke_int_names : bcl_int_names;
++	unsigned long flags = IRQF_ONESHOT | (bcl->legacy_uke ? IRQF_TRIGGER_RISING : 0);
+ 	int ret, irq_num, i;
+ 	struct bcl_alarm_data *alarm;
+ 
+@@ -1271,7 +1341,7 @@
+ 		/* Initialize work before IRQ request */
+ 		INIT_DELAYED_WORK(&alarm->alarm_poll_work, bcl_alarm_enable_poll);
+ 
+-		irq_num = platform_get_irq_byname(pdev, bcl_int_names[i]);
++		irq_num = platform_get_irq_byname(pdev, names[i]);
+ 		if (irq_num < 0)
+ 			return irq_num;
+ 
+@@ -1279,8 +1349,8 @@
+ 		alarm->irq_enabled = true;
+ 
+ 		ret = devm_request_threaded_irq(&pdev->dev, irq_num, NULL,
+-						bcl_handle_alarm, IRQF_ONESHOT,
+-						bcl_int_names[i], alarm);
++						bcl_handle_alarm, flags,
++						names[i], alarm);
+ 		if (ret)
+ 			return ret;
+ 
+@@ -1331,9 +1401,12 @@
+ 
+ 	bcl->dev = &pdev->dev;
+ 	bcl->desc = device_get_match_data(&pdev->dev);
+-	if (!bcl->desc)
+-		return dev_err_probe(&pdev->dev, -EINVAL, "Failed to get device match data\n");
+-
++	if (!bcl->desc) {
++		if (!bcl_legacy_uke_match(&pdev->dev))
++			return -ENODEV;
++		bcl->desc = &pm7550ba_data;
++		bcl->legacy_uke = true;
++	}
+ 	ret = devm_mutex_init(bcl->dev, &bcl->lock);
+ 	if (ret)
+ 		return ret;
+@@ -1347,6 +1420,11 @@
+ 		return dev_err_probe(&pdev->dev, ret, "Failed to read 'reg' property\n");
+ 
+ 	bcl->base = reg;
++	if (bcl->legacy_uke) {
++		ret = bcl_legacy_uke_revision(bcl);
++		if (ret)
++			return dev_err_probe(&pdev->dev, ret, "Unqualified Uke BCL revision\n");
++	}
+ 
+ 	ret = bcl_regmap_field_init(bcl->dev, bcl, bcl->desc);
+ 	if (ret < 0)
+@@ -1390,6 +1468,7 @@
+ }
+ 
+ static const struct of_device_id bcl_match[] = {
++	{ .compatible = "qcom,bcl-v5" },
+ 	{
+ 		.compatible = "qcom,pm7250b-bcl",
+ 		.data = &pm7250b_data,

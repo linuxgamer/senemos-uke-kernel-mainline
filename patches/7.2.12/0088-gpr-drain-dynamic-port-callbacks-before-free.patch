@@ -1,0 +1,103 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] soc: qcom: drain dynamic GPR callbacks before port free
+
+Receive drops the service-map spinlock before invoking a GPR callback.
+A concurrent dynamic-port close can remove/free the service and graph
+while that callback still uses them. Serialize the already ordered GPR
+receive path with dynamic-port removal using a sleeping mutex. Keep the
+callback outside the service-map spinlock and wait before freeing the
+port or releasing the AudioReach graph's dependent state.
+
+Document that port free runs outside callbacks in process context. The
+native graph callback only submits asynchronous data commands and does
+not close its own port. No IRQ/RPMSG receive path takes the new mutex.
+Static service driver unbind, transport/PDR teardown and concurrent
+senders retain their own lifetime requirements; this is not their fix.
+
+OEM Uke and same-SoC OnePlus GPR-lite use different dispatch/lifetime
+integration and provide no drop-in native fix. No donor code is copied.
+
+---
+--- a/drivers/soc/qcom/apr.c
++++ b/drivers/soc/qcom/apr.c
+@@ -4,6 +4,7 @@
+ 
+ #include <linux/kernel.h>
+ #include <linux/module.h>
++#include <linux/mutex.h>
+ #include <linux/device.h>
+ #include <linux/spinlock.h>
+ #include <linux/idr.h>
+@@ -31,6 +32,7 @@
+ 	struct device *dev;
+ 	spinlock_t svcs_lock;
+ 	spinlock_t rx_lock;
++	struct mutex callback_lock;
+ 	struct idr svcs_idr;
+ 	int dest_domain_id;
+ 	int type;
+@@ -81,9 +83,11 @@
+ 	struct packet_router *gpr = port->pr;
+ 	unsigned long flags;
+ 
++	mutex_lock(&gpr->callback_lock);
+ 	spin_lock_irqsave(&gpr->svcs_lock, flags);
+ 	idr_remove(&gpr->svcs_idr, port->id);
+ 	spin_unlock_irqrestore(&gpr->svcs_lock, flags);
++	mutex_unlock(&gpr->callback_lock);
+ 
+ 	kfree(port);
+ }
+@@ -301,6 +305,7 @@
+ 		resp.payload = buf + (hdr_size *  4);
+ 
+ 
++	mutex_lock(&gpr->callback_lock);
+ 	spin_lock_irqsave(&gpr->svcs_lock, flags);
+ 	svc = idr_find(&gpr->svcs_idr, hdr->dest_port);
+ 	spin_unlock_irqrestore(&gpr->svcs_lock, flags);
+@@ -308,11 +313,13 @@
+ 	if (!svc) {
+ 		dev_err(gpr->dev, "GPR: Port(%x) is not registered\n",
+ 			hdr->dest_port);
++		mutex_unlock(&gpr->callback_lock);
+ 		return -EINVAL;
+ 	}
+ 
+ 	if (svc->callback)
+ 		svc->callback(&resp, svc->priv, 0);
++	mutex_unlock(&gpr->callback_lock);
+ 
+ 	return 0;
+ }
+@@ -649,6 +656,7 @@
+ 	INIT_LIST_HEAD(&apr->rx_list);
+ 	spin_lock_init(&apr->rx_lock);
+ 	spin_lock_init(&apr->svcs_lock);
++	mutex_init(&apr->callback_lock);
+ 	idr_init(&apr->svcs_idr);
+ 
+ 	ret = of_apr_add_pd_lookups(dev);
+--- a/sound/soc/qcom/qdsp6/q6apm.c
++++ b/sound/soc/qcom/qdsp6/q6apm.c
+@@ -828,9 +828,9 @@
+ {
+ 	struct audioreach_graph *ar_graph = graph->ar_graph;
+ 
++	gpr_free_port(graph->port);
+ 	graph->ar_graph = NULL;
+ 	kref_put(&ar_graph->refcount, q6apm_put_audioreach_graph);
+-	gpr_free_port(graph->port);
+ 	kfree(graph);
+ 
+ 	return 0;
+--- a/include/linux/soc/qcom/apr.h
++++ b/include/linux/soc/qcom/apr.h
+@@ -190,6 +190,7 @@
+ 
+ gpr_port_t *gpr_alloc_port(gpr_device_t *gdev, struct device *dev,
+ 				gpr_port_cb cb, void *priv);
++/* Drains receive callbacks; call from process context outside a callback. */
+ void gpr_free_port(gpr_port_t *port);
+ int gpr_send_port_pkt(gpr_port_t *port, const struct gpr_pkt *pkt);
+ int gpr_send_pkt(gpr_device_t *gdev, const struct gpr_pkt *pkt);

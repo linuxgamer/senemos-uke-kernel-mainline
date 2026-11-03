@@ -1,0 +1,114 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] slimbus: qcom-ngd: propagate startup failures before registration
+
+Do not enable message queues after DMA setup failed. Propagate both setup
+paths and runtime-resume failures to the UP worker, and retain the startup
+PM reference when startup fails. Accept positive pm_runtime_resume results.
+Treat an interrupted QMI wait as a failed wait rather than a ready service.
+
+This deliberately leaves DMA teardown, duplicate SSR/PDR event ownership
+and controller removal unchanged. Those lifecycle defects still gate DSP
+hardware tests; error propagation alone does not qualify SLIMbus or audio.
+
+--- a/drivers/slimbus/qcom-ngd-ctrl.c
++++ b/drivers/slimbus/qcom-ngd-ctrl.c
+@@ -1146,13 +1146,17 @@
+ 	return 0;
+ }
+ 
+-static void qcom_slim_ngd_setup(struct qcom_slim_ngd_ctrl *ctrl)
++static int qcom_slim_ngd_setup(struct qcom_slim_ngd_ctrl *ctrl)
+ {
+ 	u32 cfg = readl_relaxed(ctrl->ngd->base);
++	int ret;
+ 
+ 	if (ctrl->state == QCOM_SLIM_NGD_CTRL_DOWN ||
+-		ctrl->state == QCOM_SLIM_NGD_CTRL_ASLEEP)
+-		qcom_slim_ngd_init_dma(ctrl);
++		ctrl->state == QCOM_SLIM_NGD_CTRL_ASLEEP) {
++		ret = qcom_slim_ngd_init_dma(ctrl);
++		if (ret)
++			return ret;
++	}
+ 
+ 	/* By default enable message queues */
+ 	cfg |= NGD_CFG_RX_MSGQ_EN;
+@@ -1163,6 +1167,7 @@
+ 		cfg |= NGD_CFG_ENABLE;
+ 
+ 	writel_relaxed(cfg, ctrl->ngd->base);
++	return 0;
+ }
+ 
+ static int qcom_slim_ngd_power_up(struct qcom_slim_ngd_ctrl *ctrl)
+@@ -1203,8 +1208,7 @@
+ 			dev_info(ctrl->dev, "Subsys restart: ADSP active framer\n");
+ 			return 0;
+ 		}
+-		qcom_slim_ngd_setup(ctrl);
+-		return 0;
++		return qcom_slim_ngd_setup(ctrl);
+ 	}
+ 
+ 	/*
+@@ -1218,7 +1222,9 @@
+ 
+ 	writel_relaxed(rx_msgq|SLIM_RX_MSGQ_TIMEOUT_VAL,
+ 				ngd->base + NGD_RX_MSGQ_CFG);
+-	qcom_slim_ngd_setup(ctrl);
++	ret = qcom_slim_ngd_setup(ctrl);
++	if (ret)
++		return ret;
+ 
+ 	time_left = wait_for_completion_timeout(&ctrl->reconf, HZ);
+ 	if (!time_left) {
+@@ -1322,7 +1328,7 @@
+ 		ctrl->state = QCOM_SLIM_NGD_CTRL_AWAKE;
+ 	}
+ 
+-	return 0;
++	return ret;
+ }
+ 
+ static int qcom_slim_ngd_enable(struct qcom_slim_ngd_ctrl *ctrl, bool enable)
+@@ -1339,9 +1345,11 @@
+ 		complete(&ctrl->qmi.qmi_comp);
+ 		if (!pm_runtime_enabled(ctrl->ctrl.dev) ||
+ 			 !pm_runtime_suspended(ctrl->ctrl.dev))
+-			qcom_slim_ngd_runtime_resume(ctrl->ctrl.dev);
++			ret = qcom_slim_ngd_runtime_resume(ctrl->ctrl.dev);
+ 		else
+-			pm_runtime_resume(ctrl->ctrl.dev);
++			ret = pm_runtime_resume(ctrl->ctrl.dev);
++		if (ret < 0)
++			return ret;
+ 
+ 		pm_runtime_mark_last_busy(ctrl->ctrl.dev);
+ 		pm_runtime_put(ctrl->ctrl.dev);
+@@ -1450,18 +1458,22 @@
+ static void qcom_slim_ngd_up_worker(struct work_struct *work)
+ {
+ 	struct qcom_slim_ngd_ctrl *ctrl;
++	long ret;
+ 
+ 	ctrl = container_of(work, struct qcom_slim_ngd_ctrl, ngd_up_work);
+ 
+ 	/* Make sure qmi service is up before continuing */
+-	if (!wait_for_completion_interruptible_timeout(&ctrl->qmi_up,
+-						       msecs_to_jiffies(MSEC_PER_SEC))) {
+-		dev_err(ctrl->dev, "QMI wait timeout\n");
++	ret = wait_for_completion_interruptible_timeout(&ctrl->qmi_up,
++						msecs_to_jiffies(MSEC_PER_SEC));
++	if (ret <= 0) {
++		dev_err(ctrl->dev, "QMI wait failed:%ld\n", ret);
+ 		return;
+ 	}
+ 
+ 	mutex_lock(&ctrl->ssr_lock);
+-	qcom_slim_ngd_enable(ctrl, true);
++	ret = qcom_slim_ngd_enable(ctrl, true);
++	if (ret)
++		dev_err(ctrl->dev, "NGD startup failed:%ld\n", ret);
+ 	mutex_unlock(&ctrl->ssr_lock);
+ }
+ 

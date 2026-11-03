@@ -139,13 +139,14 @@ diff --git a/drivers/gpu/drm/msm/dsi/dsi_host.c b/drivers/gpu/drm/msm/dsi/dsi_ho
 index 2561f88..bcebb60 100644
 --- a/drivers/gpu/drm/msm/dsi/dsi_host.c
 +++ b/drivers/gpu/drm/msm/dsi/dsi_host.c
-@@ -204,6 +204,8 @@ struct msm_dsi_host {
+@@ -204,7 +204,9 @@ struct msm_dsi_host {
  	struct regmap *sfpb;
  
  	struct drm_display_mode *mode;
 +	struct drm_display_mode *uke_dfps_mode;
 +	bool uke_dfps_staged;
  	struct drm_dsc_config *dsc;
+ 	unsigned int dsc_slice_per_pkt;
  
  	/* connected device info */
 @@ -310,7 +312,8 @@ static bool dsi_uke_o82_powered_profile(struct msm_dsi_host *msm_host)

@@ -1,0 +1,27 @@
+Subject: [PATCH] power: supply: qcom_battmgr: propagate Uke Xiaomi status events
+
+The Uke OEM handle_notification() reports a battery change for notification
+payload 0x50; the shared Xiaomi GLINK implementation in Peridot does likewise.
+The Uke queue currently discards this payload, preventing event-driven battery
+consumers from observing vendor status changes until another event or poll.
+
+Route the validated Uke notification through the existing battery event path.
+Keep raw opcode 0x50 messages, reply matching and charger controls unchanged.
+This notification is not a bypass-state or electrical-isolation indication.
+
+References: MiCode/Xiaomi_Kernel_OpenSource 5712080a4b0c0b1a879e6d145c601c649ddaddfd,
+drivers/power/supply/qti_battery_charger.c; redzrush101/linux
+2ed9eadbecae21ef51134e556951e7305ba65f88, drivers/power/supply/qcom_battmgr.c.
+Original GPL-2.0-only Linux Foundation/Linaro/Qualcomm attribution is retained.
+
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -1686,7 +1686,7 @@
+ 	notification = le32_to_cpu(msg->notification);
+ 	notification &= 0xff;
+ 	if (battmgr->variant == QCOM_BATTMGR_UKE && notification == 0x50)
+-		return;
++		notification = NOTIF_BAT_PROPERTY;
+ 	switch (notification) {
+ 	case NOTIF_BAT_INFO:
+ 		battmgr->info.valid = false;

@@ -1,0 +1,25 @@
+From: Uke Linux contributors <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] regulator: admit the exact Uke NFC L7E resource
+
+Uke OEM DT 94c84aeb9e517dbde546fc732033c184094c8e57 describes the
+POCO tag supply as L7E in qcom/uke-sm8635.dtsi and the exact ldoe7
+resource in qcom/cliffs-regulators.dtsi. Native release 33 leaves the
+tag deferred because this resource is outside the reviewed allowlist.
+
+Retain OEM constraints and the existing provider's command-DB validation,
+request ownership and failure paths. This adds no guessed voltage or
+board value and does not establish physical RF acceptance. The tag
+transport retains its separate exact POCO model admission.
+
+--- a/drivers/regulator/qcom-rpmh-regulator-uke.c
++++ b/drivers/regulator/qcom-rpmh-regulator-uke.c
+@@ -2012,7 +2012,8 @@
+ 	    strcmp(aggr_vreg->resource_name, "ldob5") &&
+ 	    strcmp(aggr_vreg->resource_name, "ldob12") &&
+ 	    strcmp(aggr_vreg->resource_name, "ldob8") &&
+-	    strcmp(aggr_vreg->resource_name, "ldod3"))
++	    strcmp(aggr_vreg->resource_name, "ldod3") &&
++	    strcmp(aggr_vreg->resource_name, "ldoe7"))
+ 		return -ENODEV;
+ 
+ 	aggr_vreg->addr = cmd_db_read_addr(aggr_vreg->resource_name);

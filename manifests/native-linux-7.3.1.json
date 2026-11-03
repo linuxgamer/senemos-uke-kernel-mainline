@@ -1,0 +1,521 @@
+{
+  "schema_version": 1,
+  "version": "7.3.1",
+  "upstream_commit": "79a907609d53d5cd645b42c11550d295d43abf99",
+  "source_sha256": "fa595aad93734f829c963c2a90ef7c3673224fd7fdae7b49406e397cde2de231",
+  "source_url": "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.3.1.tar.xz",
+  "signature_url": "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.3.1.tar.sign",
+  "signer": "647F28654894E3BD457199BE38DBBDC86092693E",
+  "source_date_epoch": 1793362198,
+  "donor_commit": "32cad9ccd383ff4b37d8a5e7f88a8bfdcc07307e",
+  "patches": [
+    {
+      "path": "patches/7.3.0/0001-cliffs-clock-handoff.patch",
+      "sha256": "139deaba8c38c4c374a162accd7f889779929f2895f59a70d58fe0dcc4972862"
+    },
+    {
+      "path": "patches/7.3.0/0002-uke-rpmh-regulators.patch",
+      "sha256": "2560e67c86cfb3d5e4cad443775c2ffcdf4a0b83f776e510dbff17f1fc404146"
+    },
+    {
+      "path": "patches/7.3.0/0003-cliffs-tlmm.patch",
+      "sha256": "8040aecc97ad055d8dad9a6b0dc76a9087e4742f2d5003b846f2af97906b53e4"
+    },
+    {
+      "path": "patches/7.3.0/0004-cliffs-interconnect.patch",
+      "sha256": "ced8b8823875f77076638ecec583b1e2aac09d1a89d738a686b2e938f1a89dcd"
+    },
+    {
+      "path": "patches/7.3.0/0005-uke-smmu-handoff.patch",
+      "sha256": "4e2e00cbfe6bf28819553f110de4e1b11004516934b8e3b6a15b11a413a7729b"
+    },
+    {
+      "path": "patches/7.3.0/0006-uke-usb-v7-api.patch",
+      "sha256": "0245aa0017989821744c87572c8986acd2be2eb4d3778a785c8d82c296812e63"
+    },
+    {
+      "path": "patches/7.3.0/0007-uke-independent-dts.patch",
+      "sha256": "81b515d04e7463534074e75a651e7a4803fad536240a52dadd0d83e7a6b724c0"
+    },
+    {
+      "path": "patches/7.3.0/0008-sm7675-ufs-phy.patch",
+      "sha256": "80aefafd680136bf187dc20c632e7d71b19644528055fe41c262b97e0826a968"
+    },
+    {
+      "path": "patches/7.3.0/0009-cliffs-ufs-interconnect.patch",
+      "sha256": "fa1d9a1743fba4de7d163f48c8127b752f560d94bfecfde9590659c48b37debe"
+    },
+    {
+      "path": "patches/7.3.0/0010-uke-ufs-dma-power-admission.patch",
+      "sha256": "e20d25186ab0fa1d1b62eae0d61b972ef2c8f812a5212c1e03acfbff09cd8e5e"
+    },
+    {
+      "path": "patches/7.3.0/0011-cliffs-rpmh-snapshot-size.patch",
+      "sha256": "a65984bf0b3a5a021446508d58befc26d471ac62fbb5a7a5f784730643b50727"
+    },
+    {
+      "path": "patches/7.3.0/0012-uke-gdsc-shared-gcc-regmap.patch",
+      "sha256": "04a04966bde864af9fd744af76af4faf0168fe579b81059aa451de82ab61c9c7"
+    },
+    {
+      "path": "patches/7.3.0/0013-uke-usb-role-and-phy-error-gates.patch",
+      "sha256": "2610daab7f7b4ed8fcf53ecee8077df1c49abd4c58ebd40ffc2117b013672dbc"
+    },
+    {
+      "path": "patches/7.3.0/0014-cliffs-wpss-proxy-regulators.patch",
+      "sha256": "99f958bd34a7c4def62323e58bb6e30d12be82097f3447b7f034c0b6d5e21742"
+    },
+    {
+      "path": "patches/7.3.0/0015-uke-wlan-supplies-and-dma.patch",
+      "sha256": "07194f96f8c4dda1e8cc7d503451561aee58118f72ad0ccd53aacdb0a21a822b"
+    },
+    {
+      "path": "patches/7.3.0/0016-uke-wlan-ordered-rails.patch",
+      "sha256": "40c611b9e280c46b31f7bc4cf2d3fd9f9edeb035f35f4c3d8cb7cc0d808a2b7c"
+    },
+    {
+      "path": "patches/7.3.0/0017-cliffs-gpio-function-flag.patch",
+      "sha256": "7b87ac3a643c166f768485128b8b1e693a8fc4d6d91fba931493c6c33ebca514"
+    },
+    {
+      "path": "patches/7.3.0/0018-rpmsg-channel-modalias-fallback.patch",
+      "sha256": "c0e19fe92d577b251e03b9c7c68896b17f563c271a5e492c209e940fd499927a"
+    },
+    {
+      "path": "patches/7.3.0/0019-spmi-sdam-nvmem-aperture.patch",
+      "sha256": "6ac3d7aea7418820bd681892b976ae4970f38f9417b336588cbe6a77a8c99591"
+    },
+    {
+      "path": "patches/7.3.0/0020-cliffs-adsp-pas.patch",
+      "sha256": "3e7623998b148135d6e8098f5a4fd0472653893f35dc4a57ffa88552cd5ff80b"
+    },
+    {
+      "path": "patches/7.3.0/0021-cliffs-gpu-clock-handoff.patch",
+      "sha256": "949196481b277ee72db76418a29a563bd2faad03eac83aec976fde3d69ea2638"
+    },
+    {
+      "path": "patches/7.3.0/0022-ktz8866-write-errors.patch",
+      "sha256": "191e7b7d2d45547254f62679247e0826ab516a6c2c9364d46bb2dad947f999cd"
+    },
+    {
+      "path": "patches/7.3.0/0023-uke-qup1-backlight-bus.patch",
+      "sha256": "6ce2231e5a2ed8857e739778c3fdd8db1bfc20232c8ef8ea7f46b279b1aced9c"
+    },
+    {
+      "path": "patches/7.3.0/0024-uke-adsp-gpu-arc-suppliers.patch",
+      "sha256": "52272d96a6e364cee9d2665f24ba52cb9dac72444b9095e2c980692c6c523490"
+    },
+    {
+      "path": "patches/7.3.0/0025-uke-paired-normal-backlight.patch",
+      "sha256": "f7fbe96d9eddcfc39a1f7dc99ae81640fab9a6b8fe92ef2f7e3fca018ddd679c"
+    },
+    {
+      "path": "patches/7.3.0/0026-cliffs-lpass-adsp-interconnect.patch",
+      "sha256": "f956f107cd2fc565641b24703ffce23178916ef6815d6323ca4237db4d50c25a"
+    },
+    {
+      "path": "patches/7.3.0/0027-uke-oem-gpr-domain.patch",
+      "sha256": "993b4fb901bd0a2a3d8639e4ee40e3d4ba81ec41c942d8eec95de52b0837914d"
+    },
+    {
+      "path": "patches/7.3.0/0028-uke-protection-domain-map.patch",
+      "sha256": "560f280372567217ad98731e8302e2d0d57de78dda5ebf03b17bae69f13749be"
+    },
+    {
+      "path": "patches/7.3.0/0029-uke-legacy-cpucp-mailbox.patch",
+      "sha256": "32f64cd38316a0f022f60bc2d11e9ed2b767a1e60357041fe40a527137aa3145"
+    },
+    {
+      "path": "patches/7.3.0/0030-slim-startup-error-propagation.patch",
+      "sha256": "da894b89074ae57e1ba68f71716b7fa0233b1711b4670563013d66961aa20347"
+    },
+    {
+      "path": "patches/7.3.0/0031-uke-battery-property-ids.patch",
+      "sha256": "5aff69a246e0be62bc635e5acdfd0a6a39acd04daf67535a4460dcd0b4f8957d"
+    },
+    {
+      "path": "patches/7.3.0/0032-uke-battery-only-glink.patch",
+      "sha256": "30cbefb8c2e0129abf14e161d4339b8fb86109171fdbca24ec3436c40c049ef3"
+    },
+    {
+      "path": "patches/7.3.0/0033-uke-charger-budget-and-startup.patch",
+      "sha256": "c2c2f0358998133b129a420bf72dd1f45ff9feb14a53186ad970bdeb867fb873"
+    },
+    {
+      "path": "patches/7.3.0/0034-uke-firmware-backlight-blanking.patch",
+      "sha256": "edcb295cf96928f0f27f3da34d797be154f884e4d1f3963370fd17ad5e343e77"
+    },
+    {
+      "path": "patches/7.3.0/0034a-dwc3-power-supply-notifier-compat.patch",
+      "sha256": "19233c3b29bda2abb4da9b57319b724ebbb2975be3637259e855e1e71b075012"
+    },
+    {
+      "path": "patches/7.3.0/0035-uke-charger-readiness-and-abi.patch",
+      "sha256": "607c44207743bc593de58ae6a07e3715103e42337f81d0018ba60733402edbc0"
+    },
+    {
+      "path": "patches/7.3.0/0036-uke-adreno732-render.patch",
+      "sha256": "a567e04b5100413f92a046f8b4c79511a43f962049360c1ad47bbb6fcef3825b"
+    },
+    {
+      "path": "patches/7.3.0/0037-uke-gpu-interconnect.patch",
+      "sha256": "134ab7cafe6c1754ad9850f51197d401fa7470dcd04ee7f205dfed8dd30e16cc"
+    },
+    {
+      "path": "patches/7.3.0/0038-uke-handoff-panel-metadata.patch",
+      "sha256": "6289e5228da221af78acf45bda4862dc1bb6e771a65dc68e107e66bf4c9412d5"
+    },
+    {
+      "path": "patches/7.3.0/0039-adreno-unbound-component-removal.patch",
+      "sha256": "70b48281c140464076776d81440f0aef54f01ef0cdcb932c9c6358d36a66eadc"
+    },
+    {
+      "path": "patches/7.3.0/0040-sm7675-epss-core-count.patch",
+      "sha256": "d18f2f2942427522ff479baebc078841d0f6463d649dfcc813967bbddd1f266e"
+    },
+    {
+      "path": "patches/7.3.0/0041-sysfb-bounded-damage-copy.patch",
+      "sha256": "91232e80e7fabb4c27820ad8bb10f817e3dfe9fcae360342df7b13a82ee409ff"
+    },
+    {
+      "path": "patches/7.3.0/0042-uke-backlight-visible-minimum.patch",
+      "sha256": "01d64d28d9cdb749bf8df3acc6fba187430b1b831e935271b6046fb0588b86c4"
+    },
+    {
+      "path": "patches/7.3.0/0043-uke-cdc-usb2-power-budget.patch",
+      "sha256": "363cf1f068338c6a68ee31e49b5ee86f55a944a6d891c1d0a16eedfb5cd404c7"
+    },
+    {
+      "path": "patches/7.3.0/0044-uke-usb-charger-readiness-diagnostics.patch",
+      "sha256": "e6921ea8d40ae66bd04b4de9408bbfa447cabad67c57d38333d88a3c721c0973"
+    },
+    {
+      "path": "patches/7.3.0/0045-uke-battery-derived-power.patch",
+      "sha256": "d452a44134478b427407d0e4a1761249014ab5524f384c9180763a0d7cd5718b"
+    },
+    {
+      "path": "patches/7.3.0/0046-adc5-gen3-voltage-units.patch",
+      "sha256": "9cf109bd352837b0a3c8e53caa3158c43bf68c3ef6f2187bb078a45b343461c3"
+    },
+    {
+      "path": "patches/7.3.0/0047-smp2p-preserve-edges-without-restart.patch",
+      "sha256": "35c7dad5f9230707c7916c009bc04615bfbf755b610e14526115c6dcd959b3bd"
+    },
+    {
+      "path": "patches/7.3.0/0048-adc5-gen3-charger-and-battery-scalers.patch",
+      "sha256": "ef098f331d0883589aaceafc081afd308329f8a63e58c72d3046c28f30b4358b"
+    },
+    {
+      "path": "patches/7.3.0/0049-input-qcom-smp2p-switch.patch",
+      "sha256": "a8295c9a7971874708784e163551e324e3f34e0737b16d198c28aa500575e28f"
+    },
+    {
+      "path": "patches/7.3.0/0050-uke-cpucp-shared-rx.patch",
+      "sha256": "092fd30e119e5207bcdbbe42adc28bad3d8e82b315bed8e077cc29339fc6fe7f"
+    },
+    {
+      "path": "patches/7.3.0/0051-lucid-evo-reset-latch.patch",
+      "sha256": "f7a1ce81faad1b958cc2195106ebd3951062a62b23e27df2f53d8ee414895f1f"
+    },
+    {
+      "path": "patches/7.3.0/0052-dpu-video-vblank-trace-refcount.patch",
+      "sha256": "cd705f2fc2d46c7740ca0daf5c25a6c89076bd291b62f3766eed236700a81061"
+    },
+    {
+      "path": "patches/7.3.0/0053-uke-battmgr-request-lifecycle.patch",
+      "sha256": "b0223999b2bca55f806272a023bfd3020cb9d58c09a018d7996d65e03a92110c"
+    },
+    {
+      "path": "patches/7.3.0/0054-uke-usb-budget-generation.patch",
+      "sha256": "98407856fc06cb65bec04795cec678906d354274d13a7fe61496409419323c13"
+    },
+    {
+      "path": "patches/7.3.0/0055-usb-ucsi-glink-packet-lifecycle.patch",
+      "sha256": "77f272726ade1221460e1152e33bab98c3d71224f3d6d0431f8d57381ad9c4d0"
+    },
+    {
+      "path": "patches/7.3.0/0056-soc-qcom-pmic-altmode-events.patch",
+      "sha256": "a56b1b532137ec081e1bb46e6ee25cbcb40341599f62ca8570e9e931832c1c2d"
+    },
+    {
+      "path": "patches/7.3.0/0057-drm-msm-uke-dp-hbr2-limit.patch",
+      "sha256": "ac01292583c3a9e85bd2233e9aff9e2641af925e95e381b2142246aa6d32f6b3"
+    },
+    {
+      "path": "patches/7.3.0/0058-usb-uke-repeater-host-tuning.patch",
+      "sha256": "a995a84f736575c447af660dd8bcb00d25bda2e447a49e141d504aee5176309d"
+    },
+    {
+      "path": "patches/7.3.0/0059-usb-qcom-restore-utmi-resume.patch",
+      "sha256": "80f1569fbadf6814032c2ade76f32ce2e2ad1e0fe3f1f873d0fed988cc601b7b"
+    },
+    {
+      "path": "patches/7.3.0/0060-phy-qcom-uke-gen1-dp-profile.patch",
+      "sha256": "2222d02df8fddbbf1ed1a431807f5da8a6475a988bfb9c144f90e9632ebb9714"
+    },
+    {
+      "path": "patches/7.3.0/0061-drm-msm-uke-dp-controller.patch",
+      "sha256": "bdf709e393169afbbda7e70ed6ca6a80a2c89838b21e7766fcfed3e22c00ce25"
+    },
+    {
+      "path": "patches/7.3.0/0062-usb-uke-wcd-revision-observation.patch",
+      "sha256": "f1828e3778c28d445d57e6a17c6c279d672234a0a46f40c97a7a64b118967732"
+    },
+    {
+      "path": "patches/7.3.0/0063-ath11k-ahb-unregistered-remove.patch",
+      "sha256": "36b056cfe8ce78262e72a684ac05088bac1033ffe3101de8853373398d1a4e7b"
+    },
+    {
+      "path": "patches/7.3.0/0064-uke-battmgr-managed-group.patch",
+      "sha256": "de5b3d17f8232b4855bca78a926cb8f92710404471d88725c7678cf50c56bc72"
+    },
+    {
+      "path": "patches/7.3.0/0065-usb-uke-typec-phy-framework.patch",
+      "sha256": "81af05b888fe78bc41e1ad6fd609da80cbc6a74ded8fea96a69b1fc91e61f56b"
+    },
+    {
+      "path": "patches/7.3.0/0066-phy-uke-qmp-power-routing.patch",
+      "sha256": "500e98c7bfabdb1febc4b436898e4a7b80d0cc656e064ceda4d250520ea648ba"
+    },
+    {
+      "path": "patches/7.3.0/0067-uke-battmgr-qualified-control.patch",
+      "sha256": "c4be0714e4015d4f294dc66bc4dfaf994b6dad759fc02d8671d4628e7dedf220"
+    },
+    {
+      "path": "patches/7.3.0/0068-usb-uke-role-completion.patch",
+      "sha256": "8cfe3b5ed786d84098ad18f2e83af02cfde6edf977b28123c2e56a34902e04d8"
+    },
+    {
+      "path": "patches/7.3.0/0069-usb-role-readonly-observation.patch",
+      "sha256": "1cecead455c913baac3d1c866777efa9081095fa00fb4584ae4f9b955d53621d"
+    },
+    {
+      "path": "patches/7.3.0/0070-usb-uke-required-wake-irqs.patch",
+      "sha256": "a00547b950d4d865eb6ed2534681d559c4e011452ab99f7c7f337b5c14342516"
+    },
+    {
+      "path": "patches/7.3.0/0071-uke-charge-development-admission-help.patch",
+      "sha256": "b25f75f17b3aebbbfe212fd327d42885f80ac7f8de5cbb18150d9b3f4488297a"
+    },
+    {
+      "path": "patches/7.3.0/0072-uke-usb-source-type-provenance.patch",
+      "sha256": "5ed47b5f32a7b02d32020a250d4a3bc8c22281b9c5b3909786b719b096c53987"
+    },
+    {
+      "path": "patches/7.3.0/0073-uke-charge-current-macro-collision.patch",
+      "sha256": "1bf11c8377b006e1ddd27403fe6c4cfab87e86b6450b817acd2707d8cc32d977"
+    },
+    {
+      "path": "patches/7.3.0/0074-uke-ktz-dimming-observation.patch",
+      "sha256": "cc698c3801740b8342de44da08923b6bac4bc6170a78e69c998fb621b066df8f"
+    },
+    {
+      "path": "patches/7.3.0/0075-uke-qmp-ldob3-supplier.patch",
+      "sha256": "1f1be3959b9ce795133e46fd7ef801edd03035d819760eea5c489e8aae8880a2"
+    },
+    {
+      "path": "patches/7.3.0/0076-uke-charge-readonly-settings.patch",
+      "sha256": "90e480eee772f4466d0a447db689975a3cebb2d37b4c071cf4ba6fd1ce44fc53"
+    },
+    {
+      "path": "patches/7.3.0/0077-uke-preconfigured-cap-enable.patch",
+      "sha256": "ed57e6cb9f07d4d14ee5dbaceda20af0c12467767855f902117c78863820bee0"
+    },
+    {
+      "path": "patches/7.3.0/0078-uke-existing-cap-application-probe.patch",
+      "sha256": "7e671166e379e3cff13e7c1431307f4346098c81a648fbc1d3bb03e73d9abe5a"
+    },
+    {
+      "path": "patches/7.3.0/0079-audioreach-readiness-and-response-bounds.patch",
+      "sha256": "f8910718a99425f076a8739adc7e25dd6e85bb5618cf8b3955d1b3e1db6744a8"
+    },
+    {
+      "path": "patches/7.3.0/0080-msm-global-engine-time.patch",
+      "sha256": "7662c75130c5b8435ec7ad6745c60cf874d9ca7eecce5723fd16bb27c89f1904"
+    },
+    {
+      "path": "patches/7.3.0/0081-scmi-cached-protocol-discovery.patch",
+      "sha256": "f2970405e9a026a387aee2e407a4fc61a13ca9462a6cb17aaffe2570b551bc22"
+    },
+    {
+      "path": "patches/7.3.0/0082-uke-moisture-and-thermal-protection.patch",
+      "sha256": "f00d1b868d95dfd727d19d3c5812f5eabd4045012fe7e2fcdff984d6606a7809"
+    },
+    {
+      "path": "patches/7.3.0/0083-usb-ucsi-cached-transport-state.patch",
+      "sha256": "3edeed88d61aea35060b2e378d1ae695e75e042399190ede0e7d5da825ac4383"
+    },
+    {
+      "path": "patches/7.3.0/0084-audioreach-basic-error-responses.patch",
+      "sha256": "52d03049b4962d36c33b38d1d3b8982d7dc97688241d1adcf7893e2ac18aa7f0"
+    },
+    {
+      "path": "patches/7.3.0/0085-q6apm-preserve-unmap-result-and-buffer-type.patch",
+      "sha256": "d16c1823ea21bc4b0f78c11d6594c4aad7b7c9953ae3bfcc1432bcaa6adca520"
+    },
+    {
+      "path": "patches/7.3.0/0086-q6prm-correlate-resource-transactions.patch",
+      "sha256": "a14948b9c8de455dc1d2ea3e91c5f2c0376076d5c7a77ca2dcd72eb12547a450"
+    },
+    {
+      "path": "patches/7.3.0/0087-q6apm-bound-graph-events-and-buffer-tokens.patch",
+      "sha256": "503c06d7b2442ae9405630124d7074e435fd095ca39f63d1a85f882a77816ada"
+    },
+    {
+      "path": "patches/7.3.0/0088-gpr-drain-dynamic-port-callbacks-before-free.patch",
+      "sha256": "4c5e2a1416c0f2c7e84a0cece46c1be7049b2c375443e71174c28755c63d1e0a"
+    },
+    {
+      "path": "patches/7.3.0/0089-apr-detach-rx-batch-under-queue-lock.patch",
+      "sha256": "6e191a09de60391f9e8d924a2ab0fceecb3f450d412fcb1ca690eeaad95aa891"
+    },
+    {
+      "path": "patches/7.3.0/0090-q6apm-use-sleepable-compressed-stream-lock.patch",
+      "sha256": "c903bd888bcba2d29ee36f19dfb697dc7085012adf48daa249b74e2585d08dd5"
+    },
+    {
+      "path": "patches/7.3.0/0091-q6apm-bound-and-serialize-buffer-submissions.patch",
+      "sha256": "0b11401e75101b3bac81117ae8fcce41dc3a8c6384d54e3ba0bface787b21bea"
+    },
+    {
+      "path": "patches/7.3.0/0092-q6apm-validate-dma-completion-results.patch",
+      "sha256": "dd7b0a7ce6c2d769990e97801192e175e0805f90915613075519b781b32f3ed4"
+    },
+    {
+      "path": "patches/7.3.0/0093-q6apm-qualify-graph-publication-and-references.patch",
+      "sha256": "56a64a38fd961be8601c9f3dbc5260ca4b638b50c0b82bcf26a8ca41d5fe03d1"
+    },
+    {
+      "path": "patches/7.3.0/0094-gpr-quiesce-native-audio-services-before-teardown.patch",
+      "sha256": "897991df8cb126124f8928689b23b08bbf453598211adfb6a60573d8aeede07b"
+    },
+    {
+      "path": "patches/7.3.0/0095-bindings-sm7675-llcc.patch",
+      "sha256": "f7cca65930456c5af300881587d4191b86ed1fd54cf84e1c2598ffed0779f939"
+    },
+    {
+      "path": "patches/7.3.0/0096-sm7675-llcc-policy-and-resource-guards.patch",
+      "sha256": "fcd5d5c4251f9b2e8e22a6dceb90662f5f991333745ea40730921ef97d951b6e"
+    },
+    {
+      "path": "patches/7.3.0/0097-adreno-order-native-llcc-supplier.patch",
+      "sha256": "3c04845b4c143bcab0dbd87d9f48fd4cd54abb15818cceae93529fa69bcf8303"
+    },
+    {
+      "path": "patches/7.3.0/0098-uke-confirm-usb-sdp-adapter.patch",
+      "sha256": "b6562d35915caf0bfd7f3c9304597d12e8caaa7e79012992aac4936d3f6a6650"
+    },
+    {
+      "path": "patches/7.3.0/0099-apr-unwind-failed-service-publication.patch",
+      "sha256": "8f4de16dec04d631f8da1ca0d8e023906c1845560cdddfe1fe732b42f2dba9d1"
+    },
+    {
+      "path": "patches/7.3.0/0100-uke-audioreach-card-with-closed-streams.patch",
+      "sha256": "dcdc3ce17898fe468541257a1d007b1b287b636ee2ecfc094cd28c84fcea3fdc"
+    },
+    {
+      "path": "patches/7.3.0/0101-qrtr-transport-ready-handshake.patch",
+      "sha256": "c140b620d8cde695d19044dddf3ba55316e583498cafd34ed89de1b5db2b9375"
+    },
+    {
+      "path": "patches/7.3.0/0102-uke-clock-kconfig-dependencies.patch",
+      "sha256": "a5aa37ec3a88072ed83e3b79954fd64480204593ba491265320d6f4a8030cab9"
+    },
+    {
+      "path": "patches/7.3.0/0103-spi-geni-gpi-core-completion.patch",
+      "sha256": "d9dcfbfcb6a37df8f0175fe7edb1bff6ce16bbbf711da6c3ac81bd74f585471a"
+    },
+    {
+      "path": "patches/7.3.0/0104-uke-confirm-sdp-budget-readback.patch",
+      "sha256": "9ee8a56d5968923bc51b13efb41860540ccb4413c8540506eb10609c161fffae"
+    },
+    {
+      "path": "patches/7.3.0/0105-msm-fault-capture-nonblocking.patch",
+      "sha256": "1a8d250037e8e54fcaf902ff4e995c3a24c70e1f01d37890e8c3219f4d0d837f"
+    },
+    {
+      "path": "patches/7.3.0/0106-usb-ucsi-preserve-partner-altmode.patch",
+      "sha256": "088b13cbc6cfda5403b4c2e5379e0396ab583488730221193101abe1bd809df5"
+    },
+    {
+      "path": "patches/7.3.0/0107-phy-qmp-accept-combined-dp-usb-modes.patch",
+      "sha256": "54fc314824967a2f88fc71178904991ea59ca1ef5cfd184dc7a8a4e787b19e99"
+    },
+    {
+      "path": "patches/7.3.0/0108-typec-dynamic-route-diagnostics.patch",
+      "sha256": "44ac8b9c5d3da8c880a116311215b4ee7ac66c9e383bd33a79e46179c33b00a3"
+    },
+    {
+      "path": "patches/7.3.0/0109-pmic-altmode-suppress-duplicate-hpd-levels.patch",
+      "sha256": "64102c1a2efd355d911659056147b65a3531a59c2102b9ef7bc3b85f319736bb"
+    },
+    {
+      "path": "patches/7.3.0/0110-dp-aux-preserve-non-edid-i2c-transactions.patch",
+      "sha256": "0e439462fdee66838f6fc6e881ae123708931d9b22489e5a2adc5cbd53dbec46"
+    },
+    {
+      "path": "patches/7.3.0/0111-uke-displayport-audio-dma-admission.patch",
+      "sha256": "26d47ef2df6d9ec3157cf2426d1a0d162572acd762b14f55d5d6f5c54752dad3"
+    },
+    {
+      "path": "patches/7.3.0/0112-uke-wlan-regulator-devres-lifetime.patch",
+      "sha256": "355fb6c213de914ceca42eecae7e3cad271b8c88ebd12d9de9fd08579e11a2d2"
+    },
+    {
+      "path": "patches/7.3.0/0113-uke-display-boot-observations.patch",
+      "sha256": "569c93ae9d780bfe29ab33d9d2ea46867c8576875c3e468783a196a6fdaa78fd"
+    },
+    {
+      "path": "patches/7.3.0/0114-uke-battmgr-drain-before-suspend.patch",
+      "sha256": "34bf39e452bc30ec8ac02e6ac47dc46c9b6177ce0a4a0f618c3bd58f453cfb8f"
+    },
+    {
+      "path": "patches/7.3.0/0115-asoc-fs19xx-smart-amplifier.patch",
+      "sha256": "7918bf161f096d716a27d80d894590c156fd7a01482e9873747f8b03f4f73c1b"
+    },
+    {
+      "path": "patches/7.3.0/0116-q6apm-tdm-sink-module.patch",
+      "sha256": "ca224f92e18a2b54e450afd5ddfcf8fccbe64c7afd357faba4771edf841e0641"
+    },
+    {
+      "path": "patches/7.3.0/0117-asoc-uke-audio-runtime-safety.patch",
+      "sha256": "369a439c03297a9c215d4760cdb75d8dde0ef9f7f3a5b985bf3ed286dc8bbc69"
+    },
+    {
+      "path": "patches/7.3.0/0118-asoc-fs19xx-speaker-rotation.patch",
+      "sha256": "402797bee14b7938d3f182009350078583043ef89280af6235ec1a50a389940e"
+    },
+    {
+      "path": "patches/7.3.0/0119-asoc-uke-probe-readiness.patch",
+      "sha256": "3b471cf198606afb0008dcd315034ffa0c573c60907e702cff71729150b0bec9"
+    },
+    {
+      "path": "patches/7.3.0/0120-msm-shrinker-blocking-control.patch",
+      "sha256": "fb3c4d7ec8d0df4f77d780de7587a911ed509304eae9f1bf3238f542c7d2c7d0"
+    },
+    {
+      "path": "patches/7.3.0/0121-msm-uke-nonblocking-reclaim.patch",
+      "sha256": "5551d9fd7a5e5ea9d5e75f8904e722de70adfac3143973bfb104b197195e0884"
+    }
+  ],
+  "dtb": "qcom/sm7675-xiaomi-uke.dtb",
+  "hardware_tested": false,
+  "configs": [
+    {
+      "path": "configs/arm64-qcom.config",
+      "sha256": "ea08a26d2afe7d27411ca603c5e7690116f796a1c7956408156f24a09f8fdf06"
+    },
+    {
+      "path": "configs/uke.config",
+      "sha256": "e095d38fe7e53fbc7208005f89596dad35f7f8e5e539f2bc4cfef778c621b601"
+    },
+    {
+      "path": "configs/fedora.config",
+      "sha256": "69208fd016401450f747595c936c98b756f70e8b055677f944e04e274688caad"
+    }
+  ],
+  "patch_series": "7.3.0",
+  "source_delivery": "pinned-parent-adaptation",
+  "parent_copr_build": 11230581,
+  "parent_srpm_sha256": "b6352bcfd676eaeaa60c92577a3a53c5cb870a2310fb9dc8bbb58548a7987394"
+}

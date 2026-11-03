@@ -1,0 +1,128 @@
+/* SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause */
+/*
+ * Internal speakers: four FS19xx amplifiers (QUP1 SE3 I2C, addresses
+ * 0x34-0x37) fed from the VA TDM interface on LPASS LPI GPIO 6-9. Pin, bus,
+ * reset and slot data are taken from the OEM device tree; the OEM graph
+ * (ACDB a2000001) carries four 32-bit slots at 48 kHz. Includes the HDMI
+ * backend so one card owns the shared frontend.
+ */
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/sound/qcom,q6dsp-lpass-ports.h>
+#include "sm7675-uke-audio-providers.dtsi"
+
+&uke_q6apm_dais {
+	/* Exact Uke audio-ion stream identities; never use identity DMA. */
+	iommus = <&apps_smmu 0x1001 0x80>, <&apps_smmu 0x1061 0>;
+	dma-coherent;
+	/* Also selects the shared frontend DMA admission used by the speaker path. */
+	xiaomi,hdmi-only;
+	status = "okay";
+};
+
+&uke_q6apm_bedais {
+	status = "okay";
+};
+
+/* Amplifier bus; uke_amp_* symbols and phandles come from the native ABL entry. */
+&{/soc/qcom,qupv3_1_geni_se@8c0000/i2c@88c000} {
+	compatible = "qcom,geni-i2c";
+	clock-names = "se";
+	clock-frequency = <400000>;
+	dmas = <&gpi_dma1 0 3 3>, <&gpi_dma1 1 3 3>;
+	status = "okay";
+};
+
+/*
+ * The amplifiers stay in reset (GPIO low) until a stream starts. The native
+ * entry removes the duplicate OEM reset-gpio; the driver requires reset-gpios
+ * to describe the remaining line as active-low.
+ */
+&uke_amp_tl {
+	compatible = "foursemi,fs19xx";
+	reset-gpios = <&tlmm 30 GPIO_ACTIVE_LOW>;
+	sound-name-prefix = "TopLeft";
+	#sound-dai-cells = <0>;
+	status = "okay";
+};
+
+&uke_amp_tr {
+	compatible = "foursemi,fs19xx";
+	reset-gpios = <&tlmm 149 GPIO_ACTIVE_LOW>;
+	sound-name-prefix = "TopRight";
+	#sound-dai-cells = <0>;
+	status = "okay";
+};
+
+&uke_amp_bl {
+	compatible = "foursemi,fs19xx";
+	reset-gpios = <&tlmm 124 GPIO_ACTIVE_LOW>;
+	sound-name-prefix = "BottomLeft";
+	#sound-dai-cells = <0>;
+	status = "okay";
+};
+
+&uke_amp_br {
+	compatible = "foursemi,fs19xx";
+	reset-gpios = <&tlmm 123 GPIO_ACTIVE_LOW>;
+	sound-name-prefix = "BottomRight";
+	#sound-dai-cells = <0>;
+	status = "okay";
+};
+
+&uke_lpass_tlmm {
+	/* OEM lpi_tdm1_* pins: gpio6 SCK, gpio7 WS, gpio8 SD0, gpio9 SD1. */
+	uke_tdm_active: tdm-active-state {
+		clk-pins {
+			pins = "gpio6";
+			function = "i2s1_clk";
+			drive-strength = <8>;
+			bias-disable;
+		};
+
+		ws-pins {
+			pins = "gpio7";
+			function = "i2s1_ws";
+			drive-strength = <8>;
+			bias-disable;
+		};
+
+		sd0-pins {
+			pins = "gpio8";
+			function = "i2s1_data";
+			drive-strength = <8>;
+			bias-disable;
+		};
+
+		sd1-pins {
+			pins = "gpio9";
+			function = "i2s1_data";
+			drive-strength = <8>;
+			bias-pull-down;
+		};
+	};
+};
+
+&{/} {
+	sound-uke {
+		compatible = "xiaomi,uke-speaker-audio-card";
+		model = "POCO-Pad-X1";
+		pinctrl-names = "default";
+		pinctrl-0 = <&uke_tdm_active>;
+
+		hdmi-dai-link {
+			link-name = "DISPLAY_PORT_RX_0";
+			cpu { sound-dai = <&uke_q6apm_bedais DISPLAY_PORT_RX_0>; };
+			codec { sound-dai = <&uke_dp>; };
+			platform { sound-dai = <&uke_q6apm>; };
+		};
+
+		speaker-dai-link {
+			link-name = "SECONDARY_TDM_RX_0";
+			cpu { sound-dai = <&uke_q6apm_bedais SECONDARY_TDM_RX_0>; };
+			codec {
+				sound-dai = <&uke_amp_tl>, <&uke_amp_tr>, <&uke_amp_bl>, <&uke_amp_br>;
+			};
+			platform { sound-dai = <&uke_q6apm>; };
+		};
+	};
+};

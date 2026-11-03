@@ -1,0 +1,26 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] usb: typec: ucsi: preserve routing for an Alt Mode partner
+
+The connector-status bitmap conversion changed the USB-only partner check
+into a USB-bit check. A partner advertising both USB and Alt Mode therefore
+receives a generic USB-mode write after its Alt Mode handler programs DP.
+
+On Uke, PAN sets DP pin D and UCSI then reports partner_flags=3 before
+ucsi_partner_change overwrites the route with TYPEC_STATE_USB. Leave that
+route to its Alt Mode handler. Keep normal USB, USB4, accessory modes, data
+roles, PD and disconnect cleanup unchanged.
+
+Fixes: 226ff2e681d0 ("usb: typec: ucsi: Convert connector specific commands to bitmaps")
+
+--- a/drivers/usb/typec/ucsi/ucsi.c
++++ b/drivers/usb/typec/ucsi/ucsi.c
+@@ -1356,7 +1356,8 @@
+ 			typec_set_mode(con->port, TYPEC_MODE_AUDIO);
+ 			break;
+ 		default:
+-			if (UCSI_CONSTAT(con, PARTNER_FLAG_USB))
++			if (UCSI_CONSTAT(con, PARTNER_FLAG_USB) &&
++			    !UCSI_CONSTAT(con, PARTNER_FLAG_ALT_MODE))
+ 				typec_set_mode(con->port, TYPEC_STATE_USB);
+ 		}
+ 

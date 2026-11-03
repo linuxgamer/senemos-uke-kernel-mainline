@@ -1,0 +1,198 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: qcom: bound and serialize buffer submissions
+
+The compressed DAI advertises 128 KiB fragments, but the host's 16-bit
+length encoding loses their size. Split the opaque host token into an
+8-bit period index and 24-bit length; the existing maximum is 64 periods.
+Bound fragment count/size and physical address arithmetic accordingly.
+An existing buffer set must match the requested geometry; do not reset
+its cursor on an identical repeat or overwrite a different allocation.
+
+Build read/write packets from the locked buffer state. Reject absent or
+out-of-range fragments and oversized writes. Advance the ring only after
+successful transport submission, preserving its cursor on allocation or
+send failure. All native token producers/consumers share the same macros;
+no wire command payload or DSP resource identifier changes.
+
+Exact firmware token echo, DMA lifecycle and stream recovery remain
+separate acceptance requirements. No audio profile or stream is enabled.
+
+---
+--- a/sound/soc/qcom/qdsp6/q6apm.c
++++ b/sound/soc/qcom/qdsp6/q6apm.c
+@@ -6,8 +6,10 @@
+ #include <linux/jiffies.h>
+ #include <linux/kernel.h>
+ #include <linux/module.h>
++#include <linux/mutex.h>
+ #include <linux/of.h>
+ #include <linux/of_platform.h>
++#include <linux/overflow.h>
+ #include <linux/sched.h>
+ #include <linux/slab.h>
+ #include <linux/soc/qcom/apr.h>
+@@ -297,34 +299,37 @@
+ {
+ 	struct audioreach_graph_data *data;
+ 	struct audio_buffer *buf;
++	phys_addr_t last;
++	size_t total_size;
+ 	int cnt;
+ 
++	if ((dir != SNDRV_PCM_STREAM_PLAYBACK && dir != SNDRV_PCM_STREAM_CAPTURE) ||
++	    !periods || periods > APM_WRITE_TOKEN_MASK + 1 || !period_sz ||
++	    period_sz > (APM_WRITE_TOKEN_LEN_MASK >> APM_WRITE_TOKEN_LEN_SHIFT) ||
++	    check_mul_overflow(period_sz, (size_t)periods, &total_size) ||
++	    check_add_overflow(phys, (phys_addr_t)(total_size - 1), &last))
++		return -EINVAL;
++
+ 	if (dir == SNDRV_PCM_STREAM_PLAYBACK)
+ 		data = &graph->rx_data;
+ 	else
+ 		data = &graph->tx_data;
+ 
+-	mutex_lock(&graph->lock);
+-
+-	data->dsp_buf = 0;
++	guard(mutex)(&graph->lock);
+ 
+ 	if (data->buf) {
+-		mutex_unlock(&graph->lock);
++		if (data->num_periods != periods || data->buf[0].size != period_sz ||
++		    data->buf[0].phys != phys)
++			return -EBUSY;
+ 		return 0;
+ 	}
+ 
+ 	buf = kzalloc_objs(struct audio_buffer, periods);
+-	if (!buf) {
+-		mutex_unlock(&graph->lock);
++	if (!buf)
+ 		return -ENOMEM;
+-	}
+-
+-	if (dir == SNDRV_PCM_STREAM_PLAYBACK)
+-		data = &graph->rx_data;
+-	else
+-		data = &graph->tx_data;
+ 
+ 	data->buf = buf;
++	data->dsp_buf = 0;
+ 
+ 	buf[0].phys = phys;
+ 	buf[0].size = period_sz;
+@@ -337,8 +342,6 @@
+ 	}
+ 	data->num_periods = periods;
+ 
+-	mutex_unlock(&graph->lock);
+-
+ 	return 0;
+ }
+ EXPORT_SYMBOL_GPL(q6apm_alloc_fragments);
+@@ -499,6 +502,17 @@
+ {
+ 	struct apm_data_cmd_wr_sh_mem_ep_data_buffer_v2 *write_buffer;
+ 	struct audio_buffer *ab;
++	int ret;
++
++	if (!len || len > (APM_WRITE_TOKEN_LEN_MASK >> APM_WRITE_TOKEN_LEN_SHIFT))
++		return -EINVAL;
++
++	guard(mutex)(&graph->lock);
++	if (!graph->rx_data.buf || graph->rx_data.dsp_buf >= graph->rx_data.num_periods)
++		return -EINVAL;
++	ab = &graph->rx_data.buf[graph->rx_data.dsp_buf];
++	if (len > ab->size)
++		return -EINVAL;
+ 
+ 	struct gpr_pkt *pkt __free(kfree) = audioreach_alloc_pkt(sizeof(*write_buffer),
+ 					DATA_CMD_WR_SH_MEM_EP_DATA_BUFFER_V2,
+@@ -509,9 +523,6 @@
+ 
+ 	write_buffer = (void *)pkt + GPR_HDR_SIZE;
+ 
+-	mutex_lock(&graph->lock);
+-	ab = &graph->rx_data.buf[graph->rx_data.dsp_buf];
+-
+ 	write_buffer->buf_addr_lsw = lower_32_bits(ab->phys);
+ 	write_buffer->buf_addr_msw = upper_32_bits(ab->phys);
+ 	write_buffer->buf_size = len;
+@@ -520,14 +531,16 @@
+ 	write_buffer->mem_map_handle = graph->info->mem_map_handle;
+ 	write_buffer->flags = wflags;
+ 
++	ret = gpr_send_port_pkt(graph->port, pkt);
++	if (ret < 0)
++		return ret;
++
+ 	graph->rx_data.dsp_buf++;
+ 
+ 	if (graph->rx_data.dsp_buf >= graph->rx_data.num_periods)
+ 		graph->rx_data.dsp_buf = 0;
+ 
+-	mutex_unlock(&graph->lock);
+-
+-	return gpr_send_port_pkt(graph->port, pkt);
++	return ret;
+ }
+ EXPORT_SYMBOL_GPL(q6apm_write_async);
+ 
+@@ -536,6 +549,13 @@
+ 	struct data_cmd_rd_sh_mem_ep_data_buffer_v2 *read_buffer;
+ 	struct audioreach_graph_data *port;
+ 	struct audio_buffer *ab;
++	int ret;
++
++	guard(mutex)(&graph->lock);
++	port = &graph->tx_data;
++	if (!port->buf || port->dsp_buf >= port->num_periods)
++		return -EINVAL;
++	ab = &port->buf[port->dsp_buf];
+ 
+ 	struct gpr_pkt *pkt __free(kfree) = audioreach_alloc_pkt(sizeof(*read_buffer),
+ 					DATA_CMD_RD_SH_MEM_EP_DATA_BUFFER_V2,
+@@ -545,23 +565,21 @@
+ 
+ 	read_buffer = (void *)pkt + GPR_HDR_SIZE;
+ 
+-	mutex_lock(&graph->lock);
+-	port = &graph->tx_data;
+-	ab = &port->buf[port->dsp_buf];
+-
+ 	read_buffer->buf_addr_lsw = lower_32_bits(ab->phys);
+ 	read_buffer->buf_addr_msw = upper_32_bits(ab->phys);
+ 	read_buffer->mem_map_handle = graph->info->mem_map_handle;
+ 	read_buffer->buf_size = ab->size;
+ 
++	ret = gpr_send_port_pkt(graph->port, pkt);
++	if (ret < 0)
++		return ret;
++
+ 	port->dsp_buf++;
+ 
+ 	if (port->dsp_buf >= port->num_periods)
+ 		port->dsp_buf = 0;
+ 
+-	mutex_unlock(&graph->lock);
+-
+-	return gpr_send_port_pkt(graph->port, pkt);
++	return ret;
+ }
+ EXPORT_SYMBOL_GPL(q6apm_read);
+ 
+--- a/sound/soc/qcom/qdsp6/q6apm.h
++++ b/sound/soc/qcom/qdsp6/q6apm.h
+@@ -42,9 +42,9 @@
+ #define APM_CLIENT_EVENT_DATA_WRITE_DONE	0x1009
+ #define APM_CLIENT_EVENT_DATA_READ_DONE		0x100a
+ #define APM_CLIENT_EVENT_WATERMARK_EVENT	0x100b
+-#define APM_WRITE_TOKEN_MASK                   GENMASK(15, 0)
+-#define APM_WRITE_TOKEN_LEN_MASK               GENMASK(31, 16)
+-#define APM_WRITE_TOKEN_LEN_SHIFT              16
++#define APM_WRITE_TOKEN_MASK                   GENMASK(7, 0)
++#define APM_WRITE_TOKEN_LEN_MASK               GENMASK(31, 8)
++#define APM_WRITE_TOKEN_LEN_SHIFT              8
+ 
+ #define APM_MAX_SESSIONS			8
+ #define APM_LAST_BUFFER_FLAG			BIT(30)

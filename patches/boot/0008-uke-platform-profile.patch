@@ -1,0 +1,167 @@
+diff --git a/drivers/acpi/platform_profile.c b/drivers/acpi/platform_profile.c
+index 79d2e92..bbf4504 100644
+--- a/drivers/acpi/platform_profile.c
++++ b/drivers/acpi/platform_profile.c
+@@ -9,12 +9,16 @@
+ #include <linux/cleanup.h>
+ #include <linux/init.h>
+ #include <linux/mutex.h>
++#include <linux/of.h>
+ #include <linux/platform_profile.h>
+ #include <linux/sysfs.h>
+ 
+ #define to_pprof_handler(d)	(container_of(d, struct platform_profile_handler, dev))
+ 
+ static DEFINE_MUTEX(profile_lock);
++/* Keep the existing userspace ABI without enabling ACPI on a DT boot. */
++static struct kobject *profile_kobj;
++static bool profile_interface_ready;
+ 
+ struct platform_profile_handler {
+ 	const char *name;
+@@ -216,7 +220,7 @@ static ssize_t profile_store(struct device *dev,
+ 			return ret;
+ 	}
+ 
+-	sysfs_notify(acpi_kobj, NULL, "platform_profile");
++	sysfs_notify(profile_kobj, NULL, "platform_profile");
+ 
+ 	return count;
+ }
+@@ -436,7 +440,7 @@ static ssize_t platform_profile_store(struct kobject *kobj,
+ 			return ret;
+ 	}
+ 
+-	sysfs_notify(acpi_kobj, NULL, "platform_profile");
++	sysfs_notify(profile_kobj, NULL, "platform_profile");
+ 
+ 	return count;
+ }
+@@ -482,7 +486,7 @@ void platform_profile_notify(struct device *dev)
+ 	scoped_cond_guard(mutex_intr, return, &profile_lock) {
+ 		_notify_class_profile(dev, NULL);
+ 	}
+-	sysfs_notify(acpi_kobj, NULL, "platform_profile");
++	sysfs_notify(profile_kobj, NULL, "platform_profile");
+ }
+ EXPORT_SYMBOL_GPL(platform_profile_notify);
+ 
+@@ -532,7 +536,7 @@ int platform_profile_cycle(void)
+ 			return err;
+ 	}
+ 
+-	sysfs_notify(acpi_kobj, NULL, "platform_profile");
++	sysfs_notify(profile_kobj, NULL, "platform_profile");
+ 
+ 	return 0;
+ }
+@@ -559,6 +563,8 @@ struct device *platform_profile_register(struct device *dev, const char *name,
+ 	if (WARN_ON_ONCE(!dev || !name || !ops || !ops->profile_get ||
+ 	    !ops->profile_set || !ops->probe))
+ 		return ERR_PTR(-EINVAL);
++	if (!READ_ONCE(profile_interface_ready))
++		return ERR_PTR(-EOPNOTSUPP);
+ 
+ 	struct platform_profile_handler *pprof __free(kfree) = kzalloc_obj(*pprof);
+ 	if (!pprof)
+@@ -605,9 +611,9 @@ struct device *platform_profile_register(struct device *dev, const char *name,
+ 		goto cleanup_ida;
+ 	}
+ 
+-	sysfs_notify(acpi_kobj, NULL, "platform_profile");
++	sysfs_notify(profile_kobj, NULL, "platform_profile");
+ 
+-	err = sysfs_update_group(acpi_kobj, &platform_profile_group);
++	err = sysfs_update_group(profile_kobj, &platform_profile_group);
+ 	if (err)
+ 		goto cleanup_cur;
+ 
+@@ -641,8 +647,8 @@ void platform_profile_remove(struct device *dev)
+ 	ida_free(&platform_profile_ida, pprof->minor);
+ 	device_unregister(&pprof->dev);
+ 
+-	sysfs_notify(acpi_kobj, NULL, "platform_profile");
+-	sysfs_update_group(acpi_kobj, &platform_profile_group);
++	sysfs_notify(profile_kobj, NULL, "platform_profile");
++	sysfs_update_group(profile_kobj, &platform_profile_group);
+ }
+ EXPORT_SYMBOL_GPL(platform_profile_remove);
+ 
+@@ -690,28 +696,43 @@ static int __init platform_profile_init(void)
+ {
+ 	int err;
+ 
+-	if (acpi_disabled)
++	if (acpi_disabled && !of_have_populated_dt())
+ 		return -EOPNOTSUPP;
++	profile_kobj = kobject_get(acpi_kobj);
++	if (!profile_kobj && acpi_disabled)
++		profile_kobj = kobject_create_and_add("acpi", firmware_kobj);
++	if (!profile_kobj)
++		return acpi_disabled ? -ENOMEM : -ENODEV;
+ 
+ 	err = class_register(&platform_profile_class);
+ 	if (err)
+-		return err;
++		goto release_kobject;
+ 
+-	err = sysfs_create_group(acpi_kobj, &platform_profile_group);
++	err = sysfs_create_group(profile_kobj, &platform_profile_group);
+ 	if (err)
+ 		class_unregister(&platform_profile_class);
++	else {
++		WRITE_ONCE(profile_interface_ready, true);
++		return 0;
++	}
+ 
++release_kobject:
++	kobject_put(profile_kobj);
++	profile_kobj = NULL;
+ 	return err;
+ }
+ 
+ static void __exit platform_profile_exit(void)
+ {
+-	sysfs_remove_group(acpi_kobj, &platform_profile_group);
++	WRITE_ONCE(profile_interface_ready, false);
++	sysfs_remove_group(profile_kobj, &platform_profile_group);
+ 	class_unregister(&platform_profile_class);
++	kobject_put(profile_kobj);
++	profile_kobj = NULL;
+ }
+ module_init(platform_profile_init);
+ module_exit(platform_profile_exit);
+ 
+ MODULE_AUTHOR("Mark Pearson <markpearson@lenovo.com>");
+-MODULE_DESCRIPTION("ACPI platform profile sysfs interface");
++MODULE_DESCRIPTION("Platform profile sysfs interface");
+ MODULE_LICENSE("GPL");
+diff --git a/drivers/soc/qcom/Kconfig b/drivers/soc/qcom/Kconfig
+index 6a67e0e..5822c68 100644
+--- a/drivers/soc/qcom/Kconfig
++++ b/drivers/soc/qcom/Kconfig
+@@ -327,6 +327,15 @@ config QCOM_UBWC_CONFIG
+ 	  (UBWC) engines across various IP blocks, which need to be initialized
+ 	  with coherent configuration data. This module functions as a single
+ 	  source of truth for that information.
++config QCOM_UKE_PLATFORM_PROFILE
++	bool "Uke CPU and GPU platform profile preferences"
++	depends on QCOM_UKE_ABL_DT && ACPI && SYSFS && ARM_QCOM_CPUFREQ_HW=y && PM_DEVFREQ
++	select ACPI_PLATFORM_PROFILE
++	help
++	  Expose Uke's CPU and GPU preference policies through the standard
++	  platform profile ABI. Hardware frequency tables and thermal QoS
++	  constraints retain authority. This does not control charging.
++
+ config QCOM_RPMH_UKE
+ 	bool "Xiaomi Uke downstream RPMh DRV/channel support"
+ 	depends on QCOM_RPMH=y
+diff --git a/drivers/soc/qcom/Makefile b/drivers/soc/qcom/Makefile
+index 093ade8..9d435ca 100644
+--- a/drivers/soc/qcom/Makefile
++++ b/drivers/soc/qcom/Makefile
+@@ -47,3 +47,4 @@ obj-$(CONFIG_QCOM_PBS) +=	qcom-pbs.o
+ obj-$(CONFIG_QCOM_UBWC_CONFIG) += ubwc_config.o
+ 
+ obj-$(CONFIG_QCOM_RPMH_UKE_KUNIT_TEST) += rpmh-uke-test.o
++obj-$(CONFIG_QCOM_UKE_PLATFORM_PROFILE) += uke-platform-profile.o

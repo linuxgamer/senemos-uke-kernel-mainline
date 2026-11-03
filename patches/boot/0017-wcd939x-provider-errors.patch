@@ -1,0 +1,23 @@
+From: Uke Linux contributors
+Subject: [PATCH] ASoC: wcd939x: preserve errors from platform data providers
+
+GPIO and regulator providers can return -EPROBE_DEFER while LPASS clocks
+and pins are still registering. Replacing that error with -EINVAL stops
+the deferred retry and leaves the codec unavailable. Preserve the original
+error, including permanent configuration failures.
+
+--- a/sound/soc/codecs/wcd939x.c
++++ b/sound/soc/codecs/wcd939x.c
+@@ -3555,10 +3555,8 @@ static int wcd939x_probe(struct platform_device *pdev)
+ 	wcd939x->common.max_bias = 4;
+ 
+ 	ret = wcd939x_populate_dt_data(wcd939x, dev);
+-	if (ret) {
+-		dev_err(dev, "%s: Fail to obtain platform data\n", __func__);
+-		return -EINVAL;
+-	}
++	if (ret)
++		return ret;
+ 
+ 	ret = wcd939x_add_typec(wcd939x, dev);
+ 	if (ret)

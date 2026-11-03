@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-06",
+  "device": "uke",
+  "soc": "SM7675",
+  "scope": "Source, targeted AArch64 compilation and static DT candidate fixtures",
+  "source_profile_sha256": "e3f222a0562001257686a25a99e639fb8c659d9b43f76877a15257f62f513736",
+  "ordered_patch_count": 13,
+  "new_patches": [
+    {
+      "path": "patches/7.2.9/0009-cliffs-ufs-interconnect.patch",
+      "sha256": "fa1d9a1743fba4de7d163f48c8127b752f560d94bfecfde9590659c48b37debe"
+    },
+    {
+      "path": "patches/7.2.9/0010-uke-ufs-dma-power-admission.patch",
+      "sha256": "e20d25186ab0fa1d1b62eae0d61b972ef2c8f812a5212c1e03acfbff09cd8e5e"
+    },
+    {
+      "path": "patches/7.2.9/0011-cliffs-rpmh-snapshot-size.patch",
+      "sha256": "a65984bf0b3a5a021446508d58befc26d471ac62fbb5a7a5f784730643b50727"
+    },
+    {
+      "path": "patches/7.2.9/0012-uke-gdsc-shared-gcc-regmap.patch",
+      "sha256": "04a04966bde864af9fd744af76af4faf0168fe579b81059aa451de82ab61c9c7"
+    },
+    {
+      "path": "patches/7.2.9/0013-uke-usb-role-and-phy-error-gates.patch",
+      "sha256": "2610daab7f7b4ed8fcf53ecee8077df1c49abd4c58ebd40ffc2117b013672dbc"
+    }
+  ],
+  "source_patch_application": "passed without fuzz",
+  "target_objects": {
+    "architecture": "AArch64",
+    "toolchain_image": "a6fb262f41c060702100f704f5c63ac48957682e84befb0812f08e248f2bec7e",
+    "clang": "23.1.2",
+    "results": {
+      "ufs_noc": "passed",
+      "scoped_smmu": "passed",
+      "shared_gcc_gdsc": "passed",
+      "rpmh_rollback_arrays": "passed",
+      "existing_oem_tcsr": "passed",
+      "usb_core_and_glue": "passed"
+    }
+  },
+  "dt_candidates": {
+    "stock_profile": "Global OS3.0.303.0.WOZMIXM",
+    "base_count": 4,
+    "all_merges": "passed",
+    "raw_and_merged_source_hashes": "verified",
+    "clock_and_gdsc_supplier_phandles": "verified",
+    "ram_and_ufs_reset_sid": "unchanged",
+    "board_identity": "Applied through a root-target fragment backed by the inspected Uke board metadata",
+    "smmu_primary_and_register_handoff_fallback": "verified",
+    "usb2_role": "peripheral only",
+    "foreign_receipt_corrupted_input_existing_output_unadmitted_host_and_wrong_version": "rejected",
+    "host_entry_with_automatic_pinned_container": "passed",
+    "selected_dtb_index": null,
+    "android_dtbo_image": false,
+    "launchable": false,
+    "esp32_host_qualified": false
+  },
+  "host_self_test_groups": 10,
+  "shellcheck": "passed",
+  "full_kernel_build": {
+    "requested_release": "7.2.9-1.5.fc46",
+    "jobs": 2,
+    "state": "passed corrected full-series build",
+    "old_accepted_outputs_preserved": true,
+    "complete_image_modules_rpm_srpm_and_lifecycle": "passed",
+    "rejected_trial": {
+      "reason": "RPM series applied eight patches despite a thirteen-patch manifest",
+      "original_image_sha256": "fe62e9fc7bce684081be719b2baa5d12ae392fbd8f9390153409cecdb6b5ff57",
+      "published": false
+    },
+    "corrections": [
+      "Exact manifest/series comparison before staging and in RPM prep",
+      "Patch/config hashes checked by independent RPM prep",
+      "Applied-patch receipt checked against compiled output and packaged payload",
+      "Source prep included in cache and repackaging identity"
+    ],
+    "corrected_result": {
+      "date": "2026-10-07",
+      "source_revision": "56138d5b78fbec5c7cb99378a7628247be1107cb",
+      "manifest_sha256": "a545fe2f6029346bbf1cb34b115b07a29f0933064151116328e1f8364f9fae54",
+      "image_sha256": "5eacec7505f85df39df868c5a9e81274cf55bbaf6ee8d91e71fd827eba80c56c",
+      "config_sha256": "e2995d52f963778ba13e48329dad9fb8fbcd784b6c7a43e97ec1a2940ab020ac",
+      "module_count": 1146,
+      "module_abi_sha256": "4f89bf2bddd98dda770ac20640fe5fc2faae11bc5f10df66b35264e89a62b5a7",
+      "compile_validation": "passed",
+      "payload_validation": "passed",
+      "source_rpm_preparation": "passed",
+      "package_lifecycle_tested": true,
+      "applied_patch_count": 13,
+      "packages": [
+        {
+          "file": "senemos-uke-linux-kernel-mainline-7.2.9-1.5.fc46.aarch64.rpm",
+          "kind": "binary",
+          "nevra": "senemos-uke-linux-kernel-mainline-0:7.2.9-1.5.fc46.aarch64",
+          "sha256": "51dc24c8840963c0ce00f867f84ec28f17ab298acfb9653777a36a89e860859d"
+        },
+        {
+          "file": "senemos-uke-linux-kernel-mainline-core-7.2.9-1.5.fc46.aarch64.rpm",
+          "kind": "binary",
+          "nevra": "senemos-uke-linux-kernel-mainline-core-0:7.2.9-1.5.fc46.aarch64",
+          "sha256": "a523a3e27aea0667bec7c67dbe89ae1c0cdd64e4b70d7ce54a381e469a93dffa"
+        },
+        {
+          "file": "senemos-uke-linux-kernel-mainline-dtbs-7.2.9-1.5.fc46.aarch64.rpm",
+          "kind": "binary",
+          "nevra": "senemos-uke-linux-kernel-mainline-dtbs-0:7.2.9-1.5.fc46.aarch64",
+          "sha256": "2b47b7e7f853e2c3cdb90e43fd29506074f98b417514f39e32bc410eb18c6a74"
+        },
+        {
+          "file": "senemos-uke-linux-kernel-mainline-modules-7.2.9-1.5.fc46.aarch64.rpm",
+          "kind": "binary",
+          "nevra": "senemos-uke-linux-kernel-mainline-modules-0:7.2.9-1.5.fc46.aarch64",
+          "sha256": "566699ea5f95a1bedc6c37359f59dd2b9214f05e805a346bae0b31cdad0c7caf"
+        },
+        {
+          "file": "senemos-uke-linux-kernel-mainline-7.2.9-1.5.fc46.src.rpm",
+          "kind": "source",
+          "nevra": "senemos-uke-linux-kernel-mainline-0:7.2.9-1.5.fc46.aarch64",
+          "sha256": "ff5b6e12916aa8ab76e9bc71c1362068b0d76e4c682a99ec01b31b6c19b6616b"
+        }
+      ],
+      "boot_tested": false,
+      "hardware_tested": false
+    }
+  },
+  "firmware": {
+    "stock_early_and_security_firmware": "retained",
+    "public_binary_redistribution": false,
+    "uefi_firmware_port_complete": false,
+    "live_owner_fdt_and_ram_verified": false
+  },
+  "independent_packaged_board_usb_ufs_enabled": false,
+  "own_device_boot_tested": false,
+  "hardware_tested": false,
+  "flash_performed": false
+}

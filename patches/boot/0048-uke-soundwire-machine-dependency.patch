@@ -1,0 +1,21 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] ASoC: qcom: link the Uke SoundWire helpers
+
+The experimental Uke microphone backend uses the standard Qualcomm stream
+helpers. Select their object and require SoundWire for this machine driver.
+This adds no runtime codec admission or DT activation.
+
+---
+diff --git a/sound/soc/qcom/Kconfig b/sound/soc/qcom/Kconfig
+--- a/sound/soc/qcom/Kconfig
++++ b/sound/soc/qcom/Kconfig
+@@ -198,7 +198,8 @@ config SND_SOC_UKE
+ 	tristate "Uke AudioReach card registration"
+-	depends on QCOM_APR && OF
++	depends on QCOM_APR && OF && SOUNDWIRE
+ 	select SND_SOC_QCOM_COMMON
++	select SND_SOC_QCOM_SDW
+ 	select SND_SOC_HDMI_CODEC
+ 	select SND_SOC_QDSP6_APM
+ 	select SND_SOC_QDSP6_APM_DAI
+ 	help

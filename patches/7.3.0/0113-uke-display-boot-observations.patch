@@ -1,0 +1,59 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] Observe Uke display boot ownership transitions
+
+Report already-read handoff state without changing power, clocks or mappings.
+The Cliffs sync wrapper preserves the original interconnect callback.
+
+diff --git a/drivers/interconnect/qcom/qnoc-cliffs-usb.c b/drivers/interconnect/qcom/qnoc-cliffs-usb.c
+index 50290cb..06d83d3 100644
+--- a/drivers/interconnect/qcom/qnoc-cliffs-usb.c
++++ b/drivers/interconnect/qcom/qnoc-cliffs-usb.c
+@@ -699,13 +699,20 @@ static const struct of_device_id cliffs_usb_of_match[] = {
+ };
+ MODULE_DEVICE_TABLE(of, cliffs_usb_of_match);
+ 
++static void cliffs_usb_sync_state(struct device *dev)
++{
++	dev_info(dev, "Uke display boot: interconnect sync begins\n");
++	icc_sync_state(dev);
++	dev_info(dev, "Uke display boot: interconnect sync returns\n");
++}
++
+ static struct platform_driver cliffs_usb_driver = {
+ 	.probe = qcom_icc_rpmh_probe,
+ 	.remove = qcom_icc_rpmh_remove,
+ 	.driver = {
+ 		.name = "qnoc-cliffs-usb",
+ 		.of_match_table = cliffs_usb_of_match,
+-		.sync_state = icc_sync_state,
++		.sync_state = cliffs_usb_sync_state,
+ 	},
+ };
+ module_platform_driver(cliffs_usb_driver);
+diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c b/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
+index d32a658..88fc74c 100644
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
+@@ -833,6 +833,9 @@ static int qcom_uke_smmu_cfg_probe(struct arm_smmu_device *smmu)
+ 			smmu->s2crs[i].type = FIELD_GET(ARM_SMMU_S2CR_TYPE, s2cr);
+ 			smmu->s2crs[i].privcfg = FIELD_GET(ARM_SMMU_S2CR_PRIVCFG, s2cr);
+ 			smmu->s2crs[i].cbndx = cb;
++			dev_info(smmu->dev,
++				 "Uke display boot: preserved SMR[%d] id=%#x mask=%#x type=%u cb=%u\n",
++				 i, id, mask, smmu->s2crs[i].type, cb);
+ 			break;
+ 		}
+ 	}
+diff --git a/drivers/video/backlight/ktz8866.c b/drivers/video/backlight/ktz8866.c
+index 2066140..dfcf843 100644
+--- a/drivers/video/backlight/ktz8866.c
++++ b/drivers/video/backlight/ktz8866.c
+@@ -359,6 +359,8 @@ static int ktz8866_uke_probe(struct ktz8866 *ktz)
+ 	ret = ktz8866_uke_brightness(ktz);
+ 	if (ret < 0)
+ 		return ret;
++	dev_info(&ktz->client->dev,
++		 "Uke display boot: paired backlight inherited brightness=%d\n", ret);
+ 	props.brightness = ret;
+ 	ktz->backlight = devm_backlight_device_register(&ktz->client->dev, "uke-backlight",
+ 		&ktz->client->dev, ktz, &ktz8866_uke_backlight_ops, &props);

@@ -1,0 +1,54 @@
+Subject: [PATCH] drm/msm: retain reclaim progress without blocking Uke presentation
+
+The Uke kernel selects nonblocking GEM reclamation through Rob Clark's
+proposed control. Preserve inactive buffer eviction and normal swap; do not
+wait on busy buffers while reclaim can hold reservations needed by GPU
+retirement. Loaded cover/panel transitions exhibit seconds-long reclaim and
+retirement stalls; disabling all eviction isolates the class but is too broad
+for a persistent repair. The proposed control provides the narrower policy.
+
+Report actual freed pages even when the scanned LRU becomes empty. The MM
+shrinker caller discards SHRINK_STOP before adding progress, so remaining==0
+must not discard a successful batch. Preserve STOP when no progress is made.
+
+This kernel is the Uke-specific delivery. The writable control retains its
+upstream comparison path without an unversioned module option that would
+break older retained kernels. No fence, ownership or busy-buffer safety check
+is removed. The original GPL-2.0-only and Rob Clark/Red Hat attribution remains.
+
+--- a/drivers/gpu/drm/msm/msm_gem_shrinker.c
++++ b/drivers/gpu/drm/msm/msm_gem_shrinker.c
+@@ -19,7 +19,7 @@
+ MODULE_PARM_DESC(enable_eviction, "Enable swappable GEM buffers");
+ module_param(enable_eviction, bool, 0600);
+ 
+-static bool eviction_can_block = true;
++static bool eviction_can_block = false;
+ MODULE_PARM_DESC(eviction_can_block, "Enable blocking for GEM buffer to become idle for eviction");
+ module_param(eviction_can_block, bool, 0600);
+ 
+@@ -175,7 +175,6 @@
+ 	};
+ 	long nr = sc->nr_to_scan;
+ 	unsigned long freed = 0;
+-	unsigned long remaining = 0;
+ 
+ 	for (unsigned i = 0; (nr > 0) && (i < ARRAY_SIZE(stages)); i++) {
+ 		if (!stages[i].cond)
+@@ -190,7 +189,6 @@
+ 					 NULL);
+ 		nr -= stages[i].freed;
+ 		freed += stages[i].freed;
+-		remaining += stages[i].remaining;
+ 	}
+ 
+ 	if (freed) {
+@@ -199,7 +197,7 @@
+ 				     stages[3].freed);
+ 	}
+ 
+-	return (freed > 0 && remaining > 0) ? freed : SHRINK_STOP;
++	return freed ? freed : SHRINK_STOP;
+ }
+ 
+ #ifdef CONFIG_DEBUG_FS

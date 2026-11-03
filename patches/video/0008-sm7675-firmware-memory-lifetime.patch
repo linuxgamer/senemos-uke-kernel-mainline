@@ -1,0 +1,482 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] media: iris: own Cliffs firmware mmap and PAS resource lifetime
+
+Adapt the Iris33 mmap ABI from OnePlus SM7675 1138e00f. Match the three
+device regions and payload offsets to exact Uke OS3.0.304.0 msm_video.ko
+2976535e5523521d953bdc762fc446e02bd5b564b28db34789d066b6070406df.
+Keep MMIO above the DMA pool. Reject missing, partial and out-of-range
+mappings before starting firmware. Retain mappings on incomplete teardown.
+
+Track authenticated firmware and refuse to free queues after failed PAS
+shutdown or runtime resume. Preserve cleanup errors and existing platforms
+without the optional memory hooks. This candidate has no physical boot claim.
+
+--- a/drivers/media/platform/qcom/iris/Makefile
++++ b/drivers/media/platform/qcom/iris/Makefile
+@@ -17,6 +17,7 @@
+              iris_power.o \
+              iris_probe.o \
+              iris_resources.o \
++             iris_sm7675_memory.o \
+              iris_state.o \
+              iris_utils.o \
+              iris_vidc.o \
+--- a/drivers/media/platform/qcom/iris/iris_core.h
++++ b/drivers/media/platform/qcom/iris/iris_core.h
+@@ -75,10 +75,14 @@
+  * @intr_status: interrupt status
+  * @sys_error_handler: a delayed work for handling system fatal error
+  * @instances: a list_head of all instances
++ * @fw_memory: platform-owned firmware mappings retained until a successful teardown
++ * @fw_loaded: firmware authenticated and not yet shut down successfully
+  * @inst_fw_caps_dec: an array of supported instance capabilities by decoder
+  * @inst_fw_caps_enc: an array of supported instance capabilities by encoder
+  */
+ 
++struct iris_fw_memory;
++
+ struct iris_core {
+ 	struct device				*dev;
+ 	void __iomem				*reg_base;
+@@ -101,6 +105,8 @@
+ 	const struct iris_platform_data		*iris_platform_data;
+ 	const struct iris_firmware_data		*iris_firmware_data;
+ 	const struct iris_firmware_desc		*iris_firmware_desc;
++	struct iris_fw_memory			*fw_memory;
++	bool					fw_loaded;
+ 	const struct qcom_ubwc_cfg_data		*ubwc_cfg;
+ 	enum iris_core_state			state;
+ 	dma_addr_t				iface_q_table_daddr;
+--- a/drivers/media/platform/qcom/iris/iris_core.c
++++ b/drivers/media/platform/qcom/iris/iris_core.c
+@@ -12,20 +12,34 @@
+ 
+ void iris_core_deinit(struct iris_core *core)
+ {
+-	int ret;
++	bool running;
++	int ret, error;
+ 
+ 	ret = pm_runtime_resume_and_get(core->dev);
+ 
+ 	mutex_lock(&core->lock);
++	if (ret < 0) {
++		dev_err(core->dev, "resume for shutdown failed: %d; retaining resources\n", ret);
++		if (core->state != IRIS_CORE_DEINIT)
++			core->state = IRIS_CORE_ERROR;
++		goto unlock;
++	}
+ 	if (core->state != IRIS_CORE_DEINIT) {
+-		iris_fw_unload(core);
++		running = core->fw_loaded;
++		error = iris_fw_unload(core);
++		if (error) {
++			dev_err(core->dev, "firmware shutdown failed: %d; retaining resources\n", error);
++			core->state = IRIS_CORE_ERROR;
++			goto unlock;
++		}
+ 
+-		if (!ret)
++		if (running)
+ 			iris_vpu_power_off(core);
+ 
+-		iris_hfi_queues_deinit(core);
+-		core->state = IRIS_CORE_DEINIT;
++		error = iris_hfi_queues_deinit(core);
++		core->state = error ? IRIS_CORE_ERROR : IRIS_CORE_DEINIT;
+ 	}
++unlock:
+ 	mutex_unlock(&core->lock);
+ 
+ 	if (!ret)
+@@ -51,7 +65,7 @@
+ 
+ int iris_core_init(struct iris_core *core)
+ {
+-	int ret;
++	int ret, error;
+ 
+ 	mutex_lock(&core->lock);
+ 	if (core->state == IRIS_CORE_INIT) {
+@@ -74,7 +88,7 @@
+ 
+ 	ret = iris_fw_load(core);
+ 	if (ret)
+-		goto error_power_off;
++		goto error_unload_fw;
+ 
+ 	ret = iris_vpu_boot_firmware(core);
+ 	if (ret)
+@@ -95,13 +109,20 @@
+ 	return iris_wait_for_system_response(core);
+ 
+ error_unload_fw:
+-	iris_fw_unload(core);
+-error_power_off:
++	error = iris_fw_unload(core);
++	if (error) {
++		dev_err(core->dev, "firmware shutdown failed: %d; retaining resources\n", error);
++		core->state = IRIS_CORE_ERROR;
++		ret = error;
++		goto exit;
++	}
+ 	iris_vpu_power_off(core);
+ error_queue_deinit:
+-	iris_hfi_queues_deinit(core);
++	error = iris_hfi_queues_deinit(core);
++	if (error)
++		ret = error;
+ error:
+-	core->state = IRIS_CORE_DEINIT;
++	core->state = core->fw_loaded || core->fw_memory ? IRIS_CORE_ERROR : IRIS_CORE_DEINIT;
+ exit:
+ 	mutex_unlock(&core->lock);
+ 
+--- a/drivers/media/platform/qcom/iris/iris_firmware.c
++++ b/drivers/media/platform/qcom/iris/iris_firmware.c
+@@ -160,6 +160,9 @@
+ 	const struct tz_cp_config *cp_config;
+ 	int i, ret;
+ 
++	if (core->fw_loaded)
++		return -EBUSY;
++
+ 	ret = iris_load_fw_to_memory(core);
+ 	if (ret) {
+ 		dev_err(core->dev, "firmware download failed %d\n", ret);
+@@ -171,6 +174,7 @@
+ 		dev_err(core->dev, "auth and reset failed: %d\n", ret);
+ 		return ret;
+ 	}
++	core->fw_loaded = true;
+ 
+ 	for (i = 0; i < core->iris_platform_data->tz_cp_config_data_size; i++) {
+ 		cp_config = &core->iris_platform_data->tz_cp_config_data[i];
+@@ -180,7 +184,6 @@
+ 						     cp_config->cp_nonpixel_size);
+ 		if (ret) {
+ 			dev_err(core->dev, "qcom_scm_mem_protect_video_var failed: %d\n", ret);
+-			qcom_pas_shutdown(IRIS_PAS_ID);
+ 			return ret;
+ 		}
+ 	}
+@@ -190,7 +193,15 @@
+ 
+ int iris_fw_unload(struct iris_core *core)
+ {
+-	return qcom_pas_shutdown(IRIS_PAS_ID);
++	int ret;
++
++	if (!core->fw_loaded)
++		return 0;
++	ret = qcom_pas_shutdown(IRIS_PAS_ID);
++	if (!ret)
++		core->fw_loaded = false;
++
++	return ret;
+ }
+ 
+ int iris_set_hw_state(struct iris_core *core, bool resume)
+--- a/drivers/media/platform/qcom/iris/iris_hfi_queue.h
++++ b/drivers/media/platform/qcom/iris/iris_hfi_queue.h
+@@ -172,7 +172,7 @@
+ };
+ 
+ int iris_hfi_queues_init(struct iris_core *core);
+-void iris_hfi_queues_deinit(struct iris_core *core);
++int iris_hfi_queues_deinit(struct iris_core *core);
+ 
+ int iris_hfi_queue_cmd_write_locked(struct iris_core *core, void *pkt, u32 pkt_size);
+ int iris_hfi_queue_cmd_write(struct iris_core *core, void *pkt, u32 pkt_size);
+--- a/drivers/media/platform/qcom/iris/iris_hfi_queue.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_queue.c
+@@ -246,7 +246,9 @@
+ int iris_hfi_queues_init(struct iris_core *core)
+ {
+ 	struct iris_hfi_queue_table_header *q_tbl_hdr;
++	const struct vpu_ops *ops = core->iris_platform_data->vpu_ops;
+ 	u32 queue_size;
++	int ret;
+ 
+ 	/* Iris hardware requires 4K queue alignment */
+ 	queue_size = ALIGN((sizeof(*q_tbl_hdr) + (IFACEQ_QUEUE_SIZE * IFACEQ_NUMQ)), SZ_4K);
+@@ -263,9 +265,13 @@
+ 					  GFP_KERNEL, DMA_ATTR_WRITE_COMBINE);
+ 	if (!core->sfr_vaddr) {
+ 		dev_err(core->dev, "sfr alloc and map failed\n");
+-		dma_free_attrs(core->dev, queue_size, core->iface_q_table_vaddr,
+-			       core->iface_q_table_daddr, DMA_ATTR_WRITE_COMBINE);
+-		return -ENOMEM;
++		ret = -ENOMEM;
++		goto error_queue;
++	}
++	if (ops->fw_memory_init) {
++		ret = ops->fw_memory_init(core);
++		if (ret)
++			goto error_sfr;
+ 	}
+ 
+ 	iris_hfi_queue_init(core, IFACEQ_CMDQ_ID, &core->command_queue);
+@@ -287,14 +293,34 @@
+ 	*((u32 *)core->sfr_vaddr) = SFR_SIZE;
+ 
+ 	return 0;
++
++error_sfr:
++	dma_free_attrs(core->dev, SFR_SIZE, core->sfr_vaddr,
++		       core->sfr_daddr, DMA_ATTR_WRITE_COMBINE);
++	core->sfr_vaddr = NULL;
++	core->sfr_daddr = 0;
++error_queue:
++	dma_free_attrs(core->dev, queue_size, core->iface_q_table_vaddr,
++		       core->iface_q_table_daddr, DMA_ATTR_WRITE_COMBINE);
++	core->iface_q_table_vaddr = NULL;
++	core->iface_q_table_daddr = 0;
++	return ret;
+ }
+ 
+-void iris_hfi_queues_deinit(struct iris_core *core)
++int iris_hfi_queues_deinit(struct iris_core *core)
+ {
++	const struct vpu_ops *ops = core->iris_platform_data->vpu_ops;
+ 	u32 queue_size;
++	int ret;
++
++	if (ops->fw_memory_deinit) {
++		ret = ops->fw_memory_deinit(core);
++		if (ret)
++			return ret;
++	}
+ 
+ 	if (!core->iface_q_table_vaddr)
+-		return;
++		return 0;
+ 
+ 	iris_hfi_queue_deinit(&core->debug_queue);
+ 	iris_hfi_queue_deinit(&core->message_queue);
+@@ -314,4 +340,6 @@
+ 
+ 	core->iface_q_table_vaddr = NULL;
+ 	core->iface_q_table_daddr = 0;
++
++	return 0;
+ }
+--- a/drivers/media/platform/qcom/iris/iris_vpu_common.h
++++ b/drivers/media/platform/qcom/iris/iris_vpu_common.h
+@@ -20,7 +20,9 @@
+ 	int (*power_on_hw)(struct iris_core *core);
+ 	int (*power_off_controller)(struct iris_core *core);
+ 	int (*power_on_controller)(struct iris_core *core);
+-	void (*program_bootup_registers)(struct iris_core *core);
++	int (*program_bootup_registers)(struct iris_core *core);
++	int (*fw_memory_init)(struct iris_core *core);
++	int (*fw_memory_deinit)(struct iris_core *core);
+ 	void (*set_preset_registers)(struct iris_core *core);
+ 	u64 (*calc_freq)(struct iris_inst *inst, size_t data_size);
+ 	int (*set_hwmode)(struct iris_core *core);
+@@ -41,7 +43,10 @@
+ void iris_vpu_power_off(struct iris_core *core);
+ int iris_vpu35_vpu4x_power_off_controller(struct iris_core *core);
+ int iris_vpu35_vpu4x_power_on_controller(struct iris_core *core);
+-void iris_vpu35_vpu4x_program_bootup_registers(struct iris_core *core);
++int iris_vpu35_vpu4x_program_bootup_registers(struct iris_core *core);
++int iris_sm7675_fw_memory_init(struct iris_core *core);
++int iris_sm7675_fw_memory_deinit(struct iris_core *core);
++int iris_sm7675_program_bootup_registers(struct iris_core *core);
+ u64 iris_vpu3x_vpu4x_calculate_frequency(struct iris_inst *inst, size_t data_size);
+ 
+ void iris_vpu_set_preset_registers(struct iris_core *core);
+--- a/drivers/media/platform/qcom/iris/iris_vpu_common.c
++++ b/drivers/media/platform/qcom/iris/iris_vpu_common.c
+@@ -41,7 +41,7 @@
+ 	writel(mask_val, core->reg_base + WRAPPER_INTR_MASK);
+ }
+ 
+-static void iris_vpu_setup_ucregion_memory_map(struct iris_core *core)
++static int iris_vpu_setup_ucregion_memory_map(struct iris_core *core)
+ {
+ 	u32 queue_size, value;
+ 	const struct vpu_ops *vpu_ops = core->iris_platform_data->vpu_ops;
+@@ -68,14 +68,19 @@
+ 	}
+ 
+ 	if (vpu_ops->program_bootup_registers)
+-		vpu_ops->program_bootup_registers(core);
++		return vpu_ops->program_bootup_registers(core);
++
++	return 0;
+ }
+ 
+ int iris_vpu_boot_firmware(struct iris_core *core)
+ {
+ 	u32 ctrl_init = BIT(0), ctrl_status = 0, count = 0, max_tries = 1000;
++	int ret;
+ 
+-	iris_vpu_setup_ucregion_memory_map(core);
++	ret = iris_vpu_setup_ucregion_memory_map(core);
++	if (ret)
++		return ret;
+ 
+ 	writel(ctrl_init, core->reg_base + CTRL_INIT);
+ 	writel(0x1, core->reg_base + CPU_CS_SCIACMDARG3);
+@@ -417,9 +422,11 @@
+ 	return ret;
+ }
+ 
+-void iris_vpu35_vpu4x_program_bootup_registers(struct iris_core *core)
++int iris_vpu35_vpu4x_program_bootup_registers(struct iris_core *core)
+ {
+ 	writel(0x1, core->reg_base + WRAPPER_IRIS_VCODEC_VPU_WRAPPER_SPARE_0);
++
++	return 0;
+ }
+ 
+ u64 iris_vpu3x_vpu4x_calculate_frequency(struct iris_inst *inst, size_t data_size)
+--- a/drivers/media/platform/qcom/iris/iris_vpu3x.c
++++ b/drivers/media/platform/qcom/iris/iris_vpu3x.c
+@@ -353,6 +353,9 @@
+ };
+ 
+ const struct vpu_ops iris_vpu33_2p_ops = {
++	.fw_memory_init = iris_sm7675_fw_memory_init,
++	.fw_memory_deinit = iris_sm7675_fw_memory_deinit,
++	.program_bootup_registers = iris_sm7675_program_bootup_registers,
+ 	.power_off_hw = iris_vpu33_2p_power_off_hardware,
+ 	.power_on_hw = iris_vpu_power_on_hw,
+ 	.power_off_controller = iris_vpu33_power_off_controller,
+--- /dev/null
++++ b/drivers/media/platform/qcom/iris/iris_sm7675_memory.c
+@@ -0,0 +1,133 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc.
++ * Iris33 mmap ABI: OnePlus SM7675 1138e00f, venus_hfi_queue.c.
++ * Regions cross-checked against Uke OS3.0.304.0 msm_video.ko, SHA256
++ * 2976535e5523521d953bdc762fc446e02bd5b564b28db34789d066b6070406df.
++ */
++#include <linux/dma-mapping.h>
++#include <linux/iommu.h>
++#include <linux/slab.h>
++
++#include "iris_core.h"
++#include "iris_vpu_common.h"
++
++struct iris_fw_memory {
++	struct iommu_domain *domain;
++	void *mmap;
++	dma_addr_t mmap_dma;
++	u32 mapped;
++};
++
++static const struct {
++	phys_addr_t physical;
++	u32 iova;
++	u32 payload_index;
++} sm7675_fw_regions[] = {
++	{ 0x0aae0000, 0xffae0000, 11 },
++	{ 0x00508000, 0xffadf000, 19 },
++	{ 0x17421000, 0xffade000, 21 },
++};
++
++int iris_sm7675_fw_memory_deinit(struct iris_core *core)
++{
++	struct iris_fw_memory *memory = core->fw_memory;
++	int i;
++
++	if (!memory)
++		return 0;
++
++	for (i = ARRAY_SIZE(sm7675_fw_regions) - 1; i >= 0; i--) {
++		if (!(memory->mapped & BIT(i)))
++			continue;
++		if (iommu_unmap(memory->domain, sm7675_fw_regions[i].iova, SZ_4K) != SZ_4K) {
++			dev_err(core->dev, "firmware region %d unmap incomplete\n", i);
++			continue;
++		}
++		memory->mapped &= ~BIT(i);
++	}
++	/* Keep ownership for a later cleanup attempt if an unmap was incomplete. */
++	if (memory->mapped)
++		return -EIO;
++
++	if (memory->mmap)
++		dma_free_coherent(core->dev, SZ_4K, memory->mmap, memory->mmap_dma);
++	kfree(memory);
++	core->fw_memory = NULL;
++
++	return 0;
++}
++
++int iris_sm7675_fw_memory_init(struct iris_core *core)
++{
++	struct iris_fw_memory *memory;
++	u32 *payload;
++	unsigned int i;
++	int ret;
++
++	if (core->fw_memory)
++		return -EBUSY;
++	if (core->iris_platform_data->dma_mask >= sm7675_fw_regions[2].iova)
++		return -EINVAL;
++	memory = kzalloc(sizeof(*memory), GFP_KERNEL);
++	if (!memory)
++		return -ENOMEM;
++	memory->domain = iommu_get_domain_for_dev(core->dev);
++	if (!memory->domain) {
++		kfree(memory);
++		return -ENODEV;
++	}
++	core->fw_memory = memory;
++
++	/* MMIO IOVAs are above the platform DMA allocation mask and cannot alias it. */
++	for (i = 0; i < ARRAY_SIZE(sm7675_fw_regions); i++) {
++		ret = iommu_map(memory->domain, sm7675_fw_regions[i].iova,
++				sm7675_fw_regions[i].physical, SZ_4K,
++				IOMMU_READ | IOMMU_WRITE | IOMMU_MMIO, GFP_KERNEL);
++		if (ret)
++			goto error;
++		memory->mapped |= BIT(i);
++	}
++
++	memory->mmap = dma_alloc_coherent(core->dev, SZ_4K, &memory->mmap_dma, GFP_KERNEL);
++	if (!memory->mmap) {
++		ret = -ENOMEM;
++		goto error;
++	}
++	if (upper_32_bits(memory->mmap_dma) || !IS_ALIGNED(memory->mmap_dma, SZ_4K) ||
++	    memory->mmap_dma < memory->domain->geometry.aperture_start ||
++	    memory->mmap_dma > core->iris_platform_data->dma_mask ||
++	    core->iris_platform_data->dma_mask - memory->mmap_dma < SZ_4K - 1) {
++		ret = -ERANGE;
++		goto error;
++	}
++
++	payload = memory->mmap;
++	memset(payload, 0, SZ_4K);
++	payload[0] = 1;
++	for (i = 0; i < ARRAY_SIZE(sm7675_fw_regions); i++) {
++		payload[sm7675_fw_regions[i].payload_index] = sm7675_fw_regions[i].iova;
++		payload[sm7675_fw_regions[i].payload_index + 1] = SZ_4K;
++	}
++
++	return 0;
++
++error:
++	iris_sm7675_fw_memory_deinit(core);
++	return ret;
++}
++
++int iris_sm7675_program_bootup_registers(struct iris_core *core)
++{
++	struct iris_fw_memory *memory = core->fw_memory;
++
++	if (!memory || !memory->mmap || memory->mapped != GENMASK(2, 0))
++		return -EINVAL;
++
++	dma_wmb();
++	writel(lower_32_bits(memory->mmap_dma), core->reg_base + 0xa0060);
++	writel(0xffade000, core->reg_base + 0xa0024);
++	writel(0x3000, core->reg_base + 0xa0028);
++
++	return 0;
++}

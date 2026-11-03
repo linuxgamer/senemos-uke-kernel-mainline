@@ -1,0 +1,139 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] interconnect: qcom: restore exact Cliffs HLOS video routes
+
+Adapt the Uke OEM 5712080a cliffs.c video and configuration paths to the
+existing pointer-link provider. Preserve display, USB and shared DDR nodes.
+Add only the HLOS MM1/SF route and Venus configuration endpoint. No donor
+voter aliases, firmware or measured throughput claims are introduced.
+
+--- a/drivers/interconnect/qcom/cliffs-display-icc.h
++++ b/drivers/interconnect/qcom/cliffs-display-icc.h
+@@ -11,9 +11,71 @@
+ #define MASTER_MNOC_HF_MEM_NOC 23
+ #define SLAVE_DISPLAY_CFG 524
+ #define SLAVE_MNOC_HF_MEM_NOC 559
++#define MASTER_MNOC_SF_MEM_NOC 24
++#define MASTER_VIDEO 28
++#define SLAVE_VENUS_CFG 548
++#define SLAVE_MNOC_SF_MEM_NOC 560
+ 
+ static struct qcom_icc_node qns_mem_noc_hf;
+ static struct qcom_icc_node qnm_mnoc_hf;
++static struct qcom_icc_node qnm_mnoc_sf;
++static struct qcom_icc_node qns_mem_noc_sf;
++
++/* Exact Uke OEM video route and QoS, using only the existing HLOS voters. */
++static const struct qcom_icc_qosbox qnm_video_qos = {
++	.num_ports = 1,
++	.port_offsets = { 0x30000 },
++	.prio = 0,
++	.urg_fwd = 1,
++	.prio_fwd_disable = 0,
++};
++
++static struct qcom_icc_node qnm_video = {
++	.name = "qnm_video",
++	.channels = 1,
++	.buswidth = 32,
++	.qosbox = &qnm_video_qos,
++	.num_links = 1,
++	.link_nodes = { &qns_mem_noc_sf },
++};
++
++static struct qcom_icc_node qns_mem_noc_sf = {
++	.name = "qns_mem_noc_sf",
++	.channels = 2,
++	.buswidth = 32,
++	.num_links = 1,
++	.link_nodes = { &qnm_mnoc_sf },
++};
++
++static const struct qcom_icc_qosbox qnm_mnoc_sf_qos = {
++	.num_ports = 2,
++	.port_offsets = { 0x35000, 0x75000 },
++	.prio = 0,
++	.urg_fwd = 1,
++	.prio_fwd_disable = 0,
++};
++
++static struct qcom_icc_node qnm_mnoc_sf = {
++	.name = "qnm_mnoc_sf",
++	.channels = 2,
++	.buswidth = 32,
++	.qosbox = &qnm_mnoc_sf_qos,
++	.num_links = 2,
++	.link_nodes = { &qns_gem_noc_cnoc, &qns_llcc },
++};
++
++static struct qcom_icc_node qhs_venus_cfg = {
++	.name = "qhs_venus_cfg",
++	.channels = 1,
++	.buswidth = 4,
++};
++
++static struct qcom_icc_bcm bcm_mm1 = {
++	.name = "MM1",
++	.enable_mask = 0x1,
++	.num_nodes = 1,
++	.nodes = { &qns_mem_noc_sf },
++};
+ 
+ static const struct qcom_icc_qosbox qnm_mdp_qos = {
+ 	.num_ports = 2,
+@@ -74,11 +136,14 @@
+ };
+ 
+ static struct qcom_icc_node * const mmss_noc_nodes[] = {
++	[MASTER_VIDEO] = &qnm_video,
++	[SLAVE_MNOC_SF_MEM_NOC] = &qns_mem_noc_sf,
+ 	[MASTER_MDP] = &qnm_mdp,
+ 	[SLAVE_MNOC_HF_MEM_NOC] = &qns_mem_noc_hf,
+ };
+ 
+ static struct qcom_icc_bcm * const mmss_noc_bcms[] = {
++	&bcm_mm1,
+ 	&bcm_mm0,
+ };
+ 
+--- a/drivers/interconnect/qcom/qnoc-cliffs-usb.c
++++ b/drivers/interconnect/qcom/qnoc-cliffs-usb.c
+@@ -172,8 +172,9 @@
+ 	.name = "qsm_cfg",
+ 	.channels = 1,
+ 	.buswidth = 4,
+-	.num_links = 5,
+-	.link_nodes = { &qhs_qup0, &qhs_qup1, &qhs_usb3_0, &qhs_ufs_mem_cfg, &qhs_display_cfg },
++	.num_links = 6,
++	.link_nodes = { &qhs_qup0, &qhs_qup1, &qhs_usb3_0, &qhs_ufs_mem_cfg,
++			&qhs_display_cfg, &qhs_venus_cfg },
+ };
+ 
+ static struct qcom_icc_node qnm_gemnoc_cnoc = {
+@@ -467,8 +468,9 @@
+ static struct qcom_icc_bcm bcm_sh1 = {
+ 	.name = "SH1",
+ 	.enable_mask = 0x1,
+-	.num_nodes = 5,
+-	.nodes = { &chm_apps, &qnm_gpu, &qnm_snoc_sf, &qns_gem_noc_cnoc, &qnm_mnoc_hf },
++	.num_nodes = 6,
++	.nodes = { &chm_apps, &qnm_gpu, &qnm_snoc_sf, &qns_gem_noc_cnoc,
++		   &qnm_mnoc_hf, &qnm_mnoc_sf },
+ };
+ 
+ static struct qcom_icc_bcm bcm_sn0 = {
+@@ -546,6 +548,7 @@
+ };
+ 
+ static struct qcom_icc_node * const cnoc_cfg_nodes[] = {
++	[SLAVE_VENUS_CFG] = &qhs_venus_cfg,
+ 	[SLAVE_DISPLAY_CFG] = &qhs_display_cfg,
+ 	[MASTER_CNOC_CFG] = &qsm_cfg,
+ 	[SLAVE_QUP_0] = &qhs_qup0,
+@@ -584,6 +587,7 @@
+ };
+ 
+ static struct qcom_icc_node * const gem_noc_nodes[] = {
++	[MASTER_MNOC_SF_MEM_NOC] = &qnm_mnoc_sf,
+ 	[MASTER_MNOC_HF_MEM_NOC] = &qnm_mnoc_hf,
+ 	[MASTER_APPSS_PROC] = &chm_apps,
+ 	[MASTER_GFX3D] = &qnm_gpu,
