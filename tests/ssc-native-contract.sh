@@ -54,7 +54,7 @@ cp "$root/tests/ssc-native-host.h" "$stage/include/ssc-native-host.h"
         ssc_response ssc_request ssc_rate ssc_sample_values ssc_report \
         ssc_start ssc_stop ssc_close_client; do
         awk -v name="$name" '
-          $0 ~ "^static .* " name "\\(" {emit=1;found=1}
+          $0 ~ "^static .* " name "\\(" && $0 !~ /;/ {emit=1;found=1}
           emit {print}
           emit && /^}/ {emit=0;exit}
           END {if(!found)exit 1}
