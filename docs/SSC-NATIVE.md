@@ -112,3 +112,17 @@ release 1600, retaining its secure RTC, SSC integration, Binder, MEMLAT and supp
 changes. It adds the checked temperature source and NFC/IR updates qualified
 in separate build 11251492. Full combined kernel/package and physical results
 are required separately.
+
+Combined kernel 1710/build11251648 subsequently passed complete kernel, module
+and package checks. The first read-only observation of running1500 finds the
+SSC module bound and ADSP running, with the file services active, but no native
+SSC IIO devices registered. Sensor publication and physical behavior remain
+unqualified. The boot log also records a driver-core managed-link warning.
+
+The new source correction defers SSC probe until the ADSP supplier has fully
+bound. The bound check and managed-link creation hold the supplier device lock
+to exclude concurrent unbind; all paths unlock and retain ordinary reference
+cleanup. It does not start ADSP or change the sensor protocol. Remote check
+1.0-8 exercises the actual helper with fake providers and compiles the native
+AArch64 objects. This correction is absent from immutable1710; check results
+and later boot/sensor acceptance remain separate requirements.

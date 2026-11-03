@@ -1117,7 +1117,7 @@
     },
     {
       "path": "src/sensors/uke-ssc-iio.c",
-      "sha256": "fd8a48a8817be506a8556f9dfabc75442ab9225d736b791f70b42e7a034dd149"
+      "sha256": "6a581add200a207fe20578fd12b23b7d3c39205e396cda9d6c08da76c25886c6"
     },
     {
       "path": "src/sensors/uke-ssc-protocol.c",
@@ -1242,6 +1242,10 @@
     {
       "path": "tests/o82-platform-contract.sh",
       "sha256": "1421b4bde41d75a57fc325f4c77b211b5266e020e11d622f189d9fccb93cdb24"
+    },
+    {
+      "path": "tests/ssc-supplier-contract.sh",
+      "sha256": "0d8c84daa5e97798fe661921a0b6a4e0caff6220c7a7b1b2585f6d53f5d1d778"
     }
   ],
   "root_selector_capability": {

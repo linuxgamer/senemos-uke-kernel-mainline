@@ -10,7 +10,7 @@ mkdir -p "$output" "$stage/uke-ssc-protocol-check-1.0"
 git -C "$root" archive HEAD src/sensors/uke-ssc-protocol.c src/sensors/uke-ssc-protocol.h \
     src/sensors/uke-ssc-iio.c src/sensors/Kconfig src/sensors/Makefile src/sensors/prepare-source.sh \
     tests/ssc-protocol-contract.c tests/ssc-protocol-contract.sh \
-    tests/ssc-native-contract.c tests/ssc-native-contract.sh tests/ssc-native-host.h \
+    tests/ssc-native-contract.c tests/ssc-native-contract.sh tests/ssc-native-host.h tests/ssc-supplier-contract.sh \
     src/boot/uke-hardware.h tests/hardware-dt.cpp tests/hardware-dt.sh \
     packaging/native/check-ssc-native-objects.sh \
     LICENSE LICENSES/GPL-2.0-only.txt | tar -xf - -C "$stage/uke-ssc-protocol-check-1.0"
@@ -19,7 +19,7 @@ tar --sort=name --mtime=@1793664000 --owner=0 --group=0 --numeric-owner \
 cat > "$output/uke-ssc-protocol-check.spec" <<'SPEC'
 Name: uke-ssc-protocol-check
 Version: 1.0
-Release: 7%{?dist}
+Release: 8%{?dist}
 Summary: Remote checks of the native Uke SSC protocol decoder
 License: GPL-2.0-only AND MIT
 Source0: %{name}-%{version}.tar.gz
@@ -37,12 +37,16 @@ install -d %{buildroot}%{_docdir}/%{name}
 %check
 set -o pipefail
 bash tests/ssc-protocol-contract.sh | tee %{buildroot}%{_docdir}/%{name}/checks.txt
+bash tests/ssc-supplier-contract.sh | tee -a %{buildroot}%{_docdir}/%{name}/checks.txt
 CXX=clang++ bash tests/hardware-dt.sh | tee -a %{buildroot}%{_docdir}/%{name}/checks.txt
 bash packaging/native/check-ssc-native-objects.sh | tee -a %{buildroot}%{_docdir}/%{name}/checks.txt
 %files
 %license LICENSE LICENSES/GPL-2.0-only.txt
 %{_docdir}/%{name}/checks.txt
 %changelog
+* Tue Nov 03 2026 Uke contributors - 1.0-8
+- Defer SSC admission until ADSP has bound and serialize managed link creation.
+
 * Tue Nov 03 2026 Uke contributors - 1.0-7
 - Check native physical sensor temperature, millicelsius scaling and its DT entry.
 

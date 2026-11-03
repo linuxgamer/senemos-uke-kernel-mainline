@@ -880,6 +880,22 @@ static int ssc_resume(struct device *dev)
 	return 0;
 }
 
+static int ssc_link_adsp(struct device *consumer, struct device *supplier)
+{
+	int ret;
+
+	/* Serialize the bound check and link creation against supplier unbind. */
+	device_lock(supplier);
+	if (!device_is_bound(supplier))
+		ret = -EPROBE_DEFER;
+	else if (!device_link_add(consumer, supplier, DL_FLAG_AUTOREMOVE_CONSUMER))
+		ret = -ENOMEM;
+	else
+		ret = 0;
+	device_unlock(supplier);
+	return ret;
+}
+
 static int ssc_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -902,11 +918,10 @@ static int ssc_probe(struct platform_device *pdev)
 	of_node_put(adsp);
 	if (!supplier)
 		return -EPROBE_DEFER;
-	if (!device_link_add(dev, &supplier->dev, DL_FLAG_AUTOREMOVE_CONSUMER)) {
-		put_device(&supplier->dev);
-		return -ENOMEM;
-	}
+	ret = ssc_link_adsp(dev, &supplier->dev);
 	put_device(&supplier->dev);
+	if (ret)
+		return ret;
 	c = devm_kzalloc(dev, sizeof(*c), GFP_KERNEL);
 	if (!c)
 		return -ENOMEM;
