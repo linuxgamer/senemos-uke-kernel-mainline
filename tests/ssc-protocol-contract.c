@@ -199,9 +199,103 @@ static void malformed(void)
 	assert(uke_ssc_decode_sample(view(&b), 0, &sample_out));
 	assert(uke_ssc_decode_sample((struct uke_ssc_view){b.data, UKE_SSC_MESSAGE_MAX + 1}, 0, &sample_out) == -EINVAL);
 }
+
+static void attribute(struct bytes *root, unsigned int id, const struct bytes *primitive)
+{
+	struct bytes values = {}, a = {};
+	field(&values, 1, primitive->data, primitive->size);
+	integer(&a, 1, id); field(&a, 2, values.data, values.size);
+	field(root, 1, a.data, a.size);
+}
+
+static struct bytes metadata(void)
+{
+	struct bytes root = {}, p = {};
+	field(&p, 2, "Synthetic motion", 16); attribute(&root, 0, &p);
+	p.size = 0; field(&p, 2, "accel", 5); attribute(&root, 2, &p);
+	p.size = 0; integer(&p, 5, 1); attribute(&root, 3, &p);
+	attribute(&root, 21, &p);
+	p.size = 0; field(&p, 2, "sns_accel.proto", 15); attribute(&root, 5, &p);
+	p.size = 0; fixed(&p, 3, 0x41200000, 4); attribute(&root, 6, &p);
+	p.size = 0; fixed(&p, 4, 0, 8); attribute(&root, 16, &p);
+	return root;
+}
+
+static void attributes(void)
+{
+	struct bytes b = metadata(), p = {}, changed;
+	struct uke_ssc_attributes out, before;
+	unsigned int i;
+	assert(!uke_ssc_decode_attributes(view(&b), "accel", "sns_accel.proto", &out));
+	assert(!strcmp(out.name, "Synthetic motion") && !strcmp(out.datatype, "accel"));
+	assert(out.available && out.physical && !out.hlos_incompatible && !out.stream_type);
+	assert(out.rate_count == 1 && out.rate[0] == 0x41200000);
+	before = out;
+	assert(uke_ssc_decode_attributes(view(&b), "gyro", "sns_accel.proto", &out) == -ENOMSG);
+	assert(uke_ssc_decode_attributes(view(&b), "accel", "sns_gyro.proto", &out) == -ENOMSG);
+	assert(!memcmp(&out, &before, sizeof(out)));
+	for (i = 0; i < b.size; i++) {
+		assert(uke_ssc_decode_attributes((struct uke_ssc_view){b.data, i}, "accel", "sns_accel.proto", &out));
+		assert(!memcmp(&out, &before, sizeof(out)));
+	}
+	integer(&p, 5, 0); attribute(&b, 30, &p);
+	assert(!uke_ssc_decode_attributes(view(&b), "accel", "sns_accel.proto", &out) && !out.hlos_incompatible);
+	b = metadata(); p.size = 0; integer(&p, 5, 1); attribute(&b, 30, &p);
+	assert(!uke_ssc_decode_attributes(view(&b), "accel", "sns_accel.proto", &out) && out.hlos_incompatible);
+	/* A duplicate attribute never silently changes availability. */
+	attribute(&b, 3, &p);
+	assert(uke_ssc_decode_attributes(view(&b), "accel", "sns_accel.proto", &out));
+	/* Unknown attributes are framed, without assigning their vendor semantics. */
+	b = metadata(); p.size = 0; integer(&p, 5, 1); attribute(&b, 500, &p);
+	assert(!uke_ssc_decode_attributes(view(&b), "accel", "sns_accel.proto", &out));
+	b = metadata(); changed = b;
+	assert(uke_ssc_decode_attributes(view(&b), "accel", "sns_accel.proto", (struct uke_ssc_attributes *)b.data) == -EINVAL);
+	assert(!memcmp(b.data, changed.data, b.size));
+}
+
+static void requests(void)
+{
+	static const u8 expected[] = {
+		0x0a,0x12,0x09,0x23,0x01,0,0,0,0,0,0,0x11,0x56,0x04,0,0,0,0,0,0,
+		0x15,1,0,0,0,0x1a,4,8,1,16,0,0x22,0
+	};
+	u8 out[256], saved[256];
+	size_t size, keep;
+	struct uke_ssc_suid sensor = {0x123,0x456}, lookup = {0xababababababababULL,0xababababababababULL};
+	unsigned int command;
+	memset(out, 0xa5, sizeof(out)); size = 999;
+	assert(!uke_ssc_encode_request(UKE_SSC_ATTRIBUTES, sensor, NULL, 0, out, sizeof(out), &size));
+	assert(size == sizeof(expected) && !memcmp(out, expected, size) && out[size] == 0xa5);
+	for (command = UKE_SSC_ATTRIBUTES; command <= UKE_SSC_DISABLE; command++) {
+		u32 message[] = {512,1,513,514,10};
+		assert(!uke_ssc_encode_request(command, sensor, NULL, command == UKE_SSC_STREAM ? 0x41200000 : 0, out, sizeof(out), &size));
+		assert(out[20] == 0x15 && !memcmp(out, expected, 20));
+		assert(out[21] == (message[command] & 255) && out[22] == (message[command] >> 8));
+		assert(out[30] == (command == UKE_SSC_ATTRIBUTES ? 0 : 1));
+		if (command == UKE_SSC_STREAM) {
+			const u8 tail[] = {0x22,7,0x12,5,0x0d,0,0,0x20,0x41};
+			assert(size == 40 && !memcmp(out + 31, tail, sizeof(tail)));
+		} else assert(size == sizeof(expected) && !out[32]);
+	}
+	assert(!uke_ssc_encode_request(UKE_SSC_LOOKUP, lookup, "accel", 0, out, sizeof(out), &size));
+	const u8 lookup_tail[] = {0x22,13,0x12,11,0x0a,5,'a','c','c','e','l',0x10,1,0x18,0};
+	assert(size == 46 && !memcmp(out + 31, lookup_tail, sizeof(lookup_tail)));
+	memcpy(saved, out, sizeof(out)); keep = size;
+	assert(uke_ssc_encode_request(UKE_SSC_LOOKUP, lookup, "accel", 0, out, size - 1, &size) == -ENOSPC);
+	assert(size == keep && !memcmp(out, saved, sizeof(out)));
+	assert(uke_ssc_encode_request(UKE_SSC_LOOKUP, sensor, "accel", 0, out, sizeof(out), &size) == -EINVAL);
+	assert(uke_ssc_encode_request(UKE_SSC_LOOKUP, lookup, "accel/foreign", 0, out, sizeof(out), &size) == -EINVAL);
+	assert(uke_ssc_encode_request(UKE_SSC_STREAM, sensor, NULL, 0x7f800000, out, sizeof(out), &size) == -EINVAL);
+	assert(uke_ssc_encode_request(UKE_SSC_STREAM, sensor, NULL, 0xbf800000, out, sizeof(out), &size) == -EINVAL);
+	assert(uke_ssc_encode_request(UKE_SSC_ATTRIBUTES, sensor, "accel", 0, out, sizeof(out), &size) == -EINVAL);
+	assert(uke_ssc_encode_request(UKE_SSC_DISABLE + 1, sensor, NULL, 0, out, sizeof(out), &size) == -EINVAL);
+	assert(uke_ssc_encode_request(UKE_SSC_ATTRIBUTES, sensor, NULL, 0, out, sizeof(out), (size_t *)out) == -EINVAL);
+	assert(!memcmp(out, saved, sizeof(out)));
+}
 int main(void)
 {
-	samples(); events(); discovery(); numeric(); malformed();
+	samples(); events(); discovery(); numeric(); malformed(); attributes(); requests();
 	puts("SSC native decoder: bounded SUID/event/sample parsing, packed floats, unchanged failures and 30000 independent numeric comparisons passed; synthetic host data only");
+	puts("SSC native metadata and requests: exact API/type, availability, physical/stream fields, rates, APSS delivery, disable, golden bytes and unchanged rejection checks passed");
 	return 0;
 }

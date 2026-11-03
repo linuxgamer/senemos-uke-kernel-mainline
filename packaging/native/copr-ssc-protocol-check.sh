@@ -15,7 +15,7 @@ tar --sort=name --mtime=@1793664000 --owner=0 --group=0 --numeric-owner \
 cat > "$output/uke-ssc-protocol-check.spec" <<'SPEC'
 Name: uke-ssc-protocol-check
 Version: 1.0
-Release: 1%{?dist}
+Release: 2%{?dist}
 Summary: Remote checks of the native Uke SSC protocol decoder
 License: GPL-2.0-only OR MIT
 Source0: %{name}-%{version}.tar.gz
@@ -36,6 +36,9 @@ bash tests/ssc-protocol-contract.sh | tee %{buildroot}%{_docdir}/%{name}/checks.
 %license LICENSE LICENSES/GPL-2.0-only.txt
 %{_docdir}/%{name}/checks.txt
 %changelog
+* Tue Nov 03 2026 Uke contributors - 1.0-2
+- Check exact metadata admission and bounded APSS request construction.
+
 * Tue Nov 03 2026 Uke contributors - 1.0-1
 - Check native event decoding and fixed-point arithmetic with synthetic inputs.
 SPEC
