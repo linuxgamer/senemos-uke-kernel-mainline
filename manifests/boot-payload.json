@@ -29,7 +29,7 @@
     },
     {
       "path": "packaging/native/native.config",
-      "sha256": "abcd83ac1ac8171923123618cb0a17dd0880e50f3a81297bf84d94117cdc7360"
+      "sha256": "0228f8bdd711e918e3b4cdae3401df8b51d4c53c6e3b62c4e85a8398515639db"
     },
     {
       "path": "packaging/native/prepare.sh",
@@ -1154,6 +1154,42 @@
     {
       "path": "tests/ssc-native-host.h",
       "sha256": "ee715775fd1fa8b7e5a570e9608801ec90b0d727a8383ab38f6ef6f5e9bc611f"
+    },
+    {
+      "path": "src/boot/sm7675-uke-usb2.dtso",
+      "sha256": "b12e14b5dde82fc237f3b2e626d34c0ae0c85c3d3c14f4ff75cf9fa6cd8f7573"
+    },
+    {
+      "path": "src/nfc/prepare-source.sh",
+      "sha256": "53182ac5d741ad8bcb7734466a1ff55ea9ca3aba4a0e1bd9f8ba6482de15b46e"
+    },
+    {
+      "path": "src/nfc/fm19511-uke.c",
+      "sha256": "076a178ea5eb19702f5190bff1f4805fe3c94e5dc7945061ecdf81d49b25134a"
+    },
+    {
+      "path": "src/nfc/fm19511-uapi.h",
+      "sha256": "4502665344c02c5e56daab8c11f174b3478f09312c3314ba93394022a846497e"
+    },
+    {
+      "path": "src/nfc/fm,fm19511.yaml",
+      "sha256": "143f51575a1a8a4cb458a32b7a4930e908a41336baf4d72f313da4f23092826b"
+    },
+    {
+      "path": "src/infrared/ir-spi-uke.c",
+      "sha256": "99f0022b5b2741610b45044070bb237fe4658c732e2bf9425bead71eb2bb10e3"
+    },
+    {
+      "path": "tests/fm19511-contract.sh",
+      "sha256": "2102bed7d0ef7286aca5ce8e94343ef798a57e599b837309396c8ee270eab233"
+    },
+    {
+      "path": "tests/fm19511-pm-contract.sh",
+      "sha256": "56fd044170b0f237429c575afa5a5de426729b06beaced2b646d764217a280ea"
+    },
+    {
+      "path": "tests/ir-spi-contract.sh",
+      "sha256": "7121c9cae9ea33055dad3fc1106138ed34c618b0c54a0ccaf8156b503b798de7"
     }
   ],
   "root_selector_capability": {

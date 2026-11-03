@@ -23,6 +23,7 @@ properties:
   interrupts:
     maxItems: 1
   vdd-supply: true
+  wakeup-source: true
   qcom,ntag-vdd-supply:
     deprecated: true
   qcom,ntag-vdd-voltage:

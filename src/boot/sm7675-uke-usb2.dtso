@@ -118,6 +118,8 @@
 	ir-spi@0 {
 		compatible = "ir-spi-led";
 		label = "Uke infrared transmitter";
+		spi-max-frequency = <19200000>;
+		duty-cycle = /bits/ 8 <50>;
 	};
 };
 
@@ -144,6 +146,7 @@
 		model = "FM19511 NFC tag";
 		interrupt-parent = <&tlmm>;
 		interrupts = <170 IRQ_TYPE_EDGE_FALLING>;
+		wakeup-source;
 		/* The admitted POCO SKU enables this before I2C population. */
 		status = "disabled";
 	};

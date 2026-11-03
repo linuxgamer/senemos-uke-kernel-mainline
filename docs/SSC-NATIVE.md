@@ -96,11 +96,19 @@ description, without a new AP bus client. This is sensor-die temperature,
 not an ambient-temperature, battery-temperature or thermal-limit substitute.
 No factory calibration or thermal policy is changed.
 
-That extension is not in the immutable 1500 candidate. Remote source check
-1.0-7 covers the actual conversion, metadata/stream and scale functions,
-positive/negative Celsius values and updated FDT. It remains pending; a later
-combined kernel needs complete linkage and distinct device acceptance.
+That extension is not in the immutable 1500 candidate.
+[Remote source check 11251535](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11251535/)
+passed at 1.0-7. It covers the actual conversion, metadata/stream and scale
+functions, positive/negative Celsius values, invalid accuracy and updated FDT.
+The native AArch64 composite object also compiled against Linux 7.3.1.
+A later combined kernel needs complete linkage and distinct device acceptance.
 The protocol is the pinned Qualcomm
 [physical sensor temperature API](https://github.com/qualcomm/sensinghub/blob/329551963bcc063f6a89f6cbca259c5b5c9c4e0b/apis/proto/sns_sensor_temperature.proto),
 and the output unit follows the exact
 [Linux IIO ABI](https://github.com/torvalds/linux/blob/79a907609d53d5cd645b42c11550d295d43abf99/Documentation/ABI/testing/sysfs-bus-iio).
+
+`packaging/native/copr-hardware1600.sh` prepares the combined successor from
+release 1500, retaining its SSC integration, Binder, MEMLAT and supplier/touch
+changes. It adds the checked temperature source and NFC/IR updates qualified
+in separate build 11251492. Full combined kernel/package and physical results
+are required separately.
