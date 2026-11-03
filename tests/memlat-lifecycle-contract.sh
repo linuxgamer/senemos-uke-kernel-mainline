@@ -25,21 +25,35 @@ typedef uint32_t u32;typedef uint64_t u64;
 #define PTR_ERR(p) ((int)(intptr_t)(p))
 #define ERR_PTR(e) ((void *)(intptr_t)(e))
 #define for_each_online_cpu(id) for((id)=0;(id)<2;(id)++)
-#define dev_warn_ratelimited(device,format,...) do { assert((device)==p.dev);printf(format,__VA_ARGS__); } while(0)
-struct perf_event { bool alive,disabled; };
+#define dev_warn_ratelimited(device,format,...) do { assert(device);printf(format,__VA_ARGS__); } while(0)
+static u64 div64_u64(u64 a,u64 b) { assert(b);return a/b; }
+C
+printf '#include "%s/src/power/uke-memlat-policy.h"\n' "$root" >> "$work/check.c"
+cat >> "$work/check.c" <<'C'
+#define max(a,b) ((a)>(b)?(a):(b))
+#define container_of(p,t,m) ((t *)((char *)(p)-offsetof(t,m)))
+#define to_delayed_work(p) container_of(p,struct delayed_work,work)
+typedef unsigned long cpumask_t;
+#define cpumask_clear(m) (*(m)=0)
+#define cpumask_set_cpu(id,m) (*(m)|=1UL<<(id))
+#define for_each_cpu_and(id,a,b) for((id)=0;(id)<2;(id)++) if((*(a)&*(b))&(1UL<<(id)))
+struct perf_event { bool alive,disabled;unsigned reads; };
 struct perf_event_attr { u32 type,size,pinned,disabled;u64 config; };
 struct mutex { bool held; };
 struct hlist_node { int value; };
-struct delayed_work { int value; };
+struct work_struct { int value; };
+struct delayed_work { struct work_struct work; };
 struct workqueue_struct { int value; };
 struct icc_path { unsigned index; };
 struct device { void *data; };
-struct uke_memlat_cpu { struct perf_event *event[4];u64 timestamp; };
+struct uke_memlat_cpu { struct perf_event *event[4];struct uke_memlat_count previous[4];u64 timestamp; };
+struct uke_memlat_monitor { struct uke_memlat_row map[12];cpumask_t cpus;unsigned rows,group;bool compute; };
 struct uke_memlat {
     struct device *dev;struct mutex lock;struct delayed_work work;
     struct workqueue_struct *queue;struct hlist_node hp_node;
     struct icc_path *path[2];struct uke_memlat_cpu cpu[8];
-    u32 vote[2];u64 rejected,vote_errors;int hp_state;bool suspended;
+    struct uke_memlat_monitor monitor[7];unsigned monitors;
+    u32 vote[2];u64 samples,rejected,vote_errors;int hp_state;bool suspended;
 };
 static struct uke_memlat p;
 static struct device dev;
@@ -50,6 +64,14 @@ static unsigned created,released,enabled,disabled,queued,cancelled,destroyed,hp_
 static unsigned icc_calls[2],requested[2],fail_mask;
 static int fail_create=-1;
 static bool cpu_lock;
+static unsigned idle_mask;
+static u64 clock_ns;
+static int available_idle_cpu(unsigned id) { return !!(idle_mask&(1U<<id)); }
+static u64 ktime_get_ns(void) { clock_ns+=8000000;return clock_ns; }
+static u64 perf_event_read_value(struct perf_event *e,u64 *enabled_time,u64 *running_time) {
+    assert(cpu_lock&&p.lock.held&&e->alive&&!e->disabled);
+    e->reads++;*enabled_time=*running_time=100*e->reads;return 1000*e->reads;
+}
 static void mutex_lock(struct mutex *m) { assert(!m->held);m->held=true; }
 static void mutex_unlock(struct mutex *m) { assert(m->held);m->held=false; }
 static void cpus_read_lock(void) { assert(!cpu_lock);cpu_lock=true; }
@@ -82,7 +104,7 @@ static int cpuhp_state_remove_instance(int state,struct hlist_node *node) {
 }
 static void cpuhp_remove_multi_state(int state) { assert(state==101&&hp_removed==1);hp_removed++; }
 C
-for function in release_cpu online offline commit stop suspend resume; do
+for function in release_cpu online offline commit sample stop suspend resume; do
     awk -v name="uke_memlat_$function" '
       $0 ~ "^static (int|void) " name "\\(" {emit=1;found++}
       emit {print}
@@ -95,7 +117,7 @@ static void reset(void) {
     memset(&p,0,sizeof(p));memset(events,0,sizeof(events));
     created=released=enabled=disabled=queued=cancelled=destroyed=hp_removed=0;
     memset(icc_calls,0,sizeof(icc_calls));memset(requested,0,sizeof(requested));
-    fail_create=-1;fail_mask=0;cpu_lock=false;p.dev=&dev;dev.data=&p;
+    fail_create=-1;fail_mask=idle_mask=0;clock_ns=0;cpu_lock=false;p.dev=&dev;dev.data=&p;
     p.path[0]=&paths[0];p.path[1]=&paths[1];p.queue=&queue;p.hp_state=101;
 }
 static void online(void) {
@@ -132,8 +154,18 @@ int main(void) {
     reset();online();assert(!uke_memlat_offline(1,&p.hp_node));assert(released==4);
     assert(!uke_memlat_suspend(&dev)&&disabled==4);assert(!uke_memlat_resume(&dev)&&enabled==4);
     uke_memlat_stop(&p);assert(created==released&&destroyed==1);
+    reset();online();idle_mask=3;
+    uke_memlat_sample(&p.work.work);assert(p.samples==1&&queued==1);
+    for(unsigned i=0;i<8;i++)assert(!events[i].reads);
+    assert(!p.cpu[0].timestamp&&!p.cpu[1].timestamp);
+    idle_mask=2;uke_memlat_sample(&p.work.work);assert(p.samples==2&&queued==2);
+    for(unsigned i=0;i<8;i++)assert(events[i].reads==(i<4?1U:0U));
+    assert(p.cpu[0].timestamp&&!p.cpu[1].timestamp);
+    p.suspended=true;uke_memlat_sample(&p.work.work);assert(p.samples==2&&queued==2);
+    for(unsigned i=0;i<8;i++)assert(events[i].reads==(i<4?1U:0U));
+    uke_memlat_stop(&p);assert(created==released&&destroyed==1);
     puts("Actual Uke MEMLAT: every counter allocation fault, non-veto hotplug, disabled hotplug, ICC units/errors, suspend rollback, resume baselines and removal pass; fake providers, host only");
 }
 C
-"${CC:-clang}" -std=c11 -Wall -Wextra -Werror -Wno-misleading-indentation -fsanitize=undefined,address -fno-sanitize-recover=all "$work/check.c" -o "$work/check"
+"${CC:-clang}" -std=c11 -Wall -Wextra -Werror -Wno-unused-function -Wno-misleading-indentation -fsanitize=undefined,address -fno-sanitize-recover=all "$work/check.c" -o "$work/check"
 "$work/check"

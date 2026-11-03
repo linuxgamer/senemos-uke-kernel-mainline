@@ -10,15 +10,15 @@ mkdir -p "$output" "$stage/uke-memlat-check-1.0"
 git -C "$root" archive HEAD src/power/uke-memlat.c src/power/uke-memlat-policy.h \
     src/boot/uke-bwmon.h src/boot/uke-cpu-bwmon.h src/boot/uke-memlat.h \
     tests/memlat-policy-contract.sh tests/memlat-dt-contract.sh tests/memlat-lifecycle-contract.sh \
-    LICENSE | tar -xf - -C "$stage/uke-memlat-check-1.0"
+    LICENSE LICENSES/GPL-2.0-only.txt | tar -xf - -C "$stage/uke-memlat-check-1.0"
 tar --sort=name --mtime=@1793664000 --owner=0 --group=0 --numeric-owner \
     -czf "$output/uke-memlat-check-1.0.tar.gz" -C "$stage" uke-memlat-check-1.0
 cat > "$output/uke-memlat-check.spec" <<'SPEC'
 Name: uke-memlat-check
 Version: 1.0
-Release: 1%{?dist}
+Release: 2%{?dist}
 Summary: Remote source checks of the native Uke memory-latency policy
-License: GPL-2.0-only
+License: GPL-2.0-only AND MIT
 Source0: %{name}-%{version}.tar.gz
 BuildArch: noarch
 BuildRequires: bash clang compiler-rt libasan libubsan libfdt-devel coreutils findutils gawk
@@ -36,9 +36,12 @@ for check in policy dt lifecycle; do
     bash tests/memlat-$check-contract.sh | tee -a %{buildroot}%{_docdir}/%{name}/checks.txt
 done
 %files
-%license LICENSE
+%license LICENSE LICENSES/GPL-2.0-only.txt
 %{_docdir}/%{name}/checks.txt
 %changelog
+* Tue Nov 03 2026 Uke contributors - 1.0-2
+- Verify idle CPU sampling admission and preserve both source license notices.
+
 * Tue Nov 03 2026 Uke contributors - 1.0-1
 - Check native policy, DT and actual lifecycle callbacks in remote build workers.
 SPEC

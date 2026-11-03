@@ -21,6 +21,9 @@ voltage, thermal ceilings or CPUCP configuration.
 
 The8 ms delayed work is deferrable and freezable. Unscheduled, multiplexed,
 reset, idle, implausible and overlong samples do not produce synthetic votes.
+CPUs observed as idle are skipped before perf reads, which can otherwise send
+remote IPIs. Their next active interval starts with a fresh counter baseline.
+This admission is a scheduler snapshot, not a physical no-wakeup guarantee.
 Hotplug releases counters without refusing CPU online operations. Suspend
 stops work, releases this driver's votes and disables counters; a failed vote
 release aborts suspend and resumes sampling. Resume starts fresh baselines.

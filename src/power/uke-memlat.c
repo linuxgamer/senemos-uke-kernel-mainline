@@ -17,6 +17,7 @@
 #include <linux/perf_event.h>
 #include <linux/platform_device.h>
 #include <linux/pm.h>
+#include <linux/sched.h>
 #include <linux/workqueue.h>
 #include "uke-memlat-policy.h"
 
@@ -147,6 +148,11 @@ static void uke_memlat_sample(struct work_struct *work)
 		u64 now = ktime_get_ns();
 		bool accepted = cpu->timestamp != 0;
 
+		/* perf reads may send an IPI. Do not wake an idle CPU to sample it. */
+		if (available_idle_cpu(id)) {
+			cpu->timestamp = 0;
+			continue;
+		}
 		if (!cpu->event[UKE_MEMLAT_EVENTS - 1]) {
 			complete = false;
 			continue;
