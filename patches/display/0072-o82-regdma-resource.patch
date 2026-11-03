@@ -11,33 +11,60 @@ Signed-off-by: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
 ---
 --- a/drivers/gpu/drm/msm/Makefile
 +++ b/drivers/gpu/drm/msm/Makefile
-@@ -81,1 +81,3 @@
+@@ -103,6 +103,8 @@
+ 	disp/dpu1/dpu_hw_util.o \
+ 	disp/dpu1/dpu_hw_vbif.o \
+ 	disp/dpu1/dpu_hw_wb.o \
  	disp/dpu1/dpu_kms.o \
 +	disp/dpu1/dpu_o82_platform.o \
 +	disp/dpu1/dpu_o82_regdma.o \
+ 	disp/dpu1/dpu_plane.o \
+ 	disp/dpu1/dpu_rm.o \
 --- a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.h
 +++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.h
-@@ -85,1 +85,2 @@
+@@ -85,6 +85,7 @@
+ 	struct dpu_rm rm;
+ 
+ 	struct dpu_hw_vbif *hw_vbif;
  	struct dpu_hw_mdp *hw_mdp;
 +	struct dpu_o82_regdma *o82_regdma;
+ 
+ 	bool has_danger_ctrl;
 --- a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
 +++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
-@@ -35,1 +35,2 @@
+@@ -32,6 +32,7 @@
+ #include "dpu_encoder.h"
+ #include "dpu_formats.h"
+ #include "dpu_hw_vbif.h"
  #include "dpu_kms.h"
 +#include "dpu_o82_platform.h"
-@@ -1227,1 +1228,4 @@
+ #include "dpu_plane.h"
+ #include "dpu_vbif.h"
+@@ -1263,6 +1264,9 @@
+ 		goto err_mmu_destroy;
+ 	}
+ 
  	dpu_kms->hw_vbif = hw;
 +	rc = dpu_o82_platform_init(dpu_kms);
 +	if (rc)
 +		goto err_mmu_destroy;
-@@ -1434,3 +1438,3 @@
+ 
+ 	/* TODO: use the same max_freq as in dpu_kms_hw_init */
+@@ -1434,12 +1438,16 @@
  static int __maybe_unused dpu_runtime_suspend(struct device *dev)
  {
 -	int i;
 +	int i, rc;
-@@ -1441,1 +1445,5 @@
+ 	struct platform_device *pdev = to_platform_device(dev);
+ 	struct msm_drm_private *priv = platform_get_drvdata(pdev);
+ 	struct dpu_kms *dpu_kms = to_dpu_kms(priv->kms);
+ 
 +	rc = dpu_o82_platform_suspend(dpu_kms);
 +	if (rc)
 +		return rc;
 +
  	clk_bulk_disable_unprepare(dpu_kms->num_clocks, dpu_kms->clocks);
+ 
+ 	for (i = 0; i < dpu_kms->num_paths; i++)
+ 		icc_set_bw(dpu_kms->path[i], 0, 0);
+ 

@@ -1237,7 +1237,7 @@
     },
     {
       "path": "patches/display/0072-o82-regdma-resource.patch",
-      "sha256": "928a8139d4e0b08a2f774109c74883697530d8e30da19acedcee4edae32ee550"
+      "sha256": "579537deef614fbe2294d0f5117e5ed8835d947846d9b122426de3edd9a139ef"
     },
     {
       "path": "tests/o82-platform-contract.sh",

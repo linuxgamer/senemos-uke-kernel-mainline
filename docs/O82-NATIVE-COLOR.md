@@ -136,11 +136,19 @@ errors cannot publish a partial transport pointer. Runtime suspend refuses to
 drop clocks while the transport retains a failed-stop latch.
 
 Patch 0072 connects those helpers after the retained KMS lifecycle/retirement
-source checks. Remote check 1.0-2 exercises the actual admission/suspend
-functions with fake providers and compiles the platform object against the
-upstream DPU headers. These checks are pending. Complete adapted KMS linkage,
-DT/schema validation and device behavior remain separate. This source is not
-in the immutable combined kernel 1710 candidate.
+source checks. Remote check 1.0-2 passed the actual admission/suspend functions
+with fake providers, then failed before object compilation because patch 0072
+used an insertion hunk without sufficient trailing context. The corrected
+patch applies to the exact upstream header and MSM Makefile in a text check.
+
+The replacement `uke-o82-kms-check` retains the exact successful kernel 1600
+source RPM and its complete source preparation. It then applies the resource
+extension, builds the actual linked MSM display object, checks both compiled
+supplier DT resource tuples and validates the binding document. The producer
+verifies the parent's header/payload digests and preserves every retained
+source. Its RPM contains only a text receipt. Full linked-object, DT and
+binding results are pending; device behavior remains separate. This source is
+not in the immutable combined kernel 1710 candidate.
 
 This is a resource/PM prerequisite. It does not allocate a color DMA buffer,
 resolve logical RGB versus gamut c0/c2_c1, select a preset, program a DSPP,
