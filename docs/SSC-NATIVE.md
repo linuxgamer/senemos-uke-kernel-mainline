@@ -74,6 +74,14 @@ The pinned upstream QMI dispatcher/decoder files must match before staging.
 These source checks and the earlier composite-object build do not yet
 establish that the complete candidate passes or that sensors work on Uke.
 
+[Candidate 11251503](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11251503/)
+produced the `7.3.1-1500` source RPM and passed both compiler/sanitizer protocol
+and actual-callback runs in the retained kernel build. The native-compatible
+FDT/ADSP and foreign-board fixtures also passed. Complete kernel/module/package
+results remain pending. The earlier 1400 submission stopped before producing
+a source RPM because a concurrent custom build had already used release 1401;
+the fresh-release guard remains unchanged.
+
 Mount/clock handling, device lifecycle acceptance, vendor CCT/flicker semantics
 and live physical sensor behavior remain unqualified. The driver reports host
 receipt timestamps and does not infer a mounting matrix or DSP tick frequency.
