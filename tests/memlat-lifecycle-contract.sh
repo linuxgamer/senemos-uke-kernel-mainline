@@ -25,7 +25,7 @@ typedef uint32_t u32;typedef uint64_t u64;
 #define PTR_ERR(p) ((int)(intptr_t)(p))
 #define ERR_PTR(e) ((void *)(intptr_t)(e))
 #define for_each_online_cpu(id) for((id)=0;(id)<2;(id)++)
-#define dev_warn_ratelimited(...) ((void)0)
+#define dev_warn_ratelimited(device,format,...) do { assert((device)==p.dev);printf(format,__VA_ARGS__); } while(0)
 struct perf_event { bool alive,disabled; };
 struct perf_event_attr { u32 type,size,pinned,disabled;u64 config; };
 struct mutex { bool held; };
