@@ -57,6 +57,7 @@ Summary: Uke kernel Image and source identity
 Provides: installonlypkg(kernel)
 Provides: kernel-uname-r(%{krel})
 Provides: uke-kernel(platform-profile-qos-v1) = 1
+Provides: uke-kernel(nfc-ir-v1) = 1
 Provides: uke-displayport-audio = 0.1.0-13%{?dist}
 Requires: (wireplumber >= 0.5 if wireplumber)
 Requires: (pipewire-pulseaudio >= 1.6.10-1.uke1 if pipewire-pulseaudio)
@@ -89,6 +90,7 @@ boot requires the separately validated dynamic stock-bootloader handoff.
 
 %package boot
 Summary: Matched native-display boot bundle for Uke
+Requires: uke-nfc-ir >= 1.0.0-1
 Requires: %{name}-core = %{version}-%{release}
 Requires: %{name}-modules = %{version}-%{release}
 Requires: %{name}-dtbs = %{version}-%{release}
@@ -203,6 +205,7 @@ bash native-profile/tests/usbss-kconfig-contract.sh "$PWD" "%{_uke_out}/scripts/
 printf 'UKE_BUILD_STAGE boot_bundle elapsed_s=%d\n' "$((SECONDS-uke_build_start))"
 
 %check
+bash native-profile/tests/nfc-ir-package-contract.sh %{_uke_out}
 bash native-profile/tests/storage-crypto-contract.sh %{_uke_out}/.config
 test -L %{buildroot}/usr/lib/firmware/%{krel}/qcom/uke%{krel}/POCO-Pad-X1-tplg.bin
 cmp native-generated/POCO-Pad-X1-tplg.bin %{buildroot}/usr/lib/firmware/%{krel}/qcom/uke%{krel}/POCO-Pad-X1-tplg.bin

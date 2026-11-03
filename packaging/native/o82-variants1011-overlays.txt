@@ -13,6 +13,7 @@ src/input/nt36532-uke-spi.c
 src/input/sm7675-uke-thp.dtsi
 src/power/uke-pm8010.h
 tests/dsi-read-transaction-contract.sh
+tests/nfc-ir-package-contract.sh
 tests/o82-dfps-panel-contract.sh
 tests/o82-mode-valid-contract.sh
 tests/o82-on-batch-contract.sh
