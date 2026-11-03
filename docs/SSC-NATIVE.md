@@ -65,7 +65,7 @@ The ADSP phandle and all nine firmware-owned descriptions remain. Sensors
 load from the normal root module set after firmware is available; they are
 not required in the early initramfs. Existing libssc clients are preserved.
 
-`packaging/native/copr-ssc1400.sh` prepares a retained release 1303 candidate
+`packaging/native/copr-ssc1500.sh` prepares a retained release 1303 candidate
 with SSC integration. It preserves panel/touch suppliers, bounded touch
 recovery, native MEMLAT and Binder settings. Its remote checks repeat the
 protocol/callback tests, exercise the actual early FDT helper, and require

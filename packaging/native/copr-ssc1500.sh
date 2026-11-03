@@ -19,7 +19,7 @@ for attempt in {1..60}; do
     esac
 done
 [[ $parent_state == succeeded ]]
-bash "$owner/packaging/native/refuse-published-release.sh" senemos-uke-linux-kernel-mainline 7.3.1-1400
+bash "$owner/packaging/native/refuse-published-release.sh" senemos-uke-linux-kernel-mainline 7.3.1-1500
 stage=$(mktemp -d)
 trap 'find "$stage" -depth -delete' EXIT
 curl -fLsS --retry 2 --proto '=https' --proto-redir '=https' \
@@ -98,7 +98,7 @@ while IFS=$'\t' read -r relative expected; do
         printf '%s  %s\n' "$expected" "$boot/$relative" | sha256sum -c --quiet -
     fi
 done < <(jq -r '.source_assets[]|[.path,.sha256]|@tsv' "$stage/parent-boot-lock.json")
-cp "$profile/source-composition.json" "$profile/source-composition-before1400.json"
+cp "$profile/source-composition.json" "$profile/source-composition-before1500.json"
 commit=$(git -C "$owner" rev-parse HEAD)
 epoch=$(git -C "$owner" show -s --format=%ct HEAD)
 printf '%s\n' "$commit" > "$profile/source-commit"
@@ -109,13 +109,13 @@ jq --arg commit "$commit" --arg parent_hash "$parent_hash" --slurpfile overlays 
  parent_source_commit:"0ad12c19b1f4ec56e7017348f41636f76925e4af",
  parent_header_sha256:"2400e59b76391a8337994ecde731634178a733712ee6c537bf3294f64bd1beef",
  parent_payload_sha256:"a5414d20fdbc0a20d8e3f055d959367a9c2b5de8ed8ba31f4e12dbaf476e9daa",
- parent_composition:"source-composition-before1400.json",kernel_release:"7.3.1-1400",rpm_revision:"1400",
+ parent_composition:"source-composition-before1500.json",kernel_release:"7.3.1-1500",rpm_revision:"1500",
  overlays:$overlays[0],kernel_driver_source_unchanged:false,
  native_ssc_iio_abi:1,ssc_service:400,ssc_service_version:1,ssc_service_instance:0,
  ssc_supported_datatypes:["accel","gyro","mag","ambient_light","ambient_light_back","proximity","sar"],
  ssc_unqualified_datatypes:["cct_front","flicker"],ssc_timestamp_source:"host-receipt",
  ssc_mount_matrix_inferred:false,firmware_payload_included:false,physical_acceptance:false
- }' "$profile/source-composition-before1400.json" > "$profile/source-composition.json"
+ }' "$profile/source-composition-before1500.json" > "$profile/source-composition.json"
 (cd "$profile"; find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 (cd "$boot"; jq -r '.source_assets[]|.sha256+"  "+.path' lock.json | sha256sum -c --quiet -)
 for tree in native-profile boot-recipe; do
@@ -128,7 +128,7 @@ install -m644 "$boot/lock.json" "$output/boot-payload.json"
 [[ $(grep -Fxc 'Provides: uke-kernel(memlat-v1) = 1' "$spec") == 1 ]]
 [[ $(grep -Fxc '%check' "$spec") == 1 ]]
 awk '
- /^%global senemos_build_release 1303$/ {$0="%global senemos_build_release 1400"}
+ /^%global senemos_build_release 1303$/ {$0="%global senemos_build_release 1500"}
  /^Provides: uke-kernel\(memlat-v1\) = 1$/ {
   print;print "Provides: uke-kernel(ssc-iio-v1) = 1";next
  }
@@ -137,7 +137,7 @@ awk '
  }
  /^%changelog$/ {
   print
-  print "* Tue Nov 03 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-1400"
+  print "* Tue Nov 03 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-1500"
   print "- Bind firmware-owned Uke SSC sensors to the native QMI/IIO consumer."
   print "- Require exact API metadata and verify complete module linkage."
   print "- Retain supplier variants, MEMLAT, touch recovery and Binder support."
@@ -147,4 +147,4 @@ awk '
 ' "$spec" > "$stage/next.spec"
 install -m644 "$stage/next.spec" "$spec"
 sha256sum -c "$stage/retained-sources.sha256"
-[[ $(rpmspec --target aarch64 --define 'dist %{nil}' -q --srpm --qf '%{VERSION}-%{RELEASE}' "$spec") == 7.3.1-1400 ]]
+[[ $(rpmspec --target aarch64 --define 'dist %{nil}' -q --srpm --qf '%{VERSION}-%{RELEASE}' "$spec") == 7.3.1-1500 ]]
