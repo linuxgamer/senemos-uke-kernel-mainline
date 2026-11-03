@@ -49,7 +49,7 @@ spec=$output/uke-o82-kms-check.spec
 awk '
  /^%description/ {exit}
  /^Name:/ {$0="Name: uke-o82-kms-check"}
- /^Release:/ {$0="Release: 5%{?dist}"}
+ /^Release:/ {$0="Release: 6%{?dist}"}
  /^Summary:/ {$0="Summary: Retained Uke DPU KMS and REGDMA source integration check"}
  /^(Requires|Provides|Recommends):/ {next}
  {print}
@@ -86,6 +86,10 @@ test -s %{buildroot}%{_docdir}/%{name}/checks.txt
 %{_docdir}/%{name}/checks.txt
 
 %changelog
+* Wed Nov 04 2026 Uke contributors - 7.3.1-6
+- Diagnose the exact synthetic QoS refusal without changing expected values.
+- Model the wrapper-owned PM reference independently of an external caller.
+
 * Wed Nov 04 2026 Uke contributors - 7.3.1-5
 - Check bound KMS and managed display VM admission with runtime power ownership.
 - Exercise exact LUTDMA clock and QoS setup, failure retention and recovery.
@@ -106,4 +110,4 @@ test -s %{buildroot}%{_docdir}/%{name}/checks.txt
 SPEC
 sha256sum -c "$stage/retained.sha256"
 rm "$parent"
-[[ $(rpmspec --target aarch64 -q --srpm --qf '%{NAME}-%{VERSION}-%{RELEASE}' "$spec") == uke-o82-kms-check-7.3.1-5.fc46 ]]
+[[ $(rpmspec --target aarch64 -q --srpm --qf '%{NAME}-%{VERSION}-%{RELEASE}' "$spec") == uke-o82-kms-check-7.3.1-6.fc46 ]]

@@ -39,6 +39,7 @@ static bool broken_mdp_enable, broken_mdp_release, broken_pmu_release;
 static unsigned int dropped_qos_offset;
 static int runtime_usage, pm_get_error, pm_put_error;
 static unsigned int pm_gets, pm_puts, pm_noresume, suspend_callbacks;
+static unsigned int power_case;
 static struct drm_gem_object command_bo;
 static unsigned char commands[DPU_O82_LUTBUS_BYTES];
 static unsigned int allocations, releases;
@@ -183,14 +184,19 @@ void writel(uint32_t value, volatile void *address)
 	    (uintptr_t)address < (uintptr_t)vbif_registers + sizeof(vbif_registers)) {
 		size_t offset = (uintptr_t)address - (uintptr_t)vbif_registers;
 		assert(dpu_vbif_qos_lock && command_owner->power_lock.locked);
-		assert(runtime_usage > 1 && command_owner->power_held);
+		assert(runtime_usage > 0 && command_owner->power_held);
 		assert(load(mdp_registers, 0x2bc) & BIT(20));
 		assert((load(registers, 0x1f0) & FORCE) == FORCE);
 		if (command_kms && !emulate_power_hold) {
-			assert(runtime_usage > 1 && command_owner->power_held);
+			assert(runtime_usage > 0 && command_owner->power_held);
 			assert(load(mdp_registers, 0x2bc) & BIT(20));
 			for (unsigned int level = 0; level < 8; level++) {
 				unsigned int expected = level < 4 ? 4 : 5;
+				if (((load(vbif_registers, 0x550 + 8 * level) >> 28) & 7) != expected ||
+				    ((load(vbif_registers, 0x590 + 8 * level) >> 28) & 7) != expected)
+					fprintf(stderr, "Synthetic QoS before trigger: case=%u row=%u RP=%u LVL=%u expected=%u\n",
+						power_case, level, (load(vbif_registers, 0x550 + 8 * level) >> 28) & 7,
+						(load(vbif_registers, 0x590 + 8 * level) >> 28) & 7, expected);
 				assert(((load(vbif_registers, 0x550 + 8 * level) >> 28) & 7) == expected);
 				assert(((load(vbif_registers, 0x590 + 8 * level) >> 28) & 7) == expected);
 			}
@@ -287,6 +293,7 @@ static void fresh(struct dpu_o82_regdma *dma, struct dpu_hw_ctl *ctl, unsigned i
 
 int main(void)
 {
+	setvbuf(stdout, NULL, _IONBF, 0);
 	struct dpu_o82_regdma dma;
 	struct dpu_hw_ctl ctl;
 	unsigned int before, before_reads;
@@ -511,6 +518,7 @@ static void power_lifetime(void)
 	}
 	command_owner = &dma; command_kms = &kms; emulate_power_hold = false;
 #define RESET_POWER() do { \
+	power_case++; \
 	assert(vm.references == 1); \
 	mdp_cfg = (struct dpu_mdp_cfg){ .clk_ctrls = {[DPU_CLK_CTRL_REG_DMA] = {0x2bc,20}} }; \
 	vbif_cfg = (struct dpu_vbif_cfg){ .qos_rp_remap_size = 0x40 }; \
