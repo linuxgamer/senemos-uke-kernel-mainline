@@ -33,7 +33,7 @@
     },
     {
       "path": "packaging/native/prepare.sh",
-      "sha256": "8435ed5cd5a56457617801d50c9caa4d947e206353dad99d3a51055a6ad8bb63"
+      "sha256": "9ecc01d380cb4fbd655ab0791576dd64e539780a3d1e3edc0307c04b8df4811a"
     },
     {
       "path": "patches/boot/0005-uke-root-selector.patch",
@@ -1214,6 +1214,34 @@
     {
       "path": "tests/rtc-secure-contract.sh",
       "sha256": "37d1b8da680df23af7ab5c94e6e4a5bd5b4dac4498f254155abda53eb5e1300a"
+    },
+    {
+      "path": "src/display/sm7675-uke-native-display.dtso",
+      "sha256": "53fa8913a22bacd3cd1265d8d37a122acbb803cb85b70a7c3e9ffba1884ca998"
+    },
+    {
+      "path": "src/display/dpu_o82_platform.c",
+      "sha256": "a8a6db2f8218add640e0cd80e3050a95b08f4fb411b1bc87564747bb2484ffc6"
+    },
+    {
+      "path": "src/display/dpu_o82_platform.h",
+      "sha256": "9be5b1246551e4c827161bf789f4378a6dd6e9b63c22575b7071ed758c54eea8"
+    },
+    {
+      "path": "src/display/prepare-o82-regdma.sh",
+      "sha256": "b794c9653898a4937af8829db2490d7666d9a152285e5d7e55d223a3d5ca80d4"
+    },
+    {
+      "path": "src/display/bindings/qcom,sm7675-dpu.yaml",
+      "sha256": "39d9107af3e5a65c2a1d058881711ffcf3fd5fa9b55502f68c1f496152330253"
+    },
+    {
+      "path": "patches/display/0072-o82-regdma-resource.patch",
+      "sha256": "928a8139d4e0b08a2f774109c74883697530d8e30da19acedcee4edae32ee550"
+    },
+    {
+      "path": "tests/o82-platform-contract.sh",
+      "sha256": "7556702e7f8ca8bd92a5ab8aa5012dd237da0f8f63434d3baef34e89ded639b9"
     }
   ],
   "root_selector_capability": {

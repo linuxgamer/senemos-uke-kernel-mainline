@@ -126,3 +126,23 @@ The register and clock evidence is the GPL-2.0-only Xiaomi
 at commit `44275c404a677d9d9e5230fedd1af2ef02fc7b9a`.
 The native interface uses Linux 7.3.1 DPU CTL addressing. Reference source is
 read as evidence and is never executed as a driver or build shortcut.
+
+The subsequent platform source declares the exact separate REGDMA DT resource
+at 0x0af80000/0x7000, alongside the existing native MDP/VBIF resources. The
+platform helper requires Uke/SM7675, its native DPU compatible and exact MDP/
+REGDMA ranges before managed resource reservation. It initializes the existing
+transport without accessing MMIO. Missing/foreign ranges, allocation and map
+errors cannot publish a partial transport pointer. Runtime suspend refuses to
+drop clocks while the transport retains a failed-stop latch.
+
+Patch 0072 connects those helpers after the retained KMS lifecycle/retirement
+source checks. Remote check 1.0-2 exercises the actual admission/suspend
+functions with fake providers and compiles the platform object against the
+upstream DPU headers. These checks are pending. Complete adapted KMS linkage,
+DT/schema validation and device behavior remain separate. This source is not
+in the immutable combined kernel 1710 candidate.
+
+This is a resource/PM prerequisite. It does not allocate a color DMA buffer,
+resolve logical RGB versus gamut c0/c2_c1, select a preset, program a DSPP,
+advertise HDR or complete VM/unbind ownership. Those parts of the original
+native color objective remain required before enabling live color uploads.

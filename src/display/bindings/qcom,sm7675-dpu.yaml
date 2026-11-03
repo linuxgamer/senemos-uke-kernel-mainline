@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/display/msm/qcom,sm7675-dpu.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Qualcomm SM7675 Display DPU with REGDMA
+
+maintainers:
+  - MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+
+description: |
+  The Uke native display graph uses separate MDP, VBIF and REGDMA register
+  resources. REGDMA command offsets are relative to its own resource. Declaring
+  that resource does not advertise HDR or select a color-processing pipeline.
+
+$ref: /schemas/display/msm/dpu-common.yaml#
+
+properties:
+  compatible:
+    const: qcom,sm7675-dpu
+
+  reg:
+    items:
+      - description: MDP register set
+      - description: VBIF register set
+      - description: REGDMA register set
+
+  reg-names:
+    items:
+      - const: mdp
+      - const: vbif
+      - const: regdma
+
+  clocks:
+    items:
+      - description: Display configuration bus
+      - description: Display HF AXI
+      - description: Display MDSS AHB
+      - description: Display LUT
+      - description: Display core
+      - description: Display vsync
+
+  clock-names:
+    items:
+      - const: bus
+      - const: nrt_bus
+      - const: iface
+      - const: lut
+      - const: core
+      - const: vsync
+
+required:
+  - compatible
+  - reg
+  - reg-names
+  - clocks
+  - clock-names
+
+unevaluatedProperties: false
+...

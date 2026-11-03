@@ -219,3 +219,10 @@ git -C "$kernel" apply --check "$profile/patches/usb/0001-qcom-system-role-pm.pa
 git -C "$kernel" apply "$profile/patches/usb/0001-qcom-system-role-pm.patch"
 CC=clang bash "$profile/tests/usb-role-pm-contract.sh" \
     "$kernel/drivers/usb/dwc3/dwc3-qcom.c" "$output/dwc3-qcom-before-role-pm.c"
+if [[ $(jq -er .version "$kernel/senemos-adaptation/source-lock.json") == 7.3.1 ]]; then
+    # Preserve historical KMS/retirement checks before extending the source.
+    bash "$profile/src/display/prepare-o82-regdma.sh" "$kernel"
+    bash "$profile/tests/o82-platform-contract.sh"
+    sha256sum "$profile/patches/display/0072-o82-regdma-resource.patch" \
+        "$profile/src/display/dpu_o82_platform.c" >> "$output/abl-source-SHA256SUMS"
+fi

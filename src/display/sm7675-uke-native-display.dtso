@@ -76,8 +76,9 @@
 				status = "okay";
 				uke_dpu: display-controller@ae01000 {
 					compatible = "qcom,sm7675-dpu";
-					reg = <0xae01000 0x8f000>, <0xaeb0000 0x1074>;
-					reg-names = "mdp", "vbif";
+					reg = <0xae01000 0x8f000>, <0xaeb0000 0x1074>,
+					      <0xaf80000 0x7000>;
+					reg-names = "mdp", "vbif", "regdma";
 					interrupt-parent = <&uke_mdss>;
 					interrupts = <0>;
 					iommus = <&apps_smmu 0x1c00 0x2>;

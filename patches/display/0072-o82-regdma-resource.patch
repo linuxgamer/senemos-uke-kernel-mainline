@@ -1,0 +1,43 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] drm/msm/dpu: admit the separate Uke REGDMA resource
+
+Reserve the exact Cliffs REGDMA range separately from MDP/VBIF and initialize
+its transport without programming the engine. Keep runtime clocks enabled
+while the transport retains a failed-stop ownership latch. Color upload,
+paired DSPP/GEM lifetime and HDR connector admission remain separate work.
+
+This hook follows the retained KMS lifecycle and retirement patches.
+Signed-off-by: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+---
+--- a/drivers/gpu/drm/msm/Makefile
++++ b/drivers/gpu/drm/msm/Makefile
+@@ -81,1 +81,3 @@
+ 	disp/dpu1/dpu_kms.o \
++	disp/dpu1/dpu_o82_platform.o \
++	disp/dpu1/dpu_o82_regdma.o \
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.h
+@@ -85,1 +85,2 @@
+ 	struct dpu_hw_mdp *hw_mdp;
++	struct dpu_o82_regdma *o82_regdma;
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
+@@ -35,1 +35,2 @@
+ #include "dpu_kms.h"
++#include "dpu_o82_platform.h"
+@@ -1227,1 +1228,4 @@
+ 	dpu_kms->hw_vbif = hw;
++	rc = dpu_o82_platform_init(dpu_kms);
++	if (rc)
++		goto err_mmu_destroy;
+@@ -1434,3 +1438,3 @@
+ static int __maybe_unused dpu_runtime_suspend(struct device *dev)
+ {
+-	int i;
++	int i, rc;
+@@ -1441,1 +1445,5 @@
++	rc = dpu_o82_platform_suspend(dpu_kms);
++	if (rc)
++		return rc;
++
+ 	clk_bulk_disable_unprepare(dpu_kms->num_clocks, dpu_kms->clocks);
