@@ -10,6 +10,7 @@
 #include "dpu_kms.h"
 #include "dpu_o82_platform.h"
 #include "dpu_o82_regdma.h"
+#include "dpu_o82_upload.h"
 
 int dpu_o82_platform_init(struct dpu_kms *kms)
 {
@@ -38,6 +39,7 @@ int dpu_o82_platform_init(struct dpu_kms *kms)
 	if (IS_ERR(regs))
 		return PTR_ERR(regs);
 	dpu_o82_regdma_init(dma, regs);
+	dma->kms_owner = kms;
 	kms->o82_regdma = dma;
 	return 0;
 }
@@ -46,5 +48,9 @@ int dpu_o82_platform_suspend(struct dpu_kms *kms)
 {
 	if (kms->o82_regdma && !dpu_o82_regdma_can_unmap(kms->o82_regdma))
 		return -EBUSY;
-	return 0;
+	if (!kms->o82_regdma)
+		return 0;
+	if (READ_ONCE(kms->o82_regdma->power_held))
+		return -EBUSY;
+	return dpu_o82_upload_release(kms->o82_regdma);
 }

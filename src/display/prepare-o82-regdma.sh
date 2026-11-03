@@ -6,9 +6,12 @@ owner=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 [[ $(jq -er .version "$kernel/senemos-adaptation/source-lock.json") == 7.3.1 ]]
 git -C "$kernel" apply --check "$owner/patches/display/0072-o82-regdma-resource.patch"
 git -C "$kernel" apply "$owner/patches/display/0072-o82-regdma-resource.patch"
+git -C "$kernel" apply --check "$owner/patches/display/0073-o82-regdma-power.patch"
+git -C "$kernel" apply "$owner/patches/display/0073-o82-regdma-power.patch"
 target=$kernel/drivers/gpu/drm/msm/disp/dpu1
 for file in dpu_o82_platform.c dpu_o82_platform.h dpu_o82_regdma.c dpu_o82_regdma.h \
     dpu_o82_upload.c dpu_o82_upload.h dpu_o82_lutbus.c dpu_o82_lutbus.h \
+    dpu_o82_power.c dpu_o82_power.h \
     dpu_o82_profiles.h o82-regdma.h; do
     install -m644 "$owner/src/display/$file" "$target/$file"
 done

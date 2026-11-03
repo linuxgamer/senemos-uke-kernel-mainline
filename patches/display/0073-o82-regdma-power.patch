@@ -1,0 +1,123 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] drm/msm/dpu: serialize color clock and QoS register updates
+
+Protect shared MDP clock and VBIF QoS read-modify-write sequences against
+concurrent clients. Return the requested QoS field readback so the native Uke
+LUTDMA power owner can reject incomplete setup before submitting commands.
+Existing generic QoS callers retain their current selection and ignore status.
+
+Signed-off-by: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+---
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_util.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_util.c
+@@ -5,6 +5,8 @@
+  */
+ #define pr_fmt(fmt)	"[drm:%s:%d] " fmt, __func__, __LINE__
+ 
++#include <linux/spinlock.h>
++
+ #include "msm_drv.h"
+ #include "dpu_kms.h"
+ #include "dpu_hw_mdss.h"
+@@ -12,6 +14,7 @@
+ 
+ /* using a file static variables for debugfs access */
+ static u32 dpu_hw_util_log_mask = DPU_DBG_MASK_NONE;
++static DEFINE_SPINLOCK(dpu_hw_clock_lock);
+ 
+ /* DPU_SCALER_QSEED3 */
+ #define QSEED3_HW_VERSION                  0x00
+@@ -561,7 +564,9 @@
+ {
+ 	u32 reg_val, new_val;
+ 	bool clk_forced_on;
++	unsigned long flags;
+ 
++	spin_lock_irqsave(&dpu_hw_clock_lock, flags);
+ 	reg_val = DPU_REG_READ(c, clk_ctrl_reg->reg_off);
+ 
+ 	if (enable)
+@@ -573,6 +578,7 @@
+ 
+ 	clk_forced_on = !(reg_val & BIT(clk_ctrl_reg->bit_off));
+ 
++	spin_unlock_irqrestore(&dpu_hw_clock_lock, flags);
+ 	return clk_forced_on;
+ }
+ 
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_vbif.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_vbif.c
+@@ -3,11 +3,14 @@
+  */
+ 
+ #include <drm/drm_managed.h>
++#include <linux/spinlock.h>
+ 
+ #include "dpu_hwio.h"
+ #include "dpu_hw_catalog.h"
+ #include "dpu_hw_vbif.h"
+ 
++static DEFINE_SPINLOCK(dpu_vbif_qos_lock);
++
+ #define VBIF_VERSION			0x0000
+ #define VBIF_CLK_FORCE_CTRL0		0x0008
+ #define VBIF_CLK_FORCE_CTRL1		0x000C
+@@ -154,14 +157,16 @@
+ 	return (reg_val & BIT(xin_id)) ? true : false;
+ }
+ 
++static bool dpu_hw_set_qos_remap(struct dpu_hw_vbif *vbif,
+-static void dpu_hw_set_qos_remap(struct dpu_hw_vbif *vbif,
+ 		u32 xin_id, u32 level, u32 remap_level)
+ {
+ 	struct dpu_hw_blk_reg_map *c;
+ 	u32 reg_lvl, reg_val, reg_val_lvl, mask, reg_high, reg_shift;
++	unsigned long flags;
++	bool matched;
+ 
+ 	if (!vbif)
++		return false;
+-		return;
+ 
+ 	c = &vbif->hw;
+ 
+@@ -169,6 +174,7 @@
+ 	reg_high = ((xin_id & 0x8) >> 3) * 4 + (level * 8);
+ 	reg_shift = (xin_id & 0x7) * 4;
+ 
++	spin_lock_irqsave(&dpu_vbif_qos_lock, flags);
+ 	reg_val = DPU_REG_READ(c, VBIF_XINL_QOS_RP_REMAP_000 + reg_high);
+ 	reg_val_lvl = DPU_REG_READ(c, reg_lvl + reg_high);
+ 
+@@ -182,6 +188,11 @@
+ 
+ 	DPU_REG_WRITE(c, VBIF_XINL_QOS_RP_REMAP_000 + reg_high, reg_val);
+ 	DPU_REG_WRITE(c, reg_lvl + reg_high, reg_val_lvl);
++	matched = (DPU_REG_READ(c, VBIF_XINL_QOS_RP_REMAP_000 + reg_high) & mask) ==
++		(reg_val & mask) && (DPU_REG_READ(c, reg_lvl + reg_high) & mask) ==
++		(reg_val_lvl & mask);
++	spin_unlock_irqrestore(&dpu_vbif_qos_lock, flags);
++	return matched;
+ }
+ 
+ static void dpu_hw_set_write_gather_en(struct dpu_hw_vbif *vbif, u32 xin_id)
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_vbif.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_vbif.h
+@@ -60,8 +60,9 @@
+ 	 * @xin_id: client interface identifier
+ 	 * @level: priority level
+ 	 * @remap_level: remapped level
++	 * @return: true when both priority and level readbacks match
+ 	 */
++	bool (*set_qos_remap)(struct dpu_hw_vbif *vbif,
+-	void (*set_qos_remap)(struct dpu_hw_vbif *vbif,
+ 			u32 xin_id, u32 level, u32 remap_level);
+ 
+ 	/**
+--- a/drivers/gpu/drm/msm/Makefile
++++ b/drivers/gpu/drm/msm/Makefile
+@@ -109,3 +109,4 @@
+ 	disp/dpu1/dpu_o82_lutbus.o \
+ 	disp/dpu1/dpu_o82_upload.o \
++	disp/dpu1/dpu_o82_power.o \
+ 	disp/dpu1/dpu_plane.o \

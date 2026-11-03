@@ -4,6 +4,7 @@
 set -Eeuo pipefail
 test ! -e /etc/senemos/kernel-update.conf
 root=${1:-$(cd -- "$(dirname -- "$0")/.." && pwd)}
+kernel=$(realpath "${2:?Pass the prepared kernel for the actual shared register helpers}")
 scratch=$(mktemp -d)
 trap 'find "$scratch" -depth -delete' EXIT
 mkdir -p "$scratch/linux" "$scratch/drm"
@@ -18,6 +19,8 @@ typedef uint64_t u64;
 typedef uint8_t u8;
 #define __iomem
 #define BIT(n) (1U << (n))
+#define READ_ONCE(x) (x)
+#define WRITE_ONCE(x,v) ((x)=(v))
 #define GENMASK(h, l) ((~0U >> (31 - (h))) & (~0U << (l)))
 #endif
 EOF
@@ -41,7 +44,7 @@ cat > "$scratch/drm/drm_gpuvm.h" <<'EOF'
 #ifndef TEST_GPUVM_H
 #define TEST_GPUVM_H
 #include "linux/types.h"
-struct drm_gpuvm { unsigned int references; struct drm_device *drm; };
+struct drm_gpuvm { unsigned int references; struct drm_device *drm; bool managed; };
 struct drm_gpuvm *drm_gpuvm_get(struct drm_gpuvm *vm);
 void drm_gpuvm_put(struct drm_gpuvm *vm);
 bool drm_gpuvm_range_valid(struct drm_gpuvm *vm, u64 address, u64 bytes);
@@ -55,11 +58,88 @@ cat > "$scratch/msm_gem.h" <<'EOF'
 struct drm_device { unsigned int token; };
 struct drm_gem_object { struct drm_device *dev; };
 #define MSM_BO_WC 4
+#define to_msm_vm(vm) (vm)
 void *msm_gem_kernel_new(struct drm_device *dev, size_t bytes, u32 flags,
     struct drm_gpuvm *vm, struct drm_gem_object **bo, u64 *iova);
 void msm_gem_kernel_put(struct drm_gem_object *bo, struct drm_gpuvm *vm);
 #endif
 EOF
+cat > "$scratch/linux/array_size.h" <<'EOF'
+#define ARRAY_SIZE(a) (sizeof(a)/sizeof((a)[0]))
+EOF
+cat > "$scratch/linux/platform_device.h" <<'EOF'
+#ifndef TEST_PLATFORM_H
+#define TEST_PLATFORM_H
+struct device { unsigned int token; };
+struct platform_device { struct device dev; };
+#endif
+EOF
+cat > "$scratch/linux/pm_runtime.h" <<'EOF'
+#include "platform_device.h"
+int pm_runtime_resume_and_get(struct device *dev);
+int pm_runtime_put_sync(struct device *dev);
+void pm_runtime_get_noresume(struct device *dev);
+EOF
+cat > "$scratch/dpu_hw_top.h" <<'EOF'
+#ifndef TEST_TOP_H
+#define TEST_TOP_H
+#include "linux/types.h"
+#define DPU_CLK_CTRL_REG_DMA 1
+struct dpu_hw_blk_reg_map { void *blk_addr; };
+struct dpu_clk_ctrl_reg { u32 reg_off,bit_off; };
+struct dpu_mdp_cfg { struct dpu_clk_ctrl_reg clk_ctrls[2]; };
+struct dpu_hw_mdp {
+    struct dpu_hw_blk_reg_map hw;
+    const struct dpu_mdp_cfg *caps;
+    struct { bool (*setup_clk_force_ctrl)(struct dpu_hw_mdp *,unsigned int,bool); } ops;
+};
+#endif
+EOF
+cat > "$scratch/dpu_hw_vbif.h" <<'EOF'
+#ifndef TEST_VBIF_H
+#define TEST_VBIF_H
+#include "dpu_hw_top.h"
+struct dpu_vbif_cfg { u32 qos_rp_remap_size; };
+struct dpu_hw_vbif {
+    struct dpu_hw_blk_reg_map hw;
+    const struct dpu_vbif_cfg *cap;
+    struct { bool (*set_qos_remap)(struct dpu_hw_vbif *,u32,u32,u32); } ops;
+};
+#endif
+EOF
+cat > "$scratch/dpu_kms.h" <<'EOF'
+#ifndef TEST_KMS_H
+#define TEST_KMS_H
+#include "msm_gem.h"
+#include "linux/platform_device.h"
+#include "dpu_hw_top.h"
+#include "dpu_hw_vbif.h"
+struct dpu_kms {
+    struct drm_device *dev;
+    struct platform_device *pdev;
+    struct { struct drm_gpuvm *vm; } base;
+    struct dpu_o82_regdma *o82_regdma;
+    struct dpu_hw_mdp *hw_mdp;
+    struct dpu_hw_vbif *hw_vbif;
+};
+#endif
+EOF
+{
+    printf '%s\n' 'static int dpu_hw_clock_lock, dpu_vbif_qos_lock;' \
+        '#define spin_lock_irqsave(p,f) do { assert(!*(p)); *(p)=1; (f)=0; } while(0)' \
+        '#define spin_unlock_irqrestore(p,f) do { assert(*(p)&&(f)==0); *(p)=0; } while(0)' \
+        '#define DPU_REG_READ(c,off) readl((c)->blk_addr+(off))' \
+        '#define DPU_REG_WRITE(c,off,value) writel((value),(c)->blk_addr+(off))'
+    sed -n '/^bool dpu_hw_clk_force_ctrl(/,/^}/p' \
+        "$kernel/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_util.c"
+    grep -E '^#define VBIF_XINL_QOS_(RP|LVL)_REMAP_000' \
+        "$kernel/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_vbif.c"
+    sed -n '/^static bool dpu_hw_set_qos_remap(/,/^}/p' \
+        "$kernel/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_vbif.c"
+    sed -n '/^int dpu_o82_platform_suspend(/,/^}/p' "$root/src/display/dpu_o82_platform.c"
+} > "$scratch/shared-helpers.h"
+grep -q '^bool dpu_hw_clk_force_ctrl(' "$scratch/shared-helpers.h"
+grep -q '^static bool dpu_hw_set_qos_remap(' "$scratch/shared-helpers.h"
 cat > "$scratch/linux/io.h" <<'EOF'
 #include "types.h"
 u32 readl(const volatile void *address);
@@ -86,6 +166,7 @@ cat > "$scratch/dpu_hw_ctl.h" <<'EOF'
 struct dpu_hw_ctl { unsigned int idx; struct { void *blk_addr; } hw; };
 EOF
 sources=("$root/src/display/dpu_o82_regdma.c" "$root/src/display/dpu_o82_upload.c"
+    "$root/src/display/dpu_o82_power.c"
     "$root/src/display/dpu_o82_lutbus.c" "$root/tests/o82-regdma-transport-contract.c")
 includes=(-I"$scratch" -I"$root/src/display")
 gcc -std=gnu11 -O1 -g -UNDEBUG -Wall -Wextra -Werror -fsanitize=address,undefined \

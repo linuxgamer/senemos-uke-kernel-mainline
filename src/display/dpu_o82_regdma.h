@@ -6,6 +6,7 @@
 #include <linux/types.h>
 
 struct dpu_hw_ctl;
+struct dpu_kms;
 struct drm_gem_object;
 struct drm_gpuvm;
 
@@ -13,6 +14,12 @@ struct drm_gpuvm;
 struct dpu_o82_regdma {
 	void __iomem *regs;
 	struct mutex lock;
+	/* Outer power owner always precedes the transport mutex. */
+	struct mutex power_lock;
+	struct dpu_kms *kms_owner;
+	bool power_held;
+	bool mdp_clock_owned;
+	u32 pmu_clock_owned;
 	u32 owned_clock_bits;
 	u32 quarantined_ctl;
 	/* One GEM command owner, serialized by the same transport mutex. */

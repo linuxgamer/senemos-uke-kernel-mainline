@@ -31,10 +31,12 @@ git -C "$owner" archive --prefix=native-addon/ HEAD \
     src/display/dpu_o82_platform.c src/display/dpu_o82_platform.h \
     src/display/dpu_o82_regdma.c src/display/dpu_o82_regdma.h src/display/o82-regdma.h \
     src/display/dpu_o82_upload.c src/display/dpu_o82_upload.h \
+    src/display/dpu_o82_power.c src/display/dpu_o82_power.h \
     src/display/dpu_o82_lutbus.c src/display/dpu_o82_lutbus.h src/display/dpu_o82_profiles.h \
     src/display/uke-o82-hdr-format.h src/display/prepare-o82-regdma.sh \
     src/display/sm7675-uke-native-display.dtso src/display/bindings/qcom,sm7675-dpu.yaml \
     patches/display/0072-o82-regdma-resource.patch \
+    patches/display/0073-o82-regdma-power.patch \
     tests/o82-platform-contract.sh tests/o82-lutbus-contract.c tests/o82-lutbus-contract.sh \
     tests/o82-regdma-transport-contract.c tests/o82-regdma-transport-contract.sh \
     packaging/native/check-o82-kms.sh LICENSE LICENSES/GPL-2.0-only.txt | \
@@ -47,7 +49,7 @@ spec=$output/uke-o82-kms-check.spec
 awk '
  /^%description/ {exit}
  /^Name:/ {$0="Name: uke-o82-kms-check"}
- /^Release:/ {$0="Release: 4%{?dist}"}
+ /^Release:/ {$0="Release: 5%{?dist}"}
  /^Summary:/ {$0="Summary: Retained Uke DPU KMS and REGDMA source integration check"}
  /^(Requires|Provides|Recommends):/ {next}
  {print}
@@ -84,6 +86,10 @@ test -s %{buildroot}%{_docdir}/%{name}/checks.txt
 %{_docdir}/%{name}/checks.txt
 
 %changelog
+* Wed Nov 04 2026 Uke contributors - 7.3.1-5
+- Check bound KMS and managed display VM admission with runtime power ownership.
+- Exercise exact LUTDMA clock and QoS setup, failure retention and recovery.
+
 * Wed Nov 04 2026 Uke contributors - 7.3.1-4
 - Exercise actual GEM command ownership, encoder and transport together.
 - Compile and link the command owner in the real retained MSM composite.
@@ -100,4 +106,4 @@ test -s %{buildroot}%{_docdir}/%{name}/checks.txt
 SPEC
 sha256sum -c "$stage/retained.sha256"
 rm "$parent"
-[[ $(rpmspec --target aarch64 -q --srpm --qf '%{NAME}-%{VERSION}-%{RELEASE}' "$spec") == uke-o82-kms-check-7.3.1-4.fc46 ]]
+[[ $(rpmspec --target aarch64 -q --srpm --qf '%{NAME}-%{VERSION}-%{RELEASE}' "$spec") == uke-o82-kms-check-7.3.1-5.fc46 ]]

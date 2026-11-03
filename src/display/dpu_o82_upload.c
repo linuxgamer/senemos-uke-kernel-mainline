@@ -5,6 +5,7 @@
 #include <drm/drm_gpuvm.h>
 
 #include "msm_gem.h"
+#include "dpu_kms.h"
 #include "dpu_hw_ctl.h"
 #include "dpu_o82_lutbus.h"
 #include "dpu_o82_regdma.h"
@@ -52,12 +53,19 @@ int dpu_o82_upload(struct dpu_o82_regdma *dma, struct drm_device *drm,
 	int ret;
 
 	if (!dma || !dma->regs || !drm || !vm || vm->drm != drm ||
+	    !dma->kms_owner ||
+	    dma->kms_owner->o82_regdma != dma || dma->kms_owner->dev != drm ||
+	    dma->kms_owner->base.vm != vm || !to_msm_vm(vm)->managed ||
 	    !ctl || !ctl->hw.blk_addr || !input ||
 	    (dspp_mask != 3 && dspp_mask != 5 && dspp_mask != 6) ||
 	    !o82_regdma_make_descriptor(ctl->idx, 0x1000, DPU_O82_LUTBUS_BYTES, &descriptor))
 		return -EINVAL;
 
 	mutex_lock(&dma->lock);
+	if (!READ_ONCE(dma->power_held)) {
+		ret = -EHOSTDOWN;
+		goto out;
+	}
 	if (dma->quarantined_ctl) {
 		ret = -EBUSY;
 		goto out;
@@ -91,6 +99,12 @@ int dpu_o82_upload_release(struct dpu_o82_regdma *dma)
 		goto out;
 	}
 	if (dma->command_bo) {
+		if (!dma->kms_owner || dma->kms_owner->o82_regdma != dma ||
+		    dma->command_vm != dma->kms_owner->base.vm ||
+		    dma->command_bo->dev != dma->kms_owner->dev) {
+			ret = -EINVAL;
+			goto out;
+		}
 		msm_gem_kernel_put(dma->command_bo, dma->command_vm);
 		drm_gpuvm_put(dma->command_vm);
 		dma->command_bo = NULL;

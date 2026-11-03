@@ -36,7 +36,12 @@ void dpu_o82_regdma_init(struct dpu_o82_regdma *dma, void __iomem *regs)
 	dma->command_vm = NULL;
 	dma->command_data = NULL;
 	dma->command_iova = 0;
+	dma->kms_owner = NULL;
+	dma->power_held = false;
+	dma->mdp_clock_owned = false;
+	dma->pmu_clock_owned = 0;
 	mutex_init(&dma->lock);
+	mutex_init(&dma->power_lock);
 }
 
 static void dpu_o82_regdma_restore_clock(struct dpu_o82_regdma *dma)
@@ -144,7 +149,7 @@ int dpu_o82_regdma_execute(struct dpu_o82_regdma *dma, struct dpu_hw_ctl *ctl,
 		return -EINVAL;
 	mutex_lock(&dma->lock);
 	/* An owned GEM buffer excludes every unrelated raw IOVA submission. */
-	ret = dma->command_bo ? -EBUSY :
+	ret = dma->command_bo || READ_ONCE(dma->power_held) ? -EBUSY :
 		dpu_o82_regdma_execute_locked(dma, ctl, iova, bytes);
 	mutex_unlock(&dma->lock);
 	return ret;

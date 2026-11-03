@@ -13,6 +13,10 @@
 #include "dpu_o82_profiles.h"
 #include "msm_gem.h"
 #include "linux/io.h"
+#include "dpu_kms.h"
+#include "dpu_o82_power.h"
+#include "dpu_o82_platform.h"
+#include "shared-helpers.h"
 
 #define BIT(n) (1U << (n))
 #define FORCE (BIT(0) | BIT(16))
@@ -20,6 +24,7 @@
 
 enum completion { DONE, TIMEOUT, ERROR, ERROR_AND_DONE, QUEUE1_ONLY };
 static unsigned char registers[0x7000], control[0x200];
+static unsigned char mdp_registers[0x400], vbif_registers[0x1000];
 static enum completion outcome;
 static unsigned int reset_count, fail_reset_from, trigger_count;
 static unsigned int writes, reads, dma_barriers, io_barriers, status_reads;
@@ -28,6 +33,12 @@ static unsigned int selected_ctl;
 static bool active, broken_clock, broken_error_clear, broken_done_clear;
 static bool add_clock_bit;
 static struct dpu_o82_regdma *command_owner;
+static struct dpu_kms *command_kms;
+static bool emulate_power_hold;
+static bool broken_mdp_enable, broken_mdp_release, broken_pmu_release;
+static unsigned int dropped_qos_offset;
+static int runtime_usage, pm_get_error, pm_put_error;
+static unsigned int pm_gets, pm_puts, pm_noresume, suspend_callbacks;
 static struct drm_gem_object command_bo;
 static unsigned char commands[DPU_O82_LUTBUS_BYTES];
 static unsigned int allocations, releases;
@@ -77,6 +88,39 @@ void msm_gem_kernel_put(struct drm_gem_object *bo, struct drm_gpuvm *vm)
 }
 
 static void upload_lifetime(void);
+static void power_lifetime(void);
+
+int pm_runtime_resume_and_get(struct device *dev)
+{
+	assert(dev == &command_kms->pdev->dev && command_owner->power_lock.locked);
+	assert(command_owner->power_held);
+	/* A forced suspend while resume is pending must not release clocks. */
+	assert(dpu_o82_platform_suspend(command_kms) == -EBUSY);
+	pm_gets++;
+	if (pm_get_error) return pm_get_error;
+	runtime_usage++;
+	return 0;
+}
+
+int pm_runtime_put_sync(struct device *dev)
+{
+	assert(dev == &command_kms->pdev->dev && command_owner->power_lock.locked);
+	assert(!command_owner->power_held && !command_owner->mdp_clock_owned);
+	assert(!command_owner->pmu_clock_owned && !active && runtime_usage > 0);
+	pm_puts++; runtime_usage--;
+	if (pm_put_error) return pm_put_error;
+	if (!runtime_usage) {
+		suspend_callbacks++;
+		return dpu_o82_platform_suspend(command_kms);
+	}
+	return 0;
+}
+
+void pm_runtime_get_noresume(struct device *dev)
+{
+	assert(dev == &command_kms->pdev->dev && command_owner->power_lock.locked);
+	pm_noresume++; runtime_usage++;
+}
 
 static uint32_t load(const unsigned char *memory, size_t offset)
 {
@@ -95,6 +139,14 @@ uint32_t readl(const volatile void *address)
 	uintptr_t at = (uintptr_t)address - (uintptr_t)registers;
 	unsigned int base = selected_ctl * 0x1000;
 
+	if ((uintptr_t)address >= (uintptr_t)mdp_registers &&
+	    (uintptr_t)address < (uintptr_t)mdp_registers + sizeof(mdp_registers)) {
+		reads++; return load(mdp_registers, (uintptr_t)address - (uintptr_t)mdp_registers);
+	}
+	if ((uintptr_t)address >= (uintptr_t)vbif_registers &&
+	    (uintptr_t)address < (uintptr_t)vbif_registers + sizeof(vbif_registers)) {
+		reads++; return load(vbif_registers, (uintptr_t)address - (uintptr_t)vbif_registers);
+	}
 	assert(at < sizeof(registers) - 3 && !(at & 3));
 	reads++;
 	if (at == base + 0x54 && (!fail_reset_from || reset_count < fail_reset_from)) {
@@ -119,6 +171,33 @@ void writel(uint32_t value, volatile void *address)
 	unsigned int base = selected_ctl * 0x1000;
 
 	writes++;
+	if ((uintptr_t)address >= (uintptr_t)mdp_registers &&
+	    (uintptr_t)address < (uintptr_t)mdp_registers + sizeof(mdp_registers)) {
+		size_t offset = (uintptr_t)address - (uintptr_t)mdp_registers;
+		assert(dpu_hw_clock_lock && offset == 0x2bc);
+		if (broken_mdp_enable && (value & BIT(20))) value &= ~BIT(20);
+		if (broken_mdp_release && !(value & BIT(20))) value |= BIT(20);
+		store(mdp_registers, offset, value); return;
+	}
+	if ((uintptr_t)address >= (uintptr_t)vbif_registers &&
+	    (uintptr_t)address < (uintptr_t)vbif_registers + sizeof(vbif_registers)) {
+		size_t offset = (uintptr_t)address - (uintptr_t)vbif_registers;
+		assert(dpu_vbif_qos_lock && command_owner->power_lock.locked);
+		assert(runtime_usage > 1 && command_owner->power_held);
+		assert(load(mdp_registers, 0x2bc) & BIT(20));
+		assert((load(registers, 0x1f0) & FORCE) == FORCE);
+		if (command_kms && !emulate_power_hold) {
+			assert(runtime_usage > 1 && command_owner->power_held);
+			assert(load(mdp_registers, 0x2bc) & BIT(20));
+			for (unsigned int level = 0; level < 8; level++) {
+				unsigned int expected = level < 4 ? 4 : 5;
+				assert(((load(vbif_registers, 0x550 + 8 * level) >> 28) & 7) == expected);
+				assert(((load(vbif_registers, 0x590 + 8 * level) >> 28) & 7) == expected);
+			}
+		}
+		if (offset != dropped_qos_offset) store(vbif_registers, offset, value);
+		return;
+	}
 	if ((uintptr_t)address == (uintptr_t)control + 0xd4) {
 		assert(value == BIT(0));
 		assert(dma_barriers == trigger_count + 1);
@@ -161,6 +240,9 @@ void writel(uint32_t value, volatile void *address)
 		command_write = writes;
 	if (at == 0x1f0 && broken_clock)
 		value &= ~BIT(0);
+	if (at == 0x1f0 && broken_pmu_release && (load(registers, at) & FORCE) == FORCE &&
+	    (value & FORCE) != FORCE)
+		value |= FORCE;
 	store(registers, at, value);
 }
 
@@ -179,6 +261,14 @@ static void fresh(struct dpu_o82_regdma *dma, struct dpu_hw_ctl *ctl, unsigned i
 {
 	memset(registers, 0, sizeof(registers));
 	memset(control, 0, sizeof(control));
+	memset(mdp_registers, 0, sizeof(mdp_registers));
+	memset(vbif_registers, 0x33, sizeof(vbif_registers));
+	store(mdp_registers, 0x2bc, BIT(12));
+	assert(!dpu_hw_clock_lock && !dpu_vbif_qos_lock);
+	broken_mdp_enable = broken_mdp_release = broken_pmu_release = false;
+	dropped_qos_offset = 0;
+	runtime_usage = 1; pm_get_error = pm_put_error = 0;
+	pm_gets = pm_puts = pm_noresume = suspend_callbacks = 0;
 	selected_ctl = index;
 	reset_count = fail_reset_from = trigger_count = writes = reads = 0;
 	dma_barriers = io_barriers = status_reads = address_write = command_write = status_clear = 0;
@@ -187,6 +277,11 @@ static void fresh(struct dpu_o82_regdma *dma, struct dpu_hw_ctl *ctl, unsigned i
 	ctl->idx = index;
 	ctl->hw.blk_addr = control;
 	dpu_o82_regdma_init(dma, registers);
+	if (command_owner == dma && command_kms) {
+		dma->kms_owner = command_kms;
+		command_kms->o82_regdma = dma;
+		dma->power_held = emulate_power_hold;
+	}
 	assert(dpu_o82_regdma_can_unmap(dma));
 }
 
@@ -284,6 +379,7 @@ int main(void)
 	}
 	puts("Actual Cliffs DB transport: bounds, ordering, all CTLs, clock ownership, faults, timeout and quarantine/recovery passed");
 	upload_lifetime();
+	power_lifetime();
 	return 0;
 }
 
@@ -294,8 +390,9 @@ static void upload_lifetime(void)
 	struct dpu_o82_regdma dma;
 	struct dpu_hw_ctl ctl;
 	struct drm_device drm = {1}, foreign_drm = {2};
-	struct drm_gpuvm vm = { .references = 1, .drm = &drm };
-	struct drm_gpuvm foreign_vm = { .references = 1, .drm = &foreign_drm };
+	struct drm_gpuvm vm = { .references = 1, .drm = &drm, .managed = true };
+	struct drm_gpuvm foreign_vm = { .references = 1, .drm = &foreign_drm, .managed = true };
+	struct dpu_kms kms = { .dev = &drm, .base = {.vm = &vm} };
 	unsigned int before;
 
 	for (unsigned int channel = 0; channel < 3; channel++) {
@@ -303,6 +400,7 @@ static void upload_lifetime(void)
 		igc[2 * (256 * 3 + channel) + 1] = 0x0f;
 	}
 	command_owner = &dma;
+	command_kms = &kms; emulate_power_hold = true;
 	for (unsigned int fault = 0; fault < 3; fault++) {
 		fresh(&dma, &ctl, 1);
 		allocations = releases = 0;
@@ -329,6 +427,13 @@ static void upload_lifetime(void)
 	assert(dpu_o82_upload(&dma, &drm, &vm, &ctl, NULL, 3) == -EINVAL);
 	assert(dpu_o82_upload(&dma, &drm, &vm, &ctl, &input, 1) == -EINVAL);
 	assert(dpu_o82_upload(&dma, &foreign_drm, &vm, &ctl, &input, 3) == -EINVAL);
+	assert(!allocations && !writes && !reads);
+	vm.managed = false;
+	assert(dpu_o82_upload(&dma, &drm, &vm, &ctl, &input, 3) == -EINVAL);
+	vm.managed = true;
+	dma.power_held = false;
+	assert(dpu_o82_upload(&dma, &drm, &vm, &ctl, &input, 3) == -EHOSTDOWN);
+	dma.power_held = true;
 	assert(!allocations && !writes && !reads);
 	assert(dpu_o82_upload_release(NULL) == -EINVAL);
 	assert(!dpu_o82_upload_release(&dma));
@@ -367,12 +472,140 @@ static void upload_lifetime(void)
 	assert(!dma.command_data && !dma.command_iova);
 	assert(!dpu_o82_upload_release(&dma) && releases == 1);
 
-	/* A new VM is admitted only after the old owned buffer has been released. */
+	/* Reallocation remains bound to the admitted KMS and its managed VM. */
 	outcome = ERROR;
-	assert(dpu_o82_upload(&dma, &foreign_drm, &foreign_vm, &ctl, &input, 3) == -EIO);
-	assert(!dma.quarantined_ctl && !active && foreign_vm.references == 2);
+	assert(dpu_o82_upload(&dma, &drm, &vm, &ctl, &input, 3) == -EIO);
+	assert(!dma.quarantined_ctl && !active && vm.references == 2);
 	assert(!dpu_o82_upload_release(&dma));
-	assert(foreign_vm.references == 1 && releases == 2 && allocations == 2);
+	assert(vm.references == 1 && foreign_vm.references == 1 && releases == 2 && allocations == 2);
 	command_owner = NULL;
+	command_kms = NULL; emulate_power_hold = false;
 	puts("Actual O82 GEM/transport/encoder: WC allocation, balanced VM references, mapping bounds, reuse, foreign/raw refusal, malformed LUT, failed-stop retention, recovery and release passed; fake providers only");
+}
+
+static bool clock_control(struct dpu_hw_mdp *mdp, unsigned int clock, bool enable)
+{
+	assert(clock == DPU_CLK_CTRL_REG_DMA);
+	return dpu_hw_clk_force_ctrl(&mdp->hw, &mdp->caps->clk_ctrls[clock], enable);
+}
+
+static void power_lifetime(void)
+{
+	static u8 igc[257 * 3 * 2], gamut[4913 * 3 * 2], gc[1024 * 3 * 2];
+	struct dpu_o82_color_input input = { .igc = igc, .gamut = gamut, .gc = gc };
+	struct dpu_o82_regdma dma;
+	struct dpu_hw_ctl ctl;
+	struct drm_device drm = {1};
+	struct drm_gpuvm vm = { .references = 1, .drm = &drm, .managed = true };
+	struct platform_device pdev = { .dev = {1} };
+	struct dpu_mdp_cfg mdp_cfg;
+	struct dpu_vbif_cfg vbif_cfg;
+	struct dpu_hw_mdp mdp;
+	struct dpu_hw_vbif vbif;
+	struct dpu_kms kms;
+	unsigned int before;
+
+	for (unsigned int channel = 0; channel < 3; channel++) {
+		igc[2 * (256 * 3 + channel)] = 0xff;
+		igc[2 * (256 * 3 + channel) + 1] = 0x0f;
+	}
+	command_owner = &dma; command_kms = &kms; emulate_power_hold = false;
+#define RESET_POWER() do { \
+	assert(vm.references == 1); \
+	mdp_cfg = (struct dpu_mdp_cfg){ .clk_ctrls = {[DPU_CLK_CTRL_REG_DMA] = {0x2bc,20}} }; \
+	vbif_cfg = (struct dpu_vbif_cfg){ .qos_rp_remap_size = 0x40 }; \
+	mdp = (struct dpu_hw_mdp){ .hw = {mdp_registers}, .caps = &mdp_cfg, .ops = {clock_control} }; \
+	vbif = (struct dpu_hw_vbif){ .hw = {vbif_registers}, .cap = &vbif_cfg, .ops = {dpu_hw_set_qos_remap} }; \
+	kms = (struct dpu_kms){ .dev=&drm, .pdev=&pdev, .base={.vm=&vm}, .hw_mdp=&mdp, .hw_vbif=&vbif }; \
+	vm.managed = true; fresh(&dma, &ctl, 1); allocations = releases = 0; \
+} while (0)
+	for (unsigned int fault = 0; fault < 7; fault++) {
+		RESET_POWER();
+		if (fault == 0) dma.kms_owner = NULL;
+		if (fault == 1) kms.base.vm = NULL;
+		if (fault == 2) vm.managed = false;
+		if (fault == 3) mdp.ops.setup_clk_force_ctrl = NULL;
+		if (fault == 4) mdp_cfg.clk_ctrls[DPU_CLK_CTRL_REG_DMA].reg_off++;
+		if (fault == 5) vbif_cfg.qos_rp_remap_size = 0x20;
+		if (fault == 6) vbif.ops.set_qos_remap = NULL;
+		assert(dpu_o82_power_upload(&kms, &ctl, &input, 3) == -EINVAL);
+		assert(!pm_gets && !pm_puts && !allocations && !reads && !writes);
+	}
+	RESET_POWER();
+	struct dpu_kms alias = kms;
+	assert(dpu_o82_power_upload(&alias, &ctl, &input, 3) == -EINVAL);
+	assert(!pm_gets && !allocations);
+	pm_get_error = -EACCES;
+	assert(dpu_o82_power_upload(&kms, &ctl, &input, 3) == -EACCES);
+	assert(pm_gets == 1 && !pm_puts && runtime_usage == 1 && !dma.power_held);
+	assert(!reads && !writes && !allocations);
+	RESET_POWER(); broken_mdp_enable = true;
+	assert(dpu_o82_power_upload(&kms, &ctl, &input, 3) == -EIO);
+	assert(pm_gets == 1 && pm_puts == 1 && runtime_usage == 1 && !dma.power_held);
+	assert(!allocations && !trigger_count);
+	RESET_POWER(); broken_clock = true;
+	assert(dpu_o82_power_upload(&kms, &ctl, &input, 3) == -EIO);
+	assert(pm_puts == 1 && runtime_usage == 1 && !dma.power_held && !allocations);
+	assert(!(load(mdp_registers, 0x2bc) & BIT(20)) && !(load(registers, 0x1f0) & FORCE));
+	for (unsigned int matrix = 0; matrix < 2; matrix++) {
+		RESET_POWER(); dropped_qos_offset = (matrix ? 0x590 : 0x550) + 8 * 3;
+		assert(dpu_o82_power_upload(&kms, &ctl, &input, 3) == -EIO);
+		assert(!allocations && !trigger_count && pm_puts == 1 && !dma.power_held);
+	}
+	RESET_POWER();
+	assert(!dpu_o82_power_upload(&kms, &ctl, &input, 3));
+	assert(runtime_usage == 1 && pm_gets == 1 && pm_puts == 1 && vm.references == 2);
+	assert(!dma.power_held && !dma.mdp_clock_owned && !dma.pmu_clock_owned);
+	assert(load(mdp_registers, 0x2bc) == BIT(12));
+	for (unsigned int level = 0; level < 8; level++) {
+		u32 mask = 7U << 28;
+		assert((load(vbif_registers, 0x550 + 8 * level) & ~mask) == (0x33333333U & ~mask));
+		assert((load(vbif_registers, 0x590 + 8 * level) & ~mask) == (0x33333333U & ~mask));
+	}
+	assert(!dpu_o82_upload_release(&dma) && vm.references == 1);
+	RESET_POWER();
+	store(mdp_registers, 0x2bc, BIT(12) | BIT(20));
+	store(registers, 0x1f0, FORCE | BIT(9));
+	assert(!dpu_o82_power_upload(&kms, &ctl, &input, 3));
+	assert(load(mdp_registers, 0x2bc) == (BIT(12) | BIT(20)));
+	assert(load(registers, 0x1f0) == (FORCE | BIT(9)) && !dma.power_held);
+	assert(!dpu_o82_upload_release(&dma));
+	RESET_POWER(); outcome = TIMEOUT; fail_reset_from = 2;
+	assert(dpu_o82_power_upload(&kms, &ctl, &input, 3) == -ETIMEDOUT);
+	assert(dma.power_held && runtime_usage == 2 && !pm_puts && vm.references == 2);
+	assert(dpu_o82_platform_suspend(&kms) == -EBUSY);
+	before = writes + reads;
+	assert(dpu_o82_power_upload(&kms, &ctl, &input, 3) == -EBUSY);
+	assert(dpu_o82_regdma_execute(&dma, &ctl, 0x2000, 8) == -EBUSY);
+	assert(pm_gets == 1 && writes + reads == before && !releases);
+	assert(dpu_o82_power_recover(&kms) == -ETIMEDOUT && runtime_usage == 2 && !pm_puts);
+	fail_reset_from = 0;
+	assert(!dpu_o82_power_recover(&kms));
+	assert(!dma.power_held && runtime_usage == 1 && pm_puts == 1 && vm.references == 2);
+	assert(!dpu_o82_upload_release(&dma));
+	for (unsigned int clock = 0; clock < 2; clock++) {
+		RESET_POWER();
+		broken_mdp_release = clock == 0; broken_pmu_release = clock == 1;
+		assert(dpu_o82_power_upload(&kms, &ctl, &input, 3) == -EIO);
+		assert(dma.power_held && runtime_usage == 2 && !pm_puts && !dma.quarantined_ctl);
+		assert(dpu_o82_platform_suspend(&kms) == -EBUSY);
+		broken_mdp_release = broken_pmu_release = false;
+		assert(!dpu_o82_power_recover(&kms));
+		assert(runtime_usage == 1 && pm_puts == 1 && !dma.power_held);
+		assert(!dpu_o82_upload_release(&dma));
+	}
+	RESET_POWER(); pm_put_error = -EBUSY;
+	assert(dpu_o82_power_upload(&kms, &ctl, &input, 3) == -EBUSY);
+	assert(dma.power_held && runtime_usage == 2 && pm_puts == 1 && pm_noresume == 1);
+	assert(dpu_o82_platform_suspend(&kms) == -EBUSY);
+	pm_put_error = 0;
+	assert(!dpu_o82_power_recover(&kms) && runtime_usage == 1 && pm_puts == 2);
+	assert(!dpu_o82_upload_release(&dma));
+	RESET_POWER(); runtime_usage = 0;
+	assert(!dpu_o82_power_upload(&kms, &ctl, &input, 3));
+	assert(!runtime_usage && suspend_callbacks == 1 && !dma.command_bo && vm.references == 1);
+	assert(!dpu_o82_power_recover(&kms) && pm_puts == 1);
+#undef RESET_POWER
+	command_owner = NULL; command_kms = NULL;
+	puts("Actual O82 power/GEM/transport/shared helpers: bound managed VM, pending-resume suspend refusal, both force gates, exact eight-level LUTDMA QoS/readbacks, preserved client fields, failed-stop/clock/PM retention, recovery and suspend-before-clock memory release passed; fake providers only");
 }
