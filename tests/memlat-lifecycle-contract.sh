@@ -3,6 +3,7 @@
 set -Eeuo pipefail
 test ! -e /etc/senemos/kernel-update.conf
 root=$(cd -- "$(dirname -- "$0")/.." && pwd)
+source_file=${UKE_MEMLAT_SOURCE:-$root/src/power/uke-memlat.c}
 work=$(mktemp -d)
 trap 'find "$work" -depth -delete' EXIT
 cat > "$work/check.c" <<'C'
@@ -19,6 +20,7 @@ typedef uint32_t u32;typedef uint64_t u64;
 #define PERF_TYPE_RAW 4
 #define EIO 5
 #define ENOMEM 12
+#define ERANGE 34
 #define ARRAY_SIZE(a) (sizeof(a)/sizeof((a)[0]))
 #define hlist_entry(p,t,m) ((t *)((char *)(p)-offsetof(t,m)))
 #define IS_ERR(p) ((uintptr_t)(p)>(uintptr_t)-4096)
@@ -53,7 +55,9 @@ struct uke_memlat {
     struct workqueue_struct *queue;struct hlist_node hp_node;
     struct icc_path *path[2];struct uke_memlat_cpu cpu[8];
     struct uke_memlat_monitor monitor[7];unsigned monitors;
-    u32 vote[2];u64 samples,rejected,vote_errors;int hp_state;bool suspended;
+    u32 vote[2],l3_requested_khz,l3_ceiling_khz;
+    u64 samples,rejected,vote_errors,l3_range_rejections,l3_limited_votes;
+    int hp_state;bool suspended;
 };
 static struct uke_memlat p;
 static struct device dev;
@@ -62,6 +66,8 @@ static struct workqueue_struct queue;
 static struct perf_event events[32];
 static unsigned created,released,enabled,disabled,queued,cancelled,destroyed,hp_removed;
 static unsigned icc_calls[2],requested[2],fail_mask;
+static u32 l3_capacity,l3_io_failure;
+static bool l3_reject_all;
 static int fail_create=-1;
 static bool cpu_lock;
 static unsigned idle_mask;
@@ -88,7 +94,12 @@ static void perf_event_disable(struct perf_event *e) { assert(cpu_lock&&p.lock.h
 static void perf_event_enable(struct perf_event *e) { assert(cpu_lock&&p.lock.held&&e->alive);e->disabled=false;enabled++; }
 static int icc_set_bw(struct icc_path *path,u32 average,u32 peak) {
     assert(!average&&path->index<2);icc_calls[path->index]++;requested[path->index]=peak;
-    return fail_mask&(1U<<path->index)?-EIO:0;
+    if(fail_mask&(1U<<path->index))return -EIO;
+    if(path->index==1 && peak) {
+        if(l3_io_failure && peak==l3_io_failure)return -EIO;
+        if(l3_reject_all || (l3_capacity && peak>l3_capacity))return -ERANGE;
+    }
+    return 0;
 }
 static unsigned msecs_to_jiffies(unsigned ms) { assert(ms==8);return ms; }
 static bool queue_delayed_work(struct workqueue_struct *q,struct delayed_work *w,unsigned delay) {
@@ -104,27 +115,81 @@ static int cpuhp_state_remove_instance(int state,struct hlist_node *node) {
 }
 static void cpuhp_remove_multi_state(int state) { assert(state==101&&hp_removed==1);hp_removed++; }
 C
-for function in release_cpu online offline commit sample stop suspend resume; do
+for function in release_cpu online offline lower_l3 commit sample stop suspend resume; do
     awk -v name="uke_memlat_$function" '
-      $0 ~ "^static (int|void) " name "\\(" {emit=1;found++}
+      $0 ~ "^static (int|void|u32) " name "\\(" {emit=1;found++}
       emit {print}
       emit && /^}/ {emit=0}
-      END {if(found!=1)exit 1}
-    ' "$root/src/power/uke-memlat.c" >> "$work/check.c"
+      END {if(found!=1 && !(name=="uke_memlat_lower_l3" && found==0))exit 1}
+    ' "$source_file" >> "$work/check.c"
 done
 cat >> "$work/check.c" <<'C'
 static void reset(void) {
     memset(&p,0,sizeof(p));memset(events,0,sizeof(events));
     created=released=enabled=disabled=queued=cancelled=destroyed=hp_removed=0;
     memset(icc_calls,0,sizeof(icc_calls));memset(requested,0,sizeof(requested));
-    fail_create=-1;fail_mask=idle_mask=0;clock_ns=0;cpu_lock=false;p.dev=&dev;dev.data=&p;
+    fail_create=-1;fail_mask=idle_mask=0;l3_capacity=l3_io_failure=0;l3_reject_all=false;
+    clock_ns=0;cpu_lock=false;p.dev=&dev;dev.data=&p;
     p.path[0]=&paths[0];p.path[1]=&paths[1];p.queue=&queue;p.hp_state=101;
 }
 static void online(void) {
     for(unsigned i=0;i<2;i++){assert(!uke_memlat_online(i,&p.hp_node));p.cpu[i].timestamp=123;}
     assert(created==8&&!released&&!p.rejected);
 }
+static void capacity_setup(void) {
+    reset();p.monitors=3;
+    p.monitor[0].group=1;p.monitor[0].rows=4;
+    const u32 values[]={998400,1209600,1593600,1804800};
+    for(unsigned i=0;i<4;i++)p.monitor[0].map[i].memory_khz=values[i];
+    p.monitor[1]=p.monitor[0]; // Duplicate rows must never produce duplicate retries.
+    p.monitor[2].group=0;p.monitor[2].rows=1;
+    p.monitor[2].map[0].memory_khz=1700000; // A different group is never a candidate.
+    l3_capacity=1593600*32;
+}
+static void capacity_contract(void) {
+    const u32 high[]={600000,1804800},low[]={600000,1209600},zero[]={0,0};
+    capacity_setup();
+    int ret=uke_memlat_commit(&p,high);
+    assert(!ret && p.vote[1]==1593600 && "Adaptive L3 must retain its highest admitted map vote");
+    assert(p.l3_ceiling_khz==1593600 && p.l3_requested_khz==1804800);
+    assert(icc_calls[1]==2 && p.l3_range_rejections==1 && !p.vote_errors);
+    for(unsigned i=0;i<64;i++)assert(!uke_memlat_commit(&p,high));
+    assert(icc_calls[1]==2 && p.l3_limited_votes==65 && p.l3_range_rejections==1);
+    assert(!uke_memlat_commit(&p,low) && p.vote[1]==1209600 && icc_calls[1]==3);
+    assert(!uke_memlat_commit(&p,high) && p.vote[1]==1593600 && icc_calls[1]==4);
+    online();assert(!uke_memlat_suspend(&dev));
+    assert(!p.vote[1] && !p.l3_requested_khz && p.l3_ceiling_khz==1593600);
+    assert(!uke_memlat_resume(&dev));assert(!uke_memlat_commit(&p,high));
+    assert(p.vote[1]==1593600 && p.l3_range_rejections==1);
+    uke_memlat_stop(&p);assert(created==released && destroyed==1);
+
+    capacity_setup();l3_capacity=1337000*32;
+    assert(!uke_memlat_commit(&p,high) && p.vote[1]==1209600);
+    assert(p.l3_ceiling_khz==1209600 && icc_calls[1]==3 && p.l3_range_rejections==2);
+    assert(!uke_memlat_commit(&p,zero) && !p.vote[1] && !requested[1]);
+
+    capacity_setup();fail_mask=2;
+    assert(uke_memlat_commit(&p,high)==-EIO && icc_calls[1]==1);
+    assert(!p.l3_ceiling_khz && !p.l3_range_rejections && p.vote_errors==1);
+    capacity_setup();l3_io_failure=1593600*32;
+    assert(uke_memlat_commit(&p,high)==-EIO && icc_calls[1]==2);
+    assert(!p.l3_ceiling_khz && p.l3_range_rejections==1 && p.vote_errors==1 && !p.vote[1]);
+    capacity_setup();fail_mask=1;
+    assert(uke_memlat_commit(&p,high)==-EIO && !p.vote[0] && p.vote[1]==1593600);
+    assert(p.l3_ceiling_khz==1593600 && p.l3_range_rejections==1 && p.vote_errors==1);
+    capacity_setup();l3_reject_all=true;
+    assert(uke_memlat_commit(&p,high)==-ERANGE && icc_calls[1]==4);
+    assert(!p.l3_ceiling_khz && p.vote_errors==1 && p.l3_range_rejections==4 && !p.vote[1]);
+    capacity_setup();assert(!uke_memlat_commit(&p,high));online();fail_mask=2;
+    assert(uke_memlat_suspend(&dev)==-EIO && !p.suspended && p.vote[1]==1593600);
+    assert(p.l3_ceiling_khz==1593600 && p.l3_range_rejections==1 && p.vote_errors==1);
+    fail_mask=0;assert(!uke_memlat_suspend(&dev));assert(!uke_memlat_resume(&dev));
+    assert(!uke_memlat_commit(&p,high) && p.l3_range_rejections==1);
+    uke_memlat_stop(&p);assert(created==released && destroyed==1);
+    puts("Actual adaptive L3: bounded mapped capacity, cached constraints, duplicate/group isolation, release/PM and real error preservation PASS");
+}
 int main(void) {
+    capacity_contract();
     for(int fault=0;fault<4;fault++) {
         reset();fail_create=fault;assert(!uke_memlat_online(0,&p.hp_node));
         assert(created==(unsigned)fault&&released==created&&p.rejected==1);
@@ -167,5 +232,7 @@ int main(void) {
     puts("Actual Uke MEMLAT: every counter allocation fault, non-veto hotplug, disabled hotplug, ICC units/errors, suspend rollback, resume baselines and removal pass; fake providers, host only");
 }
 C
-"${CC:-clang}" -std=c11 -Wall -Wextra -Werror -Wno-unused-function -Wno-misleading-indentation -fsanitize=undefined,address -fno-sanitize-recover=all "$work/check.c" -o "$work/check"
+flags=(-std=c11 -Wall -Wextra -Werror -Wno-unused-function -Wno-misleading-indentation)
+if [[ ${SANITIZE:-1} == 1 ]]; then flags+=(-fsanitize=undefined,address -fno-sanitize-recover=all); fi
+"${CC:-clang}" "${flags[@]}" "$work/check.c" -o "$work/check"
 "$work/check"

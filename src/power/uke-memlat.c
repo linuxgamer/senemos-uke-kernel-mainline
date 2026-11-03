@@ -48,7 +48,9 @@ struct uke_memlat {
 	struct uke_memlat_monitor monitor[UKE_MEMLAT_MONITORS];
 	unsigned int monitors;
 	u32 vote[2];
+	u32 l3_requested_khz, l3_ceiling_khz;
 	u64 samples, rejected, vote_errors;
+	u64 l3_range_rejections, l3_limited_votes;
 	int hp_state;
 	bool suspended;
 };
@@ -105,6 +107,27 @@ static int uke_memlat_offline(unsigned int id, struct hlist_node *node)
 	return 0;
 }
 
+static u32 uke_memlat_lower_l3(struct uke_memlat *p, u32 upper)
+{
+	u32 next = 0;
+	unsigned int m, row;
+
+	/* Only consider distinct positive points in the validated OEM L3 maps. */
+	for (m = 0; m < p->monitors; m++) {
+		const struct uke_memlat_monitor *mon = &p->monitor[m];
+
+		if (mon->group != 1)
+			continue;
+		for (row = 0; row < mon->rows; row++) {
+			u32 khz = mon->map[row].memory_khz;
+
+			if (khz < upper && khz > next)
+				next = khz;
+		}
+	}
+	return next;
+}
+
 static int uke_memlat_commit(struct uke_memlat *p, const u32 vote[2])
 {
 	static const u32 width[] = { 16, 32 };
@@ -112,16 +135,49 @@ static int uke_memlat_commit(struct uke_memlat *p, const u32 vote[2])
 	unsigned int i;
 
 	for (i = 0; i < 2; i++) {
-		if (p->vote[i] == vote[i])
+		u32 target = vote[i];
+		bool limited = false;
+
+		if (i == 1) {
+			p->l3_requested_khz = target;
+			if (p->l3_ceiling_khz && target > p->l3_ceiling_khz) {
+				target = p->l3_ceiling_khz;
+				limited = true;
+			}
+		}
+		if (p->vote[i] == target) {
+			if (limited)
+				p->l3_limited_votes++;
 			continue;
-		ret = icc_set_bw(p->path[i], 0, vote[i] * width[i]);
+		}
+		ret = icc_set_bw(p->path[i], 0, target * width[i]);
+		if (i == 1 && target && ret == -ERANGE) {
+			u32 next;
+
+			p->l3_range_rejections++;
+			while ((next = uke_memlat_lower_l3(p, target))) {
+				target = next;
+				ret = icc_set_bw(p->path[i], 0, target * width[i]);
+				if (!ret) {
+					/* A mapped, admitted request; not measured hardware frequency. */
+					p->l3_ceiling_khz = target;
+					limited = true;
+					break;
+				}
+				if (ret != -ERANGE)
+					break;
+				p->l3_range_rejections++;
+			}
+		}
 		if (ret) {
 			p->vote_errors++;
 			if (!first)
 				first = ret;
 			dev_warn_ratelimited(p->dev, "Memory path %u vote failed: %d\n", i, ret);
 		} else {
-			p->vote[i] = vote[i];
+			p->vote[i] = target;
+			if (limited)
+				p->l3_limited_votes++;
 		}
 	}
 	return first;
@@ -287,8 +343,10 @@ static ssize_t sampling_show(struct device *dev, struct device_attribute *attr, 
 	ssize_t bytes;
 
 	mutex_lock(&p->lock);
-	bytes = sysfs_emit(buffer, "samples=%llu rejected=%llu vote_errors=%llu llcc_khz=%u l3_khz=%u suspended=%u\n",
-			   p->samples, p->rejected, p->vote_errors, p->vote[0], p->vote[1], p->suspended);
+	bytes = sysfs_emit(buffer, "samples=%llu rejected=%llu vote_errors=%llu llcc_khz=%u l3_khz=%u suspended=%u l3_requested_khz=%u l3_ceiling_khz=%u l3_range_rejections=%llu l3_limited_votes=%llu\n",
+			   p->samples, p->rejected, p->vote_errors, p->vote[0], p->vote[1], p->suspended,
+			   p->l3_requested_khz, p->l3_ceiling_khz,
+			   p->l3_range_rejections, p->l3_limited_votes);
 	mutex_unlock(&p->lock);
 	return bytes;
 }
