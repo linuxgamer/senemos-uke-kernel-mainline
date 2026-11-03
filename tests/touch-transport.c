@@ -58,7 +58,9 @@ struct nvt_uke_touch {
     const struct firmware *firmware;
     bool charger_known, charger_online;
     unsigned int watchdog;
-    u8 *tx, *rx;
+    u64 io_errors, recovery_attempts;
+    unsigned int recovery_budget;
+    u8 *tx, *rx, *frame;
 };
 struct spi_transfer {
     const void *tx_buf; void *rx_buf;
@@ -78,6 +80,8 @@ static struct {
     int wake_enable_error, wake_disable_error, boot_error, gesture_error;
     unsigned int wake_enables, wake_disables, boots, gestures, coordinates, releases;
     int coordinate_error;
+    int frame_error;
+    unsigned int frame_reads, published;
     u8 bytes[2][NVT_UKE_FRAME_SIZE + 2];
     bool block, entered, proceed;
     pthread_mutex_t lock;
@@ -163,14 +167,31 @@ static int nvt_uke_charger(const struct nvt_uke_io *io, bool online) {
     assert(nvt_ready(io->context) == 0 && online == mock.online);
     mock.charger_calls++; return mock.charger_error;
 }
-#define dev_warn_ratelimited(...) do { mock.warnings++; } while (0)
+static int nvt_uke_read_frame(const struct nvt_uke_io *io, u8 *frame) {
+    assert(!nvt_ready(io->context) && frame);
+    mock.frame_reads++;
+    return mock.frame_error;
+}
+static int nvt_uke_watchdog(const u8 *frame, size_t size, unsigned int *count) {
+    assert(frame && size == NVT_UKE_FRAME_SIZE && count);
+    return 0;
+}
+static void nvt_publish_contacts(struct nvt_uke_touch *t, int result) {
+    assert(!result && !nvt_ready(t) && t->booted);
+    mock.published++;
+}
+__attribute__((format(printf, 2, 3)))
+static void dev_warn_ratelimited(struct device *dev, const char *format, ...) {
+    assert(dev && format);
+    mock.warnings++;
+}
 #define dev_err_ratelimited(...) do { mock.warnings++; } while (0)
 
 #include "production.h"
 
 static struct nvt_uke_touch touch;
 static struct spi_device spi = { .touch = &touch, .irq = 54 };
-static u8 tx[NVT_UKE_FRAME_SIZE + 2], rx[NVT_UKE_FRAME_SIZE + 2];
+static u8 tx[NVT_UKE_FRAME_SIZE + 2], rx[NVT_UKE_FRAME_SIZE + 2], frame[NVT_UKE_FRAME_SIZE];
 static const struct firmware firmware;
 
 static void reset(void) {
@@ -183,6 +204,7 @@ static void reset(void) {
     touch.firmware = &firmware;
     touch.charger_known = touch.charger_online = false;
     touch.panel_state = 1; touch.watchdog = 10; touch.idle_reset = true;
+    touch.io_errors = touch.recovery_attempts = 0; touch.recovery_budget = 1;
     touch.boot_work.pending = 0;
     touch.charger_work.pending = 0;
     touch.poll_work.pending = 0;touch.matrix.samples = 32;
@@ -195,7 +217,78 @@ static void reset(void) {
     mock.wake_enable_error = mock.wake_disable_error = mock.boot_error = mock.gesture_error = 0;
     mock.wake_enables = mock.wake_disables = mock.boots = mock.gestures = 0;
     mock.coordinates = mock.releases = 0; mock.coordinate_error = 0;
+    mock.frame_error = 0; mock.frame_reads = mock.published = 0;
     mock.block = mock.entered = mock.proceed = false;
+}
+
+static void read_contacts(void) {
+    mutex_lock(&touch.io_lock);
+    nvt_read_contacts(&touch);
+    mutex_unlock(&touch.io_lock);
+}
+
+static void recovery_contract(void) {
+    reset(); mock.frame_error = -EREMOTEIO;
+    read_contacts();
+    /* Original source latches fault and cannot execute the queued reload. */
+    assert(!touch.fault && touch.recovery_attempts == 1);
+    assert(touch.io_errors == 1 && !touch.booted && !touch.firmware_ready);
+    assert(!touch.recovery_budget && mock.queues == 1 && mock.frame_reads == 1);
+    nvt_irq_set(&touch, true);
+    nvt_schedule_poll(&touch);
+    assert(!mock.enables && !touch.poll_work.pending);
+    nvt_boot_worker(&touch.boot_work);
+    assert(mock.boots == 1 && touch.booted && touch.firmware_ready && touch.irq_enabled);
+    assert(touch.matrix.samples == 0);
+    mock.frame_error = 0; read_contacts();
+    assert(mock.published == 1 && mock.frame_reads == 2);
+
+    /* A second read fault cannot trigger an unlimited firmware/reset loop. */
+    mock.frame_error = -EIO; read_contacts();
+    assert(touch.fault && touch.io_errors == 2 && touch.recovery_attempts == 1);
+    nvt_boot_worker(&touch.boot_work);
+    assert(mock.boots == 1 && !touch.booted && !touch.irq_enabled);
+    read_contacts();
+    assert(mock.frame_reads == 3 && mock.queues == 2);
+
+    /* Only a new powered panel generation re-arms a latched failure. */
+    u64 state = 2;
+    nvt_panel_changed(&touch.panel_notifier, 0, &state);
+    assert(touch.fault && !touch.recovery_budget && mock.boots == 1);
+    state = 3; nvt_panel_changed(&touch.panel_notifier, 0, &state);
+    assert(!touch.fault && touch.recovery_budget == 1);
+    nvt_boot_worker(&touch.boot_work);
+    assert(mock.boots == 2 && touch.booted);
+    read_contacts();
+    assert(!touch.fault && touch.recovery_attempts == 2 && !touch.recovery_budget);
+    unsigned int queues = mock.queues;
+    nvt_panel_changed(&touch.panel_notifier, 0, &state);
+    assert(mock.queues == queues && !touch.recovery_budget);
+
+    reset(); mock.frame_error = -EIO; read_contacts(); mock.boot_error = -EIO;
+    nvt_boot_worker(&touch.boot_work);
+    assert(touch.fault && !touch.booted && !touch.recovery_budget && mock.boots == 1);
+    read_contacts(); assert(mock.frame_reads == 1 && mock.queues == 1);
+
+    reset(); touch.fault = true;
+    struct device dev = { .touch = &touch };
+    assert(!nvt_suspend(&dev) && !touch.recovery_budget);
+    assert(!nvt_resume(&dev) && !touch.fault && touch.recovery_budget == 1);
+    nvt_boot_worker(&touch.boot_work);
+    assert(touch.booted && touch.firmware_ready && mock.boots == 1);
+
+    for (unsigned int invalid = 0; invalid < 3; ++invalid) {
+        reset();
+        touch.panel_ready = invalid != 0;
+        touch.suspended = invalid == 1;
+        touch.removed = invalid == 2;
+        read_contacts(); nvt_boot_worker(&touch.boot_work);
+        assert(!mock.frame_reads && !mock.boots && !touch.recovery_attempts);
+    }
+    reset(); mock.frame_error = -ESHUTDOWN;
+    read_contacts();
+    assert(!touch.fault && !touch.io_errors && !touch.recovery_attempts && !mock.queues);
+    puts("Actual touch recovery: one cold reload, exhaustion, lifecycle re-arm and invalid-state fencing PASS");
 }
 
 static int race_result;
@@ -217,8 +310,9 @@ int main(void) {
     assert(pthread_mutex_init(&touch.io_lock, NULL) == 0);
     assert(pthread_mutex_init(&touch.irq_lock, NULL) == 0);
     assert(pthread_mutex_init(&touch.state_lock, NULL) == 0);
-    touch.spi = &spi; touch.tx = tx; touch.rx = rx; touch.boot_work.touch = &touch;
+    touch.spi = &spi; touch.tx = tx; touch.rx = rx; touch.frame = frame; touch.boot_work.touch = &touch;
     touch.charger_work.touch = &touch; touch.io.context = &touch;
+    recovery_contract();
     reset();
     u8 data[NVT_UKE_FRAME_SIZE];
     assert(nvt_spi_io(&touch, 0x11c000, data, sizeof(data), true, true) == 0);
