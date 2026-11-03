@@ -19,7 +19,7 @@ tar --sort=name --mtime=@1793664000 --owner=0 --group=0 --numeric-owner \
 cat > "$output/uke-ssc-protocol-check.spec" <<'SPEC'
 Name: uke-ssc-protocol-check
 Version: 1.0
-Release: 8%{?dist}
+Release: 9%{?dist}
 Summary: Remote checks of the native Uke SSC protocol decoder
 License: GPL-2.0-only AND MIT
 Source0: %{name}-%{version}.tar.gz
@@ -44,6 +44,10 @@ bash packaging/native/check-ssc-native-objects.sh | tee -a %{buildroot}%{_docdir
 %license LICENSE LICENSES/GPL-2.0-only.txt
 %{_docdir}/%{name}/checks.txt
 %changelog
+* Wed Nov 04 2026 Uke contributors - 1.0-9
+- Request large SSC reports and validate both documented indication IDs.
+- Check actual Control TLVs, maximum payloads and complete QMI sample dispatch.
+
 * Tue Nov 03 2026 Uke contributors - 1.0-8
 - Defer SSC admission until ADSP has bound and serialize managed link creation.
 

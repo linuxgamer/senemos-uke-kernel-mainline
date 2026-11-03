@@ -438,14 +438,17 @@ int uke_ssc_qmi_validate(struct uke_ssc_view wire, bool response, u16 *transacti
 {
 	u8 seen[32] = {};
 	size_t at = 7, size;
+	u16 message;
 	unsigned long a = (unsigned long)wire.data, b = (unsigned long)transaction;
 	unsigned int type;
 
 	if (!wire.data || !transaction || wire.size < 7 || wire.size > UKE_SSC_MESSAGE_MAX + 23 ||
 	    (a < b ? b - a < wire.size : a - b < sizeof(*transaction)))
 		return -EINVAL;
+	message = ssc_le(wire.data + 3, 2);
+	/* libqmi SSC1.36: Small0x21 and Large0x22 share the bounded TLV layout. */
 	if (wire.data[0] != (response ? 2 : 4) ||
-	    ssc_le(wire.data + 3, 2) != (response ? 0x20 : 0x21) ||
+	    (response ? message != 0x20 : message != 0x21 && message != 0x22) ||
 	    ssc_le(wire.data + 5, 2) != wire.size - 7)
 		return -EBADMSG;
 	while (at < wire.size) {

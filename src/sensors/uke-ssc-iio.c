@@ -24,7 +24,9 @@
 #define SSC_SERVICE 400
 #define SSC_TIMEOUT msecs_to_jiffies(5000)
 #define SSC_QMI_REQUEST 0x20
-#define SSC_QMI_REPORT 0x21
+#define SSC_QMI_REPORT_SMALL 0x21
+#define SSC_QMI_REPORT_LARGE 0x22
+#define SSC_REPORT_TYPE_LARGE 1
 #define SSC_QMI_REPORT_MAX (UKE_SSC_MESSAGE_MAX + 16)
 #define SSC_SENSOR_COUNT 8
 
@@ -92,7 +94,11 @@ struct ssc_controller {
 	bool removed, paused, client_open, client_known, pending, lookup_fault;
 };
 
-struct ssc_qmi_request { u32 length; u8 payload[UKE_SSC_REQUEST_MAX]; };
+struct ssc_qmi_request {
+	u32 length;
+	u8 payload[UKE_SSC_REQUEST_MAX];
+	u8 report_type_valid, report_type;
+};
 struct ssc_qmi_response {
 	u8 result_valid;
 	struct qmi_response_type_v01 result;
@@ -116,6 +122,8 @@ struct ssc_qmi_report {
 static const struct qmi_elem_info ssc_request_ei[] = {
 	SSC_ELEM(QMI_DATA_LEN, 1, 2, NO_ARRAY, 1, struct ssc_qmi_request, length),
 	SSC_ELEM(QMI_UNSIGNED_1_BYTE, UKE_SSC_REQUEST_MAX, 1, VAR_LEN_ARRAY, 1, struct ssc_qmi_request, payload),
+	SSC_ELEM(QMI_OPT_FLAG, 1, 1, NO_ARRAY, 0x10, struct ssc_qmi_request, report_type_valid),
+	SSC_ELEM(QMI_UNSIGNED_1_BYTE, 1, 1, NO_ARRAY, 0x10, struct ssc_qmi_request, report_type),
 	{ .data_type = QMI_EOTI },
 };
 static const struct qmi_elem_info ssc_response_ei[] = {
@@ -270,7 +278,10 @@ static int ssc_request(struct ssc_controller *c, struct ssc_sensor *sensor,
 			 enum uke_ssc_command command, struct uke_ssc_suid uid,
 			 const char *datatype, u32 rate)
 {
-	struct ssc_qmi_request request = {};
+	/* Match the documented QMI Control selector used by the working SSC route. */
+	struct ssc_qmi_request request = {
+		.report_type_valid = 1, .report_type = SSC_REPORT_TYPE_LARGE,
+	};
 	struct qmi_txn txn;
 	size_t bytes;
 	unsigned long flags;
@@ -302,7 +313,7 @@ static int ssc_request(struct ssc_controller *c, struct ssc_sensor *sensor,
 	c->pending_sensor = sensor;
 	spin_unlock_irqrestore(&c->state, flags);
 	ret = qmi_send_request(&c->client, &c->peer, &txn, SSC_QMI_REQUEST,
-			       UKE_SSC_REQUEST_MAX + 5, ssc_request_ei, &request);
+			       UKE_SSC_REQUEST_MAX + 9, ssc_request_ei, &request);
 	if (ret)
 		qmi_txn_cancel(&txn);
 	else

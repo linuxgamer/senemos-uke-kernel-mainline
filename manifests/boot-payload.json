@@ -1117,11 +1117,11 @@
     },
     {
       "path": "src/sensors/uke-ssc-iio.c",
-      "sha256": "6a581add200a207fe20578fd12b23b7d3c39205e396cda9d6c08da76c25886c6"
+      "sha256": "c352d1320186476975353b60ea501aa5140749aed557a218841cc7294b909ab9"
     },
     {
       "path": "src/sensors/uke-ssc-protocol.c",
-      "sha256": "1fb62e572cd9eab80abfd6b2b831857bfd300f101bf873a3f1e551ff33535c57"
+      "sha256": "0303da3c8506cf5606c095b0609b74922f0f423210d33a63dec596560f05f00a"
     },
     {
       "path": "src/sensors/uke-ssc-protocol.h",
@@ -1145,7 +1145,7 @@
     },
     {
       "path": "tests/ssc-native-contract.c",
-      "sha256": "cffb4c305d78dd9f09ac5d4787e26bbdd3918b0e8bdb81a6e82e767ca0b077c4"
+      "sha256": "3d40482a1107f8a9023185f16c89fc1ce7423447631365d8afcff0c7feb62d3c"
     },
     {
       "path": "tests/ssc-native-contract.sh",

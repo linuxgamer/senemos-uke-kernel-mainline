@@ -31,10 +31,12 @@ static int qmi_send_request(struct qmi_handle *qmi, struct sockaddr_qrtr *peer,
 	struct sockaddr_qrtr sender = *peer;
 	size_t size = maxlen;
 	u8 *wire = qmi_encode_message(QMI_REQUEST,message,&size,txn->id,ei,body);
-	assert(!IS_ERR(wire) && message == SSC_QMI_REQUEST && size == request->length + 12);
+	assert(!IS_ERR(wire) && message == SSC_QMI_REQUEST && size == request->length + 16);
+	assert(maxlen == UKE_SSC_REQUEST_MAX + 9 && request->report_type_valid && request->report_type == 1);
 	assert(wire[0] == QMI_REQUEST && wire[3] == 0x20 && wire[7] == 1);
 	assert((wire[10] | (unsigned int)wire[11] << 8) == request->length);
 	assert(!memcmp(wire+12,request->payload,request->length));
+	assert(wire[size-4]==0x10 && wire[size-3]==1 && !wire[size-2] && wire[size-1]==1);
 	free(wire);
 	fixture.last_command = request->payload[21] | (unsigned int)request->payload[22] << 8;
 	fixture.sent++;
@@ -145,6 +147,17 @@ static void qmi_wire(void)
 	assert(!IS_ERR(wire) && size==26 && !uke_ssc_qmi_validate((struct uke_ssc_view){wire,size},false,&transaction));
 	assert(qmi_decode_message(wire,size,ssc_report_ei,out)>=0);
 	assert(out->client_valid && out->payload_valid && out->length==3 && !memcmp(out->payload,"abc",3));
+	/* The documented large ID has identical length/TLV admission. */
+	wire[3]=SSC_QMI_REPORT_LARGE;
+	assert(!uke_ssc_qmi_validate((struct uke_ssc_view){wire,size},false,&transaction));
+	for(unsigned int id=0x20;id<=0x24;id++) {
+		wire[3]=id;transaction=0xbeef;
+		if(id==SSC_QMI_REPORT_SMALL || id==SSC_QMI_REPORT_LARGE)
+			assert(!uke_ssc_qmi_validate((struct uke_ssc_view){wire,size},false,&transaction));
+		else
+			assert(uke_ssc_qmi_validate((struct uke_ssc_view){wire,size},false,&transaction)<0 && transaction==0xbeef);
+	}
+	wire[3]=SSC_QMI_REPORT_LARGE;
 	for(cut=0;cut<size;cut++) {
 		transaction=0xbeef;
 		assert(uke_ssc_qmi_validate((struct uke_ssc_view){wire,cut},false,&transaction)<0 && transaction==0xbeef);
@@ -167,20 +180,97 @@ static void qmi_wire(void)
 		ssc_message(&c.client,&c.peer,wire,size);
 		assert(fixture.decoded==decoded_count && !fixture.pushed);
 	}
-	free(wire);free(in);free(out);
+	free(wire);
+	for(unsigned int id=SSC_QMI_REPORT_SMALL;id<=SSC_QMI_REPORT_LARGE;id++) {
+		in->length=UKE_SSC_MESSAGE_MAX;memset(in->payload,0x55,in->length);size=SSC_QMI_REPORT_MAX;
+		wire=qmi_encode_message(QMI_INDICATION,id,&size,0,ssc_report_ei,in);
+		assert(!IS_ERR(wire) && size==UKE_SSC_MESSAGE_MAX+23);
+		assert(!uke_ssc_qmi_validate((struct uke_ssc_view){wire,size},false,&transaction));
+		assert(qmi_decode_message(wire,size,ssc_report_ei,out)>=0 && out->length==UKE_SSC_MESSAGE_MAX);
+		free(wire);
+	}
+	free(in);free(out);
 }
 struct fixture_bytes { u8 data[512];size_t size; };
 static void put_le(struct fixture_bytes *b,u64 value,unsigned int size)
 { while(size--){assert(b->size<sizeof(b->data));b->data[b->size++]=value;value>>=8;} }
 static void put_field(struct fixture_bytes *b,unsigned int field,const void *data,size_t size)
-{ assert(size<128 && b->size+size+2<=sizeof(b->data));put_le(b,(field<<3)|2,1);put_le(b,size,1);if(size)memcpy(b->data+b->size,data,size);b->size+=size; }
-static struct fixture_bytes event(unsigned int message,u64 ticks,const void *payload,size_t size)
+{
+	size_t remaining=size;
+	assert(b->size+size+4<=sizeof(b->data));put_le(b,(field<<3)|2,1);
+	do {
+		u8 byte=remaining&127;remaining>>=7;
+		put_le(b,byte|(remaining?128:0),1);
+	} while(remaining);
+	if(size)
+		memcpy(b->data+b->size,data,size);
+	b->size+=size;
+}
+static struct fixture_bytes event_uid(struct uke_ssc_suid suid,unsigned int message,u64 ticks,const void *payload,size_t size)
 {
 	struct fixture_bytes b={},uid={},e={};
-	put_le(&uid,9,1);put_le(&uid,0x123,8);put_le(&uid,17,1);put_le(&uid,0x456,8);
+	put_le(&uid,9,1);put_le(&uid,suid.low,8);put_le(&uid,17,1);put_le(&uid,suid.high,8);
 	put_field(&b,1,uid.data,uid.size);
 	put_le(&e,13,1);put_le(&e,message,4);put_le(&e,17,1);put_le(&e,ticks,8);
 	put_field(&e,3,payload,size);put_field(&b,2,e.data,e.size);return b;
+}
+static struct fixture_bytes event(unsigned int message,u64 ticks,const void *payload,size_t size)
+{ return event_uid((struct uke_ssc_suid){0x123,0x456},message,ticks,payload,size); }
+static void attribute(struct fixture_bytes *b,unsigned int id,const void *data,size_t size)
+{
+	struct fixture_bytes values={},entry={};
+	put_field(&values,1,data,size);put_le(&entry,8,1);put_le(&entry,id,1);
+	put_field(&entry,2,values.data,values.size);put_field(b,1,entry.data,entry.size);
+}
+static void string_attribute(struct fixture_bytes *b,unsigned int id,const char *text)
+{
+	struct fixture_bytes primitive={};
+	put_field(&primitive,2,text,strlen(text)+1);attribute(b,id,primitive.data,primitive.size);
+}
+static void dispatch_large(struct ssc_controller *c,struct fixture_bytes *b,bool reject_unknown)
+{
+	struct ssc_qmi_report *r=calloc(1,sizeof(*r));
+	size_t size=SSC_QMI_REPORT_MAX;
+	u8 *wire;
+	assert(r);r->client_valid=r->payload_valid=1;r->client=c->client_id;
+	r->length=b->size;memcpy(r->payload,b->data,b->size);
+	wire=qmi_encode_message(QMI_INDICATION,SSC_QMI_REPORT_LARGE,&size,0,ssc_report_ei,r);
+	assert(!IS_ERR(wire));
+	if(reject_unknown) {
+		unsigned int decoded=fixture.decoded;
+		wire[3]=0x23;ssc_message(&c->client,&c->peer,wire,size);
+		assert(fixture.decoded==decoded && !c->sensor[0].ready);
+		wire[3]=SSC_QMI_REPORT_LARGE;
+	}
+	ssc_message(&c->client,&c->peer,wire,size);
+	free(wire);free(r);
+}
+static void large_discovery_metadata(void)
+{
+	struct ssc_controller c;
+	struct fixture_bytes discovery={},uid={},attrs={},b;
+	static const u8 yes[]={40,1};
+	static const u8 continuous[]={33,0,0,0,0,0,0,0,0};
+	static const u8 rate[]={29,0,0,0xd0,0x41}; /* 26 Hz */
+	setup(&c);c.client_known=true;c.client_id=0x123456789ULL;
+	c.sensor[0].declared=true;c.sensor[0].have_suid=c.sensor[0].ready=false;
+	put_field(&discovery,1,"accel",5);
+	put_le(&uid,9,1);put_le(&uid,0x123,8);put_le(&uid,17,1);put_le(&uid,0x456,8);
+	put_field(&discovery,2,uid.data,uid.size);
+	b=event_uid((struct uke_ssc_suid){0xababababababababULL,0xababababababababULL},
+		768,200,discovery.data,discovery.size);
+	dispatch_large(&c,&b,true);
+	assert(c.sensor[0].have_suid && c.sensor[0].need_metadata && !c.sensor[0].ready);
+	assert(c.sensor[0].suid.low==0x123 && c.sensor[0].suid.high==0x456);
+	string_attribute(&attrs,0,"synthetic-accel");string_attribute(&attrs,2,"accel");
+	string_attribute(&attrs,5,"sns_accel.proto");attribute(&attrs,3,yes,sizeof(yes));
+	attribute(&attrs,21,yes,sizeof(yes));attribute(&attrs,16,continuous,sizeof(continuous));
+	attribute(&attrs,6,rate,sizeof(rate));
+	b=event(128,201,attrs.data,attrs.size);
+	dispatch_large(&c,&b,true);
+	assert(c.sensor[0].ready && !c.sensor[0].error && c.sensor[0].need_apply);
+	assert(c.sensor[0].metadata_done.done && c.sensor[0].attributes.physical);
+	assert(c.sensor[0].rate==0x41d00000);
 }
 static void reports(void)
 {
@@ -189,11 +279,19 @@ static void reports(void)
 	struct ssc_qmi_report *r=calloc(1,sizeof(*r));
 	struct qmi_txn txn={};
 	struct fixture_bytes b=event(1025,200,xyz,sizeof(xyz));
-	assert(r);setup(&c);c.client_known=true;c.client_id=0x123456789ULL;
-	c.sensor[0].declared=c.sensor[0].registered=c.sensor[0].buffered=c.sensor[0].stream_active=true;
-	r->client_valid=r->payload_valid=1;r->client=c.client_id;r->length=b.size;memcpy(r->payload,b.data,b.size);
-	ssc_report(&c.client,&c.peer,&txn,r);
-	assert(fixture.pushed==1 && c.sensor[0].sample_sequence==10 && fixture.pushed_value[0]==1000000 && fixture.pushed_value[1]==-2500000);
+	assert(r);
+	for(unsigned int id=SSC_QMI_REPORT_SMALL;id<=SSC_QMI_REPORT_LARGE;id++) {
+		size_t size=SSC_QMI_REPORT_MAX;
+		u8 *wire;
+		setup(&c);c.client_known=true;c.client_id=0x123456789ULL;
+		c.sensor[0].declared=c.sensor[0].registered=c.sensor[0].buffered=c.sensor[0].stream_active=true;
+		r->client_valid=r->payload_valid=1;r->client=c.client_id;r->length=b.size;memcpy(r->payload,b.data,b.size);
+		wire=qmi_encode_message(QMI_INDICATION,id,&size,0,ssc_report_ei,r);
+		assert(!IS_ERR(wire));
+		ssc_message(&c.client,&c.peer,wire,size);
+		assert(fixture.pushed==1 && c.sensor[0].sample_sequence==10 && fixture.pushed_value[0]==1000000 && fixture.pushed_value[1]==-2500000);
+		free(wire);
+	}
 	ssc_report(&c.client,&c.peer,&txn,r);assert(fixture.pushed==1);
 	r->client++;ssc_report(&c.client,&c.peer,&txn,r);assert(fixture.pushed==1);r->client--;
 	b=event(130,201,NULL,0);r->length=b.size;memcpy(r->payload,b.data,b.size);
@@ -258,7 +356,7 @@ static void temperature(void)
 }
 int main(void)
 {
-	qmi_wire();ownership();reports();units_and_rates();temperature();
+	qmi_wire();ownership();large_discovery_metadata();reports();units_and_rates();temperature();
 	puts("Actual native SSC: upstream QMI wire round trips, acknowledgements, client/peer/generation guards, request faults, socket cleanup, sample admission, error release and IIO units passed; fake providers only");
 	return 0;
 }

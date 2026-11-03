@@ -129,3 +129,18 @@ passed those checks. This correction is absent from immutable1710. The1900
 producer retains the newer adaptive-L3 kernel1800 and adds the correction with
 the checked DPU resource extension. Complete delivery and later boot/sensor
 acceptance remain separate requirements.
+
+4 November2026. A bounded query through the installed libssc route confirms
+Report Large0x22 delivery. The native source now explicitly selects LARGE=1
+in Control TLV0x10 and admits both documented0x21/0x22 indications through the
+existing strict two-byte-length TLV decoder. Its16KiB limit, required/unique
+TLVs and client/peer/generation checks remain in force. Unknown message IDs
+are refused before decoding.
+
+The wire contract is the installed-version upstream libqmi1.36.0
+[SSC message schema](https://github.com/linux-mobile-broadband/libqmi/blob/defb13dcab0adc7f44f6741807244507a14a30c5/data/qmi-service-ssc.json)
+and [report enumeration](https://github.com/linux-mobile-broadband/libqmi/blob/defb13dcab0adc7f44f6741807244507a14a30c5/src/libqmi-glib/qmi-enums-ssc.h).
+The new remote check covers the actual request TLV, complete large-report
+discovery/metadata/sample dispatch, maximum-size payloads and unknown-ID
+refusal using synthetic identities. Results and corrected native IIO
+publication remain pending. Immutable kernel1900 predates this correction.
