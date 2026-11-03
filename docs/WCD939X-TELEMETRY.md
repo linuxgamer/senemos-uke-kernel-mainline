@@ -28,5 +28,18 @@ and range assertions must fail; corrected metadata and 441 cached getter
 observations must pass normally and with sanitizers. Allocation and cached
 MBHC providers are synthetic and no ALSA device is opened. This does not prove
 physical jack detection, audio playback or the absence of errors after boot.
-Native kernel/package qualification and matching-kernel observations are
-separate requirements and remain pending.
+Native qualification completed in
+[COPR build 11252415](https://copr.fedorainfracloud.org/coprs/build/11252415),
+kernel release `7.3.1-2700`, compiled source
+`c0de80bf9f7f5ac18b4fb5ceb623342f285382ee`. The two actual-old assertions
+fail at the required checks; old getter values pass. Corrected controls and
+441 cached observations pass with GCC and Clang, normally and under ASan/UBSan.
+The complete kernel, actual codec object/module linkage and inherited package
+checks pass. All six original signed runtime RPMs pass independent signature,
+payload, dependency, ordered-script, config and provenance review.
+
+DNF transaction 39 installs this cohort on 4 November 2026. The inactive A
+slot is written, synced and read back; the accepted 1500 kernel remains in B.
+The device still runs 1500 and has not rebooted into 2700. Matching-kernel ALSA
+restore, jack behavior and physical recurrence checks remain pending. A later
+documentation commit does not replace the immutable compiled source above.
