@@ -1246,6 +1246,10 @@
     {
       "path": "tests/ssc-supplier-contract.sh",
       "sha256": "0d8c84daa5e97798fe661921a0b6a4e0caff6220c7a7b1b2585f6d53f5d1d778"
+    },
+    {
+      "path": "tests/hardware1900-package-contract.sh",
+      "sha256": "9d882239394e6831ede3d48488ea4f63998a7beb1655753f320e1b47b8b3e9f3"
     }
   ],
   "root_selector_capability": {

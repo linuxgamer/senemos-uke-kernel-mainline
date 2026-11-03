@@ -124,5 +124,8 @@ bound. The bound check and managed-link creation hold the supplier device lock
 to exclude concurrent unbind; all paths unlock and retain ordinary reference
 cleanup. It does not start ADSP or change the sensor protocol. Remote check
 1.0-8 exercises the actual helper with fake providers and compiles the native
-AArch64 objects. This correction is absent from immutable1710; check results
-and later boot/sensor acceptance remain separate requirements.
+AArch64 objects. [Build11251980](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11251980/)
+passed those checks. This correction is absent from immutable1710. The1900
+producer retains the newer adaptive-L3 kernel1800 and adds the correction with
+the checked DPU resource extension. Complete delivery and later boot/sensor
+acceptance remain separate requirements.

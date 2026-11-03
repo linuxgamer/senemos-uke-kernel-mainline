@@ -146,9 +146,14 @@ source RPM and its complete source preparation. It then applies the resource
 extension, builds the actual linked MSM display object, checks both compiled
 supplier DT resource tuples and validates the binding document. The producer
 verifies the parent's header/payload digests and preserves every retained
-source. Its RPM contains only a text receipt. Full linked-object, DT and
-binding results are pending; device behavior remains separate. This source is
-not in the immutable combined kernel 1710 candidate.
+source. Its RPM contains only a text receipt.
+[Build11252062](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11252062/)
+passed the actual linked `msm.o`, both compiled supplier resource tuples and
+the binding document check. Device behavior remains separate. This source is
+not in the immutable combined kernel1710 candidate. The1900 producer retains
+the newer adaptive-L3 kernel1800 and waits for its complete build before adding
+these checked resource hooks and the SSC supplier correction. Complete1900
+kernel/package results remain required.
 
 This is a resource/PM prerequisite. It does not allocate a color DMA buffer,
 resolve logical RGB versus gamut c0/c2_c1, select a preset, program a DSPP,
