@@ -1,0 +1,181 @@
+--- a/drivers/rtc/rtc-pm8xxx.c
++++ b/drivers/rtc/rtc-pm8xxx.c
+@@ -9,6 +9,7 @@
+ #include <linux/of.h>
+ #include <linux/module.h>
+ #include <linux/nvmem-consumer.h>
++#include <linux/uke-rtc-policy.h>
+ #include <linux/init.h>
+ #include <linux/rtc.h>
+ #include <linux/platform_device.h>
+@@ -72,6 +73,7 @@
+ 	struct regmap *regmap;
+ 	bool allow_set_time;
+ 	bool use_uefi;
++	bool offset_invalid;
+ 	int alarm_irq;
+ 	const struct pm8xxx_rtc_regs *regs;
+ 	struct device *dev;
+@@ -109,6 +111,13 @@
+ 				     &size, rtc_info);
+ 	efivar_unlock();
+ 
++	if (status == EFI_NOT_FOUND && uke_rtc_machine()) {
++		/* Provision only through a later explicit RTC_SET_TIME. */
++		memset(rtc_info, 0, sizeof(*rtc_info));
++		rtc_dd->offset_invalid = true;
++		dev_info(dev, "secure RTC offset is uninitialized; trusted time required\n");
++		return 0;
++	}
+ 	if (status != EFI_SUCCESS) {
+ 		dev_dbg(dev, "failed to read UEFI offset: %lu\n", status);
+ 		return efi_status_to_err(status);
+@@ -124,10 +133,34 @@
+ 	/* Convert from GPS to Unix time offset */
+ 	offset_gps = le32_to_cpu(rtc_info->offset_gps);
+ 	rtc_dd->offset = offset_gps + (u32)RTC_TIMESTAMP_EPOCH_GPS;
++	rtc_dd->offset_invalid = false;
+ 
+ 	return 0;
+ }
+ 
++static int pm8xxx_rtc_uke_store(struct pm8xxx_rtc *rtc_dd)
++{
++	struct qcom_uefi_rtc_info verified;
++	unsigned long size = sizeof(verified);
++	efi_status_t status;
++	int rc;
++
++	rc = efivar_lock();
++	if (rc)
++		return rc;
++	status = efivar_set_variable_locked(QCOM_UEFI_NAME, &QCOM_UEFI_GUID,
++			QCOM_UEFI_ATTRS, sizeof(rtc_dd->rtc_info), &rtc_dd->rtc_info, false);
++	if (status == EFI_SUCCESS)
++		status = efivar_get_variable(QCOM_UEFI_NAME, &QCOM_UEFI_GUID,
++				NULL, &size, &verified);
++	efivar_unlock();
++	if (status != EFI_SUCCESS)
++		return efi_status_to_err(status);
++	if (size != sizeof(verified) || memcmp(&verified, &rtc_dd->rtc_info, size))
++		return -EIO;
++	return 0;
++}
++
+ static int pm8xxx_rtc_write_uefi_offset(struct pm8xxx_rtc *rtc_dd, u32 offset)
+ {
+ 	struct qcom_uefi_rtc_info *rtc_info = &rtc_dd->rtc_info;
+@@ -140,6 +173,8 @@
+ 	offset_gps = offset - (u32)RTC_TIMESTAMP_EPOCH_GPS;
+ 
+ 	rtc_info->offset_gps = cpu_to_le32(offset_gps);
++	if (uke_rtc_machine())
++		return pm8xxx_rtc_uke_store(rtc_dd);
+ 
+ 	dev_dbg(dev, "efi_rtc_info = %*ph\n", (int)size, rtc_info);
+ 
+@@ -255,14 +290,15 @@
+ 
+ 	offset = secs - raw_secs;
+ 
+-	if (offset == rtc_dd->offset)
++	if (offset == rtc_dd->offset && !rtc_dd->offset_invalid)
+ 		return 0;
+ 
+ 	/*
+ 	 * Reduce flash wear by deferring updates due to clock drift until
+ 	 * shutdown.
+ 	 */
+-	if (abs_diff(offset, rtc_dd->offset) < 30) {
++	if (!uke_rtc_machine() && !rtc_dd->offset_invalid &&
++	    abs_diff(offset, rtc_dd->offset) < 30) {
+ 		rtc_dd->offset_dirty = true;
+ 		goto out;
+ 	}
+@@ -278,6 +314,7 @@
+ 	rtc_dd->offset_dirty = false;
+ out:
+ 	rtc_dd->offset = offset;
++	rtc_dd->offset_invalid = false;
+ 
+ 	return 0;
+ }
+@@ -369,11 +406,18 @@
+ 	u32 secs;
+ 	int rc;
+ 
++	if (rtc_dd->offset_invalid)
++		return -ENODATA;
+ 	rc = pm8xxx_rtc_read_raw(rtc_dd, &secs);
+ 	if (rc)
+ 		return rc;
+ 
+ 	secs += rtc_dd->offset;
++	if (uke_rtc_machine() && secs < 1577836800U) {
++		/* A missing/factory offset is not a valid calendar for this device. */
++		rtc_dd->offset_invalid = true;
++		return -ENODATA;
++	}
+ 	rtc_time64_to_tm(secs, tm);
+ 
+ 	dev_dbg(dev, "read time: %ptRd %ptRt (%u + %u)\n", tm, tm,
+@@ -389,6 +433,8 @@
+ 	u32 secs;
+ 	int rc;
+ 
++	if (rtc_dd->offset_invalid)
++		return -ENODATA;
+ 	secs = rtc_tm_to_time64(&alarm->time);
+ 	secs -= rtc_dd->offset;
+ 	put_unaligned_le32(secs, value);
+@@ -424,6 +470,8 @@
+ 	u32 secs;
+ 	int rc;
+ 
++	if (rtc_dd->offset_invalid)
++		return -ENODATA;
+ 	rc = regmap_bulk_read(rtc_dd->regmap, regs->alarm_rw, value,
+ 			      sizeof(value));
+ 	if (rc)
+@@ -452,6 +500,8 @@
+ 	unsigned int val;
+ 	int rc;
+ 
++	if (enable && rtc_dd->offset_invalid)
++		return -ENODATA;
+ 	if (enable)
+ 		val = regs->alarm_en;
+ 	else
+--- a/drivers/firmware/qcom/qcom_scm.c
++++ b/drivers/firmware/qcom/qcom_scm.c
+@@ -31,6 +31,7 @@
+ #include <linux/remoteproc.h>
+ #include <linux/sizes.h>
+ #include <linux/types.h>
++#include <linux/uke-rtc-policy.h>
+ 
+ #include <dt-bindings/interrupt-controller/arm-gic.h>
+ 
+@@ -2150,6 +2151,12 @@
+ 	 * prominently in case someone attempts to try these commands with a
+ 	 * device/command combination that isn't supported yet.
+ 	 */
++	if (uke_rtc_machine() &&
++	    (res->result == QSEECOM_RESULT_INCOMPLETE ||
++	     res->result == QSEECOM_RESULT_BLOCKED_ON_LISTENER)) {
++		dev_err(__scm->dev, "qseecom: unsupported Uke secure callback; refusing\n");
++		return -EOPNOTSUPP;
++	}
+ 	WARN_ON(res->result == QSEECOM_RESULT_INCOMPLETE);
+ 	WARN_ON(res->result == QSEECOM_RESULT_BLOCKED_ON_LISTENER);
+ 
+@@ -2369,7 +2376,8 @@
+ 
+ 	dev_info(scm->dev, "qseecom: found qseecom with version 0x%x\n", version);
+ 
+-	if (!of_machine_device_match(qcom_scm_qseecom_allowlist)) {
++	if (!of_machine_device_match(qcom_scm_qseecom_allowlist) &&
++	    !uke_rtc_qseecom_approved(version)) {
+ 		dev_info(scm->dev, "qseecom: untested machine, skipping\n");
+ 		return 0;
+ 	}
