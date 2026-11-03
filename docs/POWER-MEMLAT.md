@@ -1,8 +1,11 @@
 # Uke native memory-latency sampling
 
-Source candidate dated 3 November 2026. Kernel build and physical qualification
-are pending. This adds the missing LLCC/L3 sampling policy to the existing
-CPUFreq, thermal, CPU/LLCC BWMON and DDR BWMON implementation.
+3 November 2026. The complete AArch64 kernel and package checks passed in
+[COPR build 11251037](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11251037/)
+at 7.3.1-1300.fc46. The actual configuration, linked built-in probe and OF match
+passed inspection. Physical qualification remains pending. This adds the
+missing LLCC/L3 sampling policy to the existing CPUFreq, thermal, CPU/LLCC
+BWMON and DDR BWMON implementation.
 
 The exact Uke `cliffs.dtsi` at MiCode/kernel_devicetree commit
 `94c84aeb9e517dbde546fc732033c184094c8e57` defines seven sampling monitors for
@@ -14,12 +17,12 @@ MEMLAT nodes remain disabled or absent.
 
 `src/power/uke-memlat.c` reads pinned ARM PMU events for instructions, cycles,
 L3 refill and L2 refill (`0x08`, `0x11`, `0x37`, `0x17`). The inherited OEM
-algorithm selects a map ceiling for memory-bound samples with at most400
+algorithm selects a map ceiling for memory-bound samples with at most 400
 instructions per miss, or for the compute monitor. Independent interconnect
 requests aggregate with existing clients; the driver does not write clocks,
 voltage, thermal ceilings or CPUCP configuration.
 
-The8 ms delayed work is deferrable and freezable. Unscheduled, multiplexed,
+The 8 ms delayed work is deferrable and freezable. Unscheduled, multiplexed,
 reset, idle, implausible and overlong samples do not produce synthetic votes.
 The consumer is built into the matched kernel and uses its public `idle_cpu`
 scheduler declaration. CPUs observed as idle are skipped before perf reads, which can otherwise send

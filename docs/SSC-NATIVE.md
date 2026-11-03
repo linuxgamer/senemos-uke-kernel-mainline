@@ -14,14 +14,18 @@ kernel floating point. Failed decoding leaves the output unchanged.
 Protocol sources are the pinned
 [Qualcomm client API](https://github.com/qualcomm/sensinghub/blob/329551963bcc063f6a89f6cbca259c5b5c9c4e0b/apis/proto/sns_client.proto),
 standard sensor/SUID schemas at the same commit, and the project's existing
-MIT SSC discovery/sample code. Upstream Linux7.3.1 QMI helper declarations
+MIT SSC discovery/sample code. Upstream Linux 7.3.1 QMI helper declarations
 were compared separately. The older SMGR service is a different protocol;
-its IIO driver cannot be selected as an SSC service400 implementation.
+its IIO driver cannot be selected as an SSC service 400 implementation.
 
 The remote check producer is `packaging/native/copr-ssc-protocol-check.sh`.
 It exercises synthetic valid/malformed packets with GCC and Clang sanitizers
 and compares integer scaling with independent host floating-point arithmetic.
-Remote validation is pending. No compile is run on the tablet.
+[COPR build 11251116](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11251116/)
+passed at 1.0-1: both compiler/sanitizer runs completed, including 30,000 numeric
+comparisons and 20,000 malformed-input cases per compiler. These are synthetic
+host tests, not a linked kernel consumer or sensor trial. No compile ran on
+the tablet.
 
 This source does not yet register a QRTR/QMI client, request samples, create
 IIO devices or replace libssc. Transport acknowledgement/client ownership,
