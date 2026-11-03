@@ -139,3 +139,33 @@ buttons, reset/disconnect release and optional tilt need independent evidence
 and fixtures. Do not substitute another tablet's coordinate constants or
 invent proximity/pressure values. No physical pen test was performed for
 this source correction.
+
+## Bounded frame-I/O recovery
+
+3 November 2026. A non-shutdown frame-read error previously set a fault latch
+that also prevented the queued firmware worker from running. Panel-ready and
+resume did not clear it. Candidate recovery permits one verified cold reload
+per powered lifecycle, then latches a repeated error until a new panel-ready
+generation or nonretained PM resume. Epoch checks and IRQ draining remain in
+place; off, suspended and removed states do not admit recovery I/O.
+
+The existing `input_stats` prefix is preserved and gains value-free I/O-error,
+recovery, fault, panel, suspend and IRQ flags. Supplier selection, firmware
+admission, electrode maps, gesture commands, panel timing and reset ownership
+are unchanged. A passing build does not attribute every physical gesture
+entry timeout or desktop pause to this mechanism.
+
+COPR11251030 qualified the original-driver negative assertion and corrected
+actual production recovery, lifecycle and 100 concurrent panel/SPI races,
+including ASan/UBSan, with a complete 7.3.1-1023 build. That composition predates
+the supplier and memory-policy work. `copr-touch-recovery1301.sh` retains the
+complete qualified 1300 source package from COPR11251037 and overlays only the
+driver and its two fixtures. It pins the parent header/payload and spec,
+preserves other sources and profile bytes, and repeats the actual parent
+negative control before sanitizer, full kernel and inherited package checks.
+The proposed 1301 composition is not yet built or physically qualified.
+
+The shared NT36532 OEM and upstream comparisons described above remain the
+protocol basis. No donor firmware, GPIO, power sequence or calibration data is
+introduced by this recovery change. Physical recurrence validation and the
+independent gesture-entry sequencing investigation remain open.

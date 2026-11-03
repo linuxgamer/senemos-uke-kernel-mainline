@@ -53,6 +53,8 @@ struct nvt_uke_touch {
 	bool charger_known, charger_online;
 	unsigned int watchdog;
 	u64 input_packets, input_errors;
+	u64 io_errors, recovery_attempts;
+	unsigned int recovery_budget;
 	unsigned long last_irq, last_valid;
 	u16 contacts_active;
 	u16 candidate_counter;
@@ -367,6 +369,7 @@ static void nvt_quiesce(struct nvt_uke_touch *t)
 	spin_lock_irqsave(&t->state_lock, flags);
 	t->gesture_armed = false;
 	t->gesture_io = false;
+	t->recovery_budget = 0;
 	spin_unlock_irqrestore(&t->state_lock, flags);
 	t->watchdog = 0;
 	t->idle_reset = false;
@@ -474,6 +477,8 @@ static void nvt_boot_worker(struct work_struct *work)
 static void nvt_read_contacts(struct nvt_uke_touch *t)
 {
 	int ret, watchdog;
+	unsigned long flags;
+	bool recovery = false;
 
 	if (!t->booted || nvt_ready(t))
 		return;
@@ -481,7 +486,21 @@ static void nvt_read_contacts(struct nvt_uke_touch *t)
 	if (ret) {
 		if (ret != -ESHUTDOWN) {
 			t->booted = false;
+			t->io_errors++;
 			nvt_fault(t);
+			/* One verified cold reload per powered lifecycle, never a reset loop. */
+			spin_lock_irqsave(&t->state_lock, flags);
+			if (t->panel_ready && !t->suspended && !t->removed && t->recovery_budget) {
+				t->recovery_budget = 0;
+				t->fault = false;
+				t->idle_reset = false;
+				t->recovery_attempts++;
+				recovery = true;
+			}
+			spin_unlock_irqrestore(&t->state_lock, flags);
+			dev_warn_ratelimited(&t->spi->dev,
+				"THP frame read failed: %d; bounded recovery=%u\n",
+				ret, (unsigned int)recovery);
 			/* The worker disables IRQ outside this threaded handler. */
 			queue_work(system_long_wq, &t->boot_work);
 		}
@@ -587,6 +606,10 @@ static int nvt_panel_changed(struct notifier_block *nb, unsigned long event, voi
 		nvt_quiesce(t);
 		spin_lock_irqsave(&t->state_lock, flags);
 		t->panel_ready = state & 1;
+		if (t->panel_ready && !t->removed) {
+			t->fault = false;
+			t->recovery_budget = 1;
+		}
 		active = nvt_active(t);
 		spin_unlock_irqrestore(&t->state_lock, flags);
 		if (active)
@@ -624,10 +647,13 @@ static ssize_t input_stats_show(struct device *dev,
 	ssize_t ret;
 
 	mutex_lock(&t->io_lock);
-	ret = sysfs_emit(buf, "packets=%llu errors=%llu active=0x%x calibrated=%u ready=%u\n",
+	ret = sysfs_emit(buf, "packets=%llu errors=%llu active=0x%x calibrated=%u ready=%u "
+		"io_errors=%llu recoveries=%llu fault=%u panel_ready=%u suspended=%u irq_enabled=%u\n",
 			t->input_packets, t->input_errors, t->contacts_active,
 			t->matrix.samples == NVT_UKE_CALIBRATION_FRAMES,
-			t->booted && t->matrix.samples == NVT_UKE_CALIBRATION_FRAMES);
+		t->booted && t->matrix.samples == NVT_UKE_CALIBRATION_FRAMES,
+		t->io_errors, t->recovery_attempts, READ_ONCE(t->fault),
+		READ_ONCE(t->panel_ready), READ_ONCE(t->suspended), READ_ONCE(t->irq_enabled));
 	mutex_unlock(&t->io_lock);
 	return ret;
 }
@@ -847,8 +873,13 @@ static int nvt_resume(struct device *dev)
 	}
 	spin_lock_irqsave(&t->state_lock, flags);
 	t->suspended = false;
-	if (!t->gesture_armed)
+	if (!t->gesture_armed) {
 		t->epoch++;
+		if (t->panel_ready && !t->removed) {
+			t->fault = false;
+			t->recovery_budget = 1;
+		}
+	}
 	active = nvt_active(t);
 	spin_unlock_irqrestore(&t->state_lock, flags);
 	if (active)
