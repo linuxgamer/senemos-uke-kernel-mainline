@@ -30,7 +30,7 @@ mkdir -p "$stage/addon"
 git -C "$owner" archive --prefix=native-addon/ HEAD \
     src/display/dpu_o82_platform.c src/display/dpu_o82_platform.h \
     src/display/dpu_o82_regdma.c src/display/dpu_o82_regdma.h src/display/o82-regdma.h \
-    src/display/dpu_o82_lutbus.c src/display/dpu_o82_lutbus.h \
+    src/display/dpu_o82_lutbus.c src/display/dpu_o82_lutbus.h src/display/dpu_o82_profiles.h \
     src/display/uke-o82-hdr-format.h src/display/prepare-o82-regdma.sh \
     src/display/sm7675-uke-native-display.dtso src/display/bindings/qcom,sm7675-dpu.yaml \
     patches/display/0072-o82-regdma-resource.patch \
@@ -45,7 +45,7 @@ spec=$output/uke-o82-kms-check.spec
 awk '
  /^%description/ {exit}
  /^Name:/ {$0="Name: uke-o82-kms-check"}
- /^Release:/ {$0="Release: 1%{?dist}"}
+ /^Release:/ {$0="Release: 2%{?dist}"}
  /^Summary:/ {$0="Summary: Retained Uke DPU KMS and REGDMA source integration check"}
  /^(Requires|Provides|Recommends):/ {next}
  {print}
@@ -81,10 +81,13 @@ test -s %{buildroot}%{_docdir}/%{name}/checks.txt
 %{_docdir}/%{name}/checks.txt
 
 %changelog
+* Tue Nov 03 2026 Uke contributors - 7.3.1-2
+- Include the shared profile declarations used by the LUT stream checks.
+
 * Tue Nov 03 2026 Uke contributors - 7.3.1-1
 - Compile the actual adapted KMS and REGDMA resource connection.
 - Check both compiled supplier overlays and the new binding document.
 SPEC
 sha256sum -c "$stage/retained.sha256"
 rm "$parent"
-[[ $(rpmspec --target aarch64 -q --srpm --qf '%{NAME}-%{VERSION}-%{RELEASE}' "$spec") == uke-o82-kms-check-7.3.1-1.fc46 ]]
+[[ $(rpmspec --target aarch64 -q --srpm --qf '%{NAME}-%{VERSION}-%{RELEASE}' "$spec") == uke-o82-kms-check-7.3.1-2.fc46 ]]
