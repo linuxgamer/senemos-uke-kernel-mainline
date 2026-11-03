@@ -1097,11 +1097,11 @@
     },
     {
       "path": "src/boot/uke-hardware.h",
-      "sha256": "508f6a26d23ae90284f7af191f7aa267a0e63d7041715de6cfc76a3204f243c3"
+      "sha256": "63bec0a7fc57fcc5b00d62351b757c66d4271e951a1d85eacef8b95a00a43799"
     },
     {
       "path": "src/boot/bindings/firmware/xiaomi,uke-ssc-sensors.yaml",
-      "sha256": "a606b21db996d3a07f2c034b874b3bd38d5da13b2ceea58ef271deb3c1862a6d"
+      "sha256": "6fe795a82aab9adbaa2ca3f11b225955a6748fb0b7d2196e6756d51c9e0f4060"
     },
     {
       "path": "src/sensors/Kconfig",
@@ -1117,7 +1117,7 @@
     },
     {
       "path": "src/sensors/uke-ssc-iio.c",
-      "sha256": "cc353df254e25da4bcd454d553c20e901ba539d86b9270d9443381f030e5112e"
+      "sha256": "fd8a48a8817be506a8556f9dfabc75442ab9225d736b791f70b42e7a034dd149"
     },
     {
       "path": "src/sensors/uke-ssc-protocol.c",
@@ -1129,7 +1129,7 @@
     },
     {
       "path": "tests/hardware-dt.cpp",
-      "sha256": "e90cea9fb417866b7b4790ff0baa21d591e71b9ecb1dea1270b682885f5f184c"
+      "sha256": "ea92abc75d04e8ac2a5ecc1dedc9c914d8a3cf294588263a2064e91474885528"
     },
     {
       "path": "tests/hardware-dt.sh",
@@ -1145,15 +1145,15 @@
     },
     {
       "path": "tests/ssc-native-contract.c",
-      "sha256": "bcc09dd4f02bb3193498c61e73076c610e26c26000d0ccfd4cfe13da24212417"
+      "sha256": "cffb4c305d78dd9f09ac5d4787e26bbdd3918b0e8bdb81a6e82e767ca0b077c4"
     },
     {
       "path": "tests/ssc-native-contract.sh",
-      "sha256": "5c84089a2a58b6344c7d0d6c745a3f7882eb1371317de19ddacf935010d8b596"
+      "sha256": "50c0485b04be784fc2e28b5761e07afe6882ae203e1355908184533fc87d9b95"
     },
     {
       "path": "tests/ssc-native-host.h",
-      "sha256": "5bb91c3cb5e4ba3127f428a7d16a828fd7e28c7cdf8fddd11b61f3daafcd6f5d"
+      "sha256": "ee715775fd1fa8b7e5a570e9608801ec90b0d727a8383ab38f6ef6f5e9bc611f"
     }
   ],
   "root_selector_capability": {

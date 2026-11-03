@@ -61,7 +61,7 @@ alignment instrumentation; native parser/callback instrumentation remains.
 
 The source now selects `CONFIG_IIO_UKE_SSC=m` and adds `xiaomi,uke-ssc-iio`
 before the legacy description compatible in the early Uke DT transformation.
-The ADSP phandle and all nine firmware-owned descriptions remain. Sensors
+The ADSP phandle and the existing firmware-owned descriptions remain. Sensors
 load from the normal root module set after firmware is available; they are
 not required in the early initramfs. Existing libssc clients are preserved.
 
@@ -85,3 +85,22 @@ the fresh-release guard remains unchanged.
 Mount/clock handling, device lifecycle acceptance, vendor CCT/flicker semantics
 and live physical sensor behavior remain unqualified. The driver reports host
 receipt timestamps and does not infer a mounting matrix or DSP tick frequency.
+
+The subsequent source extension adds the physical `sensor_temperature` datatype
+with exact `sns_sensor_temperature.proto` metadata, a streaming endpoint and
+one HIGH-accuracy Celsius value. It converts that value to millicelsius and
+exposes `IIO_TEMP` with scale 1, as required by the Linux IIO temperature ABI.
+Negative temperatures are retained; unreliable/lower-status, malformed and
+nonfinite values are refused. The DT adds a firmware-owned temperature
+description, without a new AP bus client. This is sensor-die temperature,
+not an ambient-temperature, battery-temperature or thermal-limit substitute.
+No factory calibration or thermal policy is changed.
+
+That extension is not in the immutable 1500 candidate. Remote source check
+1.0-7 covers the actual conversion, metadata/stream and scale functions,
+positive/negative Celsius values and updated FDT. It remains pending; a later
+combined kernel needs complete linkage and distinct device acceptance.
+The protocol is the pinned Qualcomm
+[physical sensor temperature API](https://github.com/qualcomm/sensinghub/blob/329551963bcc063f6a89f6cbca259c5b5c9c4e0b/apis/proto/sns_sensor_temperature.proto),
+and the output unit follows the exact
+[Linux IIO ABI](https://github.com/torvalds/linux/blob/79a907609d53d5cd645b42c11550d295d43abf99/Documentation/ABI/testing/sysfs-bus-iio).

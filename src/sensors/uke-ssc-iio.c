@@ -26,9 +26,9 @@
 #define SSC_QMI_REQUEST 0x20
 #define SSC_QMI_REPORT 0x21
 #define SSC_QMI_REPORT_MAX (UKE_SSC_MESSAGE_MAX + 16)
-#define SSC_SENSOR_COUNT 7
+#define SSC_SENSOR_COUNT 8
 
-enum ssc_kind { SSC_ACCEL, SSC_GYRO, SSC_MAG, SSC_LIGHT, SSC_PROXIMITY, SSC_SAR };
+enum ssc_kind { SSC_ACCEL, SSC_GYRO, SSC_MAG, SSC_LIGHT, SSC_PROXIMITY, SSC_SAR, SSC_TEMPERATURE };
 struct ssc_description {
 	const char *datatype, *api, *name;
 	enum ssc_kind kind;
@@ -45,6 +45,8 @@ static const struct ssc_description ssc_descriptions[SSC_SENSOR_COUNT] = {
 	{ "ambient_light_back", "sns_ambient_light.proto", "uke-ssc-rear-light", SSC_LIGHT, IIO_LIGHT, 2, 1000000 },
 	{ "proximity", "sns_proximity.proto", "uke-ssc-proximity", SSC_PROXIMITY, IIO_PROXIMITY, 1, 1 },
 	{ "sar", "sns_sar.proto", "uke-ssc-sar", SSC_SAR, IIO_PROXIMITY, 1, 1 },
+	/* The physical sensor API uses Celsius; IIO temperature uses millicelsius. */
+	{ "sensor_temperature", "sns_sensor_temperature.proto", "uke-ssc-sensor-temperature", SSC_TEMPERATURE, IIO_TEMP, 1, 1000 },
 };
 
 struct ssc_controller;
@@ -350,12 +352,37 @@ static int ssc_sample_values(struct ssc_sensor *s, const struct uke_ssc_event *e
 	ret = uke_ssc_decode_sample(event->payload, d->dimensions, &sample);
 	if (ret || !sample.status)
 		return ret ? ret : -EAGAIN;
+	/* This API specifies HIGH for valid data and UNRELIABLE while stabilizing. */
+	if (d->kind == SSC_TEMPERATURE && sample.status != 3)
+		return -EAGAIN;
 	for (i = 0; i < (d->dimensions == 3 ? 3 : 1); i++) {
 		ret = uke_ssc_fixed(sample.value[i], d->multiplier, &value[i]);
 		if (ret || (d->kind == SSC_LIGHT && value[i] < 0))
 			return ret ? ret : -ERANGE;
 	}
 	return 0;
+}
+
+static bool ssc_attributes_usable(const struct ssc_description *description,
+				 const struct uke_ssc_attributes *attributes)
+{
+	bool streaming = description->dimensions == 3 || description->kind == SSC_TEMPERATURE;
+
+	return attributes->available && attributes->physical && !attributes->hlos_incompatible &&
+	       attributes->stream_type <= 1 && (attributes->stream_type || ssc_rate(attributes)) &&
+	       (!streaming || !attributes->stream_type);
+}
+
+static int ssc_read_scale(const struct ssc_description *description, int *val, int *val2)
+{
+	if (description->multiplier == 1)
+		return -EINVAL;
+	if (description->kind == SSC_TEMPERATURE) {
+		*val = 1; *val2 = 0;
+		return IIO_VAL_INT;
+	}
+	*val = 0; *val2 = 1;
+	return IIO_VAL_INT_PLUS_MICRO;
 }
 
 static void ssc_report(struct qmi_handle *qmi, struct sockaddr_qrtr *peer,
@@ -431,10 +458,7 @@ static void ssc_report(struct qmi_handle *qmi, struct sockaddr_qrtr *peer,
 				if (!ret) {
 					s->attributes = attributes;
 					s->rate = ssc_rate(&attributes);
-					s->ready = attributes.available && attributes.physical &&
-						   !attributes.hlos_incompatible && attributes.stream_type <= 1 &&
-						   (attributes.stream_type || s->rate) &&
-						   (s->description->dimensions != 3 || !attributes.stream_type);
+					s->ready = ssc_attributes_usable(s->description, &attributes);
 					if (s->ready)
 						s->error = 0;
 				}
@@ -595,10 +619,8 @@ static int ssc_read_raw(struct iio_dev *iio, const struct iio_chan_spec *channel
 	s64 value = 0;
 	int ret, stop_ret;
 
-	if (mask == IIO_CHAN_INFO_SCALE && s->description->multiplier != 1) {
-		*val = 0; *val2 = 1;
-		return IIO_VAL_INT_PLUS_MICRO;
-	}
+	if (mask == IIO_CHAN_INFO_SCALE)
+		return ssc_read_scale(s->description, val, val2);
 	if (mask != IIO_CHAN_INFO_RAW)
 		return -EINVAL;
 	if (!iio_device_claim_direct(iio))

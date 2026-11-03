@@ -106,6 +106,7 @@ static int UKE_INIT uke_hardware_names(void *fdt)
 		UKE_SENSOR("proximity", "Proximity", "proximity", "STK3BCx"),
 		UKE_SENSOR("flicker", "Flicker", "flicker", "SIP1328"),
 		UKE_SENSOR("sar", "Capacitive SAR", "sar", "SX937x"),
+		UKE_SENSOR("sensor-temperature", "Physical sensor temperature", "sensor_temperature", "LSM6DSO\0QMI8658"),
 #undef UKE_SENSOR
 	};
 	static const char *const cores[] = {

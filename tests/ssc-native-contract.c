@@ -216,9 +216,49 @@ static void units_and_rates(void)
 	assert(values[0]==10000 && values[1]==-25000 && values[2]==-5000);
 	e.message=768;assert(ssc_sample_values(&c.sensor[2],&e,values)==-ENOMSG);
 }
+static void temperature(void)
+{
+	struct ssc_controller c;
+	const struct ssc_description *d=&ssc_descriptions[7];
+	struct uke_ssc_attributes a={.available=true,.physical=true,.stream_type=0,
+		.rate_count=1,.rate={0x40a00000}};
+	static const u8 positive[]={13,0,0,0xcc,0x41,16,3}; /* 25.5 Celsius */
+	static const u8 negative[]={13,0,0,0x20,0xc0,16,3}; /* -2.5 Celsius */
+	u8 sample[sizeof(positive)];
+	struct uke_ssc_event e={.message=1025,.ticks=1,.payload={sample,sizeof(sample)}};
+	s64 values[3]={};
+	int val=77,val2=88;
+
+	setup(&c);
+	assert(d->kind==SSC_TEMPERATURE&&d->channel==IIO_TEMP&&d->dimensions==1);
+	assert(!strcmp(d->datatype,"sensor_temperature")&&!strcmp(d->api,"sns_sensor_temperature.proto"));
+	assert(ssc_attributes_usable(d,&a));
+	a.stream_type=1;assert(!ssc_attributes_usable(d,&a));
+	a.stream_type=0;a.rate_count=0;assert(!ssc_attributes_usable(d,&a));
+	a.rate_count=1;a.physical=false;assert(!ssc_attributes_usable(d,&a));
+	a.physical=true;a.available=false;assert(!ssc_attributes_usable(d,&a));
+	a.available=true;a.hlos_incompatible=true;assert(!ssc_attributes_usable(d,&a));
+	a.hlos_incompatible=false;assert(ssc_attributes_usable(d,&a));
+	assert(ssc_read_scale(d,&val,&val2)==IIO_VAL_INT&&val==1&&val2==0);
+	assert(ssc_read_scale(&ssc_descriptions[0],&val,&val2)==IIO_VAL_INT_PLUS_MICRO&&val==0&&val2==1);
+	assert(ssc_read_scale(&ssc_descriptions[2],&val,&val2)==IIO_VAL_INT_PLUS_MICRO&&val==0&&val2==1);
+	val=77;val2=88;assert(ssc_read_scale(&ssc_descriptions[5],&val,&val2)==-EINVAL&&val==77&&val2==88);
+	memcpy(sample,positive,sizeof(sample));
+	assert(!ssc_sample_values(&c.sensor[7],&e,values)&&values[0]==25500);
+	memcpy(sample,negative,sizeof(sample));
+	assert(!ssc_sample_values(&c.sensor[7],&e,values)&&values[0]==-2500);
+	for(unsigned int status=0;status<3;status++) {
+		sample[6]=status;assert(ssc_sample_values(&c.sensor[7],&e,values)==-EAGAIN);
+	}
+	memcpy(sample,positive,sizeof(sample));sample[3]=0xc0;sample[4]=0x7f;
+	assert(ssc_sample_values(&c.sensor[7],&e,values)<0); /* NaN */
+	e.payload=(struct uke_ssc_view){positive,sizeof(positive)-1};
+	assert(ssc_sample_values(&c.sensor[7],&e,values)<0);
+	e.message=769;assert(ssc_sample_values(&c.sensor[7],&e,values)==-ENOMSG);
+}
 int main(void)
 {
-	qmi_wire();ownership();reports();units_and_rates();
+	qmi_wire();ownership();reports();units_and_rates();temperature();
 	puts("Actual native SSC: upstream QMI wire round trips, acknowledgements, client/peer/generation guards, request faults, socket cleanup, sample admission, error release and IIO units passed; fake providers only");
 	return 0;
 }

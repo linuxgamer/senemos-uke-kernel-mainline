@@ -29,7 +29,7 @@ properties:
     description: ADSP remote processor that owns the sensor firmware.
 
 patternProperties:
-  '^(accelerometer|gyroscope|magnetometer|front-light|rear-light|color-temperature|proximity|flicker|sar)$':
+  '^(accelerometer|gyroscope|magnetometer|front-light|rear-light|color-temperature|proximity|flicker|sar|sensor-temperature)$':
     type: object
     properties:
       compatible:
@@ -37,7 +37,7 @@ patternProperties:
       label: true
       qcom,ssc-datatype:
         $ref: /schemas/types.yaml#/definitions/string
-        enum: [accel, gyro, mag, ambient_light, ambient_light_back, cct_front, proximity, flicker, sar]
+        enum: [accel, gyro, mag, ambient_light, ambient_light_back, cct_front, proximity, flicker, sar, sensor_temperature]
         description: SSC datatype used by the native discovery client.
       xiaomi,model-candidates:
         $ref: /schemas/types.yaml#/definitions/string-array

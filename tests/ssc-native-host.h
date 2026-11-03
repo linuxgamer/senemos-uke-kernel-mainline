@@ -53,7 +53,9 @@ struct list_head { struct list_head *next,*prev; };
 struct device { int unused; };
 struct iio_chan_spec { unsigned int unused; };
 struct iio_dev { int unused; };
-enum iio_chan_type { IIO_ACCEL,IIO_ANGL_VEL,IIO_MAGN,IIO_LIGHT,IIO_PROXIMITY };
+enum iio_chan_type { IIO_ACCEL,IIO_ANGL_VEL,IIO_MAGN,IIO_LIGHT,IIO_PROXIMITY,IIO_TEMP };
+#define IIO_VAL_INT 1
+#define IIO_VAL_INT_PLUS_MICRO 2
 #define lockdep_assert_held(lock) assert((lock)->locked)
 #define spin_lock_irqsave(lock,flags) do { (void)(lock); (flags)=0; } while(0)
 #define spin_unlock_irqrestore(lock,flags) do { (void)(lock); (void)(flags); } while(0)

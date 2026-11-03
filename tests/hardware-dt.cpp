@@ -155,7 +155,9 @@ int main(int argc,char **argv) {
         assert(!fdt_node_check_compatible(dt.data(),n,"xiaomi,uke-ssc-sensor"));
         assert(!fdt_getprop(dt.data(),n,"reg",nullptr));
         assert(!fdt_getprop(dt.data(),n,"gpios",nullptr));++count;
-    }assert(count==9);
+    }assert(count==10);
+    assert(!std::strcmp(text(dt.data(),"/firmware/ssc-sensors/sensor-temperature","qcom,ssc-datatype"),
+        "sensor_temperature"));
     assert(!uke_hardware_simplify(dt.data()));
     assert(fdt_path_offset(dt.data(),"/soc/xiaomi_fingerprint")==-FDT_ERR_NOTFOUND);
     assert(fdt_path_offset(dt.data(),"/soc/qcom,mdss_mdp@ae00000/unused-panel")==-FDT_ERR_NOTFOUND);
