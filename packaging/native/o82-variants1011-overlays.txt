@@ -19,6 +19,7 @@ src/power/uke-memlat-policy.h
 src/power/xiaomi,uke-memlat.yaml
 tests/memlat-policy-contract.sh
 tests/memlat-dt-contract.sh
+tests/memlat-lifecycle-contract.sh
 tests/memlat-package-contract.sh
 tests/dsi-read-transaction-contract.sh
 tests/nfc-ir-package-contract.sh

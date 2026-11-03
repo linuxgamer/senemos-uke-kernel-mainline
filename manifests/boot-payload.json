@@ -33,7 +33,7 @@
     },
     {
       "path": "packaging/native/prepare.sh",
-      "sha256": "dc78f6a4ea81e4d0bc52c5d702519f24f8f558defc672b43fbdcbd834338fd5a"
+      "sha256": "d730ac99786650e8405032537d8ba8680114dfaa0822181500564c3f3e1dc133"
     },
     {
       "path": "patches/boot/0005-uke-root-selector.patch",

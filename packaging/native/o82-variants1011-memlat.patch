@@ -1,8 +1,9 @@
 --- a/prepare.sh
 +++ b/prepare.sh
-@@ -76,2 +76,5 @@
+@@ -76,2 +76,6 @@
  bash "$profile/src/boot/prepare-abl-source.sh" "$kernel" "$output"
 +bash "$profile/src/power/prepare-memlat.sh" "$kernel"
 +bash "$profile/tests/memlat-policy-contract.sh"
 +bash "$profile/tests/memlat-dt-contract.sh"
++bash "$profile/tests/memlat-lifecycle-contract.sh"
  bash "$profile/src/performance/prepare-source.sh" "$kernel"
