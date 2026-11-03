@@ -1,7 +1,7 @@
 # O82 supplier variant build
 
 The 3 November 2026 candidate uses `copr-o82-variants731.sh` to compose
-`7.3.1-1100` from the successful release1011 source RPM (COPR build11246385).
+`7.3.1-1101` from the successful release1011 source RPM (COPR build11246385).
 The pinned parent includes the release1010 production drivers and versioned
 device-local video firmware import. The source worker verifies its SHA-256,
 retains unrelated sources and package scriptlets, and records every overlay.
@@ -17,3 +17,11 @@ This is an opt-in Fedora Rawhide AArch64 test build. COPR must complete the
 kernel, modules, boot image and existing package checks before installation.
 Compilation does not establish boot success or O82-36/Tianma hardware support.
 Physical acceptance remains open for each supplier variant.
+
+Release1100 completed the kernel, modules and both boot bundles in COPR
+build11247756. Its final DSI transaction fixture still treated O82-36 as a
+foreign panel and stopped package checks. Release1101 corrects the fixture's
+single-supplier model, uses a genuinely foreign panel for refusal checks and
+executes the seven-mode and refresh-transition matrices for both suppliers.
+The runtime variant sources are retained; a fresh ABI avoids reusing the
+release1100 module-signing identity. The repeated complete build is pending.
