@@ -32,6 +32,10 @@ void dpu_o82_regdma_init(struct dpu_o82_regdma *dma, void __iomem *regs)
 	dma->regs = regs;
 	dma->owned_clock_bits = 0;
 	dma->quarantined_ctl = 0;
+	dma->command_bo = NULL;
+	dma->command_vm = NULL;
+	dma->command_data = NULL;
+	dma->command_iova = 0;
 	mutex_init(&dma->lock);
 }
 
@@ -65,8 +69,8 @@ static int dpu_o82_regdma_stop(struct dpu_o82_regdma *dma, u32 ctl)
 	return 0;
 }
 
-int dpu_o82_regdma_execute(struct dpu_o82_regdma *dma, struct dpu_hw_ctl *ctl,
-			 u64 iova, size_t bytes)
+int dpu_o82_regdma_execute_locked(struct dpu_o82_regdma *dma,
+				 struct dpu_hw_ctl *ctl, u64 iova, size_t bytes)
 {
 	struct o82_regdma_descriptor descriptor;
 	u32 value, errors = 0;
@@ -76,10 +80,10 @@ int dpu_o82_regdma_execute(struct dpu_o82_regdma *dma, struct dpu_hw_ctl *ctl,
 	    !o82_regdma_make_descriptor(ctl->idx, iova, bytes, &descriptor))
 		return -EINVAL;
 
-	mutex_lock(&dma->lock);
+	lockdep_assert_held(&dma->lock);
 	if (dma->quarantined_ctl) {
 		ret = -EBUSY;
-		goto unlock;
+		goto out;
 	}
 
 	value = readl(dma->regs + REGDMA_PMU_CLOCK);
@@ -94,7 +98,7 @@ int dpu_o82_regdma_execute(struct dpu_o82_regdma *dma, struct dpu_hw_ctl *ctl,
 	/* Discard an old descriptor before accepting a new buffer address. */
 	ret = dpu_o82_regdma_stop(dma, ctl->idx);
 	if (ret)
-		goto unlock;
+		goto out;
 
 	writel(REGDMA_ERROR_MASK, dma->regs + REGDMA_ERROR_CLEAR);
 	if ((readl(dma->regs + REGDMA_ERROR_STATUS) & REGDMA_ERROR_MASK) ||
@@ -119,7 +123,7 @@ int dpu_o82_regdma_execute(struct dpu_o82_regdma *dma, struct dpu_hw_ctl *ctl,
 
 		ret = errors ? -EIO : ret;
 		if (stop_ret)
-			goto unlock;
+			goto out;
 	} else {
 		writel(REGDMA_DONE, dma->regs + descriptor.offset + REGDMA_CLEAR);
 		readl(dma->regs + descriptor.offset + REGDMA_STATUS);
@@ -127,7 +131,21 @@ int dpu_o82_regdma_execute(struct dpu_o82_regdma *dma, struct dpu_hw_ctl *ctl,
 
 restore_clock:
 	dpu_o82_regdma_restore_clock(dma);
-unlock:
+out:
+	return ret;
+}
+
+int dpu_o82_regdma_execute(struct dpu_o82_regdma *dma, struct dpu_hw_ctl *ctl,
+			 u64 iova, size_t bytes)
+{
+	int ret;
+
+	if (!dma || !dma->regs)
+		return -EINVAL;
+	mutex_lock(&dma->lock);
+	/* An owned GEM buffer excludes every unrelated raw IOVA submission. */
+	ret = dma->command_bo ? -EBUSY :
+		dpu_o82_regdma_execute_locked(dma, ctl, iova, bytes);
 	mutex_unlock(&dma->lock);
 	return ret;
 }

@@ -12,6 +12,7 @@ printf 'Retained kernel source: '; cat "$profile/source-commit"
 printf 'REGDMA extension source: '; cat "$addon/source-commit"
 bash "$addon/tests/o82-platform-contract.sh"
 bash "$addon/tests/o82-lutbus-contract.sh"
+bash "$addon/tests/o82-regdma-transport-contract.sh" "$addon"
 # Check the real caller's order and unwind, in addition to testing the helpers.
 awk '
  /dpu_kms->hw_vbif = hw;/ {vbif=NR}
@@ -38,10 +39,11 @@ make -C "$kernel" O="$out" KCFLAGS=-Werror -j4 drivers/gpu/drm/msm/msm.o
 linked=$out/drivers/gpu/drm/msm/msm.o
 [[ -s $linked ]]
 readelf -h "$linked" | grep -E 'Machine:.*AArch64'
-for function in dpu_o82_platform_init dpu_o82_platform_suspend dpu_o82_regdma_init dpu_o82_regdma_can_unmap; do
+for function in dpu_o82_platform_init dpu_o82_platform_suspend dpu_o82_regdma_init \
+    dpu_o82_regdma_can_unmap dpu_o82_upload dpu_o82_upload_release; do
     llvm-nm --defined-only "$linked" | awk -v name="$function" '$2 ~ /^[tT]$/ && $3==name {found=1} END {exit !found}'
 done
-! llvm-nm --undefined-only "$linked" | grep -E ' dpu_o82_(platform|regdma)_'
+! llvm-nm --undefined-only "$linked" | grep -E ' dpu_o82_(platform|regdma|upload|lutbus)_'
 # Rebuild the actual paired overlays after the retained preparation, changing
 # only the explicitly declared base DT. No retained hash receipt is rewritten.
 install -m644 "$addon/src/display/sm7675-uke-native-display.dtso" \

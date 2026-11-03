@@ -6,6 +6,8 @@
 #include <linux/types.h>
 
 struct dpu_hw_ctl;
+struct drm_gem_object;
+struct drm_gpuvm;
 
 /* One owner for the entire Cliffs REGDMA3 DB engine, including its clocks. */
 struct dpu_o82_regdma {
@@ -13,8 +15,14 @@ struct dpu_o82_regdma {
 	struct mutex lock;
 	u32 owned_clock_bits;
 	u32 quarantined_ctl;
+	/* One GEM command owner, serialized by the same transport mutex. */
+	struct drm_gem_object *command_bo;
+	struct drm_gpuvm *command_vm;
+	void *command_data;
+	u64 command_iova;
 };
 
+/* Initialize once, before any command owner or hardware submission exists. */
 void dpu_o82_regdma_init(struct dpu_o82_regdma *dma, void __iomem *regs);
 
 /*
@@ -24,9 +32,14 @@ void dpu_o82_regdma_init(struct dpu_o82_regdma *dma, void __iomem *regs);
  * contents and IOMMU mapping remain pinned until this call returns AND
  * dpu_o82_regdma_can_unmap() is true. An error invalidates the entire paired
  * color state, even if reset completed. Never enable a half-programmed panel.
+ * Once the GEM command owner exists, this raw interface returns EBUSY.
  */
 int dpu_o82_regdma_execute(struct dpu_o82_regdma *dma, struct dpu_hw_ctl *ctl,
 			 u64 iova, size_t bytes);
+
+/* Internal command-owner entry; caller holds dma->lock and all power gates. */
+int dpu_o82_regdma_execute_locked(struct dpu_o82_regdma *dma,
+				 struct dpu_hw_ctl *ctl, u64 iova, size_t bytes);
 
 /* Retry a failed stop with power and both clock gates still held. */
 int dpu_o82_regdma_recover(struct dpu_o82_regdma *dma);
