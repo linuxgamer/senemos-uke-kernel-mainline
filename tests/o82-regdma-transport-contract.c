@@ -187,6 +187,12 @@ void writel(uint32_t value, volatile void *address)
 		assert(runtime_usage > 0 && command_owner->power_held);
 		assert(load(mdp_registers, 0x2bc) & BIT(20));
 		assert((load(registers, 0x1f0) & FORCE) == FORCE);
+
+		if (offset != dropped_qos_offset) store(vbif_registers, offset, value);
+		return;
+	}
+	if ((uintptr_t)address == (uintptr_t)control + 0xd4) {
+		assert(value == BIT(0));
 		if (command_kms && !emulate_power_hold) {
 			assert(runtime_usage > 0 && command_owner->power_held);
 			assert(load(mdp_registers, 0x2bc) & BIT(20));
@@ -201,11 +207,6 @@ void writel(uint32_t value, volatile void *address)
 				assert(((load(vbif_registers, 0x590 + 8 * level) >> 28) & 7) == expected);
 			}
 		}
-		if (offset != dropped_qos_offset) store(vbif_registers, offset, value);
-		return;
-	}
-	if ((uintptr_t)address == (uintptr_t)control + 0xd4) {
-		assert(value == BIT(0));
 		assert(dma_barriers == trigger_count + 1);
 		assert(io_barriers == trigger_count + 1);
 		assert(status_clear < address_write && address_write < command_write);

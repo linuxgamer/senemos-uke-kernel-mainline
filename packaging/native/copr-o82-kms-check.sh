@@ -49,7 +49,7 @@ spec=$output/uke-o82-kms-check.spec
 awk '
  /^%description/ {exit}
  /^Name:/ {$0="Name: uke-o82-kms-check"}
- /^Release:/ {$0="Release: 6%{?dist}"}
+ /^Release:/ {$0="Release: 7%{?dist}"}
  /^Summary:/ {$0="Summary: Retained Uke DPU KMS and REGDMA source integration check"}
  /^(Requires|Provides|Recommends):/ {next}
  {print}
@@ -86,6 +86,10 @@ test -s %{buildroot}%{_docdir}/%{name}/checks.txt
 %{_docdir}/%{name}/checks.txt
 
 %changelog
+* Wed Nov 04 2026 Uke contributors - 7.3.1-7
+- Check the complete QoS table at DMA trigger, after the setup writes.
+- Preserve strict values and ignored-write refusal tests.
+
 * Wed Nov 04 2026 Uke contributors - 7.3.1-6
 - Diagnose the exact synthetic QoS refusal without changing expected values.
 - Model the wrapper-owned PM reference independently of an external caller.
@@ -110,4 +114,4 @@ test -s %{buildroot}%{_docdir}/%{name}/checks.txt
 SPEC
 sha256sum -c "$stage/retained.sha256"
 rm "$parent"
-[[ $(rpmspec --target aarch64 -q --srpm --qf '%{NAME}-%{VERSION}-%{RELEASE}' "$spec") == uke-o82-kms-check-7.3.1-6.fc46 ]]
+[[ $(rpmspec --target aarch64 -q --srpm --qf '%{NAME}-%{VERSION}-%{RELEASE}' "$spec") == uke-o82-kms-check-7.3.1-7.fc46 ]]
