@@ -1241,7 +1241,7 @@
     },
     {
       "path": "tests/o82-platform-contract.sh",
-      "sha256": "7556702e7f8ca8bd92a5ab8aa5012dd237da0f8f63434d3baef34e89ded639b9"
+      "sha256": "1421b4bde41d75a57fc325f4c77b211b5266e020e11d622f189d9fccb93cdb24"
     }
   ],
   "root_selector_capability": {
