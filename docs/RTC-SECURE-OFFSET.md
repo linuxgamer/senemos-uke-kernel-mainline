@@ -1,8 +1,8 @@
 # Uke secure RTC candidate
 
-3 November 2026. The retained 7.3.1-1301 production source is extended as
-7.3.1-1401. Source and native fixtures do not establish physical RTC persistence.
-Use the COPR producer `packaging/native/copr-rtc1401.sh`; compilation runs on
+3 November 2026. The retained 7.3.1-1500 production source is extended as
+7.3.1-1600. Source and native fixtures do not establish physical RTC persistence.
+Use the COPR producer `packaging/native/copr-rtc1600.sh`; compilation runs on
 the Fedora Rawhide AArch64 worker. Do not build or flash this tree on a tablet.
 
 The measured Uke PMIC counter advances but its current RTC calendar remains
