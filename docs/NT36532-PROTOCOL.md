@@ -1,5 +1,21 @@
 # NT36532 Uke protocol and transport candidate
 
+3 November 2026: the exact Uke
+[board DT](https://github.com/MiCode/kernel_devicetree/blob/94c84aeb9e517dbde546fc732033c184094c8e57/qcom/uke-sm8635.dtsi#L184)
+declares `novatek,NVT-ts-spi`, SPI chip select0,19.2 MHz maximum, IRQ GPIO54,
+supplier-ID GPIO26, `novatek,pen-support` and `novatek,stylus-resol-double`.
+Its5993/5994 children contain supplier-specific manufacturing criteria.
+This is configuration for the OEM driver, rather than its C implementation.
+Adding its boolean pen properties does not provide a native packet decoder.
+
+The native driver below already handles the admitted finger protocol and
+supplier firmware selection. Pen coordinates and tilt remain unimplemented.
+The selected adjacent MiCode common framework accepts already-computed pen
+values from userspace; it does not establish Uke's raw-matrix coordinate
+algorithm. No adjacent-board pressure limits, packet offsets or firmware are
+enabled from that comparison. Pen support still requires the exact normal
+frame contract, lifecycle and separate accessory validation.
+
 2 November 2026: source profiles now retain separate CSOT and Tianma normal
 firmware hashes, CRCs and DT electrode maps. A mismatched supplier image is
 rejected before RAM writes; all banks are still read back. See

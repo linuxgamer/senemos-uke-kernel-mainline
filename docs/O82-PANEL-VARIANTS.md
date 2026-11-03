@@ -6,12 +6,16 @@ native DT overlay. One kernel embeds both overlays. Missing, unknown,
 duplicated and conflicting parameters are rejected; an optional colon suffix
 is accepted. RAM, reservations and the selected panel argument are preserved.
 
-Both panels expose the OEM 30, 48, 50, 60, 90, 120 and 144 Hz modes, with
-120 Hz preferred. They share the exact Uke DSC, link-clock, supply and reset
-contracts. Their ON streams remain distinct: O82-36 sends 171 commands in
-10 chunks / 1,448 padded bytes; O82-42 sends 108 commands in 8 chunks / 884
-bytes. Per-command metadata, delays, batch limits and paired completion checks
-remain enforced. The separate initial120 diagnostic stays O82-42-specific.
+Both panels expose the OEM 30, 48, 50, 60, 90, 120 and 144 Hz modes. The
+3 November startup correction prefers60 Hz and uses serial ON transfers for
+O82-36; O82-42 retains120 Hz preferred and its existing batched startup. They
+share the exact Uke DSC, link-clock, supply and reset contracts. Their ON
+streams remain distinct: O82-36 has171 commands; O82-42 sends108 commands in
+8 chunks / 884 padded bytes. Per-command metadata, delays, batch limits and
+paired completion checks remain enforced. See the
+[O82-36 candidate record](O82-36-BOOT-CANDIDATES.md) for the retained earlier
+batching experiment and its validation limits. The separate initial120
+diagnostic stays O82-42-specific.
 
 References: [issue 14](https://github.com/MCC45TR/uke-linux/issues/14),
 [MiCode Uke display DT](https://github.com/MiCode/vendor_qcom_proprietary_display-devicetree/tree/4a3e1c391130237c5e8c2b250d1c94f3e25b9b11/display)
@@ -25,9 +29,13 @@ failures, all seven modes and both links, 42 directed refresh transitions per
 supplier, panel lifecycle and refusal paths, and compiled DT overlays with
 the shared video, USB-C and speaker/microphone graph. The extra DSI admission
 patch applies after the retained native display series on Linux v7.3 sources.
-No full kernel/package build or O82-36 hardware test was performed. Issue 14
-still needs a matched build and device retest; its only failure cause is not
-established by a boot log.
+The initial combined variant build passed in
+[COPR11250533](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11250533/)
+at7.3.1-1102; the separate serial60 candidate passed in
+[COPR11250642](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11250642/)
+at7.3.1-1104. Their source is merged on main. No O82-36 hardware test was
+performed in this work. Issue14 still needs a matched build and device retest;
+its only failure cause is not established by a boot log.
 
 ## Other variant evidence
 
