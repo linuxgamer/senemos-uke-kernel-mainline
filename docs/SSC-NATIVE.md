@@ -142,5 +142,10 @@ The wire contract is the installed-version upstream libqmi1.36.0
 and [report enumeration](https://github.com/linux-mobile-broadband/libqmi/blob/defb13dcab0adc7f44f6741807244507a14a30c5/src/libqmi-glib/qmi-enums-ssc.h).
 The new remote check covers the actual request TLV, complete large-report
 discovery/metadata/sample dispatch, maximum-size payloads and unknown-ID
-refusal using synthetic identities. Results and corrected native IIO
-publication remain pending. Immutable kernel1900 predates this correction.
+refusal using synthetic identities.
+[Build11252237](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11252237/)
+passed those GCC/Clang sanitizer and actual AArch64 composite checks at1.0-9.
+Immutable kernel1900 predates this correction. The1910 producer retains that
+complete cohort and adds only the checked SSC sources and fixture, waiting for
+the complete parent build before preparation. Full1910 delivery and corrected
+native IIO publication remain pending.
