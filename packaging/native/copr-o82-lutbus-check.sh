@@ -8,7 +8,10 @@ stage=$(mktemp -d)
 trap 'find "$stage" -depth -delete' EXIT
 mkdir -p "$output" "$stage/uke-o82-lutbus-check-1.0"
 git -C "$root" archive HEAD src/display/dpu_o82_lutbus.c src/display/dpu_o82_lutbus.h \
-    src/display/dpu_o82_profiles.h tests/o82-lutbus-contract.c tests/o82-lutbus-contract.sh \
+    src/display/dpu_o82_profiles.c src/display/dpu_o82_profiles.h \
+    src/display/dpu_o82_regdma.c src/display/dpu_o82_regdma.h \
+    src/display/o82-color-firmware.h src/display/o82-regdma.h src/display/uke-o82-hdr-format.h \
+    tests/o82-lutbus-contract.c tests/o82-lutbus-contract.sh packaging/native/check-o82-color-objects.sh \
     LICENSE LICENSES/GPL-2.0-only.txt | tar -xf - -C "$stage/uke-o82-lutbus-check-1.0"
 tar --sort=name --mtime=@1793664000 --owner=0 --group=0 --numeric-owner \
     -czf "$output/uke-o82-lutbus-check-1.0.tar.gz" -C "$stage" uke-o82-lutbus-check-1.0
@@ -21,6 +24,8 @@ License: GPL-2.0-only AND MIT
 Source0: %{name}-%{version}.tar.gz
 BuildArch: noarch
 BuildRequires: bash gcc clang compiler-rt libasan libubsan coreutils findutils
+BuildRequires: make bc bison flex perl openssl-devel elfutils-libelf-devel llvm lld
+BuildRequires: python3 python3-lxml curl tar xz
 %description
 Source-only byte-stream interpretation and rejection checks using synthetic
 color tables. This does not start DMA, program a display or qualify HDR output.
@@ -32,6 +37,7 @@ install -d %{buildroot}%{_docdir}/%{name}
 %check
 set -o pipefail
 bash tests/o82-lutbus-contract.sh | tee %{buildroot}%{_docdir}/%{name}/checks.txt
+bash packaging/native/check-o82-color-objects.sh | tee -a %{buildroot}%{_docdir}/%{name}/checks.txt
 %files
 %license LICENSE LICENSES/GPL-2.0-only.txt
 %{_docdir}/%{name}/checks.txt
