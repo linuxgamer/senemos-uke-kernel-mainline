@@ -33,8 +33,9 @@ grep -Fx CONFIG_DRM_MSM_DPU=y "$out/.config"
 # Upstream MSM gen_header.py is the existing pinned, host-only build dependency.
 printf '%s  %s\n' 81763fc03ea0ebf254ab7427af2113dc0c7c0d80dceab61232b6e371463d1f90 \
     "$kernel/drivers/gpu/drm/msm/registers/gen_header.py" | sha256sum -c -
-make -C "$kernel" O="$out" KCFLAGS=-Werror -j4 drivers/gpu/drm/msm/msm-display.o
-linked=$out/drivers/gpu/drm/msm/msm-display.o
+# msm-display-y is an input list; the real composite target is msm.o.
+make -C "$kernel" O="$out" KCFLAGS=-Werror -j4 drivers/gpu/drm/msm/msm.o
+linked=$out/drivers/gpu/drm/msm/msm.o
 [[ -s $linked ]]
 readelf -h "$linked" | grep -E 'Machine:.*AArch64'
 for function in dpu_o82_platform_init dpu_o82_platform_suspend dpu_o82_regdma_init dpu_o82_regdma_can_unmap; do
@@ -71,4 +72,4 @@ for supplier in 36 42; do
     printf 'O82-%s compiled overlay: exact MDP/VBIF/REGDMA ranges and clock names passed\n' "$supplier"
 done
 dt-doc-validate "$kernel/Documentation/devicetree/bindings/display/msm/qcom,sm7675-dpu.yaml"
-printf '%s\n' 'Actual retained KMS hooks and linked MSM display object passed; both supplier DT resource tuples and binding document passed; no DMA, HDR output or physical acceptance'
+printf '%s\n' 'Actual retained KMS hooks and linked MSM object passed; both supplier DT resource tuples and binding document passed; no DMA, HDR output or physical acceptance'

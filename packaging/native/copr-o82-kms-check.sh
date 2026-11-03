@@ -45,13 +45,14 @@ spec=$output/uke-o82-kms-check.spec
 awk '
  /^%description/ {exit}
  /^Name:/ {$0="Name: uke-o82-kms-check"}
- /^Release:/ {$0="Release: 2%{?dist}"}
+ /^Release:/ {$0="Release: 3%{?dist}"}
  /^Summary:/ {$0="Summary: Retained Uke DPU KMS and REGDMA source integration check"}
  /^(Requires|Provides|Recommends):/ {next}
  {print}
 ' "$parent" > "$spec"
 cat >> "$spec" <<'SPEC'
 Source9: uke-o82-kms-check-source.tar.xz
+BuildRequires: python3-lxml
 
 %description
 Remote check of the complete retained Linux 7.3.1 Uke source preparation,
@@ -81,6 +82,9 @@ test -s %{buildroot}%{_docdir}/%{name}/checks.txt
 %{_docdir}/%{name}/checks.txt
 
 %changelog
+* Wed Nov 04 2026 Uke contributors - 7.3.1-3
+- Use the real MSM composite target declared by upstream Kbuild.
+
 * Tue Nov 03 2026 Uke contributors - 7.3.1-2
 - Include the shared profile declarations used by the LUT stream checks.
 
@@ -90,4 +94,4 @@ test -s %{buildroot}%{_docdir}/%{name}/checks.txt
 SPEC
 sha256sum -c "$stage/retained.sha256"
 rm "$parent"
-[[ $(rpmspec --target aarch64 -q --srpm --qf '%{NAME}-%{VERSION}-%{RELEASE}' "$spec") == uke-o82-kms-check-7.3.1-2.fc46 ]]
+[[ $(rpmspec --target aarch64 -q --srpm --qf '%{NAME}-%{VERSION}-%{RELEASE}' "$spec") == uke-o82-kms-check-7.3.1-3.fc46 ]]
