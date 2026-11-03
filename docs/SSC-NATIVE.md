@@ -48,8 +48,19 @@ alone cannot select these units. Buffers use host receipt timestamps. Sensor
 ticks enforce order without inventing a DSP clock conversion. No fallback
 mount matrix is installed; coordinate/mount integration remains open.
 
-The consumer is not selected into the retained kernel 1300. Its new actual
-callback/upstream-QMI tests and Linux 7.3.1 object checks are pending remotely.
+The consumer validates QMI framing, TLV boundaries, duplicates and payload
+lengths before decoding. Its transaction dispatcher follows the pinned upstream
+lock/IDR lifetime order and requires the complete decoded byte count.
+[COPR build 11251376](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11251376/)
+passed at 1.0-6. GCC and Clang sanitizer runs executed the actual callbacks
+with fake providers and the unchanged upstream QMI encoder/decoder. The actual
+protocol and QMI/IIO objects also compiled and linked into their composite
+object against Linux 7.3.1 AArch64 headers with `KCFLAGS=-Werror`. Only the
+unchanged upstream QMI host object's deliberate unaligned wire accesses omit
+alignment instrumentation; native parser/callback instrumentation remains.
+
+The consumer is not selected into the retained kernel 1300. These checks do
+not produce or validate a complete kernel module or a hardware result.
 DT activation, complete package linkage, mount/clock handling and device
 lifecycle validation remain required. Vendor CCT/flicker semantics and live
 physical sensor behavior remain unqualified. The existing libssc path is
