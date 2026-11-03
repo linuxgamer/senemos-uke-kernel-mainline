@@ -66,7 +66,7 @@ static int fail_create=-1;
 static bool cpu_lock;
 static unsigned idle_mask;
 static u64 clock_ns;
-static int available_idle_cpu(unsigned id) { return !!(idle_mask&(1U<<id)); }
+static int idle_cpu(unsigned id) { return !!(idle_mask&(1U<<id)); }
 static u64 ktime_get_ns(void) { clock_ns+=8000000;return clock_ns; }
 static u64 perf_event_read_value(struct perf_event *e,u64 *enabled_time,u64 *running_time) {
     assert(cpu_lock&&p.lock.held&&e->alive&&!e->disabled);

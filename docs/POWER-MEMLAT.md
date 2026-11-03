@@ -21,7 +21,8 @@ voltage, thermal ceilings or CPUCP configuration.
 
 The8 ms delayed work is deferrable and freezable. Unscheduled, multiplexed,
 reset, idle, implausible and overlong samples do not produce synthetic votes.
-CPUs observed as idle are skipped before perf reads, which can otherwise send
+The consumer is built into the matched kernel and uses its public `idle_cpu`
+scheduler declaration. CPUs observed as idle are skipped before perf reads, which can otherwise send
 remote IPIs. Their next active interval starts with a fresh counter baseline.
 This admission is a scheduler snapshot, not a physical no-wakeup guarantee.
 Hotplug releases counters without refusing CPU online operations. Suspend
@@ -48,7 +49,7 @@ instruction/miss qualification.
 Remote checks execute the actual policy and FDT code with sanitizers, including
 counter resets, scheduling gaps, ratio/ceiling boundaries, malformed graphs,
 disabled nodes, retained maps and repeat application. Package checks inspect
-the compiled configuration, linked module and OF alias. These checks do not
+the compiled configuration, linked built-in probe and OF match. These checks do not
 establish energy savings, real PMU scheduling, idle residency or suspend success.
 Physical acceptance requires the new kernel, counter/vote observations under
 load and idle, and a recoverable suspend/resume trial.

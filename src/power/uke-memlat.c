@@ -149,7 +149,7 @@ static void uke_memlat_sample(struct work_struct *work)
 		bool accepted = cpu->timestamp != 0;
 
 		/* perf reads may send an IPI. Do not wake an idle CPU to sample it. */
-		if (available_idle_cpu(id)) {
+		if (idle_cpu(id)) {
 			cpu->timestamp = 0;
 			continue;
 		}
