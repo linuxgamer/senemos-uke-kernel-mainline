@@ -1,0 +1,22 @@
+diff --git a/src/boot/uke-abl.c b/src/boot/uke-abl.c
+index 9da98cb..c2ae335 100644
+--- a/src/boot/uke-abl.c
++++ b/src/boot/uke-abl.c
+@@ -168,6 +168,7 @@ static int UKE_INIT uke_empty_demura_regions(void *fdt)
+ #include "uke-pmic-adc.h"
+ #include "uke-cpu-thermal.h"
+ #include "uke-clock-debug.h"
++#include "uke-rtc.h"
+ #include "uke-hall.h"
+ 
+ static int UKE_INIT uke_reboot_cell(const void *fdt)
+@@ -962,6 +963,9 @@ int UKE_INIT uke_abl_transform(void *output, size_t capacity,
+ 		return ret;
+ #endif
+ 	/* OEM zero-width bits means the whole byte; upstream rejects bits=<0 0>. */
++	ret = uke_rtc_secure_offset(output);
++	if (ret)
++		return ret;
+ 	ret = uke_delete_optional(output, "/soc/qcom,spmi@c42d000/qcom,pmk8550@0/sdam@7000/ufs_dev@ad", "bits");
+ 	if (ret)
+ 		return ret;
