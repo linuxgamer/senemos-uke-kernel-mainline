@@ -4,6 +4,9 @@ set -Eeuo pipefail
 kernel=${1:?Pass the prepared kernel source}
 here=$(cd -- "$(dirname -- "$0")" && pwd)
 target=$kernel/drivers/iio/common/uke-ssc
+# The dispatcher follows this exact upstream transaction/decoder contract.
+[[ $(git hash-object "$kernel/drivers/soc/qcom/qmi_interface.c") == 16e2e24b60968abad39065e77ca444a1562d65d1 ]]
+[[ $(git hash-object "$kernel/drivers/soc/qcom/qmi_encdec.c") == 28ce6f130b6ac355820bb295c8c96f9c6a6e385f ]]
 ! grep -q 'uke-ssc/Kconfig' "$kernel/drivers/iio/common/Kconfig"
 test ! -e "$target"
 mkdir -p "$target"

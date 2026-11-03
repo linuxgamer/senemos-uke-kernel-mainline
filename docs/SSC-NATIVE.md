@@ -59,9 +59,21 @@ object against Linux 7.3.1 AArch64 headers with `KCFLAGS=-Werror`. Only the
 unchanged upstream QMI host object's deliberate unaligned wire accesses omit
 alignment instrumentation; native parser/callback instrumentation remains.
 
-The consumer is not selected into the retained kernel 1300. These checks do
-not produce or validate a complete kernel module or a hardware result.
-DT activation, complete package linkage, mount/clock handling and device
-lifecycle validation remain required. Vendor CCT/flicker semantics and live
-physical sensor behavior remain unqualified. The existing libssc path is
-preserved until the native consumer is integrated and qualified.
+The source now selects `CONFIG_IIO_UKE_SSC=m` and adds `xiaomi,uke-ssc-iio`
+before the legacy description compatible in the early Uke DT transformation.
+The ADSP phandle and all nine firmware-owned descriptions remain. Sensors
+load from the normal root module set after firmware is available; they are
+not required in the early initramfs. Existing libssc clients are preserved.
+
+`packaging/native/copr-ssc1400.sh` prepares a retained release 1303 candidate
+with SSC integration. It preserves panel/touch suppliers, bounded touch
+recovery, native MEMLAT and Binder settings. Its remote checks repeat the
+protocol/callback tests, exercise the actual early FDT helper, and require
+complete module linkage, provider dependencies and the exact OF alias.
+The pinned upstream QMI dispatcher/decoder files must match before staging.
+These source checks and the earlier composite-object build do not yet
+establish that the complete candidate passes or that sensors work on Uke.
+
+Mount/clock handling, device lifecycle acceptance, vendor CCT/flicker semantics
+and live physical sensor behavior remain unqualified. The driver reports host
+receipt timestamps and does not infer a mounting matrix or DSP tick frequency.

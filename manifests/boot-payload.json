@@ -29,11 +29,11 @@
     },
     {
       "path": "packaging/native/native.config",
-      "sha256": "3f0f1f6840bcae28cf336e0632993b3fb0d6bd8ff374328665b5f6a38f56b00f"
+      "sha256": "abcd83ac1ac8171923123618cb0a17dd0880e50f3a81297bf84d94117cdc7360"
     },
     {
       "path": "packaging/native/prepare.sh",
-      "sha256": "d730ac99786650e8405032537d8ba8680114dfaa0822181500564c3f3e1dc133"
+      "sha256": "8435ed5cd5a56457617801d50c9caa4d947e206353dad99d3a51055a6ad8bb63"
     },
     {
       "path": "patches/boot/0005-uke-root-selector.patch",

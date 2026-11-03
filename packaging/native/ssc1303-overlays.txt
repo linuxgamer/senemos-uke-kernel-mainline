@@ -1,0 +1,16 @@
+src/boot/uke-hardware.h
+src/boot/bindings/firmware/xiaomi,uke-ssc-sensors.yaml
+src/sensors/Kconfig
+src/sensors/Makefile
+src/sensors/prepare-source.sh
+src/sensors/uke-ssc-iio.c
+src/sensors/uke-ssc-protocol.c
+src/sensors/uke-ssc-protocol.h
+tests/hardware-dt.cpp
+tests/hardware-dt.sh
+tests/ssc-protocol-contract.c
+tests/ssc-protocol-contract.sh
+tests/ssc-native-contract.c
+tests/ssc-native-contract.sh
+tests/ssc-native-host.h
+tests/ssc-package-contract.sh

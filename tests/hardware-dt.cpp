@@ -142,7 +142,16 @@ int main(int argc,char **argv) {
     assert(!fdt_getprop(dt.data(),path(dt.data(),rng),"qcom,no-qrng-config",nullptr));
     assert(!fdt_getprop(dt.data(),path(dt.data(),rng),"qcom,no-clock-support",nullptr));
     assert(!std::strcmp(text(dt.data(),"/firmware/uke-accessories","pen-model"),"Xiaomi Focus Pen"));
-    int count=0,n;fdt_for_each_subnode(n,dt.data(),path(dt.data(),"/firmware/ssc-sensors")) {
+    const int ssc=path(dt.data(),"/firmware/ssc-sensors");
+    assert(fdt_stringlist_count(dt.data(),ssc,"compatible")==2);
+    assert(!fdt_node_check_compatible(dt.data(),ssc,"xiaomi,uke-ssc-iio"));
+    assert(!fdt_node_check_compatible(dt.data(),ssc,"xiaomi,uke-ssc-sensors"));
+    int remote_bytes=0;
+    auto remote=static_cast<const fdt32_t*>(fdt_getprop(dt.data(),ssc,"remoteproc",&remote_bytes));
+    assert(remote&&remote_bytes==4&&fdt32_to_cpu(*remote)==42);
+    assert(fdt_node_offset_by_phandle(dt.data(),fdt32_to_cpu(*remote))==
+        path(dt.data(),"/soc/remoteproc-adsp@03000000"));
+    int count=0,n;fdt_for_each_subnode(n,dt.data(),ssc) {
         assert(!fdt_node_check_compatible(dt.data(),n,"xiaomi,uke-ssc-sensor"));
         assert(!fdt_getprop(dt.data(),n,"reg",nullptr));
         assert(!fdt_getprop(dt.data(),n,"gpios",nullptr));++count;

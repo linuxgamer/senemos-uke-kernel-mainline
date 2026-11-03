@@ -234,7 +234,12 @@ static int UKE_INIT uke_hardware_names(void *fdt)
 	node = uke_hardware_child(fdt, parent, "ssc-sensors");
 	if (node < 0)
 		return node;
-	ret = fdt_setprop_string(fdt, node, "compatible", "xiaomi,uke-ssc-sensors");
+	{
+		static const char compatible[] =
+			"xiaomi,uke-ssc-iio\0xiaomi,uke-ssc-sensors";
+
+		ret = fdt_setprop(fdt, node, "compatible", compatible, sizeof(compatible));
+	}
 	if (ret)
 		return ret;
 	node = fdt_path_offset(fdt, "/firmware/ssc-sensors");

@@ -1,0 +1,9 @@
+--- a/prepare.sh
++++ b/prepare.sh
+@@ -80,2 +80,6 @@
+ bash "$profile/tests/memlat-lifecycle-contract.sh"
++bash "$profile/src/sensors/prepare-source.sh" "$kernel"
++bash "$profile/tests/ssc-protocol-contract.sh"
++bash "$profile/tests/ssc-native-contract.sh" "$kernel"
++CXX=clang++ bash "$profile/tests/hardware-dt.sh"
+ bash "$profile/src/performance/prepare-source.sh" "$kernel"
