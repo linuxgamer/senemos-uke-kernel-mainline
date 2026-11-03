@@ -1,13 +1,13 @@
 # Native Binder prerequisite
 
-3 November 2026. Release `7.3.1-1302` enables the original Linux Binder IPC
+3 November 2026. Release `7.3.1-1303` enables the original Linux Binder IPC
 driver and binderfs as built-in features in the ordinary ARM64 kernel. Static
 Binder devices are disabled; a container manager can create private devices in
 binderfs. Memfd remains enabled. KVM, Gunyah VM management and EL2 takeover are
 independent of this Waydroid prerequisite.
 
 The COPR-only source worker is
-`packaging/native/copr-binder1302.sh`. It starts from the complete release1301
+`packaging/native/copr-binder1303.sh`. It starts from the complete release1301
 SRPM in COPR11251200, verifies its SHA-256 and retained source inventory, and
 changes the native configuration in both the profile and boot recipe. The boot
 recipe lock follows the actual configuration bytes. All driver sources, OEM

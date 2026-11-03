@@ -9,7 +9,7 @@ owner=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 output=$(realpath -m "${1:?COPR result directory}")
 stage=$(mktemp -d)
 trap 'find "$stage" -depth -delete' EXIT
-bash "$owner/packaging/native/refuse-published-release.sh" senemos-uke-linux-kernel-mainline 7.3.1-1302
+bash "$owner/packaging/native/refuse-published-release.sh" senemos-uke-linux-kernel-mainline 7.3.1-1303
 parent_hash=83b76251f124193609cb2da1f04a1f3100287875534bf1f8504e0ffa87f76d4b
 curl -fLsS --retry 2 --proto '=https' --proto-redir '=https' \
  https://download.copr.fedorainfracloud.org/results/mcc45tr/uke-linux-unstable/srpm-builds/11251200/senemos-uke-linux-kernel-mainline-7.3.1-1301.src.rpm -o "$stage/base.src.rpm"
@@ -70,7 +70,7 @@ jq --arg hash "$config_hash" '(.source_assets[]|select(.path=="packaging/native/
  "$boot/lock.json" > "$stage/lock.json"
 install -m644 "$stage/lock.json" "$boot/lock.json"
 install -m644 "$stage/lock.json" "$output/boot-payload.json"
-cp "$profile/source-composition.json" "$profile/source-composition-before1302.json"
+cp "$profile/source-composition.json" "$profile/source-composition-before1303.json"
 commit=$(git -C "$owner" rev-parse HEAD)
 epoch=$(git -C "$owner" show -s --format=%ct HEAD)
 printf '%s\n' "$commit" > "$profile/source-commit"
@@ -78,13 +78,13 @@ jq --arg commit "$commit" --arg parent_hash "$parent_hash" --arg config_hash "$c
  source_commit:$commit,source_mode:"retained1301-with-native-binder",
  parent_copr_build:11251200,parent_srpm_sha256:$parent_hash,
  parent_source_commit:"1c77e13fe0efd77053add9df9ebc7ae484fdbd48",
- parent_composition:"source-composition-before1302.json",kernel_release:"7.3.1-1302",rpm_revision:"1302",
+ parent_composition:"source-composition-before1303.json",kernel_release:"7.3.1-1303",rpm_revision:"1303",
  overlays:["native.config","boot-recipe/packaging/native/native.config","boot-recipe/lock.json"],
  kernel_driver_source_unchanged:true,changed_kernel_files:[],
  native_config_sha256:$config_hash,binder_ipc_builtin:true,binderfs_builtin:true,
  binder_static_devices:[],el2_policy_unchanged:true,automatic_policy_unchanged:true,
  physical_acceptance:false,waydroid_tested:false
- }' "$profile/source-composition-before1302.json" > "$profile/source-composition.json"
+ }' "$profile/source-composition-before1303.json" > "$profile/source-composition.json"
 (cd "$profile"; sha256sum -c "$stage/retained-profile.sha256"
  find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 (cd "$boot"; sha256sum -c "$stage/retained-boot.sha256"
@@ -97,7 +97,7 @@ done
 [[ $(grep -Fxc '%global senemos_build_release 1301' "$spec") == 1 ]]
 [[ $(grep -Fxc '%check' "$spec") == 1 ]]
 awk '
- /^%global senemos_build_release 1301$/ {$0="%global senemos_build_release 1302"}
+ /^%global senemos_build_release 1301$/ {$0="%global senemos_build_release 1303"}
  /^%check$/ {
   print
   print "grep -Fx '\''CONFIG_ANDROID_BINDER_IPC=y'\'' %{_uke_out}/.config"
@@ -107,12 +107,12 @@ awk '
   print "test -s %{_uke_out}/drivers/android/binder.o"
   print "test -s %{_uke_out}/drivers/android/binderfs.o"
   print "grep -Eq '\'' [tT] binder_init$'\'' %{_uke_out}/System.map"
-  print "grep -Eq '\'' [tT] binderfs_init$'\'' %{_uke_out}/System.map"
+  print "grep -Eq '\'' [tT] init_binderfs$'\'' %{_uke_out}/System.map"
   next
  }
  /^%changelog$/ {
   print
-  print "* Tue Nov 03 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-1302"
+  print "* Tue Nov 03 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 7.3.1-1303"
   print "- Enable built-in Binder IPC and binderfs in the normal ARM64 kernel."
   print "- Retain release1301 drivers, suppliers, touch recovery and boot policy."
   print ""
@@ -122,4 +122,4 @@ awk '
 ' "$spec" > "$stage/next.spec"
 mv "$stage/next.spec" "$spec"
 sha256sum -c "$stage/retained-sources.sha256"
-[[ $(rpmspec --target aarch64 --define 'dist %{nil}' -q --srpm --qf '%{VERSION}-%{RELEASE}' "$spec") == 7.3.1-1302 ]]
+[[ $(rpmspec --target aarch64 --define 'dist %{nil}' -q --srpm --qf '%{VERSION}-%{RELEASE}' "$spec") == 7.3.1-1303 ]]
