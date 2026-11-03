@@ -445,7 +445,9 @@ static int o82_prepare_locked(struct drm_panel *panel)
 	msleep(3);
 	gpiod_set_value_cansleep(ctx->reset, 1);
 	msleep(15);
-	if (ctx->initial_120hz_only || ctx->oem_refresh_modes) {
+	/* Tianma retains the serial supplier startup used by the working r1. */
+	if (ctx->initial_120hz_only ||
+	    (ctx->oem_refresh_modes && ctx->profiles == o82_42_02_0b_profiles)) {
 		ret = o82_on_batch(ctx);
 		if (ret)
 			goto failed_on;
@@ -532,7 +534,8 @@ static void o82_first_frame(struct kthread_work *work)
 	}
 	/* OEM starts DPU timing before its four HS TP-FPS updates. */
 	stage = "timing-switch";
-	if (ctx->initial_120hz_only || ctx->oem_refresh_modes) {
+	if (ctx->initial_120hz_only ||
+	    (ctx->oem_refresh_modes && ctx->profiles == o82_42_02_0b_profiles)) {
 		struct mipi_dsi_msg msgs[4] = { };
 
 		if (ctx->active->switch_count != ARRAY_SIZE(msgs)) {
@@ -564,7 +567,8 @@ static void o82_first_frame(struct kthread_work *work)
 	}
 	i = -1;
 	stage = "normal-pixels";
-	if (ctx->initial_120hz_only || ctx->oem_refresh_modes) {
+	if (ctx->initial_120hz_only ||
+	    (ctx->oem_refresh_modes && ctx->profiles == o82_42_02_0b_profiles)) {
 		i = -1;
 		ret = o82_lp_batch(ctx, normal_pixels, ARRAY_SIZE(normal_pixels));
 		if (ret)
@@ -577,7 +581,8 @@ static void o82_first_frame(struct kthread_work *work)
 		}
 	}
 	dev_info(&ctx->dsi[0]->dev, "O82 first-frame normal-pixels complete\n");
-	if (ctx->initial_120hz_only || ctx->oem_refresh_modes) {
+	if (ctx->initial_120hz_only ||
+	    (ctx->oem_refresh_modes && ctx->profiles == o82_42_02_0b_profiles)) {
 		/* Installed OEM uses a separate four-packet LP dimming group. */
 		stage = "dimming-on";
 		i = -1;
