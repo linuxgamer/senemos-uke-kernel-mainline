@@ -625,6 +625,9 @@ int main(void) {
     selection=context(2,5); published=preferred=0;
     assert(o82_get_modes(&selection.panel,selection.connector)==7 && published==7 && preferred==1 && preferred_rate==120);
     for(unsigned int m=0;m<ARRAY_SIZE(rates);m++) assert(drm_mode_vrefresh(&copies[m])==rates[m]);
+    selection=context(3,5); published=preferred=0;
+    assert(o82_get_modes(&selection.panel,selection.connector)==7 && published==7 && preferred==1 && preferred_rate==60);
+    for(unsigned int m=0;m<ARRAY_SIZE(rates);m++) assert(drm_mode_vrefresh(&copies[m])==rates[m]);
     duplication_failure=1; published=0;
     assert(o82_get_modes(&selection.panel,selection.connector)==-ENOMEM && !published);
     duplication_failure=0;
@@ -641,7 +644,7 @@ int main(void) {
         assert(((uint64_t)mode->clock*1000+divisor/2)/divisor==rates[m]);
         assert(mode->width_mm==237 && mode->height_mm==158 && mode->vtotal<=8191);
         struct o82_panel c=context(v,m);
-        const bool batched=c.initial_120hz_only || c.oem_refresh_modes;
+        const bool batched=c.initial_120hz_only || (c.oem_refresh_modes && v==2);
         const struct drm_dsc_config encoder=c.dsc;
         drm_panel_enable(&c.panel);
         assert(!c.panel.enabled && !transfers && !backlight_calls);
@@ -649,7 +652,7 @@ int main(void) {
         assert(atomic64_read(&c.touch_state)==2); /* reset generation1, not command-ready */
         assert(c.active==&c.profiles[groups[m]]);
         assert(!memcmp(&c.dsc,&encoder,sizeof(encoder)) && pps_transfers==2);
-        assert(pre_video_reads==(batched ? 0:2));
+        assert(pre_video_reads==(c.initial_120hz_only || c.oem_refresh_modes ? 0:2));
         const int full=transfers;
         assert(full==2*(int)(c.active->on_count+1));
         if(batched)assert(on_batch_calls==(v==3 ? 10:8)&&on_batch_total==(v==3 ? 1448:884)&&on_complete==1);
@@ -734,7 +737,7 @@ int main(void) {
         }
         for(int short_reply=0;short_reply<2;short_reply++) for(int fault=0;fault<20;fault++) {
             c=context(v,m);
-            if(fault>=12 && !c.initial_120hz_only && !c.oem_refresh_modes) continue;
+            if(fault>=12 && !batched) continue;
             assert(o82_prepare(&c.panel)==0);
             const int before=transfers;
             if(short_reply) transfer_short=before+fault; else transfer_failure=before+fault;

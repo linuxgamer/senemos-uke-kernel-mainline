@@ -553,7 +553,7 @@
     },
     {
       "path": "src/display/panel-xiaomi-o82.c",
-      "sha256": "a74433c2fc70b680e08a20ec701b02a3a6fb674e1fb0b9c77acbb6165812fe2d"
+      "sha256": "6b43d63765b157fad76c48ee9de7aa68e2a8ab88c7fec0c271526e6d0a39d0d4"
     },
     {
       "path": "src/display/sm7675-uke-native-display-oem-modes.dtso",
@@ -865,7 +865,7 @@
     },
     {
       "path": "tests/o82-panel-contract.sh",
-      "sha256": "bff7c858cfe63d96480130d378e9b0ee3121e92ae936eeb96bfa6dfbfde92b07"
+      "sha256": "a5edb95ad1ea8bd81fd383eb5d30d0d6a8a031716355ede889191590c11ee19f"
     },
     {
       "path": "tests/o82-profile-loader-contract.c",
