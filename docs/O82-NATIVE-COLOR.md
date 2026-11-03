@@ -4,6 +4,31 @@
 Pad 7. Remote checks use deterministic MMIO and do not access a display engine.
 There is no live caller, new EDID attachment or HDR capability from this source.
 
+3 November 2026 source extension: `dpu_o82_lutbus.c` encodes the version-matched
+Cliffs IGC4, gamut4.3 and GC1.8 stream from a validated private preset input.
+It selects two of the three hardware DSPPs for one broadcast upload, preserves
+RGB curve/cube order, packs GC channels as G/B/R, applies12-to16-bit alignment
+and the exact three-NOP LUT bus workaround, and rejects malformed inputs before
+writing output. The complete stream is37,316 bytes; a static size assertion
+includes table padding and every command. It does not allocate or map memory,
+submit DMA, flush a CTL, prove both outputs stopped or enable a display.
+
+The exact OEM DT is `cliffs-sde-common.dtsi` at display-DT commit
+`4a3e1c391130237c5e8c2b250d1c94f3e25b9b11`. Its IGC4 and gamut4.3 dispatch
+requires the LUT bus functions in `sde_hw_reg_dma_v1_color_proc.c` at display
+commit `44275c404a677d9d9e5230fedd1af2ef02fc7b9a`; the older IGC3.1 and gamut4.0
+implementations in the same file are different protocols. OEM submission tries
+SB queue1 and permits DB queue0 fallback only when SB reports unsupported.
+
+The new synthetic-table checks interpret every emitted table element, endpoint,
+padding value and GC pair with distinct RGB channels. They cover all valid
+paired DSPP masks and reject invalid widths, masks, capacity, metadata and
+overlapping storage without changing output. Compilation and sanitizer checks
+run only in COPR; their result remains pending for this source extension.
+Native atomic ownership, private firmware lifetime, MDP/REGDMA power and clock
+ownership, failed-reset quarantine, connector metadata and live integration
+remain required before exposing HDR or additional color properties.
+
 COPR [11240208](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11240208/)
 passes the actual-source GCC and Clang ASan/UBSan MMIO fixtures and the existing
 numerical/C11/EDID checks. The signed utility 0.2.0-9 is built; its binary does

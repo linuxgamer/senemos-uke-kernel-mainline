@@ -17,6 +17,7 @@ tar -xJf "$archive" -C "$scratch"
 kernel=$scratch/linux-7.3.1
 target=$kernel/drivers/gpu/drm/msm/disp/dpu1
 for file in dpu_o82_profiles.c dpu_o82_profiles.h dpu_o82_regdma.c dpu_o82_regdma.h \
+    dpu_o82_lutbus.c dpu_o82_lutbus.h \
     o82-color-firmware.h o82-regdma.h uke-o82-hdr-format.h; do
     install -m644 "$owner/src/display/$file" "$target/$file"
 done
@@ -24,7 +25,7 @@ done
 cat > "$target/Makefile" <<'EOF'
 ccflags-y += -I$(srctree)/drivers/gpu/drm/msm
 ccflags-y += -I$(objtree)/drivers/gpu/drm/msm/generated
-obj-y += dpu_o82_profiles.o dpu_o82_regdma.o
+obj-y += dpu_o82_profiles.o dpu_o82_regdma.o dpu_o82_lutbus.o
 EOF
 make -s -C "$kernel" O="$scratch/out" ARCH=arm64 defconfig
 "$kernel/scripts/config" --file "$scratch/out/.config" -d RUST -d DEBUG_INFO_BTF -d DRM_MSM_VALIDATE_XML
@@ -40,5 +41,6 @@ python3 "$kernel/drivers/gpu/drm/msm/registers/gen_header.py" --no-validate \
     > "$scratch/out/drivers/gpu/drm/msm/generated/mdp_common.xml.h"
 make -C "$kernel" O="$scratch/out" ARCH=arm64 KCFLAGS=-Werror -j4 \
     drivers/gpu/drm/msm/disp/dpu1/dpu_o82_profiles.o \
-    drivers/gpu/drm/msm/disp/dpu1/dpu_o82_regdma.o
+    drivers/gpu/drm/msm/disp/dpu1/dpu_o82_regdma.o \
+    drivers/gpu/drm/msm/disp/dpu1/dpu_o82_lutbus.o
 printf '%s\n' 'O82 native profile loader and REGDMA transport compile against exact upstream Linux 7.3.1 AArch64 headers; production integration and hardware unverified'
