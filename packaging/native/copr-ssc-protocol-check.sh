@@ -8,19 +8,23 @@ stage=$(mktemp -d)
 trap 'find "$stage" -depth -delete' EXIT
 mkdir -p "$output" "$stage/uke-ssc-protocol-check-1.0"
 git -C "$root" archive HEAD src/sensors/uke-ssc-protocol.c src/sensors/uke-ssc-protocol.h \
+    src/sensors/uke-ssc-iio.c src/sensors/Kconfig src/sensors/Makefile src/sensors/prepare-source.sh \
     tests/ssc-protocol-contract.c tests/ssc-protocol-contract.sh \
+    tests/ssc-native-contract.c tests/ssc-native-contract.sh tests/ssc-native-host.h \
+    packaging/native/check-ssc-native-objects.sh \
     LICENSE LICENSES/GPL-2.0-only.txt | tar -xf - -C "$stage/uke-ssc-protocol-check-1.0"
 tar --sort=name --mtime=@1793664000 --owner=0 --group=0 --numeric-owner \
     -czf "$output/uke-ssc-protocol-check-1.0.tar.gz" -C "$stage" uke-ssc-protocol-check-1.0
 cat > "$output/uke-ssc-protocol-check.spec" <<'SPEC'
 Name: uke-ssc-protocol-check
 Version: 1.0
-Release: 2%{?dist}
+Release: 3%{?dist}
 Summary: Remote checks of the native Uke SSC protocol decoder
-License: GPL-2.0-only OR MIT
+License: GPL-2.0-only AND MIT
 Source0: %{name}-%{version}.tar.gz
 BuildArch: noarch
 BuildRequires: bash gcc clang compiler-rt libasan libubsan coreutils findutils
+BuildRequires: make bc bison flex perl openssl-devel elfutils-libelf-devel curl tar xz
 %description
 Synthetic source checks of bounded SSC protobuf parsing and integer conversion.
 No QRTR request, hardware probing, calibration or physical acceptance is performed.
@@ -32,10 +36,14 @@ install -d %{buildroot}%{_docdir}/%{name}
 %check
 set -o pipefail
 bash tests/ssc-protocol-contract.sh | tee %{buildroot}%{_docdir}/%{name}/checks.txt
+bash packaging/native/check-ssc-native-objects.sh | tee -a %{buildroot}%{_docdir}/%{name}/checks.txt
 %files
 %license LICENSE LICENSES/GPL-2.0-only.txt
 %{_docdir}/%{name}/checks.txt
 %changelog
+* Tue Nov 03 2026 Uke contributors - 1.0-3
+- Check the actual QMI/IIO callbacks, upstream wire encoding and kernel objects.
+
 * Tue Nov 03 2026 Uke contributors - 1.0-2
 - Check exact metadata admission and bounded APSS request construction.
 

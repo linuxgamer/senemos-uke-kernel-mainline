@@ -434,6 +434,46 @@ int uke_ssc_decode_attributes(struct uke_ssc_view wire, const char *datatype,
 
 struct ssc_writer { u8 data[UKE_SSC_REQUEST_MAX]; size_t size; };
 
+int uke_ssc_decode_proximity(struct uke_ssc_view wire, bool sar,
+			     struct uke_ssc_proximity *out)
+{
+	struct uke_ssc_proximity value = {};
+	struct ssc_field f;
+	unsigned int seen = 0, bit;
+	int ret;
+
+	if (!ssc_output(wire, out, sizeof(*out)))
+		return -EINVAL;
+	while ((ret = ssc_next(&wire, &f)) > 0) {
+		if (f.number > 3)
+			continue;
+		bit = 1U << (f.number - 1);
+		if (seen & bit)
+			return -EBADMSG;
+		seen |= bit;
+		if (f.number == 2 && sar) {
+			/* SAR's additional payload is vendor bytes, never interpreted as ADC. */
+			if (f.type != 2)
+				return -EBADMSG;
+			continue;
+		}
+		if (f.type != 0 || f.integer > (f.number == 1 ? 1 : f.number == 3 ? 3 : 0xffffffffULL))
+			return -EBADMSG;
+		if (f.number == 1)
+			value.near = f.integer;
+		else if (f.number == 2) {
+			value.adc = f.integer;
+			value.has_adc = true;
+		} else {
+			value.status = f.integer;
+		}
+	}
+	if (ret < 0 || (seen & (sar ? 5U : 7U)) != (sar ? 5U : 7U))
+		return -EBADMSG;
+	*out = value;
+	return 0;
+}
+
 static void ssc_put(struct ssc_writer *w, u64 value, unsigned int bytes)
 {
 	while (bytes--) {

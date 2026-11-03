@@ -27,9 +27,30 @@ comparisons and 20,000 malformed-input cases per compiler. These are synthetic
 host tests, not a linked kernel consumer or sensor trial. No compile ran on
 the tablet.
 
-This source does not yet register a QRTR/QMI client, request samples, create
-IIO devices or replace libssc. Transport acknowledgement/client ownership,
-metadata admission, service restart, buffer lifetime and suspend teardown
-remain required integration work. Sample bits and sensor timestamps are not
-assigned physical units or a clock rate by this decoder. Vendor CCT/flicker
-semantics and physical accessory/sensor tests remain separate.
+The subsequent metadata/request check passed in
+[COPR build 11251255](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11251255/)
+at 1.0-2. It verifies exact datatype/API metadata, availability, physical/stream
+fields, rates, APSS delivery, disable requests and golden request bytes.
+
+`uke-ssc-iio.c` now implements the native QMI/IIO consumer as source. It
+tracks unambiguous service discovery, response acknowledgements and client/
+peer/generation ownership. Qualified motion/light streams and the separately
+encoded proximity/SAR events use direct reads and IIO buffers. Invalidated
+generations stop publication; a lost enable/disable acknowledgement closes
+the client socket. Service restart and suspend release requests and require
+fresh discovery/metadata before restoring requested buffers.
+
+The supported API contracts are accel m/s², gyro radians/s, mag microtesla
+converted to IIO gauss, ambient-light `[lux, raw ADC]`, and proximity/SAR
+near/far enums. The latter are boolean proximity observations, not inferred
+distances. Exact API metadata and sample shape are required; a vendor datatype
+alone cannot select these units. Buffers use host receipt timestamps. Sensor
+ticks enforce order without inventing a DSP clock conversion. No fallback
+mount matrix is installed; coordinate/mount integration remains open.
+
+The consumer is not selected into the retained kernel 1300. Its new actual
+callback/upstream-QMI tests and Linux 7.3.1 object checks are pending remotely.
+DT activation, complete package linkage, mount/clock handling and device
+lifecycle validation remain required. Vendor CCT/flicker semantics and live
+physical sensor behavior remain unqualified. The existing libssc path is
+preserved until the native consumer is integrated and qualified.

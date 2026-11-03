@@ -39,6 +39,12 @@ struct uke_ssc_attributes {
 	bool available, physical, hlos_incompatible;
 };
 
+struct uke_ssc_proximity {
+	bool near, has_adc;
+	u32 adc;
+	unsigned int status;
+};
+
 enum uke_ssc_command {
 	UKE_SSC_LOOKUP,
 	UKE_SSC_ATTRIBUTES,
@@ -58,6 +64,8 @@ int uke_ssc_decode_suids(struct uke_ssc_view wire, const char *datatype,
 			struct uke_ssc_suids *out);
 int uke_ssc_decode_attributes(struct uke_ssc_view wire, const char *datatype,
 			      const char *api, struct uke_ssc_attributes *out);
+int uke_ssc_decode_proximity(struct uke_ssc_view wire, bool sar,
+			     struct uke_ssc_proximity *out);
 /* Encodes protobuf only; QMI framing and transaction/client ownership are separate. */
 int uke_ssc_encode_request(enum uke_ssc_command command, struct uke_ssc_suid suid,
 			   const char *datatype, u32 rate_bits,

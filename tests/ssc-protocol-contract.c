@@ -292,9 +292,35 @@ static void requests(void)
 	assert(uke_ssc_encode_request(UKE_SSC_ATTRIBUTES, sensor, NULL, 0, out, sizeof(out), (size_t *)out) == -EINVAL);
 	assert(!memcmp(out, saved, sizeof(out)));
 }
+
+static void proximity(void)
+{
+	struct bytes b = {};
+	struct uke_ssc_proximity out, before;
+	unsigned int i;
+	integer(&b, 1, 1); integer(&b, 2, 12345); integer(&b, 3, 3);
+	assert(!uke_ssc_decode_proximity(view(&b), false, &out));
+	assert(out.near && out.has_adc && out.adc == 12345 && out.status == 3);
+	before = out;
+	for (i = 0; i < b.size; i++) {
+		assert(uke_ssc_decode_proximity((struct uke_ssc_view){b.data, i}, false, &out));
+		assert(!memcmp(&out, &before, sizeof(out)));
+	}
+	integer(&b, 1, 0); assert(uke_ssc_decode_proximity(view(&b), false, &out));
+	b.size = 0; integer(&b, 1, 2); integer(&b, 2, 0); integer(&b, 3, 3);
+	assert(uke_ssc_decode_proximity(view(&b), false, &out));
+	b.size = 0; integer(&b, 1, 0); integer(&b, 3, 0);
+	assert(!uke_ssc_decode_proximity(view(&b), true, &out));
+	assert(!out.near && !out.has_adc && !out.status);
+	field(&b, 2, "vendor bytes", 12);
+	assert(!uke_ssc_decode_proximity(view(&b), true, &out) && !out.has_adc);
+	assert(uke_ssc_decode_proximity(view(&b), false, &out));
+	b.size = 0; integer(&b, 1, 0); integer(&b, 2, 0x100000000ULL); integer(&b, 3, 3);
+	assert(uke_ssc_decode_proximity(view(&b), false, &out));
+}
 int main(void)
 {
-	samples(); events(); discovery(); numeric(); malformed(); attributes(); requests();
+	samples(); events(); discovery(); numeric(); malformed(); attributes(); requests(); proximity();
 	puts("SSC native decoder: bounded SUID/event/sample parsing, packed floats, unchanged failures and 30000 independent numeric comparisons passed; synthetic host data only");
 	puts("SSC native metadata and requests: exact API/type, availability, physical/stream fields, rates, APSS delivery, disable, golden bytes and unchanged rejection checks passed");
 	return 0;

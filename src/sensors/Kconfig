@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config IIO_UKE_SSC
+	tristate "Xiaomi Uke firmware-owned SSC sensors"
+	depends on ARM64 && ARCH_QCOM && OF && IIO && QRTR && QCOM_QMI_HELPERS
+	select IIO_BUFFER
+	select IIO_KFIFO_BUF
+	help
+	  Discover sensors through the existing ADSP SSC QMI service and expose
+	  metadata-qualified measurements through IIO. Firmware retains sensor-bus
+	  and calibration ownership. No registry or calibration writes are added.
