@@ -4,11 +4,16 @@ set -Eeuo pipefail
 test ! -e /etc/senemos/kernel-update.conf
 root=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 output=$(realpath -m "${1:?Pass the remote source result directory}")
+bash "$root/packaging/native/refuse-published-release.sh" uke-ssc-protocol-check 1.0-10
+(cd "$root"; jq -r '.inputs[]|.sha256+"  "+.path' \
+    manifests/ssc-observation-source-20261104.json | sha256sum -c --strict --quiet -)
 stage=$(mktemp -d)
 trap 'find "$stage" -depth -delete' EXIT
 mkdir -p "$output" "$stage/uke-ssc-protocol-check-1.0"
 git -C "$root" archive HEAD src/sensors/uke-ssc-protocol.c src/sensors/uke-ssc-protocol.h \
     src/sensors/uke-ssc-iio.c src/sensors/Kconfig src/sensors/Makefile src/sensors/prepare-source.sh \
+    src/sensors/sysfs-driver-uke-ssc \
+    manifests/ssc-observation-source-20261104.json \
     tests/ssc-protocol-contract.c tests/ssc-protocol-contract.sh \
     tests/ssc-native-contract.c tests/ssc-native-contract.sh tests/ssc-native-host.h tests/ssc-supplier-contract.sh \
     src/boot/uke-hardware.h tests/hardware-dt.cpp tests/hardware-dt.sh \
@@ -19,7 +24,7 @@ tar --sort=name --mtime=@1793664000 --owner=0 --group=0 --numeric-owner \
 cat > "$output/uke-ssc-protocol-check.spec" <<'SPEC'
 Name: uke-ssc-protocol-check
 Version: 1.0
-Release: 9%{?dist}
+Release: 10%{?dist}
 Summary: Remote checks of the native Uke SSC protocol decoder
 License: GPL-2.0-only AND MIT
 Source0: %{name}-%{version}.tar.gz
@@ -29,6 +34,8 @@ BuildRequires: make bc bison flex perl openssl-devel elfutils-libelf-devel curl 
 %description
 Synthetic source checks of bounded SSC protobuf parsing and integer conversion.
 No QRTR request, hardware probing, calibration or physical acceptance is performed.
+Read-only discovery status and generation-scoped failure reporting are checked
+through the actual callbacks and reconcile worker with fake providers.
 %prep
 %autosetup
 %build
@@ -44,6 +51,11 @@ bash packaging/native/check-ssc-native-objects.sh | tee -a %{buildroot}%{_docdir
 %license LICENSE LICENSES/GPL-2.0-only.txt
 %{_docdir}/%{name}/checks.txt
 %changelog
+* Wed Nov 04 2026 Uke contributors - 1.0-10
+- Expose read-only SSC discovery counts and the last failure stage.
+- Check actual reconcile failures, stale generations and callback privacy.
+- Retain protocol, supplier, Device Tree and native Linux object checks.
+
 * Wed Nov 04 2026 Uke contributors - 1.0-9
 - Request large SSC reports and validate both documented indication IDs.
 - Check actual Control TLVs, maximum payloads and complete QMI sample dispatch.

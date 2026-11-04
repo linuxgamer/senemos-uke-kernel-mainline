@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-04",
+  "scope": "Read-only native SSC discovery observations; transport ABI and sample admission unchanged",
+  "native_ssc_transport_abi": 1,
+  "observation_abi": 1,
+  "upstream_driver_core": {
+    "repository": "gregkh/linux",
+    "commit": "79a907609d53d5cd645b42c11550d295d43abf99",
+    "path": "drivers/base/dd.c",
+    "blob": "f6525a7ee8c54c3122508d64bd137ba34f316876",
+    "scope": "Driver-owned attribute group creation after probe and teardown lifetime"
+  },
+  "runtime_evidence": {
+    "kernel": "7.3.1-7200-unstable",
+    "ssc_controller_bound": true,
+    "adsp_running": true,
+    "published_motion_iio_observed": false,
+    "scope": "Read-only inventory; no samples, SUIDs or calibration read"
+  },
+  "interface": {
+    "permissions": "0444",
+    "attributes": [
+      "ssc_service_count",
+      "ssc_lookup_fault",
+      "ssc_suspended",
+      "ssc_client_connected",
+      "ssc_declared_sensors",
+      "ssc_discovered_sensors",
+      "ssc_ready_sensors",
+      "ssc_registered_sensors",
+      "ssc_last_error",
+      "ssc_last_error_stage"
+    ],
+    "failure_stages": [
+      "none",
+      "client",
+      "lookup",
+      "attributes",
+      "registration"
+    ],
+    "stale_generation_failure_ignored": true,
+    "read_issues_qmi": false,
+    "read_resumes_firmware": false,
+    "private_identifiers_or_samples_exposed": false
+  },
+  "qualification": {
+    "state": "pending",
+    "release": "uke-ssc-protocol-check-1.0-10",
+    "scope": "Actual callbacks/reconcile fixtures and full native driver object; no full kernel or physical acceptance"
+  },
+  "delivery": {
+    "requires_cumulative_kernel": true,
+    "preserve_selected_camera_source": true,
+    "automatic_seamless_staging_required": true,
+    "package_rollback_default": "enforced",
+    "preserve_local_rollback_preference": true,
+    "reapply_preference_command": false
+  },
+  "physical_sensor_acceptance": false,
+  "inputs": [
+    {
+      "path": "src/sensors/uke-ssc-iio.c",
+      "sha256": "cfe9b4fb1740aa33133544d0b122af5c306d42040797e8210af2299bc9479c20"
+    },
+    {
+      "path": "src/sensors/prepare-source.sh",
+      "sha256": "10d7e641fd94781b6a50b796c1d62b4c6b4f35edc96929cc6486b4ba5379157c"
+    },
+    {
+      "path": "src/sensors/sysfs-driver-uke-ssc",
+      "sha256": "e63f4c681af17711d918069e096c4a7863ff1ae19892567368b3ee96437ed891"
+    },
+    {
+      "path": "tests/ssc-native-contract.c",
+      "sha256": "2e61285a49debaa9cc6db91b3f0e0a936571e19d630b0f5ee4ebd930e44f460a"
+    },
+    {
+      "path": "tests/ssc-native-contract.sh",
+      "sha256": "90c59d7f4c05037b62e015ace749e1156539130d6e067745d64f1e9dedc3e1ea"
+    },
+    {
+      "path": "tests/ssc-native-host.h",
+      "sha256": "6ead3a1c624539d5f6ec3bb9e6cef3f43f9157087839c4118b3eefb7a08a85cd"
+    },
+    {
+      "path": "packaging/native/check-ssc-native-objects.sh",
+      "sha256": "843be99e553484c40b9c44f2dc40a88bff5e04ea6d5be9b91c9945d4f1aee0e5"
+    }
+  ]
+}

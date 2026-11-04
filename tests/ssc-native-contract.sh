@@ -50,22 +50,36 @@ cp "$root/tests/ssc-native-host.h" "$stage/include/ssc-native-host.h"
     awk '/^#define SSC_SERVICE /{emit=1} /^static bool ssc_uid_equal\(/{exit} emit{print}' \
         "$root/src/sensors/uke-ssc-iio.c"
     printf '%s\n' 'static void ssc_close_client(struct ssc_controller *c);'
-    for name in ssc_uid_equal ssc_current ssc_schedule_locked ssc_invalidate_locked \
+    for name in ssc_uid_equal ssc_current ssc_observe ssc_record_failure ssc_failure_name ssc_schedule_locked ssc_invalidate_locked \
         ssc_response ssc_request ssc_rate ssc_sample_values ssc_attributes_usable ssc_read_scale ssc_report ssc_message \
         ssc_start ssc_stop ssc_close_client; do
         awk -v name="$name" '
-          $0 ~ "^static .* " name "\\(" && $0 !~ /;/ {emit=1;found=1}
+          $0 ~ "^static .*([[:space:]]|[*])" name "\\(" && $0 !~ /;/ {emit=1;found=1}
           emit {print}
           emit && /^}/ {emit=0;exit}
           END {if(!found)exit 1}
         ' "$root/src/sensors/uke-ssc-iio.c"
     done
+    awk '
+      /^#define SSC_OBSERVATION_ATTRIBUTE\(/ {emit=1;found=1}
+      emit {print}
+      /^ATTRIBUTE_GROUPS\(ssc_observation\);$/ {done=1;exit}
+      END {if(!found || !done)exit 1}
+    ' "$root/src/sensors/uke-ssc-iio.c"
+    printf '%s\n' 'static const int ssc_client_ops;'
+    awk '
+      /^static void ssc_reconcile\(/ {emit=1;found=1}
+      emit {print}
+      emit && /^}/ {done=1;exit}
+      END {if(!found || !done)exit 1}
+    ' "$root/src/sensors/uke-ssc-iio.c"
+    [[ $(grep -Fc '.dev_groups = ssc_observation_groups' "$root/src/sensors/uke-ssc-iio.c") == 1 ]]
     cat "$root/tests/ssc-native-contract.c"
 } > "$stage/check.c"
 # The upstream QMI helper intentionally performs unaligned typed wire accesses.
 # Preserve that source and disable only its host alignment instrumentation.
 for compiler in gcc clang; do
-    common=(-std=gnu11 -O1 -g -Wall -Werror -Wno-unused-parameter
+    common=(-std=gnu11 -O1 -g -UNDEBUG -Wall -Werror -Wno-unused-parameter
         -fsanitize=address,undefined -fno-omit-frame-pointer
         -I"$stage/include" -I"$root/src/sensors")
     "$compiler" "${common[@]}" -fno-sanitize=alignment -Dqmi_decode_message=upstream_qmi_decode_message -c \
@@ -73,4 +87,25 @@ for compiler in gcc clang; do
     "$compiler" "${common[@]}" "$stage/check.c" \
         "$root/src/sensors/uke-ssc-protocol.c" "$stage/qmi.o" -o "$stage/check"
     ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 "$stage/check"
+    if [[ $compiler == gcc ]]; then
+        for fault in stale-error stale-status; do
+            if [[ $fault == stale-error ]]; then
+                sed 's/!c->removed && c->generation == generation/!c->removed/' \
+                    "$stage/check.c" > "$stage/negative.c"
+            else
+                sed 's/if (out->connected)/if (true)/' \
+                    "$stage/check.c" > "$stage/negative.c"
+            fi
+            ! cmp -s "$stage/check.c" "$stage/negative.c"
+            "$compiler" "${common[@]}" "$stage/negative.c" \
+                "$root/src/sensors/uke-ssc-protocol.c" "$stage/qmi.o" -o "$stage/negative"
+            if (ulimit -c 0; ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 \
+                "$stage/negative") > "$stage/negative.log" 2>&1; then
+                printf 'SSC observation fixture missed %s\n' "$fault" >&2
+                exit 1
+            fi
+            grep -q 'Assertion.*failed' "$stage/negative.log"
+            printf 'Actual SSC observation negative control detected %s\n' "$fault"
+        done
+    fi
 done

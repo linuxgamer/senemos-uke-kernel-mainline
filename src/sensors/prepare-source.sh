@@ -12,5 +12,7 @@ test ! -e "$target"
 mkdir -p "$target"
 install -m644 "$here/uke-ssc-iio.c" "$here/uke-ssc-protocol.c" "$here/uke-ssc-protocol.h" \
     "$here/Kconfig" "$here/Makefile" "$target/"
+install -Dm644 "$here/sysfs-driver-uke-ssc" \
+    "$kernel/Documentation/ABI/testing/sysfs-driver-uke-ssc"
 printf '\nsource "drivers/iio/common/uke-ssc/Kconfig"\n' >> "$kernel/drivers/iio/common/Kconfig"
 printf '\nobj-y += uke-ssc/\n' >> "$kernel/drivers/iio/common/Makefile"

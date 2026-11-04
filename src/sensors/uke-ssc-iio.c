@@ -18,6 +18,7 @@
 #include <linux/slab.h>
 #include <linux/soc/qcom/qmi.h>
 #include <linux/spinlock.h>
+#include <linux/sysfs.h>
 #include <linux/workqueue.h>
 #include "uke-ssc-protocol.h"
 
@@ -73,6 +74,18 @@ struct ssc_endpoint {
 	struct sockaddr_qrtr address;
 };
 
+enum ssc_failure_stage {
+	SSC_FAILURE_NONE, SSC_FAILURE_CLIENT, SSC_FAILURE_LOOKUP,
+	SSC_FAILURE_ATTRIBUTES, SSC_FAILURE_REGISTRATION,
+};
+
+struct ssc_observation {
+	unsigned int services, lookup_fault, suspended, connected;
+	unsigned int declared, discovered, ready, registered;
+	int last_error;
+	enum ssc_failure_stage last_stage;
+};
+
 struct ssc_controller {
 	struct device *dev;
 	struct qmi_handle lookup, client;
@@ -92,6 +105,9 @@ struct ssc_controller {
 	enum uke_ssc_command pending_command;
 	struct ssc_sensor *pending_sensor;
 	bool removed, paused, client_open, client_known, pending, lookup_fault;
+	/* Last discovery failure in this namespace generation; no payload data. */
+	int last_discovery_error;
+	enum ssc_failure_stage last_discovery_stage;
 };
 
 struct ssc_qmi_request {
@@ -158,6 +174,106 @@ static bool ssc_current(struct ssc_controller *c)
 	       c->endpoint_count == 1 && c->client_generation == c->generation;
 }
 
+static void ssc_observe(struct ssc_controller *c, struct ssc_observation *out)
+{
+	unsigned long flags;
+	unsigned int i;
+
+	*out = (struct ssc_observation){};
+	spin_lock_irqsave(&c->state, flags);
+	out->services = c->endpoint_count;
+	out->lookup_fault = c->lookup_fault;
+	out->suspended = c->paused;
+	out->connected = ssc_current(c);
+	out->last_error = c->last_discovery_error;
+	out->last_stage = c->last_discovery_stage;
+	for (i = 0; i < SSC_SENSOR_COUNT; i++) {
+		const struct ssc_sensor *s = &c->sensor[i];
+
+		if (!s->declared)
+			continue;
+		out->declared++;
+		out->registered += s->registered;
+		if (out->connected) {
+			out->discovered += s->have_suid;
+			out->ready += s->ready;
+		}
+	}
+	spin_unlock_irqrestore(&c->state, flags);
+}
+
+static void ssc_record_failure(struct ssc_controller *c, u64 generation,
+			       enum ssc_failure_stage stage, int error)
+{
+	unsigned long flags;
+
+	if (error >= 0)
+		return;
+	spin_lock_irqsave(&c->state, flags);
+	if (!c->removed && c->generation == generation) {
+		c->last_discovery_error = error;
+		c->last_discovery_stage = stage;
+	}
+	spin_unlock_irqrestore(&c->state, flags);
+}
+
+static const char *ssc_failure_name(enum ssc_failure_stage stage)
+{
+	switch (stage) {
+	case SSC_FAILURE_NONE: return "none";
+	case SSC_FAILURE_CLIENT: return "client";
+	case SSC_FAILURE_LOOKUP: return "lookup";
+	case SSC_FAILURE_ATTRIBUTES: return "attributes";
+	case SSC_FAILURE_REGISTRATION: return "registration";
+	default: return "unknown";
+	}
+}
+
+#define SSC_OBSERVATION_ATTRIBUTE(name, member, format) \
+static ssize_t name##_show(struct device *dev, struct device_attribute *attr, char *buf) \
+{ \
+	struct ssc_observation snapshot; \
+	ssc_observe(dev_get_drvdata(dev), &snapshot); \
+	return sysfs_emit(buf, format "\n", snapshot.member); \
+} \
+static DEVICE_ATTR_RO(name)
+
+SSC_OBSERVATION_ATTRIBUTE(ssc_service_count, services, "%u");
+SSC_OBSERVATION_ATTRIBUTE(ssc_lookup_fault, lookup_fault, "%u");
+SSC_OBSERVATION_ATTRIBUTE(ssc_suspended, suspended, "%u");
+SSC_OBSERVATION_ATTRIBUTE(ssc_client_connected, connected, "%u");
+SSC_OBSERVATION_ATTRIBUTE(ssc_declared_sensors, declared, "%u");
+SSC_OBSERVATION_ATTRIBUTE(ssc_discovered_sensors, discovered, "%u");
+SSC_OBSERVATION_ATTRIBUTE(ssc_ready_sensors, ready, "%u");
+SSC_OBSERVATION_ATTRIBUTE(ssc_registered_sensors, registered, "%u");
+SSC_OBSERVATION_ATTRIBUTE(ssc_last_error, last_error, "%d");
+
+static ssize_t ssc_last_error_stage_show(struct device *dev,
+				       struct device_attribute *attr, char *buf)
+{
+	struct ssc_observation snapshot;
+
+	ssc_observe(dev_get_drvdata(dev), &snapshot);
+	return sysfs_emit(buf, "%s\n", ssc_failure_name(snapshot.last_stage));
+}
+static DEVICE_ATTR_RO(ssc_last_error_stage);
+
+static struct attribute *ssc_observation_attrs[] = {
+	&dev_attr_ssc_service_count.attr,
+	&dev_attr_ssc_lookup_fault.attr,
+	&dev_attr_ssc_suspended.attr,
+	&dev_attr_ssc_client_connected.attr,
+	&dev_attr_ssc_declared_sensors.attr,
+	&dev_attr_ssc_discovered_sensors.attr,
+	&dev_attr_ssc_ready_sensors.attr,
+	&dev_attr_ssc_registered_sensors.attr,
+	&dev_attr_ssc_last_error.attr,
+	&dev_attr_ssc_last_error_stage.attr,
+	NULL,
+};
+ATTRIBUTE_GROUPS(ssc_observation);
+#undef SSC_OBSERVATION_ATTRIBUTE
+
 static void ssc_schedule_locked(struct ssc_controller *c)
 {
 	if (!c->removed && !c->paused)
@@ -169,6 +285,8 @@ static void ssc_invalidate_locked(struct ssc_controller *c)
 	unsigned int i;
 
 	c->generation++;
+	c->last_discovery_error = 0;
+	c->last_discovery_stage = SSC_FAILURE_NONE;
 	for (i = 0; i < SSC_SENSOR_COUNT; i++) {
 		struct ssc_sensor *s = &c->sensor[i];
 
@@ -764,8 +882,10 @@ static void ssc_reconcile(struct work_struct *work)
 		goto out;
 	if (recreate) {
 		ret = qmi_handle_init(&c->client, SSC_QMI_REPORT_MAX, &ssc_client_ops, NULL);
-		if (ret)
+		if (ret) {
+			ssc_record_failure(c, generation, SSC_FAILURE_CLIENT, ret);
 			goto out;
+		}
 		spin_lock_irqsave(&c->state, flags);
 		c->client_open = true;
 		c->client_generation = generation;
@@ -781,6 +901,7 @@ static void ssc_reconcile(struct work_struct *work)
 				continue;
 			ret = ssc_request(c, NULL, UKE_SSC_LOOKUP, lookup, c->sensor[i].description->datatype, 0);
 			if (ret) {
+				ssc_record_failure(c, generation, SSC_FAILURE_LOOKUP, ret);
 				ssc_close_client(c);
 				goto out;
 			}
@@ -805,8 +926,14 @@ static void ssc_reconcile(struct work_struct *work)
 			ssc_stop(s);
 		if (metadata) {
 			ret = ssc_request(c, s, UKE_SSC_ATTRIBUTES, uid, NULL, 0);
-			if (!ret)
-				wait_for_completion_timeout(&s->metadata_done, SSC_TIMEOUT);
+			if (!ret && !wait_for_completion_timeout(&s->metadata_done, SSC_TIMEOUT))
+				ret = -ETIMEDOUT;
+			if (!ret) {
+				spin_lock_irqsave(&c->state, flags);
+				ret = s->ready ? 0 : s->error;
+				spin_unlock_irqrestore(&c->state, flags);
+			}
+			ssc_record_failure(c, generation, SSC_FAILURE_ATTRIBUTES, ret);
 		}
 		spin_lock_irqsave(&c->state, flags);
 		ready = ssc_current(c) && s->ready && s->revision == revision;
@@ -816,8 +943,10 @@ static void ssc_reconcile(struct work_struct *work)
 		spin_unlock_irqrestore(&c->state, flags);
 		if (ready && !s->registered) {
 			ret = iio_device_register(s->iio);
-			if (ret)
+			if (ret) {
+				ssc_record_failure(c, generation, SSC_FAILURE_REGISTRATION, ret);
 				continue;
+			}
 			spin_lock_irqsave(&c->state, flags);
 			s->registered = true;
 			spin_unlock_irqrestore(&c->state, flags);
@@ -1029,7 +1158,10 @@ static const struct of_device_id ssc_match[] = {
 MODULE_DEVICE_TABLE(of, ssc_match);
 static struct platform_driver ssc_driver = {
 	.probe = ssc_probe, .remove = ssc_remove,
-	.driver = { .name = "uke-ssc-iio", .of_match_table = ssc_match, .pm = pm_sleep_ptr(&ssc_pm_ops) },
+	.driver = {
+		.name = "uke-ssc-iio", .of_match_table = ssc_match,
+		.pm = pm_sleep_ptr(&ssc_pm_ops), .dev_groups = ssc_observation_groups,
+	},
 };
 module_platform_driver(ssc_driver);
 MODULE_DESCRIPTION("Xiaomi Uke firmware-owned SSC IIO transport");

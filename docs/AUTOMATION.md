@@ -24,9 +24,16 @@ Publication can use the native HTTPS COPR API. Upstream RPM policy and dt-schema
 COPR's Fedora source-generation chroot and Rawhide repository packages can advance independently. Each job retains its source RPM, tool versions and build logs. Neither automation nor a successful package build proves Uke boot, firmware handoff or peripheral operation.
 
 Each kernel packaging release has a distinct uname, module directory and
-matched Image. Retain the accepted kernel and matching modules. Unstable RPMs
-preserve explicit boot selection and contain no activation scriptlets; a DNF
-update does not write or select a boot slot. Recovery, firmware, power and
-transaction checks remain necessary before a separate physical trial.
+matched Image. Retain the accepted kernel and matching modules. Automatic
+seamless staging must remain enabled across DNF installs and updates. Kernel
+RPM scriptlets alone do not describe transaction-triggered staging, so inspect
+the installed update provider and policy before delivery. Do not disable
+staging as a trial workaround.
+
+Rollback mode is a separate persistent local preference. Package defaults must
+remain rollback-enforced; upgrades and reinstalls must preserve an existing
+rollback-off preference without reapplying its command. Recovery, firmware,
+power and transaction checks remain necessary. Historical diagnostic package
+results do not qualify the complete current DNF staging path.
 
 References: [COPR source methods and webhooks](https://docs.copr.fedorainfracloud.org/user_documentation.html), [Kernel.org stable feed](https://www.kernel.org/releases.json).

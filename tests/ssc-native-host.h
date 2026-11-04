@@ -5,9 +5,11 @@
 #include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 #include <linux/types.h>
 #define U8_MAX UINT8_MAX
 #define ETOOSMALL 525 /* Pinned Linux include/linux/errno.h; host-only shim. */
@@ -50,15 +52,37 @@ struct sockaddr_qrtr { unsigned short sq_family; u32 sq_node,sq_port; };
 struct workqueue_struct { unsigned int queued; };
 struct work_struct { int unused; };
 struct list_head { struct list_head *next,*prev; };
-struct device { int unused; };
+struct device { void *driver_data; };
+struct attribute { const char *name; unsigned int mode; };
+struct device_attribute {
+	struct attribute attr;
+	ssize_t (*show)(struct device *, struct device_attribute *, char *);
+	ssize_t (*store)(struct device *, struct device_attribute *, const char *, size_t);
+};
+struct attribute_group { struct attribute **attrs; };
+#define DEVICE_ATTR_RO(_name) struct device_attribute dev_attr_##_name = { \
+	.attr = { .name = #_name, .mode = 0444 }, .show = _name##_show }
+#define ATTRIBUTE_GROUPS(_name) \
+	static const struct attribute_group _name##_group = { .attrs = _name##_attrs }; \
+	static const struct attribute_group *_name##_groups[] = { &_name##_group, NULL }
+static inline void *dev_get_drvdata(struct device *dev) { return dev->driver_data; }
+static inline int sysfs_emit(char *buf, const char *format, ...)
+{
+	va_list args;
+	va_start(args, format);
+	int ret = vsnprintf(buf, 4096, format, args);
+	va_end(args);
+	return ret;
+}
 struct iio_chan_spec { unsigned int unused; };
 struct iio_dev { int unused; };
 enum iio_chan_type { IIO_ACCEL,IIO_ANGL_VEL,IIO_MAGN,IIO_LIGHT,IIO_PROXIMITY,IIO_TEMP };
 #define IIO_VAL_INT 1
 #define IIO_VAL_INT_PLUS_MICRO 2
 #define lockdep_assert_held(lock) assert((lock)->locked)
-#define spin_lock_irqsave(lock,flags) do { (void)(lock); (flags)=0; } while(0)
-#define spin_unlock_irqrestore(lock,flags) do { (void)(lock); (void)(flags); } while(0)
+#define spin_lock_irqsave(lock,flags) do { assert(!*(lock)); *(lock)=1; (flags)=0; } while(0)
+#define spin_unlock_irqrestore(lock,flags) do { assert(*(lock)==1); *(lock)=0; (void)(flags); } while(0)
+#define list_first_entry(head,type,member) container_of((head)->next,type,member)
 static inline void mutex_lock(struct mutex *m) { assert(!m->locked);m->locked=true; }
 static inline void mutex_unlock(struct mutex *m) { assert(m->locked);m->locked=false; }
 static inline struct qmi_txn *idr_find(struct qmi_idr *idr,unsigned int id)
@@ -74,6 +98,9 @@ static int qmi_send_request(struct qmi_handle *,struct sockaddr_qrtr *,struct qm
 static int qmi_txn_wait(struct qmi_txn *,unsigned long);
 static void qmi_txn_cancel(struct qmi_txn *);
 static void qmi_handle_release(struct qmi_handle *);
+static int qmi_handle_init(struct qmi_handle *,size_t,const void *,const void *);
+static unsigned long wait_for_completion_timeout(struct completion *,unsigned long);
+static int iio_device_register(struct iio_dev *);
 static int iio_push_to_buffers_with_ts(struct iio_dev *,void *,size_t,s64);
 static s64 iio_get_time_ns(struct iio_dev *);
 #endif

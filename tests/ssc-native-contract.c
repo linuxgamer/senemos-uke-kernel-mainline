@@ -2,12 +2,60 @@
 /* Included after the actual production definitions/callbacks. No real providers. */
 static struct {
 	int init_error,send_error,protobuf_error;
+	int handle_error,register_error;
 	unsigned int live,cancelled,released,sent,pushed,decoded;
+	unsigned int handles,registrations;
 	bool no_ack,foreign,changed_client,stale_on_wait;
+	bool metadata_timeout,metadata_invalid,stale_registration;
 	unsigned int last_command;
 	struct ssc_controller *controller;
 	s64 pushed_value[3];
 } fixture;
+
+static int qmi_handle_init(struct qmi_handle *qmi, size_t maximum,
+			   const void *ops, const void *handlers)
+{
+	assert(qmi == &fixture.controller->client && !qmi->live);
+	assert(maximum == SSC_QMI_REPORT_MAX && ops == &ssc_client_ops && !handlers);
+	fixture.handles++;
+	if (fixture.handle_error)
+		return fixture.handle_error;
+	qmi->live = true;
+	return 0;
+}
+
+static unsigned long wait_for_completion_timeout(struct completion *done, unsigned long timeout)
+{
+	struct ssc_controller *c = fixture.controller;
+	unsigned int i;
+
+	assert(c->control.locked && !c->state && timeout == SSC_TIMEOUT);
+	for (i = 0; i < SSC_SENSOR_COUNT; i++) {
+		struct ssc_sensor *s = &c->sensor[i];
+
+		if (&s->metadata_done != done)
+			continue;
+		if (fixture.metadata_timeout)
+			return 0;
+		s->ready = !fixture.metadata_invalid;
+		s->error = fixture.metadata_invalid ? -ENODEV : 0;
+		done->done++;
+		return 1;
+	}
+	assert(!"unexpected completion");
+	return 0;
+}
+
+static int iio_device_register(struct iio_dev *iio)
+{
+	struct ssc_controller *c = fixture.controller;
+
+	assert(c->control.locked && !c->state && iio == c->sensor[0].iio);
+	fixture.registrations++;
+	if (fixture.stale_registration)
+		ssc_invalidate_locked(c);
+	return fixture.register_error;
+}
 
 int upstream_qmi_decode_message(const void *,size_t,const struct qmi_elem_info *,void *);
 int qmi_decode_message(const void *data,size_t size,const struct qmi_elem_info *ei,void *out)
@@ -90,6 +138,148 @@ static void setup(struct ssc_controller *c)
 		s->ready=true;s->have_suid=true;s->suid=(struct uke_ssc_suid){0x123,0x456};
 		s->rate=0x41200000;s->sample_sequence=9;s->sample[0]=777;s->ticks=123;
 	}
+}
+
+static unsigned int popcount8(unsigned int value)
+{
+	unsigned int n = 0;
+	for (unsigned int bit = 1; bit < 256; bit <<= 1)
+		n += !!(value & bit);
+	return n;
+}
+
+static void observation_contract(void)
+{
+	struct ssc_controller c, before;
+	struct ssc_observation view;
+	unsigned int checks = 0;
+	const char *names[] = {
+		"ssc_service_count", "ssc_lookup_fault", "ssc_suspended", "ssc_client_connected",
+		"ssc_declared_sensors", "ssc_discovered_sensors", "ssc_ready_sensors",
+		"ssc_registered_sensors", "ssc_last_error", "ssc_last_error_stage",
+	};
+
+	assert(ssc_observation_groups[0]->attrs == ssc_observation_attrs);
+	assert(!ssc_observation_groups[1]);
+	for (unsigned int mask = 0; mask < 256; mask++) {
+		unsigned int discovered = ((mask << 3) | (mask >> 5)) & 255;
+		unsigned int ready = (mask ^ 0x93) & 255, registered = (mask ^ 0x69) & 255;
+
+		for (unsigned int state = 0; state < 8; state++) {
+			setup(&c);
+			for (unsigned int i = 0; i < SSC_SENSOR_COUNT; i++) {
+				c.sensor[i].declared = !!(mask & (1u << i));
+				c.sensor[i].have_suid = !!(discovered & (1u << i));
+				c.sensor[i].ready = !!(ready & (1u << i));
+				c.sensor[i].registered = !!(registered & (1u << i));
+			}
+			if (state == 1) c.paused = true;
+			if (state == 2) c.removed = true;
+			if (state == 3) c.lookup_fault = true;
+			if (state == 4) c.endpoint_count = 0;
+			if (state == 5) c.endpoint_count = 2;
+			if (state == 6) c.client_open = false;
+			if (state == 7) c.client_generation--;
+			c.last_discovery_error = -ETIMEDOUT;
+			c.last_discovery_stage = SSC_FAILURE_LOOKUP;
+			before = c;
+			ssc_observe(&c, &view);
+			assert(!memcmp(&before, &c, sizeof(c)));
+			assert(view.services == c.endpoint_count && view.lookup_fault == (state == 3));
+			assert(view.suspended == (state == 1) && view.connected == (state == 0));
+			assert(view.declared == popcount8(mask));
+			assert(view.discovered == (state ? 0 : popcount8(mask & discovered)));
+			assert(view.ready == (state ? 0 : popcount8(mask & ready)));
+			assert(view.registered == popcount8(mask & registered));
+			assert(view.last_error == -ETIMEDOUT && view.last_stage == SSC_FAILURE_LOOKUP);
+			struct device dev = { .driver_data = &c };
+			const int expected[] = { (int)c.endpoint_count, state == 3, state == 1, !state,
+				(int)popcount8(mask), state ? 0 : (int)popcount8(mask & discovered),
+				state ? 0 : (int)popcount8(mask & ready), (int)popcount8(mask & registered),
+				-ETIMEDOUT };
+			for (unsigned int i = 0; i < 10; i++) {
+				char buffer[4096], wanted[64];
+				struct attribute *a = ssc_observation_attrs[i];
+				struct device_attribute *attr = container_of(a, struct device_attribute, attr);
+				assert(!strcmp(a->name, names[i]) && a->mode == 0444 && !attr->store);
+				if (i == 9) snprintf(wanted, sizeof(wanted), "lookup\n");
+				else snprintf(wanted, sizeof(wanted), "%d\n", expected[i]);
+				ssize_t n = attr->show(&dev, attr, buffer);
+				assert(n == (ssize_t)strlen(wanted) && !strcmp(buffer, wanted));
+				assert(!memcmp(&before, &c, sizeof(c)));
+				checks++;
+			}
+			assert(!ssc_observation_attrs[10] && !fixture.sent && !fixture.handles && !fixture.registrations);
+		}
+	}
+	setup(&c);
+	ssc_record_failure(&c, c.generation, SSC_FAILURE_CLIENT, -ENOMEM);
+	assert(c.last_discovery_error == -ENOMEM && c.last_discovery_stage == SSC_FAILURE_CLIENT);
+	ssc_record_failure(&c, c.generation - 1, SSC_FAILURE_LOOKUP, -EIO);
+	assert(c.last_discovery_error == -ENOMEM && c.last_discovery_stage == SSC_FAILURE_CLIENT);
+	ssc_record_failure(&c, c.generation, SSC_FAILURE_LOOKUP, 0);
+	ssc_record_failure(&c, c.generation, SSC_FAILURE_LOOKUP, 7);
+	assert(c.last_discovery_error == -ENOMEM);
+	c.removed = true;
+	ssc_record_failure(&c, c.generation, SSC_FAILURE_ATTRIBUTES, -EINVAL);
+	assert(c.last_discovery_error == -ENOMEM);
+	c.removed = false;
+	ssc_invalidate_locked(&c);
+	assert(!c.last_discovery_error && c.last_discovery_stage == SSC_FAILURE_NONE);
+	assert(!strcmp(ssc_failure_name(SSC_FAILURE_NONE), "none"));
+	assert(!strcmp(ssc_failure_name(SSC_FAILURE_CLIENT), "client"));
+	assert(!strcmp(ssc_failure_name(SSC_FAILURE_LOOKUP), "lookup"));
+	assert(!strcmp(ssc_failure_name(SSC_FAILURE_ATTRIBUTES), "attributes"));
+	assert(!strcmp(ssc_failure_name(SSC_FAILURE_REGISTRATION), "registration"));
+	assert(!strcmp(ssc_failure_name((enum ssc_failure_stage)999), "unknown"));
+	printf("Actual SSC observation: %u read-only callback checks, generation/refusal, current-state gating and no transport or private data passed\n", checks);
+}
+
+static void discovery_failure_contract(void)
+{
+	struct ssc_controller c;
+	struct ssc_endpoint endpoint = { .address = { AF_QIPCRTR, 3, 4 } };
+	struct iio_dev iio;
+
+	for (unsigned int fault = 0; fault < 9; fault++) {
+		setup(&c);
+		c.control.locked = false;
+		c.sensor[0].declared = true;
+		c.sensor[0].iio = &iio;
+		c.sensor[0].ready = false;
+		c.sensor[0].error = -EAGAIN;
+		c.sensor[0].need_metadata = true;
+		for (unsigned int i = 1; i < SSC_SENSOR_COUNT; i++) {
+			c.sensor[i].ready = false;
+			c.sensor[i].have_suid = false;
+		}
+		c.endpoints.next = &endpoint.list;
+		c.endpoints.prev = &endpoint.list;
+		if (fault < 3) {
+			c.client_open = false;
+			c.client.live = false;
+		}
+		if (fault == 0) fixture.handle_error = -ENOMEM;
+		if (fault == 1) fixture.send_error = -EPIPE;
+		if (fault == 2) fixture.stale_on_wait = true;
+		if (fault == 3) fixture.send_error = -EPIPE;
+		if (fault == 4) fixture.metadata_timeout = true;
+		if (fault == 5) fixture.metadata_invalid = true;
+		if (fault == 6) fixture.register_error = -ENOMEM;
+		if (fault == 8) { fixture.register_error = -EIO; fixture.stale_registration = true; }
+		ssc_reconcile(&c.reconcile);
+		assert(!c.control.locked && !c.state && !fixture.live);
+		const int errors[] = { -ENOMEM, -EPIPE, 0, -EPIPE, -ETIMEDOUT, -ENODEV, -ENOMEM, 0, 0 };
+		const enum ssc_failure_stage stages[] = { SSC_FAILURE_CLIENT, SSC_FAILURE_LOOKUP,
+			SSC_FAILURE_NONE, SSC_FAILURE_ATTRIBUTES, SSC_FAILURE_ATTRIBUTES,
+			SSC_FAILURE_ATTRIBUTES, SSC_FAILURE_REGISTRATION, SSC_FAILURE_NONE, SSC_FAILURE_NONE };
+		assert(c.last_discovery_error == errors[fault] && c.last_discovery_stage == stages[fault]);
+		assert(c.sensor[0].registered == (fault == 7));
+		if (fault == 0) assert(fixture.handles == 1 && !fixture.sent);
+		if (fault == 1 || fault == 2) assert(fixture.released == 1 && !c.client_open);
+		if (fault >= 6) assert(fixture.registrations == 1);
+	}
+	puts("Actual SSC reconcile: client, lookup, attributes, registration and stale-generation failures retain the correct stage; valid metadata still registers IIO");
 }
 static void ownership(void)
 {
@@ -357,6 +547,7 @@ static void temperature(void)
 int main(void)
 {
 	qmi_wire();ownership();large_discovery_metadata();reports();units_and_rates();temperature();
+	observation_contract();discovery_failure_contract();
 	puts("Actual native SSC: upstream QMI wire round trips, acknowledgements, client/peer/generation guards, request faults, socket cleanup, sample admission, error release and IIO units passed; fake providers only");
 	return 0;
 }

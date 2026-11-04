@@ -28,4 +28,12 @@ test -s "$scratch/out/drivers/iio/common/uke-ssc/uke-ssc-iio.o"
 test -s "$scratch/out/drivers/iio/common/uke-ssc/uke-ssc-protocol.o"
 nm "$scratch/out/drivers/iio/common/uke-ssc/uke-ssc.o" | \
     awk '$2 ~ /^[tT]$/ && $3 == "ssc_probe" {found=1} END {exit !found}'
+for attribute in service_count lookup_fault suspended client_connected declared_sensors \
+    discovered_sensors ready_sensors registered_sensors last_error last_error_stage; do
+    nm "$scratch/out/drivers/iio/common/uke-ssc/uke-ssc.o" | \
+        awk -v symbol="ssc_${attribute}_show" \
+            '$2 ~ /^[tT]$/ && $3 == symbol {found=1} END {exit !found}'
+done
+test -r "$kernel/Documentation/ABI/testing/sysfs-driver-uke-ssc"
+printf '%s\n' 'All ten read-only SSC controller callbacks compile in the actual native object; no controller query or sensor sample was performed'
 printf '%s\n' 'Native SSC protocol and QMI/IIO consumer compile against exact Linux 7.3.1 AArch64 headers; full module linkage and hardware remain unverified'

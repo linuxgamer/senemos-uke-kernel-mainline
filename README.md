@@ -45,11 +45,12 @@ sudo dnf update
 ```
 
 The kernel, modules, device trees and boot image must use matching versions.
-Unstable RPMs contain no activation scriptlets. Installed boot policy and
-selection remain separate state and must be rechecked before a transaction;
-the local automatic policy was enabled independently during this trial. Keep the accepted kernel and
-its matching modules available. Initial migration between package families
-requires a reviewed DNF transaction and recovery route.
+Automatic seamless staging stays enabled across DNF installs and updates.
+Rollback mode is a separate persistent local preference: package defaults stay
+rollback-enforced, and an existing rollback-off choice must survive upgrades
+and reinstalls without reapplying its command. Keep the accepted kernel and
+matching modules available. Initial migration between package families requires
+a reviewed DNF transaction and recovery route.
 
 ### RPM packages
 

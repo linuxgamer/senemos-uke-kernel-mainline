@@ -1,0 +1,87 @@
+What:           /sys/devices/.../ssc_service_count
+Date:           November 2026
+Contact:        Uke Linux maintainers
+Description:
+                Read-only number of matching SSC service endpoints seen by a
+                bound xiaomi,uke-ssc-iio platform controller. Zero means that no
+                matching endpoint has been discovered. More than one prevents
+                client admission; reading this attribute does not discover,
+                contact or select a service.
+
+What:           /sys/devices/.../ssc_lookup_fault
+Date:           November 2026
+Contact:        Uke Linux maintainers
+Description:
+                Read-only 0/1 flag indicating that endpoint uniqueness could not
+                be tracked. The existing transport refuses admission in this
+                state. This attribute does not clear the fault.
+
+What:           /sys/devices/.../ssc_suspended
+Date:           November 2026
+Contact:        Uke Linux maintainers
+Description:
+                Read-only 0/1 flag indicating that SSC requests are paused by
+                the existing suspend lifecycle. Reading does not resume the
+                controller, issue QMI requests or enable a sensor.
+
+What:           /sys/devices/.../ssc_client_connected
+Date:           November 2026
+Contact:        Uke Linux maintainers
+Description:
+                Read-only 0/1 result of the existing transport admission:
+                controller present and resumed, tracked unique endpoint, open
+                client and matching discovery generation. This does not prove
+                sensor discovery, valid metadata or calibrated sample delivery.
+
+What:           /sys/devices/.../ssc_declared_sensors
+Date:           November 2026
+Contact:        Uke Linux maintainers
+Description:
+                Read-only count of supported sensor datatypes declared in the
+                controller's Device Tree, from 0 through 8. It does not identify
+                fitted chips or establish physical sensor availability.
+
+What:           /sys/devices/.../ssc_discovered_sensors
+Date:           November 2026
+Contact:        Uke Linux maintainers
+Description:
+                Read-only count of declared sensors with an admitted SUID in
+                the current client generation, from 0 through 8. Zero is
+                reported when the client is not current. No SUID is exposed.
+
+What:           /sys/devices/.../ssc_ready_sensors
+Date:           November 2026
+Contact:        Uke Linux maintainers
+Description:
+                Read-only count of declared sensors with accepted metadata in
+                the current client generation, from 0 through 8. Zero is
+                reported when the client is not current. This does not report
+                samples, calibration or physical accuracy.
+
+What:           /sys/devices/.../ssc_registered_sensors
+Date:           November 2026
+Contact:        Uke Linux maintainers
+Description:
+                Read-only count of declared sensors whose IIO devices have
+                been registered, from 0 through 8. Registered devices may remain
+                present after a service disappears, so this count alone does
+                not prove that samples are available.
+
+What:           /sys/devices/.../ssc_last_error
+What:           /sys/devices/.../ssc_last_error_stage
+Date:           November 2026
+Contact:        Uke Linux maintainers
+Description:
+                Read-only last negative errno and failure stage recorded during
+                discovery in the current namespace generation. Stages are none,
+                client, lookup, attributes or registration. Unknown stage values
+                render as unknown. Success does not erase a previous failure;
+                the existing generation invalidation resets the pair to 0/none.
+                A failure from an older generation or after removal is ignored.
+                These attributes do not retry requests or change admission.
+
+                All controller attributes are installed by the driver core
+                after successful probe and removed with driver teardown. Each
+                read snapshots only status under the existing state lock.
+                Separate files may reflect different snapshots. No client ID,
+                SUID, sample, timestamp or calibration payload is exported.
