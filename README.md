@@ -67,6 +67,17 @@ records the exact source and receipt. Full cumulative kernel delivery, private
 profile preparation and physical memory-color/protection/HDR acceptance remain
 open. Existing v4 loading keeps memory absent; initial color selection is empty.
 
+Utility `0.7.0-1` adds private preparation from the fitted panel's exact stock
+ODM profile and passed
+[COPR 11261358](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11261358/).
+GCC and Clang ASan/UBSan pass candidate admission, private permissions,
+unchanged repeated preparation, failed-write cleanup and concurrent publication,
+with retained color conversion and actual kernel-loader checks. The native RPM
+is available in verified root unstable metadata and contains no factory tables.
+The [source manifest](manifests/o82-stock-profile-source-20261105.json) records
+the exact inputs. Coordinator DNF integration, device-local preparation and
+physical acceptance remain pending; kernel/profile selection is unchanged.
+
 31 October 2026. `main` is the continuation branch. Microphone capture, power management, bounded boot-watchdog and optional gaming sources are integrated. The complete combined source still requires fresh release admission and a qualified COPR build; retained candidate packages do not establish that result.
 
 On POCO Pad X1 with Fedora Rawhide AArch64 and kernel `7.3.1-102`, one named four-channel microphone input records all four paths. The operator accepts the ADC8/TX24 speech level. Signed candidate `7.3.1-105` passed package admission and was written, synced and read back in slot A; accepted `102` remains in B. The new candidate has not yet completed its physical boot and microphone checks. See [the engineering record](docs/MICROPHONE-BRINGUP-20261030.md) and [branch boundaries](docs/BRANCHES.md).

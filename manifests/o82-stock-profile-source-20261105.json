@@ -37,9 +37,31 @@
     "full_kernel_delivery_pending": true
   },
   "qualification": {
-    "state": "pending",
+    "state": "succeeded",
     "package": "uke-o82-color-profile",
-    "version": "0.7.0-1"
+    "version": "0.7.0-1",
+    "copr_build": 11261358,
+    "source_commit": "28c4229fbb4dd07a6748e1fc86a6995fff3c7eb7",
+    "started_on": 1793835079,
+    "ended_on": 1793835235,
+    "environment": "Fedora Rawhide AArch64 COPR; synthetic files only",
+    "compiler_modes": [
+      "GCC optimized",
+      "Clang ASan/UBSan"
+    ],
+    "admission_and_publication_checks_per_compiler": 15574,
+    "retained_actual_json_loader_pipeline_cases_per_compiler": 1024,
+    "retained_table_inputs_per_compiler": 4096,
+    "retained_command_streams_per_compiler": 12288,
+    "retained_pipeline_checks_per_compiler": 116605,
+    "retained_v4_and_former_source_controls": true,
+    "native_log_gzip_sha256": "ae80936e390106e6cee6ba725449febd17c7fe3a7625da5f9cdca090fbd37ef0",
+    "root_primary_sha256": "83a18887847af697343461b9d8a35496359e0498db35cddf772eff72b8b80564",
+    "rpm_sha256": "ddd76835b3d42e876647deec3caf60a00b36f3c58f70c0e950de6fd2a6c3146f",
+    "rpm_bytes": 101583,
+    "no_firmware_or_python_payload": true,
+    "no_target_operation": true,
+    "physical_stock_acquisition_or_publication": false
   },
   "delivery": {
     "dnf_hook_integration": "Pending coordinator integration after complete cumulative qualification",
