@@ -87,6 +87,16 @@
       "native_converter_run": false
     }
   },
+  "pure_converter": {
+    "implementation": "src/display/o82-hsic.h",
+    "fixture": "tests/o82-hsic-contract.cpp",
+    "remote_source_producer": "packaging/native/copr-o82-hsic-check.sh",
+    "status": "Implemented typed pure converter; remote qualification pending",
+    "scope": "Integer hue and single-precision scalar conversion only; no JSON/wire/loader/PA integration",
+    "refusals": "Nonfinite inputs and a non-nearest floating-point rounding mode leave output unchanged",
+    "oracle": "Independent integer IEEE754 product/quotient rounding; hand words, ULP neighborhoods, deterministic bit patterns and wide/rounded negative alternatives",
+    "private_data_or_hardware": false
+  },
   "remaining_work": [
     "Complete outer enable/action routing and full/neutral state semantics; scalar JSON types and the global body flag are established",
     "Qualify the native converter and extend private input without admitting unsupported operations",
