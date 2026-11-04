@@ -3,8 +3,8 @@
 4 November 2026. POCO Pad X1 / Xiaomi Pad 7, SM7675, pinned Linux 7.3.1.
 This report describes main source and remote checks. Normal retained kernel
 candidates keep color DMA and native HDR advertisement disabled. Source now
-contains an experimental paired CRTC caller; its complete retained qualification
-is pending. The initial `o82_color_profile` parameter is empty by default.
+contains an experimental paired CRTC caller qualified by remote source, fault
+and object checks. The initial `o82_color_profile` parameter is empty by default.
 
 ## Source implementation
 
@@ -81,7 +81,7 @@ knot/midpoint/native-output checks; the actual previous implementation failed
 14,583 checks. This source-derived numeric correction requires regenerating
 private ICC/native data. It does not exercise a live paired output.
 
-[COPR 11252759](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11252759/)
+[COPR 11253082](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11253082/)
 passed complete retained preparation and:
 
 - GCC/Clang ASan/UBSan execution of the actual encoder, transport, GEM/power
@@ -90,6 +90,10 @@ passed complete retained preparation and:
   halt status, retained ownership across drain retries and failed rearm.
 - Negative controls rejecting the actual former MMU destructor while DMA
   resources remained owned.
+- Actual paired CRTC caller, both physical-interface stop checks, all four
+  supported wire combinations, factory/client gamma composition and complete
+  IGC/gamut/GC flush masks. Refused kickoff precedes frame bookkeeping and
+  preserves the retained scanout-retirement submission contract.
 - Real AArch64 MSM composite linkage, required defined/internal symbols,
   both O82 supplier DT resource tuples and the binding document.
 
@@ -102,8 +106,9 @@ journal. No native compilation or device activation ran on the tablet.
 
 The existing native CRTC already supplies GC1.8 with 1024 entries and CTM programming.
 The experimental caller coordinates those paths and stages IGC/gamut/GC flush
-bits for both DSPPs. Its complete source/link/fault checks and recoverable
-physical trial remain required. Dynamic preset control, private data delivery,
+bits for both DSPPs. Complete source/link/fault checks passed; normal kernel
+package qualification and a recoverable physical trial remain required.
+Dynamic preset control, private data delivery,
 all remaining picture/HDR operations and truthful HDR admission remain open.
 An unsupported preset must not alias a different transform.
 

@@ -1,0 +1,216 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-04",
+  "kernel_parent": {
+    "build": 11252822,
+    "release": "7.3.1-6000",
+    "source_commit": "bf1f6634bafc214219de1c48b3fc72a181485343",
+    "url": "https://download.copr.fedorainfracloud.org/results/mcc45tr/uke-linux-unstable/fedora-rawhide-aarch64/Packages/s/senemos-uke-linux-kernel-mainline-7.3.1-6000.fc46.src.rpm",
+    "sha256": "6cc6db94c26f2533d08d13660f26a0ba5fc4b5a41cc81d6403ae2bb3d0163448",
+    "native_config_sha256": "d4836c6c291859c758aa31c38273f0b22ecbce4b09f13cd67d56ce76b86dd2dd",
+    "effective_config_sha256": "7f1e3f7a5be62396b2b36534780aeb561dfbf7e0a10698677b860cbc91efbd38"
+  },
+  "qualified_color": {
+    "build": 11253082,
+    "release": "7.3.1-11",
+    "source_commit": "48aa87956b9d59c09dd8e0a82279c757cd59fb03",
+    "scope": "retained source, real caller fault fixtures, AArch64 MSM composite and both supplier DTs"
+  },
+  "private_inputs": false,
+  "initial_preset": "",
+  "native_hdr_advertised": false,
+  "physical_acceptance": false,
+  "imports": [
+    {
+      "path": "src/display/dpu_o82_platform.c",
+      "sha256": "933b15a26ea11832b1dbe3ad1c2e65ac5404b45de434ef2140744dcfb1fc4484",
+      "reference_blob": "07a86e9c32f528a46f72fc0872dbeac33680858c",
+      "qualification": "11253082"
+    },
+    {
+      "path": "src/display/dpu_o82_platform.h",
+      "sha256": "23b6f1533f6b01c30a1ed2ad363b3def3ad7a3e3f3d456ee14da74ca2f6d1452",
+      "reference_blob": "3c1b62536105e94ae6a567a2ec724fcf371e4e79",
+      "qualification": "11253082"
+    },
+    {
+      "path": "src/display/dpu_o82_regdma.c",
+      "sha256": "82b3b85f51fc27c75e911aa0557246ab449a6261840aeacc18c6460cf7dfdaa0",
+      "reference_blob": "d40e657b9182d9e9a09bc3e9b0ce1509ca5279fb",
+      "qualification": "11253082"
+    },
+    {
+      "path": "src/display/dpu_o82_regdma.h",
+      "sha256": "96e0e077f5735b61074817962baf976581f97d078182f96552e71d8114d809be",
+      "reference_blob": "1ff3e62de955e22a92a0573853bcf25179838230",
+      "qualification": "11253082"
+    },
+    {
+      "path": "src/display/dpu_o82_upload.c",
+      "sha256": "3191a9dd8535bd61db17dfe46173f4112ce21b6f14307d54a9c7a0ba388fcd10",
+      "reference_blob": "dcaaf252de2bd9e9074128f653b3123ee552396e",
+      "qualification": "11253082"
+    },
+    {
+      "path": "src/display/dpu_o82_upload.h",
+      "sha256": "3639ec71173af23e55fdcdb0d38bee40395650168e1327a5848b1d2146bd9ffd",
+      "reference_blob": "4216d791ef64cb03b0eeb084a828183caacdb6a9",
+      "qualification": "11253082"
+    },
+    {
+      "path": "src/display/dpu_o82_power.c",
+      "sha256": "4bcaa07296bc6562bcaa3e09db2ba57afaea97b02e2ac63a7c20135e38537100",
+      "reference_blob": "4aa44b10c5a9806d005ea1d253e25f5b4aa646a0",
+      "qualification": "11253082"
+    },
+    {
+      "path": "src/display/dpu_o82_power.h",
+      "sha256": "b7ca004ed702823300fb6f1a90339fb67ba98f5c7fa43b1de9e09ca17c2397a5",
+      "reference_blob": "bec8d3c281ce07acf6cc6f86315fcd6ec67494d7",
+      "qualification": "11253082"
+    },
+    {
+      "path": "src/display/dpu_o82_color.c",
+      "sha256": "0993afb547c72cb26260382f8fd177f82889c918269eed7bcb768233ff774d24",
+      "reference_blob": "12af08a60d1235ee979984e1008ae2bc20b9b019",
+      "qualification": "11253082"
+    },
+    {
+      "path": "src/display/dpu_o82_color.h",
+      "sha256": "e8890ab33aa243b23951c5a6abd1a18831f24b6ba62c635f377368b8022bb650",
+      "reference_blob": "f99724ee8e86288d175132841013aee5ca93d843",
+      "qualification": "11253082"
+    },
+    {
+      "path": "src/display/dpu_o82_profiles.c",
+      "sha256": "65c963c6b2d63ecd1cbc76a1d7f58a8f5528c5b02fdc14eac67837d964f4b4c8",
+      "reference_blob": "a14055995e038958dba41b04d9896eead6de9627",
+      "qualification": "11253082"
+    },
+    {
+      "path": "src/display/dpu_o82_profiles.h",
+      "sha256": "53ef42517cbdad323069927efbef703359e797210aeb34b635f23c4a256ae489",
+      "reference_blob": "27fd1d01f5c9793a367fdc2f104ee66a442a3896",
+      "qualification": "11253082"
+    },
+    {
+      "path": "src/display/dpu_o82_lutbus.c",
+      "sha256": "eee1f6a2d589ccaa0f32470dec1adccd237737c18465071de5337cbd771521d2",
+      "reference_blob": "ba719fec550052992aa48ad1048b0a0cb10e7bbf",
+      "qualification": "11253082"
+    },
+    {
+      "path": "src/display/dpu_o82_lutbus.h",
+      "sha256": "800ff42d7f78b63f6386648928677d02c225b6f172d3039a224784b06f79236c",
+      "reference_blob": "32631e2f5549eb2a83e9e351551e0355f7041d8f",
+      "qualification": "11253082"
+    },
+    {
+      "path": "src/display/o82-regdma.h",
+      "sha256": "6c16856cd0041aa091162910aebf4076e721b35ba4bf0205b6b315de01a52077",
+      "reference_blob": "b1148b70737bbfd752d2d64726c08afc650a0b29",
+      "qualification": "11253082"
+    },
+    {
+      "path": "src/display/o82-color-firmware.h",
+      "sha256": "7cac536f24d45d5cba4a299d4a730a8036c6e20a313b09b333f5a4f804733131",
+      "reference_blob": "edbe308fe50d45b0b57b057a161ccde70ee05d42",
+      "qualification": "11253082"
+    },
+    {
+      "path": "src/display/uke-o82-hdr-format.h",
+      "sha256": "537bca8c0c82946754ee334a0bd47187fe341c65e2f9c655188062a5c8ded8e8",
+      "reference_blob": "6d00a09cc2821d4a77d6f21c72a74b24e3106895",
+      "qualification": "11253082"
+    },
+    {
+      "path": "src/display/prepare-o82-regdma.sh",
+      "sha256": "01c0caf18dd901b730aaf9c8debfa09a099cc725badd949a78790690c0739fd2",
+      "reference_blob": "c5f2d627428e61b626eac26d1cf4e32b3a079c60",
+      "qualification": "11253082"
+    },
+    {
+      "path": "src/display/sm7675-uke-native-display.dtso",
+      "sha256": "53fa8913a22bacd3cd1265d8d37a122acbb803cb85b70a7c3e9ffba1884ca998",
+      "reference_blob": "69175c193e3a74863c9eff4f4fabc45e9bd01109",
+      "qualification": "11253082"
+    },
+    {
+      "path": "src/display/bindings/qcom,sm7675-dpu.yaml",
+      "sha256": "39d9107af3e5a65c2a1d058881711ffcf3fd5fa9b55502f68c1f496152330253",
+      "reference_blob": "e5aa38f9cd366c9e75715af993acfb6c14331e62",
+      "qualification": "11253082"
+    },
+    {
+      "path": "patches/display/0072-o82-regdma-resource.patch",
+      "sha256": "8b25b0749be6d21d89f0227bb83646d17bcc6004e3886c4acdce844db7ae215c",
+      "reference_blob": "9af565fd742e96a43d57ba46ce22a10f2ff5b255",
+      "qualification": "11253082"
+    },
+    {
+      "path": "patches/display/0073-o82-regdma-power.patch",
+      "sha256": "100f8d8e0a08a8898a48e5cb2a4424e107ce7416c0a38b35457296ac42601dd9",
+      "reference_blob": "437805b5d389b58f6e5237f09aa12a1b9ea03e46",
+      "qualification": "11253082"
+    },
+    {
+      "path": "patches/display/0074-o82-regdma-close.patch",
+      "sha256": "65b7dd15a3ed6fbba6929ef8052a798f50e50dc4a5d52c7bc60a9af999d6bb5a",
+      "reference_blob": "dc09877d141daa8ea1f10e305f0624fb5a5855fb",
+      "qualification": "11253082"
+    },
+    {
+      "path": "patches/display/0075-o82-atomic-color.patch",
+      "sha256": "629a5b5e9ecce9a1b75299642075e34feb3cb5f4824d6d18d498cee941d70267",
+      "reference_blob": "f9a22fadcac0a9d945b8e5a0baf1173cd494658e",
+      "qualification": "11253082"
+    },
+    {
+      "path": "tests/o82-platform-contract.sh",
+      "sha256": "e358fedbc49f2edea90e2688cc0aea5ef77f33615d98fce14e80fbaa082b4512",
+      "reference_blob": "e9016b1e358938d098505fe44bdf917dd7248bed",
+      "qualification": "11253082"
+    },
+    {
+      "path": "tests/o82-lutbus-contract.c",
+      "sha256": "2b5e122bef7276b40b3f31450ab4756461b83495c5adcec9bbdc4923661fef9a",
+      "reference_blob": "7261f66f2dc1e88b8b08a5efd43546dea4f50f6b",
+      "qualification": "11253082"
+    },
+    {
+      "path": "tests/o82-lutbus-contract.sh",
+      "sha256": "896941d01918f788198ed07ff1933af03038efba7bcce70f8df32b44866fa162",
+      "reference_blob": "47e44c6df77bbe42e6f541efad80e8ed276b6541",
+      "qualification": "11253082"
+    },
+    {
+      "path": "tests/o82-regdma-transport-contract.c",
+      "sha256": "ff6b536038bf1a63a8c4be34f76fbfa35866ef0b03d3ee4ec2d3b04888d5659c",
+      "reference_blob": "6be3adb350f5801a466c40ade8b44b40b8435c69",
+      "qualification": "11253082"
+    },
+    {
+      "path": "tests/o82-regdma-transport-contract.sh",
+      "sha256": "b5e00865ac5fbaffe9048382cdf637f3c0a0b8d33395f2ee532296ebb8906b08",
+      "reference_blob": "9c77346ebb6f607b245613b99ecf238e54298900",
+      "qualification": "11253082"
+    },
+    {
+      "path": "tests/o82-atomic-contract.c",
+      "sha256": "0f71da31d862fa8a3f80ec2aa684c26539443aca134869a2857eb8d00fc316bf",
+      "reference_blob": "653eb49fac1489d50fe2c9aeb651cfd523a79115",
+      "qualification": "11253082"
+    },
+    {
+      "path": "tests/o82-atomic-contract.sh",
+      "sha256": "9c589bc0109a7bf9a4a336a5c1f636717deeb3eeaa6ee17fbc18d991c0a9cad7",
+      "reference_blob": "b84dcb3f5c8d6e42a753a429d922903de724727e",
+      "qualification": "11253082"
+    },
+    {
+      "path": "tests/o82-atomic-package-contract.sh",
+      "sha256": "ed021dad74906a9eaa9d0a14d399c6bde3fda8eb3e8a24138e8e6dfc4959813d",
+      "qualification": "full-kernel-package-check-added-after-object-qualification"
+    }
+  ]
+}
