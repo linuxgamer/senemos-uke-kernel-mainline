@@ -8,7 +8,8 @@ Invalid v5 data, other access errors and filename/version mismatches are termina
 Existing v4 inputs retain absent memory and their earlier PA ownership.
 Remote checks passed COPR11261036:2,048 actual loader/encoder cases per
 compiler, repaired-CRC tampering and fallback/version checks. The `0.6.0-3`
-source candidate emits v5 from OEM JSON; its utility qualification is pending.
+utility emits v5 from OEM JSON and passed COPR11261174:1,024 complete
+JSON/bundle/actual C loader cases and12,288 paired command streams per compiler.
 Cumulative kernel integration, private delivery and
 physical memory/protection/HDR acceptance remain incomplete. Initial color
 selection remains empty. Historical candidate observations below retain their
@@ -18,7 +19,7 @@ The v5 generator converts all three memory-color regions and ORs their global
 hue, saturation, value, contrast, SixZone and blending protection, including
 protection from disabled regions. Each usable preset includes explicit active
 or neutral state. Conversion preserves the O82 parser's observed skin
-saturation edge behavior and refuses malformed typed fields. The remote
+saturation edge behavior and refuses malformed typed fields. The qualified remote
 pipeline check connects actual JSON conversion, generated bundles, the native
 C loader and paired command encoding for both supplier identities. Private
 profiles remain local; the package contains no factory tables. Active opaque

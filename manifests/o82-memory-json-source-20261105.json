@@ -71,7 +71,7 @@
     "initial_color_selection_changed": false
   },
   "qualification": {
-    "state": "pending",
+    "state": "succeeded",
     "scope": "Production JSON/compiler -> generated v5 bundle -> actual native C loader -> actual paired command encoder, optimized and sanitized; retained utility/ICC/HSIC/SixZone and actual former gamut-source rejection",
     "private_input_exported": false,
     "previous_trials": [
@@ -92,7 +92,25 @@
         "passed": "Production utility compilation and optimized/sanitized self-tests, EDID and actual v4 loader passed",
         "reason": "The fixture minimal linux/types.h shadows system UAPI types needed by POSIX scheduler/stat headers in the actual C++ utility. Wrap the real UAPI header and retain the native u8 alias; production code is unchanged."
       }
-    ]
+    ],
+    "copr_build": 11261174,
+    "source_commit": "8bf314f6aac5249781e9fc2c95fd6b8448d7d75b",
+    "worker": "fedora-rawhide-aarch64",
+    "gcc_optimized": true,
+    "clang_asan_ubsan": true,
+    "complete_pipeline_cases_per_compiler": 1024,
+    "table_inputs_per_compiler": 4096,
+    "paired_command_streams_per_compiler": 12288,
+    "checks_per_compiler": 116605,
+    "skin_saturation_edge_difference_controls": 2,
+    "retained_checks": {
+      "hsic_parser_wire": 16479,
+      "hsic_scalar": 41340,
+      "sixzone_parser_wire": 30724,
+      "sixzone_scalar": 25155,
+      "gamut_grid": 29532,
+      "former_gamut_failures": 14583
+    }
   },
   "integration": {
     "shared_kernel_queue_required": true,
@@ -161,5 +179,16 @@
       "path": "LICENSES/GPL-2.0-only.txt",
       "sha256": "f6b78c087c3ebdf0f3c13415070dd480a3f35d8fc76f3d02180a407c1c812f79"
     }
-  ]
+  ],
+  "repository_delivery": {
+    "project": "mcc45tr/uke-linux-unstable",
+    "primary_sha256": "48fe8d89f5cfe48439430236b90bdcdda890ddad230a4ed8e7f6890bbcbbb8b9",
+    "package_sha256": "c6dae1a7448d7bc76ce9d9a015386faff9442e5a6d3f9c2386bc56af82b2e282",
+    "package_bytes": 71108,
+    "package_url": "https://download.copr.fedorainfracloud.org/results/mcc45tr/uke-linux-unstable/fedora-rawhide-aarch64/Packages/u/uke-o82-color-profile-0.6.0-3.fc46.aarch64.rpm",
+    "actual_payload_verified": true,
+    "no_firmware_or_python_payload": true,
+    "all_runtime_capabilities_already_installed": true,
+    "local_installation": false
+  }
 }
