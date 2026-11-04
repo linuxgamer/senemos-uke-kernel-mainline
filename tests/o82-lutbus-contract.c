@@ -6,14 +6,17 @@
 #include <string.h>
 #include "dpu_o82_profiles.h"
 #include "dpu_o82_lutbus.h"
+#include "o82-sixzone-format.h"
 
 static u8 igc[257 * 3 * 2], gamut[4913 * 3 * 2], gc[1024 * 3 * 2];
-_Alignas(16) static u8 storage[DPU_O82_LUTBUS_BYTES + 32], saved[sizeof(storage)];
+_Alignas(16) static u8 storage[DPU_O82_LUTBUS_MAX_BYTES + 32], saved[sizeof(storage)];
+static u8 sixzone[O82_SIXZONE_BYTES];
 static u8 *stream;
 static size_t cursor, bytes;
 
 static unsigned int word16(const u8 *p) { return p[0] | (unsigned int)p[1] << 8; }
 static void set16(u8 *p, unsigned int v) { p[0] = v; p[1] = v >> 8; }
+static void set32(u8 *p, unsigned int v) { for (unsigned int i = 0; i < 4; i++) p[i] = v >> (i * 8); }
 static unsigned int take32(void)
 {
 	unsigned int v = 0;
@@ -57,6 +60,55 @@ static void refused(struct dpu_o82_color_input *in, unsigned int mask, size_t ca
 	memset(storage, 0xa5, sizeof(storage)); memcpy(saved, storage, sizeof(storage)); bytes = 123;
 	assert(dpu_o82_lutbus_build(in, mask, storage + 8, cap, &bytes) == error);
 	assert(bytes == 123 && !memcmp(storage, saved, sizeof(storage)));
+}
+static void pa_protocol(void)
+{
+	set32(sixzone, 15); set32(sixzone + 4, 0xe5cc3319);
+	set32(sixzone + 8, 0x160c); set32(sixzone + 12, 0x0ba21555);
+	set32(sixzone + 16, 0x3a359b33); set32(sixzone + 20, 0x046904d4);
+	sixzone[24] = 1; sixzone[25] = 2; set32(sixzone + 28, 384);
+	for (unsigned int i = 0; i < 384 * 5; i++) set16(sixzone + 32 + 2 * i, (i * 23 + 7) % 4096);
+	assert(o82_sixzone_valid(sixzone, sizeof(sixzone)));
+	const unsigned int masks[] = {3,5,6};
+	for (unsigned int m = 0; m < 3; m++) for (unsigned int enabled = 0; enabled < 2; enabled++) {
+		struct dpu_o82_color_input in = input();
+		in.pa_managed = true; in.sixzone = enabled ? sixzone : NULL;
+		in.sixzone_bytes = enabled ? sizeof(sixzone) : 0;
+		in.pa_mode[0] = 0x20100101; in.pa_mode[1] = 0x24100101; in.pa_mode[2] = 0x08100101;
+		memset(storage, 0xa5, sizeof(storage)); stream = storage + 8; bytes = 0;
+		assert(!dpu_o82_lutbus_build(&in, masks[m], stream, DPU_O82_LUTBUS_MAX_BYTES, &bytes));
+		assert(bytes == (enabled ? DPU_O82_LUTBUS_MAX_BYTES : DPU_O82_LUTBUS_PA_OFF_BYTES));
+		cursor = DPU_O82_LUTBUS_BYTES;
+		if (enabled) {
+			lut(3, 5, sixzone + 32, 384 * 5, 384 * 5);
+			const unsigned int values[] = {0xe5cc3319,0x160c,0x0ba21555,0x3a359b33,0x046904d4};
+			for (unsigned int j = 0; j < 5; j++) { expect32(0x10000908 + 4 * j); expect32(values[j]); }
+			expect32(0x10000920); expect32(1);
+		}
+		for (unsigned int i = 0; i < 3; i++) {
+			if (!(masks[m] & (1U << i))) continue;
+			expect32(0x18180114); expect32((1U << i) << 17);
+			if (enabled) { expect32(0x20000840); expect32(0xfff); expect32(0x9000); }
+			expect32(0x20000800); expect32(0x1fefffff);
+			expect32(enabled ? 0xe0100000 : i ? 0x100000 : 0);
+		}
+		assert(cursor == bytes);
+		for (unsigned int i = 0; i < 8; i++) assert(storage[i] == 0xa5);
+		for (size_t i = bytes + 8; i < sizeof(storage); i++) assert(storage[i] == 0xa5);
+	}
+	struct dpu_o82_color_input in = input(); in.pa_managed = true;
+	in.sixzone = sixzone; in.sixzone_bytes = sizeof(sixzone);
+	refused(&in, 3, DPU_O82_LUTBUS_MAX_BYTES - 1, -ENOSPC);
+	in.sixzone_bytes--; refused(&in, 3, DPU_O82_LUTBUS_MAX_BYTES, -EINVAL); in.sixzone_bytes++;
+	in.pa_managed = false; refused(&in, 3, DPU_O82_LUTBUS_MAX_BYTES, -EINVAL); in.pa_managed = true;
+	sixzone[26] = 1; refused(&in, 3, DPU_O82_LUTBUS_MAX_BYTES, -EINVAL); sixzone[26] = 0;
+	set16(sixzone + 32, 4096); refused(&in, 3, DPU_O82_LUTBUS_MAX_BYTES, -EINVAL);
+	set16(sixzone + 32, 7);
+	memset(storage, 0xa5, sizeof(storage)); memcpy(storage + 8, sixzone, sizeof(sixzone));
+	memcpy(saved, storage, sizeof(storage)); in.sixzone = storage + 8; bytes = 123;
+	assert(dpu_o82_lutbus_build(&in, 3, storage + 8, DPU_O82_LUTBUS_MAX_BYTES, &bytes) == -EINVAL);
+	assert(bytes == 123 && !memcmp(saved, storage, sizeof(storage)));
+	puts("Actual SixZone LUTBUS: five components,192 transfers, exact controls, per-DSPP PA preservation, disable and refusal-before-write passed; no hardware operation");
 }
 int main(void)
 {
@@ -117,5 +169,6 @@ int main(void)
 	memset(storage, 0xa5, sizeof(storage)); memcpy(saved, storage, sizeof(storage));
 	assert(dpu_o82_lutbus_build(&in, 3, storage, sizeof(storage), (size_t *)(storage + 16)) == -EINVAL);
 	assert(!memcmp(storage, saved, sizeof(storage)));
+	pa_protocol();
 	puts("Actual Cliffs IGC4/gamut4.3/GC1.8 stream: all paired DSPP masks, RGB/GBR packing, endpoints, LUT alignment/padding, three-NOP workaround, bounds and refusal-before-write passed; no DMA or hardware operation");
 }

@@ -19,7 +19,7 @@ typedef uint32_t u32;
 #define HDMI_EOTF_TRADITIONAL_GAMMA_SDR 0
 #define HDMI_EOTF_SMPTE_ST2084 2
 enum dpu_dspp { DSPP_0=1,DSPP_1,DSPP_2,DSPP_3,DSPP_MAX };
-enum { DPU_DSPP_PCC=1,DPU_DSPP_GC,DPU_DSPP_IGC,DPU_DSPP_GAMUT };
+enum { DPU_DSPP_PCC=1,DPU_DSPP_GC,DPU_DSPP_IGC,DPU_DSPP_GAMUT,DPU_DSPP_PA };
 enum { INTF_1=2,INTF_2,INTF_MODE_VIDEO=1,DPU_ENC_DISABLED=0 };
 struct mutex { bool held; };
 static void mutex_lock(struct mutex *m) { assert(!m->held);m->held=true; }
@@ -52,7 +52,7 @@ struct dpu_o82_regdma { bool closing; };
 struct dpu_kms { struct msm_kms base; struct dpu_o82_color *o82_color; struct dpu_o82_regdma *o82_regdma; };
 struct msm_drm_private { struct msm_kms *kms; };
 struct dpu_o82_profiles { const void *fw; unsigned int selected; };
-struct dpu_o82_color_input { const u8 *igc,*gamut,*gc; unsigned int primaries,dither_strength; bool dither_enabled; };
+struct dpu_o82_color_input { const u8 *igc,*gamut,*gc; unsigned int primaries,dither_strength; bool dither_enabled,pa_managed; };
 struct dpu_hw_gc_lut { u32 c0[512],c1[512],c2[512],flags; };
 struct dpu_hw_intf_status { unsigned int is_en; };
 struct dpu_hw_intf { unsigned int idx; bool running; struct { void (*get_status)(struct dpu_hw_intf *,struct dpu_hw_intf_status *); } ops; };
@@ -81,11 +81,11 @@ static void *kmalloc(size_t n,int flags) { assert(n==6144 && flags==0);return no
 static void kfree(void *p) { free(p); }
 #define drm_err(D,F,E) ((void)(D),(void)(F),(void)(E),errors++)
 static int dpu_o82_profiles_input(const struct dpu_o82_profiles *p,unsigned int wide,unsigned int pq,struct dpu_o82_color_input *in) {
- assert(expected_lock->held&&p==expected_profiles && p->fw && wide<2 && pq<2);memset(in,0,sizeof(*in));in->gc=factory_gc;return 0;
+ assert(expected_lock->held&&p==expected_profiles && p->fw && wide<2 && pq<2);memset(in,0,sizeof(*in));in->gc=factory_gc;in->pa_managed=true;return 0;
 }
 static void dpu_o82_profiles_unload(struct dpu_o82_profiles *p) { assert(expected_lock->held&&p==expected_profiles);if(p->fw)unloads++;p->fw=NULL; }
 static int dpu_o82_power_upload(struct dpu_kms *kms,struct dpu_hw_ctl *ctl,const struct dpu_o82_color_input *in,unsigned int mask) {
- assert(expected_lock->held&&kms&&ctl&&reads>=2&&mask==expected_mask);assert(o82_hdr_u16(in->gc+257*6)==766);
+ assert(expected_lock->held&&kms&&ctl&&reads>=2&&mask==expected_mask&&in->pa_managed);assert(o82_hdr_u16(in->gc+257*6)==766);
  assert(o82_hdr_u16(in->gc+257*6+2)==42&&o82_hdr_u16(in->gc+257*6+4)==36);uploads++;return upload_error;
 }
 static void get_status(struct dpu_hw_intf *intf,struct dpu_hw_intf_status *s) { reads++;s->is_en=intf->running; }
@@ -132,9 +132,14 @@ int main(void) {
   dspp[0].idx=ids[m][0];dspp[1].idx=ids[m][1];expected_mask=masks[m];reads=0;
   memset(ctl.pending_dspp_flush_mask,0,sizeof(ctl.pending_dspp_flush_mask));ctl.pending_flush_mask=0;
   assert(!dpu_o82_color_check(&crtc,&state.base)&&!dpu_o82_color_commit(&crtc));
-  assert(ctl.pending_dspp_flush_mask[ids[m][0]-1]==44&&ctl.pending_dspp_flush_mask[ids[m][1]-1]==44);
+  assert(ctl.pending_dspp_flush_mask[ids[m][0]-1]==45&&ctl.pending_dspp_flush_mask[ids[m][1]-1]==45);
  }
- upload_error=-ETIMEDOUT;assert(dpu_o82_color_commit(&crtc)==-ETIMEDOUT&&color.failed);
+ for(unsigned int fault=0;fault<2;fault++) {
+  upload_error=fault?-EIO:-ETIMEDOUT;u32 old_flush[4];memcpy(old_flush,ctl.pending_dspp_flush_mask,sizeof(old_flush));
+  assert(dpu_o82_color_commit(&crtc)==upload_error&&color.failed&&dpu_o82_color_blocked(&encoder.base));
+  assert(!memcmp(old_flush,ctl.pending_dspp_flush_mask,sizeof(old_flush)));color.failed=false;
+ }
+ color.failed=true;
  unsigned int before=uploads;assert(dpu_o82_color_commit(&crtc)==-EIO&&uploads==before);color.failed=false;upload_error=0;
  no_memory=true;assert(dpu_o82_color_commit(&crtc)==-ENOMEM&&uploads==before);no_memory=false;color.failed=false;
  struct hdr_output_metadata hdr={.hdmi_metadata_type1={HDMI_EOTF_SMPTE_ST2084,0}};

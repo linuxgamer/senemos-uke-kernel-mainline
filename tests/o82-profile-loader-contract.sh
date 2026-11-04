@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # COPR/host only: actual kernel loader with a synthetic firmware provider.
 set -Eeuo pipefail
+test ! -e /etc/senemos/kernel-update.conf
 root=${1:-$(cd -- "$(dirname -- "$0")/.." && pwd)}
 scratch=$(mktemp -d)
 trap 'find "$scratch" -depth -delete' EXIT

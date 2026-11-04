@@ -156,10 +156,22 @@ record/pointers unchanged. The recorded v2 preparation has 59 records: 47 compil
 transforms and 12 explicitly blocked nonzero picture/HDR operations. That
 preparation does not complete the full native color objective.
 
-The new v3 compiler/loader source carries explicit bounded SixZone data and
-rejects older input. Its remote utility qualification is pending; complete
-paired PA hardware integration and kernel qualification are separate gates.
+The v3 compiler/loader carries explicit bounded SixZone data and rejects older
+input. Utility `0.4.0-1` passed
+[COPR 11253576](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11253576/),
+including 30,724 actual parser/wire/shared-state checks per optimized/sanitized
+run and the actual loader. Complete kernel qualification remains a separate gate.
 The delivered `6503` cohort and its disabled default are unchanged.
+
+The paired PA source appends SixZone LUTBUS block3 (192 transfers), exact
+threshold/PWL/SV writes and individual shared hold/mode modifies. The power
+wrapper admits only the exact Uke catalog, reads each selected DSPP's current
+state under held runtime power and verifies controls after DMA. Disable retains
+another PA feature's enable state; the actual CRTC stages shared PA flush bit0
+for both DSPPs. The command buffer accommodates 41,288 bytes while descriptors
+cover the selected stream length. Complete remote qualification is pending;
+private data delivery, all remaining picture/HDR operations and physical
+acceptance remain open.
 
 The 4 November tablet inspection found neither fixed native bundle nor the
 `uke-o82-color-profile` package installed. Earlier private ICC trials describe

@@ -113,6 +113,15 @@ struct dpu_hw_vbif {
 };
 #endif
 EOF
+cat > "$scratch/dpu_hw_catalog.h" <<'EOF'
+#ifndef TEST_CATALOG_H
+#define TEST_CATALOG_H
+#include "linux/types.h"
+enum { DSPP_0 = 1, DSPP_1, DSPP_2 };
+struct dpu_dspp_cfg { u32 id,base,len; };
+struct dpu_mdss_cfg { u32 dspp_count; const struct dpu_dspp_cfg *dspp; };
+#endif
+EOF
 cat > "$scratch/dpu_kms.h" <<'EOF'
 #ifndef TEST_KMS_H
 #define TEST_KMS_H
@@ -120,6 +129,7 @@ cat > "$scratch/dpu_kms.h" <<'EOF'
 #include "linux/platform_device.h"
 #include "dpu_hw_top.h"
 #include "dpu_hw_vbif.h"
+#include "dpu_hw_catalog.h"
 struct dpu_kms {
     struct drm_device *dev;
     struct platform_device *pdev;
@@ -127,6 +137,8 @@ struct dpu_kms {
     struct dpu_o82_regdma *o82_regdma;
     struct dpu_hw_mdp *hw_mdp;
     struct dpu_hw_vbif *hw_vbif;
+    void *mmio;
+    const struct dpu_mdss_cfg *catalog;
 };
 #endif
 EOF

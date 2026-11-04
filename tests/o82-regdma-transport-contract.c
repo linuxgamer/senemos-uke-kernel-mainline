@@ -12,6 +12,7 @@
 #include "dpu_o82_upload.h"
 #include "dpu_o82_lutbus.h"
 #include "dpu_o82_profiles.h"
+#include "o82-sixzone-format.h"
 #include "msm_gem.h"
 #include "linux/io.h"
 #include "dpu_kms.h"
@@ -26,6 +27,9 @@
 enum completion { DONE, TIMEOUT, ERROR, ERROR_AND_DONE, QUEUE1_ONLY };
 static unsigned char registers[0x7000], control[0x200];
 static unsigned char mdp_registers[0x400], vbif_registers[0x1000];
+static unsigned char pa_mmio[0x5a000], sixzone_data[O82_SIXZONE_BYTES];
+static unsigned int expected_command_mask = 3, pa_reads, dropped_pa_reg;
+static int dropped_pa_dspp = -1;
 static enum completion outcome;
 static unsigned int reset_count, fail_reset_from, trigger_count;
 static unsigned int writes, reads, dma_barriers, io_barriers, status_reads;
@@ -45,7 +49,7 @@ static bool halt_blocked, halt_wrong_half, unhalt_blocked, dropped_halt;
 static bool require_rearm, detached;
 static unsigned int reset_queues, close_sleeps, close_errors, detach_count;
 static struct drm_gem_object command_bo;
-static unsigned char commands[DPU_O82_LUTBUS_BYTES];
+static unsigned char commands[DPU_O82_LUTBUS_MAX_BYTES];
 static unsigned int allocations, releases;
 static int allocation_error;
 static u64 allocation_iova = 0x1000;
@@ -190,11 +194,50 @@ static void test_drain_error(struct device *dev, int error)
 	close_errors++;
 }
 
+/* Interpret actual commands, including preserved-field modifies on each DSPP. */
+static void apply_pa_commands(void)
+{
+	const unsigned int bases[] = { 0x54000, 0x56000, 0x58000 };
+	unsigned int at = 0, mask = 0;
+	unsigned int length = (load(registers, selected_ctl * 0x1000 + 4) & 0x3fff) * 4;
+
+	if (!command_owner || !command_owner->command_bo || !command_kms || !command_kms->mmio)
+		return;
+	assert(length <= sizeof(commands) && command_owner->lock.locked);
+	while (at < length) {
+		unsigned int op = load(commands, at); at += 4;
+
+		if (!op) continue;
+		assert(at + 4 <= length);
+		if (op == 0x18180114) { mask = load(commands, at) >> 17; at += 4; continue; }
+		unsigned int value = load(commands, at); at += 4;
+		if ((op >> 28) == 6) { at += ((value >> 16) & 255) * (value & 65535) * 4; continue; }
+		if ((op >> 28) == 3) { at += value * 4; continue; }
+		assert((op >> 28) == 1 || (op >> 28) == 2);
+		unsigned int reg = op & 0xfffff, preserve = 0;
+		if ((op >> 28) == 2) { preserve = value; value = load(commands, at); at += 4; }
+		if (reg != 0x800 && reg != 0x840 && reg != 0x920 && (reg < 0x908 || reg > 0x918)) continue;
+		for (unsigned int i = 0; i < 3; i++) {
+			if (!(mask & BIT(i)) || ((int)i == dropped_pa_dspp && reg == dropped_pa_reg)) continue;
+			store(pa_mmio, bases[i] + reg, (load(pa_mmio, bases[i] + reg) & preserve) | value);
+		}
+	}
+	assert(at == length);
+}
+
 uint32_t readl(const volatile void *address)
 {
 	uintptr_t at = (uintptr_t)address - (uintptr_t)registers;
 	unsigned int base = selected_ctl * 0x1000;
 
+	if ((uintptr_t)address >= (uintptr_t)pa_mmio &&
+	    (uintptr_t)address < (uintptr_t)pa_mmio + sizeof(pa_mmio)) {
+		assert(command_owner->power_lock.locked && runtime_usage > 0 && command_owner->power_held);
+		assert(load(mdp_registers, 0x2bc) & BIT(20));
+		assert((load(registers, 0x1f0) & FORCE) == FORCE);
+		pa_reads++;
+		return load(pa_mmio, (uintptr_t)address - (uintptr_t)pa_mmio);
+	}
 	if ((uintptr_t)address >= (uintptr_t)mdp_registers &&
 	    (uintptr_t)address < (uintptr_t)mdp_registers + sizeof(mdp_registers)) {
 		reads++; return load(mdp_registers, (uintptr_t)address - (uintptr_t)mdp_registers);
@@ -215,6 +258,7 @@ uint32_t readl(const volatile void *address)
 	if (at == base + 0x44 && active) {
 		status_reads++;
 		if (outcome == DONE && status_reads >= 3) {
+			apply_pa_commands();
 			store(registers, at, BIT(3));
 			active = false;
 			if (add_clock_bit)
@@ -335,7 +379,7 @@ void test_dma_wmb(void)
 	if (command_owner && command_owner->command_bo) {
 		assert(command_owner->lock.locked);
 		assert(load(commands, 0) == 0x18180114);
-		assert(load(commands, 4) == (3U << 17));
+		assert(load(commands, 4) == (expected_command_mask << 17));
 	}
 	dma_barriers++;
 }
@@ -346,6 +390,8 @@ static void fresh(struct dpu_o82_regdma *dma, struct dpu_hw_ctl *ctl, unsigned i
 	memset(registers, 0, sizeof(registers));
 	memset(control, 0, sizeof(control));
 	memset(mdp_registers, 0, sizeof(mdp_registers));
+	memset(pa_mmio, 0, sizeof(pa_mmio));
+	pa_reads = 0; dropped_pa_dspp = -1; dropped_pa_reg = 0; expected_command_mask = 3;
 	memset(vbif_registers, 0x33, sizeof(vbif_registers));
 	store(vbif_registers, 0x200, BIT(2));
 	store(vbif_registers, 0x204, BIT(2));
@@ -787,8 +833,79 @@ static void power_lifetime(void)
 		assert(releases == 1 && vm.references == 0);
 		vm.references = 1;
 	}
+	/* Actual PA snapshot, command interpretation and control-readback boundaries. */
+	struct dpu_dspp_cfg dspp_cfg[3];
+	struct dpu_mdss_cfg catalog;
+	const unsigned int pa_bases[] = { 0x54000, 0x56000, 0x58000 };
+	const unsigned int pa_regs[] = { 0x800, 0x840, 0x908, 0x90c, 0x910, 0x914, 0x918, 0x920 };
+	memset(sixzone_data, 0, sizeof(sixzone_data));
+	store(sixzone_data, 0, 15); store(sixzone_data, 4, 0xe5cc3319);
+	store(sixzone_data, 8, 0x160c); store(sixzone_data, 12, 0x0ba21555);
+	store(sixzone_data, 16, 0x3a359b33); store(sixzone_data, 20, 0x046904d4);
+	sixzone_data[24] = 1; sixzone_data[25] = 2; store(sixzone_data, 28, 384);
+	assert(o82_sixzone_valid(sixzone_data, sizeof(sixzone_data)));
+#define SETUP_PA() do { \
+	input.pa_managed = true; input.sixzone = sixzone_data; input.sixzone_bytes = sizeof(sixzone_data); \
+	for (unsigned int pi = 0; pi < 3; pi++) { \
+		dspp_cfg[pi] = (struct dpu_dspp_cfg){DSPP_0 + pi, pa_bases[pi], 0x1800}; \
+		store(pa_mmio, pa_bases[pi] + 0x800, 0x20100101 | (pi ? BIT(26) : 0)); \
+		store(pa_mmio, pa_bases[pi] + 0x840, 0xaaaa0123 + pi * 0x100); \
+		for (unsigned int pj = 2; pj < 8; pj++) \
+			store(pa_mmio, pa_bases[pi] + pa_regs[pj], 0xa5000000 | pi << 12 | pa_regs[pj]); \
+		input.pa_mode[pi] = 0xdeadbeef; input.pa_hold[pi] = 0xdeadbeef; \
+	} \
+	catalog = (struct dpu_mdss_cfg){3,dspp_cfg}; kms.catalog = &catalog; kms.mmio = pa_mmio; \
+} while (0)
+	for (unsigned int fault = 0; fault < 8; fault++) {
+		RESET_POWER(); SETUP_PA();
+		if (fault == 0) kms.mmio = NULL;
+		if (fault == 1) kms.catalog = NULL;
+		if (fault == 2) catalog.dspp = NULL;
+		if (fault == 3) catalog.dspp_count = 2;
+		if (fault == 4) dspp_cfg[0].id++;
+		if (fault == 5) dspp_cfg[1].base++;
+		if (fault == 6) dspp_cfg[2].len--;
+		if (fault == 7) dspp_cfg[2].id--;
+		assert(dpu_o82_power_upload(&kms, &ctl, &input, 3) == -EINVAL);
+		assert(!pa_reads && !allocations && !trigger_count && !dma.power_held && runtime_usage == 1);
+	}
+	const unsigned int pa_masks[] = {3,5,6};
+	for (unsigned int m = 0; m < 3; m++) for (unsigned int enable = 0; enable < 2; enable++) {
+		RESET_POWER(); SETUP_PA(); expected_command_mask = pa_masks[m];
+		if (!enable) { input.sixzone = NULL; input.sixzone_bytes = 0; }
+		unsigned char original[sizeof(input)]; memcpy(original, &input, sizeof(input));
+		assert(!dpu_o82_power_upload(&kms, &ctl, &input, pa_masks[m]));
+		assert(!memcmp(original, &input, sizeof(input)));
+		assert(pa_reads == (enable ? 20u : 8u) && trigger_count == 1 && !dma.power_held);
+		for (unsigned int i = 0; i < 3; i++) {
+			unsigned int mode = load(pa_mmio, pa_bases[i] + 0x800);
+			unsigned int hold = load(pa_mmio, pa_bases[i] + 0x840);
+			if (!(pa_masks[m] & BIT(i))) {
+				assert(mode == (0x20100101 | (i ? BIT(26) : 0)));
+				assert(hold == 0xaaaa0123 + i * 0x100);
+			} else {
+				assert(mode == (enable ? 0xe0100101 | (i ? BIT(26) : 0) :
+							0x101 | (i ? BIT(26) | BIT(20) : 0)));
+				assert(hold == (enable ? 0x9123 + i * 0x100 : 0xaaaa0123 + i * 0x100));
+			}
+		}
+		_dpu_kms_mmu_destroy(&kms); assert(releases == 1 && vm.references == 0); vm.references = 1;
+	}
+	for (unsigned int half = 0; half < 2; half++) for (unsigned int reg = 0; reg < 8; reg++) {
+		RESET_POWER(); SETUP_PA(); dropped_pa_dspp = half; dropped_pa_reg = pa_regs[reg];
+		assert(dpu_o82_power_upload(&kms, &ctl, &input, 3) == -EIO);
+		assert(trigger_count == 1 && !dma.power_held && runtime_usage == 1);
+		_dpu_kms_mmu_destroy(&kms); assert(releases == 1 && vm.references == 0); vm.references = 1;
+	}
+	RESET_POWER(); SETUP_PA(); outcome = TIMEOUT; fail_reset_from = 1;
+	assert(dpu_o82_power_upload(&kms, &ctl, &input, 3) == -ETIMEDOUT);
+	assert(pa_reads == 4 && dma.power_held && dma.command_bo && vm.references == 2);
+	fail_reset_from = 0;
+	_dpu_kms_mmu_destroy(&kms); assert(releases == 1 && vm.references == 0); vm.references = 1;
+#undef SETUP_PA
 #undef RESET_POWER
 	command_owner = NULL; command_kms = NULL;
 	puts("Actual O82 power/GEM/transport/shared helpers: bound managed VM, pending-resume suspend refusal, both force gates, exact eight-level LUTDMA QoS/readbacks, preserved client fields, failed-stop/clock/PM retention, recovery and suspend-before-clock memory release passed; fake providers only");
 	puts("Actual KMS MMU detach: closed admission, reset or exact upper-half xin7 ACK before GEM/VM/power release, retained ownership across failed attempts, four-queue rearm before unhalt and failed-rearm refusal passed; fake providers only");
+	puts("Actual paired PA: catalog refusal before reads/DMA, owned snapshots, enable/disable across all DSPP pairs, preserved foreign state, both-half ignored-write refusal and failed-stop retention passed; fake providers only");
 }

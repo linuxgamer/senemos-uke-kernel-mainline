@@ -24,8 +24,12 @@ if llvm-nm --undefined-only "$msm" | grep -E ' dpu_o82_(platform|regdma|upload|l
 fi
 strings "$msm" | grep -F 'o82_color_profile' >/dev/null
 for file in dpu_o82_platform.c dpu_o82_regdma.c dpu_o82_lutbus.c \
-    dpu_o82_upload.c dpu_o82_power.c dpu_o82_color.c dpu_o82_profiles.c; do
+    dpu_o82_upload.c dpu_o82_power.c dpu_o82_color.c dpu_o82_profiles.c \
+    dpu_o82_profiles.h dpu_o82_lutbus.h o82-color-firmware.h o82-sixzone-format.h; do
     cmp "$owner/src/display/$file" "$kernel/drivers/gpu/drm/msm/disp/dpu1/$file"
+done
+for supplier in 36 42; do
+    strings "$msm" | grep -F "qcom/sm7675/uke/o82-$supplier-color-v3.bin" >/dev/null
 done
 bash "$owner/tests/hardware1900-package-contract.sh" "$kernel" "$output"
 printf 'Full native MSM module: paired color functions, initial parameter, source identity and both DT resource tuples passed; no physical color/HDR acceptance\n'

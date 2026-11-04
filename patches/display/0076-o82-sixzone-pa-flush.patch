@@ -1,0 +1,20 @@
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.h b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.h
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.h
+@@ -85,5 +85,6 @@ enum {
+ 	DPU_DSPP_GC,
+ 	DPU_DSPP_IGC,
+ 	DPU_DSPP_GAMUT,
++	DPU_DSPP_PA,
+ 	DPU_DSPP_MAX
+ };
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_ctl.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_ctl.c
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_ctl.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_ctl.c
+@@ -411,3 +411,6 @@ static void dpu_hw_ctl_update_pending_flush_dspp_sub_blocks(
++	case DPU_DSPP_PA:
++		ctx->pending_dspp_flush_mask[dspp - DSPP_0] |= BIT(0);
++		break;
+ 	case DPU_DSPP_GC:
+ 		ctx->pending_dspp_flush_mask[dspp - DSPP_0] |= BIT(5);
+ 		break;

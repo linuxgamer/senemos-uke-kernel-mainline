@@ -14,7 +14,9 @@ struct drm_gpuvm;
  * MDP REG_DMA clock and VBIF QoS are held throughout execution/recovery by
  * dpu_o82_power_upload(). The supplied device and managed VM must match the
  * engine's admitted KMS; a same-DRM userspace VM is not a display VM.
- * One fixed-size WC GEM buffer belongs to this engine and its display VM.
+ * One maximum-sized WC GEM buffer belongs to this engine and its display VM;
+ * the descriptor covers the selected base, PA-disable or full SixZone stream.
+ * Managed PA snapshots must come from the powered wrapper under its lock.
  * Errors invalidate the complete paired color state. No HDR admission follows
  * merely from successful command execution.
  */

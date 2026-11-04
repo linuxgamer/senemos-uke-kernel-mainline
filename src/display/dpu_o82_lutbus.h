@@ -8,6 +8,8 @@ struct dpu_o82_color_input;
 
 /* One broadcast upload for the two DSPPs of the stopped internal output. */
 #define DPU_O82_LUTBUS_BYTES 37316U
+#define DPU_O82_LUTBUS_PA_OFF_BYTES (DPU_O82_LUTBUS_BYTES + 40U)
+#define DPU_O82_LUTBUS_MAX_BYTES (DPU_O82_LUTBUS_BYTES + 3972U)
 
 /*
  * The input belongs to a validated, retained dpu_o82_profiles firmware object.
@@ -15,7 +17,9 @@ struct dpu_o82_color_input;
  * lifetime/exclusion. This function only encodes commands: it does not grant
  * DSPP ownership, map memory, start DMA, flush a CTL or enable an output.
  * dspp_mask uses zero-based hardware indices; only two of Cliffs' three DSPPs
- * may be selected. On error neither the output nor *bytes is changed.
+ * may be selected. Managed PA appends paired enable/disable from powered
+ * snapshots; SixZone adds its bounded private payload. On error neither the
+ * output nor *bytes is changed. Capacity must cover the selected stream size.
  */
 int dpu_o82_lutbus_build(const struct dpu_o82_color_input *input,
 			unsigned int dspp_mask, void *buffer, size_t capacity,

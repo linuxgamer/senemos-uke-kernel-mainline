@@ -12,6 +12,8 @@ struct dpu_o82_color_input;
  * LUTDMA QoS setup. It preserves pre-existing force bits. Errors invalidate
  * the complete paired color state; a failed stop or cleanup retains power
  * and refuses further submissions and system-suspend clock release.
+ * Managed PA reads require the exact admitted Uke DSPP catalog. The wrapper
+ * owns both snapshots and post-upload control readback before dropping power.
  */
 int dpu_o82_power_upload(struct dpu_kms *kms, struct dpu_hw_ctl *ctl,
 			 const struct dpu_o82_color_input *input, unsigned int dspp_mask);

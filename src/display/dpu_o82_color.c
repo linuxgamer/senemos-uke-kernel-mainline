@@ -261,6 +261,8 @@ int dpu_o82_color_commit(struct drm_crtc *crtc)
 		ctl->ops.update_pending_flush_dspp(ctl, id, DPU_DSPP_IGC);
 		ctl->ops.update_pending_flush_dspp(ctl, id, DPU_DSPP_GAMUT);
 		ctl->ops.update_pending_flush_dspp(ctl, id, DPU_DSPP_GC);
+		if (input.pa_managed)
+			ctl->ops.update_pending_flush_dspp(ctl, id, DPU_DSPP_PA);
 	}
 	goto out;
 fail:

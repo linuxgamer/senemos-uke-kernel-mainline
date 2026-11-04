@@ -15,7 +15,12 @@ The actual JSON parser uses separate `SixZoneThresholds`, preserves legacy
 middle/high curve selection and refuses fractional/invalid thresholds, partial
 bands and unknown edge names. The native loader requests only the matching
 `o82-36-color-v3.bin` or `o82-42-color-v3.bin`; older bundles are refused.
-Compiler/loader qualification is pending. Complete native PA programming and
+Compiler/loader qualification passed in
+[COPR 11253576](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11253576/)
+at source `33035dff7573775fb5f7ae7e3909e36451043899`. Actual parser/wire/shared-state
+fixtures each passed 30,724 optimized/sanitized checks; actual native loader,
+25,155 converter checks and retained gamut regressions also passed.
+Complete native PA kernel qualification and
 physical acceptance remain required before applying these candidate bundles.
 
 The `0.3.0-5` source corrects factory gamut interpolation and native sampling

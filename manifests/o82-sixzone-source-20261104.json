@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "date": "2026-11-04",
-  "scope": "SixZone 2.0 source and static ABI comparison; no enabled native writer",
+  "scope": "SixZone 2.0 protocol, v3 private input and experimental paired PA writer; disabled default",
   "native_converter": {
     "path": "src/display/o82-sixzone.h",
     "test": "tests/o82-sixzone-contract.cpp",
@@ -196,11 +196,13 @@
     "disable": "clear only SixZone enable bits; clear PA enable only when no remaining memory/HSIC/histogram/SixZone feature requires it",
     "modify_opcode": "0x20000000 | relative_offset, then preserve mask, then new value",
     "flush": "OEM dspp_sub_blk_flush_tbl maps HSIC/memory/SixZone to bit0; UPDATE_MASK uses BIT(index), so zero is a valid shared PA flush bit",
-    "remaining_work": "Implement the native writer, paired shared-state ownership and fault-tested atomic enable/disable before data or preset admission"
+    "remaining_work": "Qualify the actual paired writer, powered snapshots/readback, shared flush and complete AArch64 kernel before data delivery and physical acceptance"
   },
   "private_inputs_included": false,
   "oem_code_executed": false,
   "native_sixzone_enabled": false,
+  "native_writer_present_in_source": true,
+  "native_writer_qualified": false,
   "delivered_v2_blocked_presets_unchanged": true,
   "bundle_integration": {
     "version": 3,
@@ -212,7 +214,15 @@
     "record_offset_fields": [136, 140],
     "implementation": ["src/display/o82-sixzone-format.h", "src/display/o82-color-profile.cpp", "src/display/dpu_o82_profiles.c"],
     "utility": "0.4.0-1",
-    "qualification": "pending actual parser, firmware validator and native loader checks",
+    "qualification": {
+      "build": 11253576,
+      "source_commit": "33035dff7573775fb5f7ae7e3909e36451043899",
+      "state": "succeeded",
+      "actual_parser_wire_checks_per_run": 30724,
+      "optimized_and_sanitized": true,
+      "actual_loader": true,
+      "kernel_writer_qualification": "pending"
+    },
     "kernel_writer_qualification_required": true,
     "private_inputs_included": false
   },

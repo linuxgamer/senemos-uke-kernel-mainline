@@ -17,12 +17,14 @@ git -C "$kernel" apply --check "$owner/patches/display/0074-o82-regdma-close.pat
 git -C "$kernel" apply "$owner/patches/display/0074-o82-regdma-close.patch"
 git -C "$kernel" apply --check "$owner/patches/display/0075-o82-atomic-color.patch"
 git -C "$kernel" apply "$owner/patches/display/0075-o82-atomic-color.patch"
+git -C "$kernel" apply --check "$owner/patches/display/0076-o82-sixzone-pa-flush.patch"
+git -C "$kernel" apply "$owner/patches/display/0076-o82-sixzone-pa-flush.patch"
 target=$kernel/drivers/gpu/drm/msm/disp/dpu1
 for file in dpu_o82_platform.c dpu_o82_platform.h dpu_o82_regdma.c dpu_o82_regdma.h \
     dpu_o82_upload.c dpu_o82_upload.h dpu_o82_lutbus.c dpu_o82_lutbus.h \
     dpu_o82_power.c dpu_o82_power.h \
     dpu_o82_color.c dpu_o82_color.h dpu_o82_profiles.c dpu_o82_profiles.h \
-    o82-color-firmware.h uke-o82-hdr-format.h o82-regdma.h; do
+    o82-color-firmware.h o82-sixzone-format.h uke-o82-hdr-format.h o82-regdma.h; do
     install -m644 "$owner/src/display/$file" "$target/$file"
 done
 install -Dm644 "$owner/src/display/bindings/qcom,sm7675-dpu.yaml" \

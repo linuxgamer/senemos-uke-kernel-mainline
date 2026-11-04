@@ -25,14 +25,14 @@ static int dpu_o82_upload_buffer(struct dpu_o82_regdma *dma,
 		return dma->command_vm == vm && dma->command_bo->dev == drm ? 0 : -EINVAL;
 
 	drm_gpuvm_get(vm);
-	data = msm_gem_kernel_new(drm, DPU_O82_LUTBUS_BYTES, MSM_BO_WC, vm, &bo, &iova);
+	data = msm_gem_kernel_new(drm, DPU_O82_LUTBUS_MAX_BYTES, MSM_BO_WC, vm, &bo, &iova);
 	if (IS_ERR(data)) {
 		drm_gpuvm_put(vm);
 		return PTR_ERR(data);
 	}
 	if (!data || !bo ||
-	    !drm_gpuvm_range_valid(vm, iova, DPU_O82_LUTBUS_BYTES) ||
-	    !o82_regdma_make_descriptor(1, iova, DPU_O82_LUTBUS_BYTES, &descriptor)) {
+	    !drm_gpuvm_range_valid(vm, iova, DPU_O82_LUTBUS_MAX_BYTES) ||
+	    !o82_regdma_make_descriptor(1, iova, DPU_O82_LUTBUS_MAX_BYTES, &descriptor)) {
 		msm_gem_kernel_put(bo, vm);
 		drm_gpuvm_put(vm);
 		return -EINVAL;
@@ -58,7 +58,7 @@ int dpu_o82_upload(struct dpu_o82_regdma *dma, struct drm_device *drm,
 	    dma->kms_owner->base.vm != vm || !to_msm_vm(vm)->managed ||
 	    !ctl || !ctl->hw.blk_addr || !input ||
 	    (dspp_mask != 3 && dspp_mask != 5 && dspp_mask != 6) ||
-	    !o82_regdma_make_descriptor(ctl->idx, 0x1000, DPU_O82_LUTBUS_BYTES, &descriptor))
+	    !o82_regdma_make_descriptor(ctl->idx, 0x1000, DPU_O82_LUTBUS_MAX_BYTES, &descriptor))
 		return -EINVAL;
 
 	mutex_lock(&dma->lock);
@@ -78,10 +78,11 @@ int dpu_o82_upload(struct dpu_o82_regdma *dma, struct drm_device *drm,
 	if (ret)
 		goto out;
 	ret = dpu_o82_lutbus_build(input, dspp_mask, dma->command_data,
-				 DPU_O82_LUTBUS_BYTES, &bytes);
+				 DPU_O82_LUTBUS_MAX_BYTES, &bytes);
 	if (ret)
 		goto out;
-	if (bytes != DPU_O82_LUTBUS_BYTES) {
+	if (bytes != DPU_O82_LUTBUS_BYTES && bytes != DPU_O82_LUTBUS_PA_OFF_BYTES &&
+	    bytes != DPU_O82_LUTBUS_MAX_BYTES) {
 		ret = -EIO;
 		goto out;
 	}

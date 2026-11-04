@@ -10,9 +10,12 @@
 #include "dpu_hw_top.h"
 #include "dpu_hw_vbif.h"
 #include "dpu_kms.h"
+#include "dpu_hw_catalog.h"
 #include "dpu_o82_power.h"
+#include "dpu_o82_profiles.h"
 #include "dpu_o82_regdma.h"
 #include "dpu_o82_upload.h"
+#include "o82-sixzone-format.h"
 
 #define O82_MDP_CLOCK 0x2bc
 #define O82_MDP_FORCE BIT(20)
@@ -135,11 +138,65 @@ static int dpu_o82_power_release(struct dpu_kms *kms)
 	return 0;
 }
 
+static int dpu_o82_pa_snapshot(struct dpu_kms *kms,
+			       struct dpu_o82_color_input *input, unsigned int mask)
+{
+	static const unsigned int bases[] = { 0x54000, 0x56000, 0x58000 };
+	unsigned int i;
+
+	if (!input->pa_managed)
+		return 0;
+	if (!kms->mmio || !kms->catalog || !kms->catalog->dspp || kms->catalog->dspp_count != 3)
+		return -EINVAL;
+	for (i = 0; i < 3; i++) {
+		const struct dpu_dspp_cfg *cfg = &kms->catalog->dspp[i];
+
+		if (cfg->id != DSPP_0 + i || cfg->base != bases[i] || cfg->len != 0x1800)
+			return -EINVAL;
+	}
+	for (i = 0; i < 3; i++) {
+		void __iomem *base = kms->mmio + bases[i];
+
+		if (!(mask & BIT(i)))
+			continue;
+		input->pa_mode[i] = readl(base + 0x800);
+		input->pa_hold[i] = readl(base + 0x840);
+	}
+	return 0;
+}
+
+static int dpu_o82_pa_verify(struct dpu_kms *kms,
+			     const struct dpu_o82_color_input *input, unsigned int mask)
+{
+	unsigned int i, j;
+
+	if (!input->pa_managed)
+		return 0;
+	for (i = 0; i < 3; i++) {
+		void __iomem *base = kms->mmio + kms->catalog->dspp[i].base;
+
+		if (!(mask & BIT(i)))
+			continue;
+		if (readl(base + 0x800) != o82_sixzone_pa_mode(input->pa_mode[i], input->sixzone) ||
+		    readl(base + 0x840) != o82_sixzone_pa_hold(input->pa_hold[i], input->sixzone))
+			return -EIO;
+		if (!input->sixzone)
+			continue;
+		for (j = 0; j < 5; j++)
+			if (readl(base + 0x908 + 4 * j) != o82_hdr_u32(input->sixzone + 4 + 4 * j))
+				return -EIO;
+		if (readl(base + 0x920) != ((o82_hdr_u32(input->sixzone) >> 3) & 1))
+			return -EIO;
+	}
+	return 0;
+}
+
 int dpu_o82_power_upload(struct dpu_kms *kms, struct dpu_hw_ctl *ctl,
 			 const struct dpu_o82_color_input *input, unsigned int dspp_mask)
 {
 	static const u32 priority[] = {4, 4, 4, 4, 5, 5, 5, 5};
 	struct dpu_o82_regdma *dma;
+	struct dpu_o82_color_input prepared;
 	u32 value;
 	unsigned int level;
 	int ret, cleanup;
@@ -147,6 +204,7 @@ int dpu_o82_power_upload(struct dpu_kms *kms, struct dpu_hw_ctl *ctl,
 	if (!dpu_o82_power_ready(kms) || !input || !ctl ||
 	    (dspp_mask != 3 && dspp_mask != 5 && dspp_mask != 6))
 		return -EINVAL;
+	prepared = *input;
 	dma = kms->o82_regdma;
 	mutex_lock(&dma->power_lock);
 	if (READ_ONCE(dma->closing)) {
@@ -187,7 +245,12 @@ int dpu_o82_power_upload(struct dpu_kms *kms, struct dpu_hw_ctl *ctl,
 			goto release;
 		}
 	}
-	ret = dpu_o82_upload(dma, kms->dev, kms->base.vm, ctl, input, dspp_mask);
+	ret = dpu_o82_pa_snapshot(kms, &prepared, dspp_mask);
+	if (ret)
+		goto release;
+	ret = dpu_o82_upload(dma, kms->dev, kms->base.vm, ctl, &prepared, dspp_mask);
+	if (!ret)
+		ret = dpu_o82_pa_verify(kms, &prepared, dspp_mask);
 release:
 	cleanup = dpu_o82_power_release(kms);
 	if (!ret)

@@ -1,25 +1,28 @@
 #!/usr/bin/env bash
-# COPR only: extend the complete 6000 kernel with the qualified atomic caller.
+# COPR only: retain6000 and qualify paired atomic SixZone/PA integration.
 set -Eeuo pipefail
 test ! -e /etc/senemos/kernel-update.conf
 [[ $(rpm --eval '%{_host_cpu}') == aarch64 && $(rpm --eval '%{fedora}') == 46 ]]
 owner=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 output=$(realpath -m "${1:?Pass the remote source result directory}")
-revision=${2:?Pass a fresh kernel revision above 6502}
-[[ $revision =~ ^[1-9][0-9]{3,4}$ && $revision -gt 6502 ]]
-manifest=manifests/o82-atomic-source-20261104.json
+revision=${2:?Pass a fresh kernel revision of at least 7000}
+[[ $revision =~ ^[1-9][0-9]{3,4}$ && $revision -ge 7000 ]]
+manifest=manifests/o82-sixzone-kernel-source-20261104.json
 (cd "$owner"; jq -r '.imports[]|.sha256+"  "+.path' "$manifest" | sha256sum -c --strict --quiet -)
+(cd "$owner"; jq -r '.qualified_sixzone_compiler.inputs[]|.sha256+"  "+.path' "$manifest" | sha256sum -c --strict --quiet -)
 # The 6000 history object is no longer available, while its exact source RPM
 # remains archived. Admit that immutable artifact only by the full-file digest,
 # RPM identity and complete profile/boot receipts below. A missing mutable API
 # object does not replace any of those identity checks.
-for pair in 11253082:uke-o82-kms-check:7.3.1-11; do
+for pair in 11253576:uke-o82-color-profile:0.4.0-1; do
     build=${pair%%:*} rest=${pair#*:}
     name=${rest%%:*} version=${rest#*:}
     curl -fsSL --max-time 45 "https://copr.fedorainfracloud.org/api_3/build/$build" | \
         jq -e --arg name "$name" --arg version "$version" \
         '.state=="succeeded" and .source_package.name==$name and .source_package.version==$version' >/dev/null
 done
+curl -fsSL --max-time 45 https://copr.fedorainfracloud.org/api_3/build/source-build-config/11253576 | \
+    jq -e '.source_dict.script | contains("commit=33035dff7573775fb5f7ae7e3909e36451043899\n")' >/dev/null
 bash "$owner/packaging/native/refuse-published-release.sh" \
     senemos-uke-linux-kernel-mainline "7.3.1-$revision"
 [[ ! -e $output || (-d $output && -z $(find "$output" -mindepth 1 -maxdepth 1 -print -quit)) ]]
@@ -78,7 +81,7 @@ jq -e '.source_mode=="retained5000-with-qualified-camera4000-front-provider" and
  (.native_hdr_advertised|not) and (.physical_acceptance|not)' \
     "$profile/source-composition.json" >/dev/null
 # This one inherited call follows the retained retirement patches and applies
-# 0072 for the first time. Updating its source also adds 0073--0075 there.
+# 0072 for the first time. Updating its source also adds 0073--0076 there.
 [[ $(grep -Fxc 'bash "$profile/src/display/prepare-o82-regdma.sh" "$kernel"' "$profile/prepare.sh") == 1 ]]
 cp "$profile/SHA256SUMS" "$stage/parent-profile.sha256"
 cp "$boot/lock.json" "$stage/parent-boot-lock.json"
@@ -129,14 +132,18 @@ jq -Rn '[inputs]' < "$stage/overlays" > "$stage/overlays.json"
 jq --arg commit "$commit" --arg revision "$revision" --arg hash "$parent_hash" \
     --slurpfile overlays "$stage/overlays.json" '. + {
  source_commit:$commit,kernel_release:("7.3.1-"+$revision),rpm_revision:$revision,
- source_mode:"retained6000-with-qualified-paired-atomic-color-caller",
+ source_mode:"retained6000-with-paired-sixzone-v3-color-caller",
  parent_copr_build:11252822,parent_srpm_sha256:$hash,
  parent_source_commit:"bf1f6634bafc214219de1c48b3fc72a181485343",
  parent_composition:"source-composition-before6500.json",overlays:$overlays[0],
- o82_atomic_source_manifest:"manifests/o82-atomic-source-20261104.json",
+ o82_atomic_source_manifest:"manifests/o82-sixzone-kernel-source-20261104.json",
  qualified_o82_kms_check:11253082,
  qualified_o82_source_commit:"48aa87956b9d59c09dd8e0a82279c757cd59fb03",
- o82_after_reference_changes:["explicit signed ARRAY_SIZE bound for the existing int CTL index"],
+ qualified_o82_sixzone_utility_check:11253576,
+ qualified_o82_sixzone_utility_source:"33035dff7573775fb5f7ae7e3909e36451043899",
+ o82_after_reference_changes:["bounded SixZone v3 firmware and paired shared PA ownership"],
+ o82_private_color_bundle_version:3,o82_sixzone_software_support:true,
+ o82_lutbus_max_bytes:41288,o82_shared_pa_flush_bit:0,
  o82_final_kernel_qualification_required:true,
  o82_atomic_color_caller:true,o82_color_initial_preset:"",
  o82_color_private_firmware_required:true,o82_color_dma_enabled:false,
@@ -158,6 +165,7 @@ jq --arg commit "$commit" --arg revision "$revision" --arg hash "$parent_hash" \
  "drivers/gpu/drm/msm/disp/dpu1/dpu_o82_profiles.c",
  "drivers/gpu/drm/msm/disp/dpu1/dpu_o82_profiles.h",
  "drivers/gpu/drm/msm/disp/dpu1/o82-color-firmware.h",
+ "drivers/gpu/drm/msm/disp/dpu1/o82-sixzone-format.h",
  "drivers/gpu/drm/msm/disp/dpu1/uke-o82-hdr-format.h"],
  native_hdr_advertised:false,device_installation:false,physical_acceptance:false
 }' "$profile/source-composition-before6500.json" > "$profile/source-composition.json"
@@ -180,6 +188,10 @@ awk -v revision="$revision" '
   print "CC=clang bash native-profile/tests/msm-retirement-proof-contract.sh \"$PWD\""
   print "CC=clang bash native-profile/tests/dpu-reservation-contract.sh \"$PWD\" \"$PWD/native-generated/dpu-reservation-before56\""
   print "CC=clang bash native-profile/tests/dpu-color-topology-contract.sh \"$PWD/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c\""
+  print "bash native-profile/tests/o82-profile-loader-contract.sh native-profile"
+  print "bash native-profile/tests/o82-lutbus-contract.sh"
+  print "bash native-profile/tests/o82-regdma-transport-contract.sh native-profile \"$PWD\""
+  print "bash native-profile/tests/o82-atomic-contract.sh native-profile \"$PWD\""
   print "printf '\''Final-source legacy AVR/video/retirement/reservation/topology color preflight passed\\n'\''"
   print;next
  }
@@ -189,12 +201,14 @@ awk -v revision="$revision" '
   print "bash native-profile/tests/o82-regdma-transport-contract.sh native-profile \"$PWD\""
   print "bash native-profile/tests/o82-atomic-contract.sh native-profile \"$PWD\""
   print "bash native-profile/tests/o82-atomic-package-contract.sh \"$PWD\" %{_uke_out}"
+  print "bash native-profile/tests/o82-profile-loader-contract.sh native-profile"
   next
  }
  /^%changelog$/ {
   print;print "* Wed Nov 04 2026 Uke contributors - 7.3.1-"revision
   print "- Retain the complete 6000 camera, touch, sensor and power sources."
-  print "- Link the qualified paired CRTC color caller with disabled initial selection."
+  print "- Add bounded SixZone v3 tables and paired shared PA enable, disable and readback."
+  print "- Preserve disabled initial selection and require matching private v3 input."
   print "- Verify full module linkage, failure ownership and both supplier DTs."
   print "- Exercise color refusal in retained AVR, video, retirement and reservation fixtures."
   print "";next
