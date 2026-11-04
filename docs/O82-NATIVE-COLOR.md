@@ -203,7 +203,14 @@ scalar words, then combines HSIC/SixZone enables with each DSPP's own powered
 snapshot and modifies shared mode once with preserve mask `0x01efffff`.
 Both active and neutral words are read back. Buffers cover41,320 bytes and
 descriptors retain the actual37,388/41,320-byte managed stream length.
-Actual compiler/loader and complete kernel qualification remain pending;
+The actual compiler/loader passed
+[COPR11253922](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11253922/)
+at source `d10c0e35649c96d4e6f92316e75948cd51116784`, with16,479 actual
+parser/wire/composed-state checks per optimized/sanitizer run and the actual
+v4 loader. Pure HSIC41,340 and SixZone30,724 checks per run remain green.
+The [full-kernel composition](../manifests/o82-hsic-kernel-source-20261104.json)
+retains exact7001 source and42 declared inputs. Native full-kernel qualification
+remains pending;
 delivered `7001` retains its v3 contract and disabled default. Memory/protection,
 complete HDR, private data delivery and physical acceptance remain open.
 

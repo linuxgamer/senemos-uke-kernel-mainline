@@ -132,7 +132,7 @@
     "board_settings_imported": false
   },
   "native_integration": {
-    "status": "Native compiler/loader and composed writer implemented; remote integration qualification pending",
+    "status": "Actual v4 compiler/loader and composed state passed; native writer/full kernel qualification pending",
     "utility": "0.5.0-1",
     "private_bundle_version": 4,
     "record_offset_fields": [
@@ -157,9 +157,21 @@
       "managed_with_sixzone": 41320
     },
     "old_bundles": "Refuse v2/v3 and request only matching color-v4.bin",
-    "remote_qualification": null,
+    "remote_qualification": {
+      "build": 11253922,
+      "release": "0.5.0-1",
+      "source_commit": "d10c0e35649c96d4e6f92316e75948cd51116784",
+      "state": "succeeded",
+      "actual_parser_wire_composed_pa_checks_per_run": 16479,
+      "pure_hsic_checks_per_run": 41340,
+      "sixzone_parser_wire_checks_per_run": 30724,
+      "actual_v4_loader": true,
+      "optimized_and_sanitized": true,
+      "native_writer_qualification": "pending complete kernel"
+    },
     "default_enabled": false,
-    "physical_acceptance": false
+    "physical_acceptance": false,
+    "kernel_source_manifest": "o82-hsic-kernel-source-20261104.json"
   },
   "remaining_work": [
     "Qualify the v4 parser, serializer, loader and composed writer, including explicit neutral state",

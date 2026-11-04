@@ -14,8 +14,12 @@ HSIC. Every unblocked record carries24 bytes of flags and bounded register
 words; the parser retains the qualified single-precision conversion order.
 The candidate loader requests only `o82-{36,42}-color-v4.bin` and rejects older
 bundles. The matching kernel writer composes HSIC/SixZone mode once per DSPP,
-programs neutral scalar words and checks readback under held power. Remote
-compiler/loader and full-kernel qualification are pending. Delivered `7001`
+programs neutral scalar words and checks readback under held power. The actual
+compiler/loader passed
+[COPR11253922](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11253922/):
+16,479 parser/wire/composed-state checks per optimized/sanitizer run, plus the
+actual v4 loader and retained numeric regressions. Complete native-kernel
+qualification remains pending. Delivered `7001`
 continues to require v3; private v4 delivery and physical acceptance are open.
 Memory-color and opaque HDR operations remain refused.
 
