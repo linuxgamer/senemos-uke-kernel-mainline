@@ -72,7 +72,14 @@
     "automatic_seamless_staging_required": true,
     "package_rollback_default": "enforced",
     "preserve_local_rollback_preference": true,
-    "reapply_preference_command": false
+    "reapply_preference_command": false,
+    "qualified_cumulative_kernel": {
+      "copr_build": 11260662,
+      "release": "7.3.1-12000-unstable",
+      "source_commit": "ad6b68ff403d57bc8e64b4f92e0dcfa41ea43e09",
+      "packaged_composition_sha256": "068c2f0bcdfa6598fd8cf4b95a6f13ef8db090c83d8099fb793ec21ab6597501",
+      "scope": "Qualified software artifact, no local installation or physical sensor acceptance"
+    }
   },
   "physical_sensor_acceptance": false,
   "inputs": [

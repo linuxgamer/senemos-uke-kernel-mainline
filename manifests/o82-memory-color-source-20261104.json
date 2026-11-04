@@ -69,13 +69,13 @@
     "implementation": "src/display/o82-memory-color.h",
     "fixture": "tests/o82-memory-color-contract.cpp",
     "producer": "packaging/native/copr-o82-memory-color-check.sh",
-    "state": "pending remote qualification",
+    "state": "Passed optimized GCC and Clang ASan/UBSan arithmetic checks",
     "oracle": "Independent integer rational IEEE754 rounding for binary32/binary64; hand words, clamp/extents/holds/hue wrap, deterministic bit patterns and wrong-alternative differences",
     "refusals": "Nonfinite inputs or non-nearest rounding leave caller output unchanged",
     "activation_changed": false
   },
   "qualification": {
-    "state": "pending",
+    "state": "succeeded",
     "release": "1.0-2",
     "previous_trials": [
       {
@@ -86,7 +86,19 @@
         "reason": "Hand-coded expected reciprocal for scaled extent255 was258; exact65536/255+0.5 truncates257. Converter unchanged; fix golden word and add synthetic mismatch diagnostics."
       }
     ],
-    "scope": "Arithmetic only; no native writer, private firmware, JSON mapping or physical acceptance"
+    "scope": "Arithmetic only; no native writer, private firmware, JSON mapping or physical acceptance",
+    "copr_build": 11260759,
+    "source_commit": "ac625ec6eaed1689a6dc7086e982b0fd68252973",
+    "checks_per_compiler": 82739,
+    "compilers": [
+      "GCC optimized, contraction enabled",
+      "Clang ASan/UBSan, contraction disabled"
+    ],
+    "wrong_alternative_differences": {
+      "floor_reciprocal": 14079,
+      "symmetric_or_wide_adjustment": 67976
+    },
+    "native_memory_color_enabled": false
   },
   "delivery": {
     "coordinated_kernel_queue_required": true,

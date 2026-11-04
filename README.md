@@ -29,8 +29,23 @@ Read-only SSC discovery observations passed
 actual callbacks, reconcile failure cases and native driver compilation.
 The cumulative source producer pins the complete 11003 SRPM and composition,
 preserves every undeclared source byte and adds only those qualified sensor
-changes plus the new ABI's audio identity. Full kernel qualification is pending.
+changes plus the new ABI's audio identity.
 The older 7300-based color producer remains held to prevent source regression.
+
+The cumulative `7.3.1-12000-unstable` candidate passed
+[COPR 11260662](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11260662/):
+Image, signed modules, both supplier DTs, boot/RPMs, retained controls and all
+ten SSC observation callbacks. All six AArch64 packages and the source RPM are
+present in checksum-verified root metadata. The packaged composition preserves
+11003 and adds SSC observations. The tablet remains on 11003; physical sensor
+acceptance is pending. This build predates the shared integration directive;
+the camera conversation owns further cumulative builds and delivery.
+
+Generic memory-color arithmetic passed
+[COPR 11260759](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11260759/)
+against an independent integer reference. JSON mapping, private format and
+joint memory/protection programming remain incomplete; this converter does
+not enable memory color or establish HDR support in 12000.
 
 31 October 2026. `main` is the continuation branch. Microphone capture, power management, bounded boot-watchdog and optional gaming sources are integrated. The complete combined source still requires fresh release admission and a qualified COPR build; retained candidate packages do not establish that result.
 

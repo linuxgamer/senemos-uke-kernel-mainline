@@ -42,7 +42,83 @@
   "raw_native_config_unchanged": true,
   "audio_change": "Only the two compact ABI-specific ALSA identity literals",
   "full_kernel_qualification": {
-    "state": "pending"
+    "state": "succeeded",
+    "copr_build": 11260662,
+    "release": "7.3.1-12000-unstable",
+    "source_commit": "ad6b68ff403d57bc8e64b4f92e0dcfa41ea43e09",
+    "root_primary_sha256": "0d1a5f15166f0d65d5ddce320b26dfe4cdfbd2664f62483e1f4256a6d5d49014",
+    "source_rpm": {
+      "name": "senemos-uke-linux-kernel-mainline-unstable",
+      "arch": "src",
+      "sha256": "7c8e9cf1da817031e5d924d3001ec6504ad1ef85693d0c55322a922f5ada0ae4",
+      "bytes": 164465643,
+      "url": "https://download.copr.fedorainfracloud.org/results/mcc45tr/uke-linux-unstable/fedora-rawhide-aarch64/Packages/s/senemos-uke-linux-kernel-mainline-unstable-7.3.1-12000.fc46.src.rpm",
+      "requires": []
+    },
+    "packaged_composition": {
+      "sha256": "068c2f0bcdfa6598fd8cf4b95a6f13ef8db090c83d8099fb793ec21ab6597501",
+      "bytes": 16824,
+      "kernel_release": "7.3.1-12000-unstable",
+      "source_commit": "ad6b68ff403d57bc8e64b4f92e0dcfa41ea43e09",
+      "parent_copr_build": 11260288,
+      "parent_srpm_sha256": "6dc168a4acdda30aa397bff6b0700d896e7b7872ce547f9ae80da63a403b2401",
+      "native_config_sha256": "739882b3a07fc6a701bae81ac6623a4b576871bd4289de3a095acabc20d49d34",
+      "diagnostic_camera_stage": 1,
+      "rtc_backend": "pmic-read-only-counter",
+      "nfc_wakeup_owner": "i2c-core",
+      "o82_private_color_bundle_version": 4,
+      "waydroid_network_precompile_config_gate": true,
+      "ssc_observation_abi": 1,
+      "automatic_seamless_staging_required": true,
+      "preserve_local_rollback_preference": true
+    },
+    "scope": "Complete Image, modules/signing/MODPOST, both supplier DTs, boot/RPMs, retained controls and actual SSC callbacks; no physical acceptance",
+    "packages": [
+      {
+        "name": "senemos-uke-linux-kernel-mainline-unstable",
+        "arch": "aarch64",
+        "sha256": "87ac43aff70dafc5547f6623e7568d386e2c49f9921af82114d1b9b70c8f16fb",
+        "bytes": 68044,
+        "url": "https://download.copr.fedorainfracloud.org/results/mcc45tr/uke-linux-unstable/fedora-rawhide-aarch64/Packages/s/senemos-uke-linux-kernel-mainline-unstable-7.3.1-12000.fc46.aarch64.rpm"
+      },
+      {
+        "name": "senemos-uke-linux-kernel-mainline-unstable-boot",
+        "arch": "aarch64",
+        "sha256": "3518d0365696fea219675ea459172aaac1cf175ed8725be0dfc800cccce32064",
+        "bytes": 65192339,
+        "url": "https://download.copr.fedorainfracloud.org/results/mcc45tr/uke-linux-unstable/fedora-rawhide-aarch64/Packages/s/senemos-uke-linux-kernel-mainline-unstable-boot-7.3.1-12000.fc46.aarch64.rpm"
+      },
+      {
+        "name": "senemos-uke-linux-kernel-mainline-unstable-core",
+        "arch": "aarch64",
+        "sha256": "3f0f14cea71401dd74397d69843fdf06e74cbf3bf4918c043cc8bb6e56ca8f29",
+        "bytes": 33912766,
+        "url": "https://download.copr.fedorainfracloud.org/results/mcc45tr/uke-linux-unstable/fedora-rawhide-aarch64/Packages/s/senemos-uke-linux-kernel-mainline-unstable-core-7.3.1-12000.fc46.aarch64.rpm"
+      },
+      {
+        "name": "senemos-uke-linux-kernel-mainline-unstable-dtbs",
+        "arch": "aarch64",
+        "sha256": "7bf0e57c1d0158cbe96570285123ac01d6789a60d29acd39ed583d29b4ce65ba",
+        "bytes": 53856,
+        "url": "https://download.copr.fedorainfracloud.org/results/mcc45tr/uke-linux-unstable/fedora-rawhide-aarch64/Packages/s/senemos-uke-linux-kernel-mainline-unstable-dtbs-7.3.1-12000.fc46.aarch64.rpm"
+      },
+      {
+        "name": "senemos-uke-linux-kernel-mainline-unstable-modules",
+        "arch": "aarch64",
+        "sha256": "9012107350730c40c3f5eeb128da9916c19de64c38e98b0b8152f320901145da",
+        "bytes": 13761754,
+        "url": "https://download.copr.fedorainfracloud.org/results/mcc45tr/uke-linux-unstable/fedora-rawhide-aarch64/Packages/s/senemos-uke-linux-kernel-mainline-unstable-modules-7.3.1-12000.fc46.aarch64.rpm"
+      },
+      {
+        "name": "senemos-uke-linux-kernel-mainline-unstable-singleboot",
+        "arch": "aarch64",
+        "sha256": "90d52fc63a6ff7878880c1bdedc2a8153adc0a0c696ccbd1d5f6f9795d79b0af",
+        "bytes": 48359,
+        "url": "https://download.copr.fedorainfracloud.org/results/mcc45tr/uke-linux-unstable/fedora-rawhide-aarch64/Packages/s/senemos-uke-linux-kernel-mainline-unstable-singleboot-7.3.1-12000.fc46.aarch64.rpm"
+      }
+    ],
+    "delivery": "Submitted before the single queue directive; preserve the shared integration queue and include subsequent handoffs before the next kernel",
+    "physical_sensors_tested": false
   },
   "physical_sensor_acceptance": false,
   "imports": [
