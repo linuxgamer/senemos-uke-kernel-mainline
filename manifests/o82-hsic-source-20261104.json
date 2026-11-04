@@ -57,8 +57,38 @@
     "packed_saturation": "Low8 signed saturation code OR high8 threshold code; initialize a fresh output word",
     "limit": "These are generic protocol ranges/scales, not preset settings or calibration coefficients; SixZone percent scaling and generic rounded fixed-point helpers are different operations"
   },
+  "json_parser": {
+    "repository": "Xiaomi-Pad-7-Development/android_vendor_xiaomi_uke",
+    "commit": "6739c8ec275318a156aa3a65f04f54f8dad82926",
+    "path": "proprietary/vendor/lib64/libqdcm-json-mode-parser.so",
+    "sha256": "00b1a5fcfe89e1a67834cba59115e8a0460a29daf10c250787587d5efa4d0f75",
+    "inspection": "Static constructors, instructions and actual PLT/GOT relocation bindings only; no execution",
+    "set_config": "HwAssetPA::SetConfig(Json::Value const&) at0x6ee94",
+    "field_key_objects": {
+      "0x94320": "cont",
+      "0x94338": "sat",
+      "0x94350": "satThresh",
+      "0x94368": "hue",
+      "0x94380": "val"
+    },
+    "constructor_range": "0x3e750..0x3e848",
+    "readers": {
+      "cont/sat/satThresh/val": "Json::Value::asFloat via PLT0x83cc8, GOT0x86890",
+      "hue": "Json::Value::asInt via PLT0x839b0, GOT0x86788"
+    },
+    "global_activation": "0x6ef70..0x6efa8 sets PA body flag bit0 when any of the five already-typed scalar values is nonzero; signed zero is inactive",
+    "limit": "This establishes scalar typing and the global body flag only; outer action/disable routing, memory and final shared PA composition remain separate gates",
+    "schema_only_input_review": {
+      "postblend_records": 59,
+      "all_five_fields_numeric": true,
+      "hue_fields_integral": true,
+      "records_with_nonzero_hsic": 4,
+      "values_or_arrays_included": false,
+      "native_converter_run": false
+    }
+  },
   "remaining_work": [
-    "Prove complete JSON field-type and enable/action routing for full and neutral HSIC state",
+    "Complete outer enable/action routing and full/neutral state semantics; scalar JSON types and the global body flag are established",
     "Qualify the native converter and extend private input without admitting unsupported operations",
     "Compose one final shared PA mode with SixZone before encoding paired changes",
     "Implement explicit neutral state and complete memory/protection/HDR operations",
