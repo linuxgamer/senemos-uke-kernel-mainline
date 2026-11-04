@@ -577,7 +577,8 @@ static void upload_lifetime(void)
 	assert(dma.command_bo == &command_bo && dma.command_vm == &vm);
 	assert(dma.command_data == commands && dma.command_iova == 0x1000);
 	assert(allocations == 1 && !releases && vm.references == 2 && trigger_count == 1);
-	assert(load(registers, 0x1004) == ((1U << 24) | (1U << 22) | (sizeof(commands) / 4)));
+	/* The allocated buffer also fits PA; this legacy input emits only base LUTs. */
+	assert(load(registers, 0x1004) == ((1U << 24) | (1U << 22) | (37316U / 4)));
 	before = writes + reads;
 	assert(dpu_o82_upload(&dma, &foreign_drm, &vm, &ctl, &input, 3) == -EINVAL);
 	foreign_vm.drm = &drm;
@@ -875,6 +876,8 @@ static void power_lifetime(void)
 		if (!enable) { input.sixzone = NULL; input.sixzone_bytes = 0; }
 		unsigned char original[sizeof(input)]; memcpy(original, &input, sizeof(input));
 		assert(!dpu_o82_power_upload(&kms, &ctl, &input, pa_masks[m]));
+		assert(load(registers, 0x1004) == ((1U << 24) | (1U << 22) |
+			((enable ? 41288U : 37356U) / 4)));
 		assert(!memcmp(original, &input, sizeof(input)));
 		assert(pa_reads == (enable ? 20u : 8u) && trigger_count == 1 && !dma.power_held);
 		for (unsigned int i = 0; i < 3; i++) {

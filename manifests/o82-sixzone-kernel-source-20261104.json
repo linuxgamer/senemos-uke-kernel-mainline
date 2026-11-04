@@ -15,7 +15,7 @@
     "preceding_parent": "6000 full-file pinned source URL now returns404; first7000 source stage11253605 failed before creating an SRPM",
     "current_parent": "6503 repository source URL returns200; full-file digest comes from checksum-verified primary metadata",
     "admission": "Full-file SHA256, exact6503 RPM/profile identity, all retained profile/boot/config receipts and unchanged legacy checks",
-    "minimum_fresh_revision": 7000,
+    "minimum_fresh_revision": 7001,
     "release_history_guard_unchanged": true
   },
   "qualified_color": {
@@ -218,8 +218,8 @@
     },
     {
       "path": "tests/o82-regdma-transport-contract.c",
-      "sha256": "2c124c3439404dafb9b856de7975589ad49cea117a6b368e4c4e9e5c3a3a66e5",
-      "reference_blob": "bac0e5701b2d0544fac3cf665f5821166462c477",
+      "sha256": "553f8410eab7f9fa46385fd0566e772c1639998066d5e7b04da2ad5551d60239",
+      "reference_blob": "13e5be4b156da57e771aa49f227296fba65a7bb2",
       "qualification": "New SixZone integration; complete remote kernel qualification required",
       "basis_sha256": "ff6b536038bf1a63a8c4be34f76fbfa35866ef0b03d3ee4ec2d3b04888d5659c",
       "basis_blob": "6be3adb350f5801a466c40ade8b44b40b8435c69"
@@ -352,5 +352,13 @@
     "sha256": "6cc6db94c26f2533d08d13660f26a0ba5fc4b5a41cc81d6403ae2bb3d0163448",
     "native_config_identity": "SHA-256 recorded in the fully pinned parent source-composition.json native_config_sha256 field",
     "effective_config_sha256": "7f1e3f7a5be62396b2b36534780aeb561dfbf7e0a10698677b860cbc91efbd38"
+  },
+  "previous_sixzone_attempt": {
+    "build": 11253690,
+    "release": "7.3.1-7000",
+    "source_commit": "f109ad7b8d1cbdc5e7becd9fe60d4cbb79a39497",
+    "result": "Source published; target preflight refused an obsolete fixture assertion comparing allocation capacity with base-only descriptor length",
+    "correction": "Keep the maximum allocation; assert exact 37316/37356/41288-byte emitted descriptor lengths for legacy/off/on streams",
+    "hardware_access": false
   }
 }
