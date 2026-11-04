@@ -1,5 +1,18 @@
 # O82 OEM P3 mapping for original KDE
 
+5 November 2026 preparation source: utility0.7.0 adds
+`uke-o82-color-profile --prepare-kernel RELEASE` for the DNF integration path.
+It admits an installed non-running `7.3.1-N-unstable` kernel carrying the
+memory/v5 source contract, checks the exact Uke/SM7675 board and fitted O82
+supplier, and reads only that supplier's hash-admitted JSON from stock ODM.
+The original LP reader verifies mirrored metadata and uses a bounded read-only
+autoclear loop. No raw JSON is saved or shipped. Private firmware is published
+with0600 permissions under `/usr/lib/firmware/RELEASE/qcom/sm7675/uke/`, using
+an anonymous staging inode, readback and atomic no-replace linking. Existing
+different, symlinked, hard-linked or public files are refused. Initial color
+selection remains empty. COPR qualification and coordinator DNF hook integration
+are pending; this source change does not install or select a kernel.
+
 5 November 2026 source update: the kernel loader supports a separate private
 v5 bundle with a mandatory 112-byte memory/protection payload for each usable
 preset, including explicit neutral state. It prefers the matching panel's

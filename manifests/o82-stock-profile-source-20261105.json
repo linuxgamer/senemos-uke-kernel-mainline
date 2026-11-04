@@ -1,0 +1,187 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-05",
+  "scope": "Private device-local v5 preparation for a non-running installed unstable kernel; no selection or boot change",
+  "reused_project_source": {
+    "repository": "MCC45TR/uke-linux-hardware-support",
+    "commit": "16c08b5f3efa7f9ccee4a6ee24f0a4de93fcc3c8",
+    "license": "MIT",
+    "assets": [
+      {
+        "original": "uke-cdsp-pogo-firmware/src/local.hpp",
+        "path": "src/display/stock-profile/local.hpp",
+        "upstream_sha256": "93cb0ae8720dfedfc796c8c2759cff5701480fd0604f80c95a158cbae7735f77",
+        "sha256": "cc504b204e3063426f3daaefc9eb92276d8a11c818655b488837f6d24413024b",
+        "transformation": "Only the include path is made local"
+      },
+      {
+        "original": "uke-boot/src/oem-video.hpp",
+        "path": "src/display/stock-profile/oem-video.hpp",
+        "upstream_sha256": "19b1897ee6de470013f7d3ea40fb5db6b97aa26e7ae9b2d77380308a7b552cdb",
+        "sha256": "19b1897ee6de470013f7d3ea40fb5db6b97aa26e7ae9b2d77380308a7b552cdb",
+        "transformation": "Unmodified"
+      }
+    ]
+  },
+  "stock_metadata": {
+    "repository": "Xiaomi-Pad-7-Development/android_vendor_xiaomi_uke",
+    "commit": "6739c8ec275318a156aa3a65f04f54f8dad82926",
+    "build_declaration": "uke-vendor.mk",
+    "odm_directory": "/etc/display",
+    "file_pattern": "qdcm_calib_data_xiaomi_o82_{36_02_0a,42_02_0b}_vid_mode_dualdsi_dsc_panel.json",
+    "private_tables_shipped": false
+  },
+  "kernel_prerequisite": {
+    "source_layer": "4800f0b884594018885c7ebadb3238c03499199f",
+    "check": 11261282,
+    "full_kernel_delivery_pending": true
+  },
+  "qualification": {
+    "state": "pending",
+    "package": "uke-o82-color-profile",
+    "version": "0.7.0-1"
+  },
+  "delivery": {
+    "dnf_hook_integration": "Pending coordinator integration after complete cumulative qualification",
+    "profile_selection_changed": false,
+    "kernel_or_boot_changed": false
+  },
+  "inputs": [
+    {
+      "path": "packaging/uke-o82-color-profile.spec",
+      "sha256": "f1e1823779da349f22449181cc4a640b99d5f422a45a43d24f4629da85873b07"
+    },
+    {
+      "path": "src/display/o82-color-profile.cpp",
+      "sha256": "89c8aae6054e016724ddf49b251a259298003286e2cc12a946f4e6fc30ad7392"
+    },
+    {
+      "path": "src/display/o82-stock-profile.hpp",
+      "sha256": "9b6a6318d1050e5536998c6cce98e25bd49193e5c0a1cfea159f291ac4357f52"
+    },
+    {
+      "path": "src/display/stock-profile/local.hpp",
+      "sha256": "cc504b204e3063426f3daaefc9eb92276d8a11c818655b488837f6d24413024b"
+    },
+    {
+      "path": "src/display/stock-profile/oem-video.hpp",
+      "sha256": "19b1897ee6de470013f7d3ea40fb5db6b97aa26e7ae9b2d77380308a7b552cdb"
+    },
+    {
+      "path": "tests/o82-stock-profile-contract.cpp",
+      "sha256": "d5f30ad41fcc4885ad38e09ad33e6caf062afc6b702d8a99a34afe70530c7625"
+    },
+    {
+      "path": "docs/O82-COLOR-PROFILE.md",
+      "sha256": "39d710b2b4cf5eb533cba10aa69865339dee16249a8d45d38560d49ded33d781"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "3261559b7f050f1691b0001544b8497469dea818a3b03136fc5cca0478b595ee"
+    },
+    {
+      "path": "LICENSES/GPL-2.0-only.txt",
+      "sha256": "f6b78c087c3ebdf0f3c13415070dd480a3f35d8fc76f3d02180a407c1c812f79"
+    },
+    {
+      "path": "src/display/uke-o82-hdr-format.h",
+      "sha256": "537bca8c0c82946754ee334a0bd47187fe341c65e2f9c655188062a5c8ded8e8"
+    },
+    {
+      "path": "tests/o82-hdr-edid-contract.cpp",
+      "sha256": "2204f9b34b592a275617a918bdb9b7d7b4ec8d88f618aba02346123ade803cc9"
+    },
+    {
+      "path": "src/display/o82-regdma.h",
+      "sha256": "6c16856cd0041aa091162910aebf4076e721b35ba4bf0205b6b315de01a52077"
+    },
+    {
+      "path": "src/display/o82-color-firmware.h",
+      "sha256": "d9a4b176ad7be2334b5cf79af1f3a59185cf5304bf22247ea427bfb8839ae48a"
+    },
+    {
+      "path": "src/display/o82-memory-format.h",
+      "sha256": "af2008725d1e642c507eac3ca100c4a3d88214ef0702e6e5b7b2b871441b4efa"
+    },
+    {
+      "path": "src/display/o82-memory-color.h",
+      "sha256": "c4a684bf4465e326907159acef5cc89d21a2b57a756520be87286eed5ff1c651"
+    },
+    {
+      "path": "tests/o82-memory-payload-contract.cpp",
+      "sha256": "1102e5d63e515fe70f2898924c36c6b50aee1f01739c2bd535fee496c94b2b75"
+    },
+    {
+      "path": "tests/o82-memory-payload-contract.sh",
+      "sha256": "8ac80d78fa6795673212f59256d97af0717513459657ad4853eeb9fa440820df"
+    },
+    {
+      "path": "src/display/dpu_o82_lutbus.c",
+      "sha256": "96206e9ff6e3a56ab86df64f5d0188ca3187aa19e942ab79ed1ff5b5fd6d162a"
+    },
+    {
+      "path": "src/display/dpu_o82_lutbus.h",
+      "sha256": "b30f36d17cc3700b3bbaa6eb0469d82b9f0289fbdb8da337d560bc447018c7dd"
+    },
+    {
+      "path": "src/display/dpu_o82_profiles.c",
+      "sha256": "98382e04a21af440ae69672b878d267c7049d23bf517a754388a16ee9d0c6ae3"
+    },
+    {
+      "path": "src/display/dpu_o82_profiles.h",
+      "sha256": "9396a72dc5e4104f3e67566a74b666d47267fd292339858484a626a9e4106e68"
+    },
+    {
+      "path": "tests/o82-profile-loader-contract.c",
+      "sha256": "6efbef54ba1403df09218e3bed9b0320b6cd73b6782ec70a02c9d17943feef66"
+    },
+    {
+      "path": "tests/o82-profile-loader-contract.sh",
+      "sha256": "18e93120b593073d4c85e24c629cb2dc3ff7c64fa66a0b4297b5ff281db6b3cd"
+    },
+    {
+      "path": "tests/o82-gamut-grid-contract.cpp",
+      "sha256": "998a6a0a5aec8f1a3f412988ad6026f7b770b6c2424b1bb0f73cfef945aea4c0"
+    },
+    {
+      "path": "src/display/o82-sixzone-format.h",
+      "sha256": "67e018625041460de4e10c2ddaa734ee9e8d0909138a3b0fe23c8a08040db86d"
+    },
+    {
+      "path": "src/display/o82-sixzone.h",
+      "sha256": "567b616cf2e66702fad00d56623dd922921eb97bd26903bf02138e8201ca6b75"
+    },
+    {
+      "path": "tests/o82-sixzone-payload-contract.cpp",
+      "sha256": "e1df20eabf931d256ccdf50ddcb227a811512a4e059a15f5f66cf80fe6afb973"
+    },
+    {
+      "path": "tests/o82-sixzone-contract.cpp",
+      "sha256": "8a9269be4f3ba4b75e78ae0bc9e6d033ddd8ba7c277a7b70d48b30512534c42c"
+    },
+    {
+      "path": "src/display/o82-hsic.h",
+      "sha256": "ef3247bfc15efab11f5ed19bfb5c8d0c14f894c59a1bfc9d6aac16f5572ff945"
+    },
+    {
+      "path": "src/display/o82-hsic-format.h",
+      "sha256": "dfa79dc0ef22f87d6989b9caca60716f7abd89387e23f1be8df38cfd02bbdb05"
+    },
+    {
+      "path": "tests/o82-hsic-payload-contract.cpp",
+      "sha256": "63d3d2a59a33f386452cafbf2ea4cac886cd9d07ab973ba14efdfd1849baff01"
+    },
+    {
+      "path": "tests/o82-hsic-contract.cpp",
+      "sha256": "2a1352133d55c043e526761367c4d0389591ee60a4f49695803f5605e48216af"
+    },
+    {
+      "path": "packaging/native/copr-o82-color-profile.sh",
+      "sha256": "66b02abc544c885bc5df6b4d3d3262332306e673d16e7fa0a15ca0d0b2001b53"
+    },
+    {
+      "path": "packaging/native/refuse-published-release.sh",
+      "sha256": "8ebb19b5e63a57df661b1401620766ae1519a154b32127a2d17733761b64eb23"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 Name: uke-o82-color-profile
-Version: 0.6.0
-Release: 3%{?dist}
+Version: 0.7.0
+Release: 1%{?dist}
 Summary: Generate private O82 OEM color mappings and native preset data
 License: MIT
 URL: https://github.com/MCC45TR/senemos-uke-kernel-mainline
@@ -35,24 +35,33 @@ Source29: dpu_o82_lutbus.c
 Source30: dpu_o82_lutbus.h
 # GPL fixture sources are not linked into the installed MIT utility.
 Source31: GPL-2.0-only.txt
+Source32: o82-stock-profile.hpp
+Source33: local.hpp
+Source34: oem-video.hpp
+Source35: o82-stock-profile-contract.cpp
 ExclusiveArch: aarch64
 BuildRequires: clang gcc-c++ compiler-rt pkgconf-pkg-config
 BuildRequires: pkgconfig(json-c) pkgconfig(lcms2) pkgconfig(openssl)
 BuildRequires: pkgconfig(libdisplay-info)
+Requires: e2fsprogs kmod
 
 %description
 Read an exact, hash-verified O82 factory QDCM profile and generate a new private
 ICC mapping from its P3 inverse gamma, gamut and output gamma tables. Original
 KWin performs color conversion in its existing ICC shader path. The generator
-does not access hardware, modify the backlight, install a desktop profile or
+does not modify the backlight, install a desktop profile or
 redistribute factory tables. Optical calibration and native HDR10 acceptance
 remain separate from OEM-derived P3 mapping and the compositor's existing EDR.
 The native-preset preparation command retains each preset's identity and
 compiles independent native/BT.2020 and gamma2.2/PQ inputs. Active operations
 without a complete implementation remain preserved and explicitly refused;
-the command does not install firmware or advertise new display capabilities.
+the file conversion command does not install firmware or advertise new display capabilities.
 Private v5 presets carry explicit memory-color and global protection state,
 including neutral transitions and protection from disabled regions.
+The separate --prepare-kernel command reads the fitted panel's exact stock ODM
+profile through a bounded read-only view and prepares private v5 firmware for
+an installed, non-running unstable kernel with the required source contract.
+It preserves the initial selection and refuses differing existing files.
 
 %prep
 cp %{SOURCE0} .
@@ -68,6 +77,9 @@ cp %{SOURCE17} %{SOURCE18} %{SOURCE19} %{SOURCE20} .
 cp %{SOURCE21} %{SOURCE22} %{SOURCE23} %{SOURCE24} .
 cp %{SOURCE25} %{SOURCE26} .
 cp %{SOURCE31} .
+cp %{SOURCE32} %{SOURCE35} .
+mkdir -p stock-profile
+cp %{SOURCE33} %{SOURCE34} stock-profile/
 mkdir -p src/display tests
 cp %{SOURCE3} %{SOURCE10} %{SOURCE11} %{SOURCE12} src/display/
 cp %{SOURCE17} %{SOURCE22} src/display/
@@ -95,6 +107,13 @@ clang++ -std=c++20 -O1 -g -UNDEBUG -Wall -Wextra -Werror \
     o82-color-profile.cpp $(pkg-config --cflags --libs json-c lcms2 openssl) \
     -o color-profile-sanitized
 ./color-profile-sanitized --self-test
+g++ -std=c++20 -O2 -UNDEBUG -Wall -Wextra -Werror -I. \
+    -Wl,--wrap=main o82-stock-profile-contract.cpp $(pkg-config --cflags --libs json-c lcms2 openssl) -o stock-profile-contract
+./stock-profile-contract
+clang++ -std=c++20 -O1 -g -UNDEBUG -Wall -Wextra -Werror -I. \
+    -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer \
+    -Wl,--wrap=main o82-stock-profile-contract.cpp $(pkg-config --cflags --libs json-c lcms2 openssl) -o stock-profile-sanitized
+./stock-profile-sanitized
 g++ -std=c++20 -O2 -UNDEBUG -Wall -Wextra -Werror -I. \
     o82-hdr-edid-contract.cpp $(pkg-config --cflags --libs libdisplay-info) -o edid-contract
 ./edid-contract
@@ -147,6 +166,11 @@ grep -E '^OEM gamut grid regression rejected: [1-9][0-9]*/[0-9]+ checks failed$'
 %{_bindir}/uke-o82-color-profile
 
 %changelog
+* Thu Nov 05 2026 Uke contributors - 0.7.0-1
+- Prepare private fitted-panel v5 data from exact read-only stock ODM input.
+- Admit installed inactive unstable candidates and publish without replacement.
+- Check admission, private permissions, failed writes and concurrent publication.
+
 * Thu Nov 05 2026 Uke contributors - 0.6.0-3
 - Preserve system UAPI integer types in the mixed C/C++ pipeline fixture.
 - Include the existing GPL license text with the native fixture sources.

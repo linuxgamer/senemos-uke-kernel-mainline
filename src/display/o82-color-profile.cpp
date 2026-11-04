@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Build a private ICC transform from the exact O82 OEM P3 profile; no hardware I/O.
+// Compile private O82 color data, with optional read-only stock preparation.
 #include <json-c/json.h>
 #include <lcms2.h>
 #include <openssl/evp.h>
@@ -26,6 +26,7 @@
 #include "o82-sixzone.h"
 #include "o82-hsic.h"
 #include "o82-memory-color.h"
+#include "o82-stock-profile.hpp"
 
 namespace {
 using Vec = std::array<double, 3>;
@@ -1040,9 +1041,30 @@ void self_test() {
 int main(int argc, char **argv) {
     try {
         if (argc == 2 && std::string_view(argv[1]) == "--self-test") { self_test(); return 0; }
+        if (argc == 3 && std::string_view(argv[1]) == "--prepare-kernel") {
+            const std::string release = argv[2];
+            utsname running{};
+            require(!uname(&running), "cannot identify running kernel");
+            o82_stock::release_name(release, running.release);
+            const unsigned panel = o82_stock::board_panel();
+            auto modules = directory(fs::path("/usr/lib/modules") / release);
+            const auto composition_bytes = file(fs::path("/usr/share/senemos/uke") / release / "source-composition.json");
+            auto composition = parse({reinterpret_cast<const char *>(composition_bytes.data()), composition_bytes.size()});
+            o82_stock::candidate(composition.get(), release, running.release);
+            const auto raw = o82_stock::acquire(panel);
+            auto document = parse({reinterpret_cast<const char *>(raw.data()), raw.size()});
+            const auto name = o82_stock::panel_name(panel);
+            const auto bundle = native_presets(document.get(), name.c_str(), panel, o82_stock::input_hash(panel));
+            o82_stock::publish(fs::path("/usr/lib/firmware") / release / "qcom/sm7675/uke" /
+                o82_stock::filename(panel), bundle, panel);
+            std::cout << "Prepared private fitted-panel v5 data for " << release <<
+                "; stock stayed read-only and initial selection is unchanged\n";
+            return 0;
+        }
         const bool native = argc == 4 && std::string_view(argv[1]) == "--native-hdr";
         const bool presets = argc == 4 && std::string_view(argv[1]) == "--native-presets";
-        require(native || presets || argc == 3, "usage: uke-o82-color-profile [--native-presets|--native-hdr] OEM_QDCM_JSON NEW_PRIVATE_OUTPUT");
+        require(native || presets || (argc == 3 && !std::string_view(argv[1]).starts_with("--")),
+            "usage: uke-o82-color-profile --prepare-kernel RELEASE | [--native-presets|--native-hdr] OEM_QDCM_JSON NEW_PRIVATE_OUTPUT");
         const auto data = read_file(argv[native || presets ? 2 : 1]);
         const auto hash = sha256(data);
         const char *panel = nullptr;
