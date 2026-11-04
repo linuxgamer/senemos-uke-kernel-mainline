@@ -11,6 +11,13 @@ Linux kernel adaptations, device trees and Fedora RPM packaging for Xiaomi Pad 7
 > This is an experimental kernel. Keep a working boot image and matching modules before updating. Not every source change has been tested on the tablet.
 
 ## Development status
+4 November 2026. New development and candidate builds use
+`senemos-uke-linux-kernel-mainline-unstable` with an `-unstable` Image ABI.
+POCO Pad X1 currently boots `7.3.1-7200-unstable`. Normal-family updates require
+an explicit request and physical stability/feature validation before promotion.
+The active color candidate retains that booting source and its camera admission
+boundaries; full peripheral and color acceptance remains open.
+
 31 October 2026. `main` is the continuation branch. Microphone capture, power management, bounded boot-watchdog and optional gaming sources are integrated. The complete combined source still requires fresh release admission and a qualified COPR build; retained candidate packages do not establish that result.
 
 On POCO Pad X1 with Fedora Rawhide AArch64 and kernel `7.3.1-102`, one named four-channel microphone input records all four paths. The operator accepts the ADC8/TX24 speech level. Signed candidate `7.3.1-105` passed package admission and was written, synced and read back in slot A; accepted `102` remains in B. The new candidate has not yet completed its physical boot and microphone checks. See [the engineering record](docs/MICROPHONE-BRINGUP-20261030.md) and [branch boundaries](docs/BRANCHES.md).
@@ -21,26 +28,30 @@ The normal boot path currently enters **EL1**. EL2/KVM work is maintained separa
 
 ## Install on Fedora
 
-Development RPMs are published to [COPR unstable](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/). For an existing singleboot userdata installation on Fedora Rawhide AArch64:
+Development RPMs are published to [COPR unstable](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/). For an existing unstable-family installation on Fedora Rawhide AArch64:
 
 ```bash
 sudo dnf copr enable mcc45tr/uke-linux-unstable
-sudo dnf --setopt=installonly_limit=0 install senemos-uke-linux-kernel-mainline-singleboot
-sudo dnf --setopt=installonly_limit=0 upgrade 'senemos-uke-linux-kernel-mainline*'
+sudo dnf update
 ```
 
-The kernel, modules, device trees and boot image must use matching versions. Singleboot uses both boot slots for Linux. Guarded automatic activation is enabled by default: DNF writes and verifies the inactive slot, selects it for the next reboot and retains the accepted slot and matched modules. The administrator chooses when to reboot; identity, firmware, power and transaction checks remain required.
+The kernel, modules, device trees and boot image must use matching versions.
+Unstable RPMs have no automatic activation scriptlets. Installing or updating
+them does not select a boot slot or reboot the tablet; the existing explicit
+trial procedure and recovery checks still apply. Keep the accepted kernel and
+its matching modules available. Initial migration between package families
+requires a reviewed DNF transaction and recovery route.
 
 ### RPM packages
 
 | Package | Purpose |
 | --- | --- |
-| `senemos-uke-linux-kernel-mainline` | Kernel package set |
-| `senemos-uke-linux-kernel-mainline-core` | ARM64 kernel image, configuration and metadata |
-| `senemos-uke-linux-kernel-mainline-modules` | Matching kernel modules |
-| `senemos-uke-linux-kernel-mainline-dtbs` | Uke device trees and display overlay |
-| `senemos-uke-linux-kernel-mainline-boot` | Matched Android boot image and boot metadata |
-| `senemos-uke-linux-kernel-mainline-singleboot` | Userdata profile and selected kernel for automatic A/B updates |
+| `senemos-uke-linux-kernel-mainline-unstable` | Development kernel package set |
+| `senemos-uke-linux-kernel-mainline-unstable-core` | ARM64 kernel image, configuration and metadata |
+| `senemos-uke-linux-kernel-mainline-unstable-modules` | Matching kernel modules |
+| `senemos-uke-linux-kernel-mainline-unstable-dtbs` | Uke device trees and display overlay |
+| `senemos-uke-linux-kernel-mainline-unstable-boot` | Matched Android boot image and boot metadata |
+| `senemos-uke-linux-kernel-mainline-unstable-singleboot` | Userdata profile and selected-image metadata |
 
 ## Build from source
 
@@ -65,7 +76,7 @@ Previous branch tips remain under `archive/` tags. Singleboot is a package profi
 ## Documentation
 
 - [Source manifest](manifests/linux-7.3.0.json) — upstream version, patches and checksums
-- [Build guide](docs/BUILDING.md) — local builds and tooling
+- [Build guide](docs/BUILDING.md) — COPR builds and tooling
 - [Native packaging](packaging/native/README.md) — source integration and package details
 - [Architecture](docs/ARCHITECTURE.md) — kernel integration overview
 - [Automation](docs/AUTOMATION.md) — source updates and COPR workflow

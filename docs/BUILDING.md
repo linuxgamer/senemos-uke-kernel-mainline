@@ -115,14 +115,16 @@ No project Python program, interpreter or Python dependency is copied to tablet
 RPMs. dt-schema is not required by this entry's compile/package checks; schema
 validation must be recorded separately if added with a pinned host-only tool.
 
-COPR publication uses the official host-only `copr-cli-2.7-1.fc46.noarch` and
-`python3-copr-2.8-1.fc46.noarch` authenticated API client. It is not a project
-Python program or target dependency. SCM source generation uses COPR's official
+COPR publication from the tablet uses native curl/jq with the authenticated
+HTTPS API. Do not run the installed Python-based copr-cli on the tablet.
+SCM source generation uses COPR's official
 Fedora host chroot, separate from the pinned local image. `.copr/Makefile`
 exports only SRPM files; verification state stays outside its result collector.
-GitHub push hooks and daily stable workflows are configured for the two ready
-source packages. See the Fedora builder's COPR automation records and the private
-package hub. RPM same-version corrections increase the release so DNF can
+New kernel development uses the unstable family and an -unstable ABI. The legacy
+upstream-candidate GitHub workflow is disabled. Normal-family source preparation
+and COPR submission are manual, and its webhook rebuild is disabled. Normal
+updates require an explicit request and physical qualification before promotion. RPM same-version
+corrections increase the release so DNF can
 deliver them, while the compiled kernel cache remains reusable when source,
 config and compilation rules are unchanged.
 
