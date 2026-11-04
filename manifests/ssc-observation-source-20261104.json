@@ -45,8 +45,25 @@
     "private_identifiers_or_samples_exposed": false
   },
   "qualification": {
-    "state": "pending",
+    "state": "succeeded",
     "release": "uke-ssc-protocol-check-1.0-10",
+    "copr_build": 11260554,
+    "source_commit": "afe3b4171cb552775d92561451db877bbb3732de",
+    "actual_show_checks_per_compiler": 20480,
+    "compilers": [
+      "gcc",
+      "clang"
+    ],
+    "sanitizers": [
+      "address",
+      "undefined"
+    ],
+    "actual_reconcile_cases": 9,
+    "negative_controls": [
+      "stale-error",
+      "stale-status"
+    ],
+    "full_native_driver_object": true,
     "scope": "Actual callbacks/reconcile fixtures and full native driver object; no full kernel or physical acceptance"
   },
   "delivery": {

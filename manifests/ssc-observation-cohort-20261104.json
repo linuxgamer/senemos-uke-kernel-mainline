@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-04",
+  "scope": "Preserve the complete qualified11003 source and add the qualified read-only SSC discovery observations",
+  "family": "senemos-uke-linux-kernel-mainline-unstable",
+  "kernel_abi_suffix": "-unstable",
+  "minimum_fresh_revision": 12000,
+  "kernel_parent": {
+    "copr_build": 11260288,
+    "release": "7.3.1-11003",
+    "source_commit": "261d85e218906f78d37810db78a4aa80cd900067",
+    "url": "https://download.copr.fedorainfracloud.org/results/mcc45tr/uke-linux-unstable/fedora-rawhide-aarch64/Packages/s/senemos-uke-linux-kernel-mainline-unstable-7.3.1-11003.fc46.src.rpm",
+    "sha256": "6dc168a4acdda30aa397bff6b0700d896e7b7872ce547f9ae80da63a403b2401",
+    "bytes": 164443242,
+    "primary_sha256": "82e5086d7d0a8059e630e33f8886397421f8756dec92dadb82b927690f311218",
+    "composition_sha256": "843c09ca59e488c2bf6526da617ef2b0395108a3972d05c7717182aee1a42008",
+    "native_config_sha256": "739882b3a07fc6a701bae81ac6623a4b576871bd4289de3a095acabc20d49d34"
+  },
+  "qualified_observations": {
+    "copr_build": 11260554,
+    "source_commit": "afe3b4171cb552775d92561451db877bbb3732de",
+    "manifest": "manifests/ssc-observation-source-20261104.json"
+  },
+  "retained": [
+    "read-only PMIC RTC gate",
+    "CAMCC camera-stage1 and inactive sensor/EEPROM graph",
+    "HSIC/SixZone v4 paired display ownership and empty default preset",
+    "CDSP and pogo source",
+    "corrected Waydroid network Kconfig",
+    "I2C-core NFC wakeup ownership",
+    "power, touch variants and unchanged sensor wire/admission"
+  ],
+  "delivery": {
+    "automatic_seamless_staging_required": true,
+    "minimum_update_provider": "uke-kernel-update >= 1.8.90",
+    "package_rollback_default": "enforced",
+    "preserve_local_rollback_preference": true,
+    "reapply_preference_command": false,
+    "normal_kernel_promotion": false
+  },
+  "undeclared_source_bytes_retained": true,
+  "raw_native_config_unchanged": true,
+  "audio_change": "Only the two compact ABI-specific ALSA identity literals",
+  "full_kernel_qualification": {
+    "state": "pending"
+  },
+  "physical_sensor_acceptance": false,
+  "imports": [
+    {
+      "path": "src/sensors/uke-ssc-iio.c",
+      "sha256": "cfe9b4fb1740aa33133544d0b122af5c306d42040797e8210af2299bc9479c20"
+    },
+    {
+      "path": "src/sensors/prepare-source.sh",
+      "sha256": "10d7e641fd94781b6a50b796c1d62b4c6b4f35edc96929cc6486b4ba5379157c"
+    },
+    {
+      "path": "src/sensors/sysfs-driver-uke-ssc",
+      "sha256": "e63f4c681af17711d918069e096c4a7863ff1ae19892567368b3ee96437ed891"
+    },
+    {
+      "path": "tests/ssc-native-contract.c",
+      "sha256": "2e61285a49debaa9cc6db91b3f0e0a936571e19d630b0f5ee4ebd930e44f460a"
+    },
+    {
+      "path": "tests/ssc-native-contract.sh",
+      "sha256": "90c59d7f4c05037b62e015ace749e1156539130d6e067745d64f1e9dedc3e1ea"
+    },
+    {
+      "path": "tests/ssc-native-host.h",
+      "sha256": "6ead3a1c624539d5f6ec3bb9e6cef3f43f9157087839c4118b3eefb7a08a85cd"
+    }
+  ],
+  "unchanged_sensor_inputs": [
+    {
+      "path": "src/sensors/uke-ssc-protocol.c",
+      "sha256": "0303da3c8506cf5606c095b0609b74922f0f423210d33a63dec596560f05f00a"
+    },
+    {
+      "path": "src/sensors/uke-ssc-protocol.h",
+      "sha256": "0e8ee0718335c5977d588ea32adaef450675fdcbd413f5715885e4cfb7bc2198"
+    },
+    {
+      "path": "src/sensors/Kconfig",
+      "sha256": "1935fbaa243887dfddcc839bc910cd611f73bb2535851d58cb661bb7d3de72ec"
+    },
+    {
+      "path": "src/sensors/Makefile",
+      "sha256": "c0025f1e5c7dbd60899d90a5404c05411ee4c8eb9c394426d94ece98e15c2b5f"
+    }
+  ]
+}

@@ -17,14 +17,20 @@ Normal-family updates require an explicit request and physical qualification
 before promotion. The legacy upstream-update workflow and normal COPR webhook
 rebuilds are disabled.
 
-The 7300-based color trial `7.3.1-10000-unstable` passed
-[COPR 11260145](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11260145/),
-including Image, linked/signed modules, both supplier DTs and boot/RPM checks.
-Delivery is held: 8101 was installed and selected independently during this
-build and adds a CAMCC boot stage absent from the color trial. Preserve that
-isolated boot trial and review cumulative source before another color build.
-The tablet still runs 7200; physical boot, full peripheral and color/HDR
-acceptance remain open.
+The tablet now runs `7.3.1-11003-unstable`, qualified in
+[COPR 11260288](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11260288/).
+Its complete source combines the read-only RTC gate, CAMCC stage1, paired
+HSIC/SixZone v4 color source, CDSP/pogo, corrected network configuration and
+I2C-owned NFC wakeup. Boot observation does not establish full peripheral,
+calibrated camera or color/HDR acceptance.
+
+Read-only SSC discovery observations passed
+[COPR 11260554](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11260554/):
+actual callbacks, reconcile failure cases and native driver compilation.
+The cumulative source producer pins the complete 11003 SRPM and composition,
+preserves every undeclared source byte and adds only those qualified sensor
+changes plus the new ABI's audio identity. Full kernel qualification is pending.
+The older 7300-based color producer remains held to prevent source regression.
 
 31 October 2026. `main` is the continuation branch. Microphone capture, power management, bounded boot-watchdog and optional gaming sources are integrated. The complete combined source still requires fresh release admission and a qualified COPR build; retained candidate packages do not establish that result.
 
