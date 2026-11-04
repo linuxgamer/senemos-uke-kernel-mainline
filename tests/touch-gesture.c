@@ -6,9 +6,9 @@
 #include <linux/unaligned.h>
 #include "../src/input/nt36532-uke-protocol.h"
 
-static unsigned calls, guards, fail_call, stop_guard, setting_writes, command;
+static unsigned calls, guards, fail_call, stop_guard, setting_writes, command, queries;
 static unsigned events[8], event_count;
-static bool busy, wrong;
+static bool busy, wrong, refuse_queries;
 static u16 values[256];
 static int ready(void *context)
 {
@@ -40,6 +40,9 @@ static int write_data(void *context, u32 address, const void *data, size_t size,
 			events[event_count++] = bytes[1];
 	} else if (size == 3) {
 		assert(bytes[0] == 0xbf && bytes[2] == 1);
+		queries++;
+		if (refuse_queries)
+			return -ETIMEDOUT;
 		command = bytes[1];
 		events[event_count++] = 0x100 | command;
 	} else if (size == 2) {
@@ -70,9 +73,9 @@ static int read_data(void *context, u32 address, void *data, size_t size, bool f
 static const struct nvt_uke_io io = { values, read_data, write_data, ready, delay, NULL, NVT_UKE_CSOT };
 static void reset(void)
 {
-	calls = guards = setting_writes = event_count = command = 0;
+	calls = guards = setting_writes = event_count = command = queries = 0;
 	fail_call = stop_guard = UINT_MAX;
-	busy = wrong = false;
+	busy = wrong = refuse_queries = false;
 	memset(values, 0, sizeof(values));
 }
 static void checksum(u8 *packet)
@@ -82,11 +85,30 @@ static void checksum(u8 *packet)
 		sum += packet[i];
 	packet[NVT_UKE_GESTURE_SIZE - 1] = (u8)-sum;
 }
-int main(void)
+int main(int argc, char **argv)
 {
 	u8 packet[NVT_UKE_GESTURE_SIZE] = { 15 << 3 };
 	unsigned int operations, checks;
-	const unsigned int sequence[] = { 0x11, 0x111, 0x1b, 0x11b, 0x7b, 0x13 };
+	const unsigned int sequence[] = { 0x11, 0x1b, 0x7b, 0x13 };
+	const char *mode = argc == 2 ? argv[1] : "all";
+	bool complete = !strcmp(mode, "all");
+
+	assert(complete || !strcmp(mode, "values") || !strcmp(mode, "oem-sequence") ||
+	       !strcmp(mode, "getter-refusal"));
+	if (!strcmp(mode, "oem-sequence")) {
+		reset();
+		assert(!nvt_uke_gesture_enter(&io));
+		assert(event_count == 4 && !memcmp(events, sequence, sizeof(sequence)) &&
+		       "Gesture entry must follow the OEM ACK-only setting sequence");
+		return 0;
+	}
+	if (!strcmp(mode, "getter-refusal")) {
+		reset(); refuse_queries = true;
+		assert(!nvt_uke_gesture_enter(&io) &&
+		       "Gesture entry must not depend on extra diagnostic readback");
+		assert(!queries && event_count == 4);
+		return 0;
+	}
 
 	checksum(packet);
 	assert(nvt_uke_double_tap(packet, sizeof(packet)) == 1);
@@ -109,7 +131,10 @@ int main(void)
 	assert(nvt_uke_double_tap(NULL, sizeof(packet)) == -EINVAL);
 
 	reset(); assert(!nvt_uke_gesture_enter(&io));
-	assert(event_count == 6 && !memcmp(events, sequence, sizeof(sequence)));
+	if (complete) {
+		assert(event_count == 4 && !memcmp(events, sequence, sizeof(sequence)));
+		assert(!queries);
+	}
 	assert(values[0x11] == 1 && !values[0x1b]);
 	operations = calls; checks = guards;
 	for (unsigned int i = 1; i <= operations; i++) {
@@ -122,8 +147,12 @@ int main(void)
 	}
 	reset(); busy = true;
 	assert(nvt_uke_gesture_enter(&io) == -ETIMEDOUT && setting_writes == 5);
-	reset(); wrong = true;
-	assert(nvt_uke_gesture_enter(&io) == -EPROTO && event_count == 2);
+	if (complete) {
+		reset(); wrong = true;
+		assert(!nvt_uke_gesture_enter(&io) && !queries && event_count == 4);
+		reset(); refuse_queries = true;
+		assert(!nvt_uke_gesture_enter(&io) && !queries && event_count == 4);
+	}
 	assert(nvt_uke_gesture_enter(NULL) == -EINVAL);
 
 	reset(); assert(!nvt_uke_coordinate_mode(&io, true));
@@ -144,5 +173,7 @@ int main(void)
 	assert(nvt_uke_coordinate_mode(&io, true) == -ETIMEDOUT && setting_writes == 5);
 	reset(); wrong = true;
 	assert(nvt_uke_coordinate_mode(&io, true) == -EPROTO && event_count == 2);
+	reset(); refuse_queries = true;
+	assert(nvt_uke_coordinate_mode(&io, true) == -ETIMEDOUT && queries == 1);
 	assert(nvt_uke_coordinate_mode(NULL, true) == -EINVAL);
 }

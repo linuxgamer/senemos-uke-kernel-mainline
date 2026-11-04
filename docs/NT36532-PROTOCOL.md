@@ -185,3 +185,50 @@ The shared NT36532 OEM and upstream comparisons described above remain the
 protocol basis. No donor firmware, GPIO, power sequence or calibration data is
 introduced by this recovery change. Physical recurrence validation and the
 independent gesture-entry sequencing investigation remain open.
+
+## OEM acknowledged gesture settings, 4 November 2026
+
+The exact retained Uke OEM module from
+[`9bb7c4331be7205fabf5427b5654555763304d20`](https://github.com/vember31/android_device_xiaomi_uke-kernel/tree/9bb7c4331be7205fabf5427b5654555763304d20),
+SHA-256 `cee722d7baf86ecadb8992038781f48ac6098c54964c31c26113420695e9eca8`,
+is inspected statically, never loaded or executed. Its gesture path calls the
+0x11/0x1b extended setters, then sends pen configuration and final0x13. Those
+setters use bounded ACKs and do not call a diagnostic getter. The native path
+additionally queried both settings after their ACKs. A failed extra query could
+therefore refuse retention even after a successful setter. The tablet's actual
+first failing operation has not been captured, so this is a source contract
+difference rather than a proven attribution of the observed timeout.
+
+The candidate factors the existing mandatory ACK operation from the verified
+value-setting helper. Gesture preparation uses ACK-only setters; coordinate
+mode retains its mandatory value readback. Command values, addresses, delays,
+ACK retries, transport/readiness errors, pen/final command behavior, firmware
+admission, matrix processing and panel order remain unchanged. Remaining write,
+ACK-read and ACK-timeout failures gain bounded command/phase diagnostics;
+normal lifecycle shutdown is not reported as a new transport warning.
+No OEM ignored-error behavior is copied.
+
+The adjacent MiCode P81 implementation instead uses a combined gesture-switch
+command. Its board/firmware protocol is not transplanted. Native Linux's I2C
+Novatek family and adjacent coordinate-firmware drivers do not provide this
+Uke THP command contract. Existing license and firmware/privacy boundaries apply.
+
+The active OnePlus Pad2 queue at127ee601 includes touch patch0018; its
+panel-follower path writes final0x13 and uses a different coordinate firmware
+contract. Lenovo TB520FU at972c5ce4 stops/restarts its coordinate driver across
+PM. Neither establishes Uke extended-setting readback requirements. Their
+catalogued local donor directories are absent in this checkout, so the exact
+pinned patch/recipe files are inspected read-only through GitHub instead.
+Linux05441d69's `novatek-nvt-ts.c` handles NT11205/NT36672A over I2C;
+the current NT36532 binding describes a DSI panel, not this touch protocol.
+No adjacent firmware, panel command table or GPIO value is copied.
+
+The remote regression imports the exact pre-change production protocol and
+requires independent failures for the extra-query sequence and an injected
+extra-query timeout. An original-value/error control remains separate.
+Corrected GCC/Clang normal and fail-fast sanitizer runs must preserve every
+mandatory operation/readiness error and coordinate readback. Existing complete
+protocol, packet/filter, firmware, matrix, publisher and transport race checks
+remain required. No compiler or touch-device operation runs on the tablet.
+Native qualification, signed delivery and physical gesture/touch recurrence
+acceptance remain pending.

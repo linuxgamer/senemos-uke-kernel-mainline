@@ -4,6 +4,7 @@
  * retained in hardware source-family uke-hw 1.5.2. No GPL-3 contact code is used.
  */
 #include <linux/errno.h>
+#include <linux/printk.h>
 #include <linux/string.h>
 #include <linux/unaligned.h>
 
@@ -391,28 +392,46 @@ int nvt_uke_charger(const struct nvt_uke_io *io, bool connected)
 	return value == connected ? nvt_uke_guard(io) : -EPROTO;
 }
 
-/* Direct Uke GPL module 9bb7c433: bounded extended-command ACK and readback. */
-static int nvt_uke_setting(const struct nvt_uke_io *io, u8 command, u16 value)
+/* Direct Uke GPL module 9bb7c433: bounded extended-command ACK. */
+static int nvt_uke_setting_ack(const struct nvt_uke_io *io, u8 command, u16 value)
 {
 	u8 request[] = { 0xbf, command, 0, (u8)value, (u8)(value >> 8) }, ack;
-	u16 actual;
 	unsigned int i;
 	int ret;
 
 	io->delay_ms(io->context, 35);
 	for (i = 0; i < 5; i++) {
 		ret = nvt_uke_write(io, 0x11c450, request, sizeof(request), false);
-		if (ret)
+		if (ret) {
+			if (ret != -ESHUTDOWN)
+				pr_warn_ratelimited("NT36532 setting 0x%02x write failed: %d\n", command, ret);
 			return ret;
+		}
 		io->delay_ms(io->context, 20);
 		ret = nvt_uke_read(io, 0x11c450, &ack, 1, false);
-		if (ret)
+		if (ret) {
+			if (ret != -ESHUTDOWN)
+				pr_warn_ratelimited("NT36532 setting 0x%02x ACK read failed: %d\n", command, ret);
 			return ret;
+		}
 		if (!ack)
 			break;
 	}
-	if (i == 5)
+	if (i == 5) {
+		pr_warn_ratelimited("NT36532 setting 0x%02x ACK timed out\n", command);
 		return -ETIMEDOUT;
+	}
+	return 0;
+}
+
+/* Coordinate-mode admission retains its separate value readback. */
+static int nvt_uke_setting(const struct nvt_uke_io *io, u8 command, u16 value)
+{
+	u16 actual;
+	int ret = nvt_uke_setting_ack(io, command, value);
+
+	if (ret)
+		return ret;
 	ret = nvt_uke_custom(io, command, &actual);
 	if (ret)
 		return ret;
@@ -435,9 +454,10 @@ int nvt_uke_gesture_enter(const struct nvt_uke_io *io)
 
 	if (ret)
 		return ret;
-	ret = nvt_uke_setting(io, 0x11, 1);
+	/* OEM gesture setup uses ACKed setters, without diagnostic getter queries. */
+	ret = nvt_uke_setting_ack(io, 0x11, 1);
 	if (!ret)
-		ret = nvt_uke_setting(io, 0x1b, 0);
+		ret = nvt_uke_setting_ack(io, 0x1b, 0);
 	if (ret)
 		return ret;
 	io->delay_ms(io->context, 35);
