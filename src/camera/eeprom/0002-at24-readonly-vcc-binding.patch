@@ -1,0 +1,24 @@
+--- a/Documentation/devicetree/bindings/eeprom/at24.yaml
++++ b/Documentation/devicetree/bindings/eeprom/at24.yaml
+@@ -209,10 +209,21 @@
+     minimum: 1
+     maximum: 8
+ 
++  vcc-microvolt:
++    minimum: 1
++    maximum: 2147483647
++    description: |
++      Requested VCC voltage for a read-only EEPROM on a shared variable
++      supply. The driver votes before runtime resume and withdraws the
++      vote after power-off. The opted-in provider has no write callback.
++
+   vcc-supply:
+     description:
+       phandle of the regulator that provides the supply voltage.
+ 
++dependencies:
++  vcc-microvolt: [read-only, vcc-supply]
++
+ required:
+   - compatible
+   - reg

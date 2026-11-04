@@ -1,0 +1,87 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 20:30:00 +0300
+Subject: [PATCH] clk: qcom: gdsc: allow permanent controller-owned provider data
+
+A permanent controller may retain published clocks and domains after a
+later probe failure. Managed provider metadata would still be freed by
+probe cleanup. Allow caller-owned provider/domain-array storage under the
+restricted controller-PM contract; preserve ordinary callers unchanged.
+
+Require exact initialized storage, no managed parent attachment and only
+validated controller-PM domains. Clear initialized slots on registration
+failure while retaining uncertain power references. The caller must keep
+its storage alive across any partial publication and failed probe.
+
+This is a source prerequisite, not a provider activation. No domain opts in.
+Existing Qualcomm/Linux attribution is retained in the original source.
+Signed-off-by: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+
+--- a/drivers/clk/qcom/gdsc.c
++++ b/drivers/clk/qcom/gdsc.c
+@@ -692,14 +692,28 @@
+ 			return ret;
+ 	}
+ 
+-	data = devm_kzalloc(dev, sizeof(*data), GFP_KERNEL);
+-	if (!data)
+-		return -ENOMEM;
+-
+-	data->domains = devm_kcalloc(dev, num, sizeof(*data->domains),
+-				     GFP_KERNEL);
+-	if (!data->domains)
+-		return -ENOMEM;
++	data = desc->permanent_data;
++	if (data) {
++		/* No managed attachment or supplier handle may escape this path. */
++		if (!num || !data->domains || data->num_domains != num ||
++		    desc->pd_list || dev->pm_domain)
++			return -EINVAL;
++		for (i = 0; i < num; i++) {
++			if (data->domains[i])
++				return -EBUSY;
++			if (scs[i] && !(scs[i]->flags & GDSC_CONTROLLER_PM))
++				return -EINVAL;
++		}
++	} else {
++		data = devm_kzalloc(dev, sizeof(*data), GFP_KERNEL);
++		if (!data)
++			return -ENOMEM;
++
++		data->domains = devm_kcalloc(dev, num, sizeof(*data->domains),
++					     GFP_KERNEL);
++		if (!data->domains)
++			return -ENOMEM;
++	}
+ 
+ 	for (i = 0; i < num; i++) {
+ 		if (!scs[i] || !scs[i]->needs_icc)
+@@ -767,8 +781,10 @@
+ 	gdsc_pm_subdomain_remove(desc, i);
+ err_remove_domains:
+ 	while (initialized--) {
+-		if (scs[initialized])
++		if (scs[initialized]) {
+ 			pm_genpd_remove(&scs[initialized]->pd);
++			data->domains[initialized] = NULL;
++		}
+ 	}
+ 
+ 	return ret;
+--- a/drivers/clk/qcom/gdsc.h
++++ b/drivers/clk/qcom/gdsc.h
+@@ -92,6 +92,15 @@
+ 	struct gdsc **scs;
+ 	size_t num;
+ 	struct dev_pm_domain_list *pd_list;
++	/*
++	 * Optional caller-owned provider and domain-array storage. Both must
++	 * outlive a partially published permanent controller, including failed
++	 * probe cleanup. Only GDSC_CONTROLLER_PM domains may use this path;
++	 * their regulator/ICC handles must not depend on devres either.
++	 * Initialize num_domains to num and every domain-array slot to NULL.
++	 * NULL preserves the existing managed-allocation path.
++	 */
++	struct genpd_onecell_data *permanent_data;
+ };
+ 
+ #ifdef CONFIG_QCOM_GDSC

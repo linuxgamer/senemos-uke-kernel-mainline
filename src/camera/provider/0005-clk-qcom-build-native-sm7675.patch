@@ -1,0 +1,28 @@
+From: Uke Linux maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] clk: qcom: build the permanent Uke SM7675 camera controller
+
+This controller uses permanent provider metadata and does not admit unload.
+Keep the Kconfig entry boolean. Board and CRM mode admission remain mandatory
+in its probe; source linkage does not establish physical camera support.
+
+diff --git a/drivers/clk/qcom/Kconfig b/drivers/clk/qcom/Kconfig
+--- a/drivers/clk/qcom/Kconfig
++++ b/drivers/clk/qcom/Kconfig
+@@ -1413,2 +1413,11 @@
++config SM_CAMCC_7675
++	bool "Uke SM7675 Camera Clock Controller"
++	depends on ARM64 && PM
++	select QCOM_GDSC
++	help
++	  Permanent camera clock and power controller for Xiaomi Uke.
++	  Firmware CRM must be disabled for the direct-programming path.
++	  This driver cannot be unloaded.
++
+ config SM_CAMCC_8150
+ 	tristate "SM8150 Camera Clock Controller"
+diff --git a/drivers/clk/qcom/Makefile b/drivers/clk/qcom/Makefile
+--- a/drivers/clk/qcom/Makefile
++++ b/drivers/clk/qcom/Makefile
+@@ -162,1 +162,2 @@
++obj-$(CONFIG_SM_CAMCC_7675) += camcc-sm7675.o
+ obj-$(CONFIG_SM_CAMCC_8150) += camcc-sm8150.o

@@ -1,0 +1,30 @@
+From: Max Bretschneider <max.bretschneider@leica-geosystems.com>
+Subject: [PATCH] media: i2c: ov08d10: avoid reading the unset mode in probe debug
+
+The hardware-configuration check runs before probe assigns cur_mode. Use the
+validated endpoint lane count in the debug message. With dynamic debugging
+enabled the old argument dereferences NULL.
+
+Adapted to the retained Linux 7.3.1 source from the author's v2 patch 1/4:
+https://lore.kernel.org/linux-media/20261024-ov08d10-get-selection-v2-1-f8c49972ca18@leica-geosystems.com/
+The original GPL-2.0 and Intel attribution are retained. No sensor register,
+power sequence, board address or mode table is changed.
+
+Signed-off-by: Max Bretschneider <max.bretschneider@leica-geosystems.com>
+---
+ drivers/media/i2c/ov08d10.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/i2c/ov08d10.c b/drivers/media/i2c/ov08d10.c
+--- a/drivers/media/i2c/ov08d10.c
++++ b/drivers/media/i2c/ov08d10.c
+@@ -1431,7 +1431,8 @@ static int ov08d10_get_hwcfg(struct ov08d10 *ov08d10)
+ 		goto check_hwcfg_error;
+ 	}
+ 
+-	dev_dbg(dev, "Using %u data lanes\n", ov08d10->cur_mode->data_lanes);
++	dev_dbg(dev, "Using %u data lanes\n",
++		bus_cfg.bus.mipi_csi2.num_data_lanes);
+ 
+ 	ov08d10->priv_lane = &lane_cfg_2;
+ 	ov08d10->modes_size = ov08d10_modes_num(ov08d10);

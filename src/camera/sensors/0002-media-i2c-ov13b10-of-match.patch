@@ -1,0 +1,47 @@
+From: Senemos Maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH 2/2] media: i2c: ov13b10: match Device Tree sensors
+
+The driver's generic fwnode, clock, regulator and GPIO paths also serve
+Device Tree sensors, but the match table currently contains only ACPI IDs.
+Add the OF match without changing registers, power sequencing or ACPI.
+This supplies no board sensor node or CAMSS platform.
+
+Compared with upstream f47d223627f80cb7a1eb14c585fe6cb35de5e984 and the Uke
+camera DT 57d2135ee6909ffb7d288a7dc4d82c85d95fc10d. The OEM OV13B10 comment
+is not a fitted-sensor or valid power/lane graph. Retain GPL-2.0 and Intel
+attribution. This candidate remains outside the active series.
+
+---
+ drivers/media/i2c/ov13b10.c |    8 ++++++++
+ 1 file changed, 8 insertions(+)
+diff --git a/drivers/media/i2c/ov13b10.c b/drivers/media/i2c/ov13b10.c
+index b0d3414..12ac43d 100644
+--- a/drivers/media/i2c/ov13b10.c
++++ b/drivers/media/i2c/ov13b10.c
+@@ -7,6 +7,7 @@
+ #include <linux/gpio/consumer.h>
+ #include <linux/i2c.h>
+ #include <linux/module.h>
++#include <linux/of.h>
+ #include <linux/pm_runtime.h>
+ #include <linux/regulator/consumer.h>
+ #include <media/v4l2-ctrls.h>
+@@ -1705,11 +1706,18 @@ static const struct acpi_device_id ov13b10_acpi_ids[] = {
+ MODULE_DEVICE_TABLE(acpi, ov13b10_acpi_ids);
+ #endif
+ 
++static const struct of_device_id ov13b10_of_match[] = {
++	{ .compatible = "ovti,ov13b10" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, ov13b10_of_match);
++
+ static struct i2c_driver ov13b10_i2c_driver = {
+ 	.driver = {
+ 		.name = "ov13b10",
+ 		.pm = pm_ptr(&ov13b10_pm_ops),
+ 		.acpi_match_table = ACPI_PTR(ov13b10_acpi_ids),
++		.of_match_table = ov13b10_of_match,
+ 	},
+ 	.probe = ov13b10_probe,
+ 	.remove = ov13b10_remove,

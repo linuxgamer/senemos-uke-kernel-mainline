@@ -1,0 +1,88 @@
+From: Uke Linux maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] media: qcom: camss: return PHY setup errors to the stream caller
+
+A native PHY can reject an unsupported lane or timing configuration before
+programming it. Propagate that error through the stream operation. Existing
+PHY implementations retain their successful behavior and return zero.
+Reject an empty lane mask before changing a legacy clock mux.
+
+diff --git a/drivers/media/platform/qcom/camss/camss-csiphy-2ph-1-0.c b/drivers/media/platform/qcom/camss/camss-csiphy-2ph-1-0.c
+index 9d67e7f..1b93427 100644
+--- a/drivers/media/platform/qcom/camss/camss-csiphy-2ph-1-0.c
++++ b/drivers/media/platform/qcom/camss/camss-csiphy-2ph-1-0.c
+@@ -94,7 +94,7 @@ static u8 csiphy_settle_cnt_calc(s64 link_freq, u32 timer_clk_rate)
+ 	return settle_cnt;
+ }
+ 
+-static void csiphy_lanes_enable(struct csiphy_device *csiphy,
++static int csiphy_lanes_enable(struct csiphy_device *csiphy,
+ 				struct csiphy_config *cfg,
+ 				s64 link_freq, u8 lane_mask)
+ {
+@@ -132,6 +132,7 @@ static void csiphy_lanes_enable(struct csiphy_device *csiphy,
+ 		writel_relaxed(0x3f, csiphy->base +
+ 			       CAMSS_CSI_PHY_INTERRUPT_CLEARn(l));
+ 	}
++	return 0;
+ }
+ 
+ static void csiphy_lanes_disable(struct csiphy_device *csiphy,
+diff --git a/drivers/media/platform/qcom/camss/camss-csiphy-3ph-1-0.c b/drivers/media/platform/qcom/camss/camss-csiphy-3ph-1-0.c
+index dac8d2e..2c0b922 100644
+--- a/drivers/media/platform/qcom/camss/camss-csiphy-3ph-1-0.c
++++ b/drivers/media/platform/qcom/camss/camss-csiphy-3ph-1-0.c
+@@ -1148,7 +1148,7 @@ static bool csiphy_is_gen2(u32 version)
+ 	return ret;
+ }
+ 
+-static void csiphy_lanes_enable(struct csiphy_device *csiphy,
++static int csiphy_lanes_enable(struct csiphy_device *csiphy,
+ 				struct csiphy_config *cfg,
+ 				s64 link_freq, u8 lane_mask)
+ {
+@@ -1189,6 +1189,7 @@ static void csiphy_lanes_enable(struct csiphy_device *csiphy,
+ 		writel_relaxed(0, csiphy->base +
+ 			       CSIPHY_3PH_CMN_CSI_COMMON_CTRLn(regs->offset, i));
+ 	}
++	return 0;
+ }
+ 
+ static void csiphy_lanes_disable(struct csiphy_device *csiphy,
+diff --git a/drivers/media/platform/qcom/camss/camss-csiphy.c b/drivers/media/platform/qcom/camss/camss-csiphy.c
+index 539ac48..766c1b3 100644
+--- a/drivers/media/platform/qcom/camss/camss-csiphy.c
++++ b/drivers/media/platform/qcom/camss/camss-csiphy.c
+@@ -272,6 +272,9 @@ static int csiphy_stream_on(struct csiphy_device *csiphy)
+ 	u8 num_lanes = csiphy->cfg.csi2->lane_cfg.num_data;
+ 	u8 val;
+ 
++	if (!lane_mask)
++		return -EINVAL;
++
+ 	link_freq = camss_get_link_freq(&csiphy->subdev.entity, bpp, num_lanes);
+ 
+ 	if (link_freq < 0) {
+@@ -295,9 +298,7 @@ static int csiphy_stream_on(struct csiphy_device *csiphy)
+ 		wmb();
+ 	}
+ 
+-	csiphy->res->hw_ops->lanes_enable(csiphy, cfg, link_freq, lane_mask);
+-
+-	return 0;
++	return csiphy->res->hw_ops->lanes_enable(csiphy, cfg, link_freq, lane_mask);
+ }
+ 
+ /*
+diff --git a/drivers/media/platform/qcom/camss/camss-csiphy.h b/drivers/media/platform/qcom/camss/camss-csiphy.h
+index 9d9657b..c8fdfb6 100644
+--- a/drivers/media/platform/qcom/camss/camss-csiphy.h
++++ b/drivers/media/platform/qcom/camss/camss-csiphy.h
+@@ -73,7 +73,7 @@ struct csiphy_hw_ops {
+ 	void (*hw_version_read)(struct csiphy_device *csiphy,
+ 				struct device *dev);
+ 	void (*reset)(struct csiphy_device *csiphy);
+-	void (*lanes_enable)(struct csiphy_device *csiphy,
++	int (*lanes_enable)(struct csiphy_device *csiphy,
+ 			     struct csiphy_config *cfg,
+ 			     s64 link_freq, u8 lane_mask);
+ 	void (*lanes_disable)(struct csiphy_device *csiphy,

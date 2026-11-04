@@ -1,0 +1,136 @@
+--- a/drivers/nvmem/at24.c
++++ b/drivers/nvmem/at24.c
+@@ -11,6 +11,7 @@
+ #include <linux/capability.h>
+ #include <linux/delay.h>
+ #include <linux/i2c.h>
++#include <linux/limits.h>
+ #include <linux/init.h>
+ #include <linux/jiffies.h>
+ #include <linux/kernel.h>
+@@ -83,6 +84,11 @@
+ 
+ 	struct nvmem_device *nvmem;
+ 	struct regulator *vcc_reg;
++	u32 vcc_uV;
++	int vcc_fault;
++	bool vcc_voltage_held;
++	bool vcc_io_active;
++	struct mutex vcc_lock;
+ 	void (*read_post)(unsigned int off, char *buf, size_t count);
+ 
+ 	/*
+@@ -433,7 +439,7 @@
+ 	return -ETIMEDOUT;
+ }
+ 
+-static int at24_read(void *priv, unsigned int off, void *val, size_t count)
++static int at24_read_data(void *priv, unsigned int off, void *val, size_t count)
+ {
+ 	struct at24_data *at24;
+ 	struct device *dev;
+@@ -452,6 +458,12 @@
+ 	ret = pm_runtime_resume_and_get(dev);
+ 	if (ret)
+ 		return ret;
++	if (at24->vcc_uV && (!READ_ONCE(at24->vcc_voltage_held) ||
++			     READ_ONCE(at24->vcc_fault))) {
++		ret = READ_ONCE(at24->vcc_fault) ?: -EHOSTDOWN;
++		pm_runtime_put(dev);
++		return ret;
++	}
+ 	/*
+ 	 * Read data from chip, protecting against concurrent updates
+ 	 * from this host, but not from other I2C masters.
+@@ -477,6 +489,8 @@
+ 	return 0;
+ }
+ 
++#include "at24-vcc-readonly.h"
++
+ static int at24_write(void *priv, unsigned int off, void *val, size_t count)
+ {
+ 	struct at24_data *at24;
+@@ -689,6 +703,7 @@
+ 		return -ENOMEM;
+ 
+ 	mutex_init(&at24->lock);
++	mutex_init(&at24->vcc_lock);
+ 	at24->byte_len = byte_len;
+ 	at24->page_size = page_size;
+ 	at24->flags = flags;
+@@ -698,10 +713,16 @@
+ 	at24->offset_adj = at24_get_offset_adj(flags, byte_len);
+ 	at24->client_regmaps[0] = regmap;
+ 
+-	at24->vcc_reg = devm_regulator_get(dev, "vcc");
++	at24->vcc_reg = device_property_present(dev, "vcc-microvolt") ?
++		devm_regulator_get_optional(dev, "vcc") :
++		devm_regulator_get(dev, "vcc");
+ 	if (IS_ERR(at24->vcc_reg))
+ 		return PTR_ERR(at24->vcc_reg);
+ 
++	err = at24_vcc_configure(dev, at24, flags);
++	if (err)
++		return dev_err_probe(dev, err, "invalid read-only VCC request\n");
++
+ 	writable = !(flags & AT24_FLAG_READONLY);
+ 	if (writable) {
+ 		at24->write_max = min_t(unsigned int,
+@@ -743,7 +764,7 @@
+ 	nvmem_config.compat = true;
+ 	nvmem_config.base_dev = dev;
+ 	nvmem_config.reg_read = at24_read;
+-	nvmem_config.reg_write = at24_write;
++	nvmem_config.reg_write = at24->vcc_uV ? NULL : at24_write;
+ 	nvmem_config.priv = at24;
+ 	nvmem_config.stride = 1;
+ 	nvmem_config.word_size = 1;
+@@ -751,7 +772,7 @@
+ 
+ 	i2c_set_clientdata(client, at24);
+ 
+-	full_power = acpi_dev_state_d0(&client->dev);
++	full_power = !at24->vcc_uV && acpi_dev_state_d0(&client->dev);
+ 	if (full_power) {
+ 		err = regulator_enable(at24->vcc_reg);
+ 		if (err)
+@@ -759,6 +780,11 @@
+ 
+ 		pm_runtime_set_active(dev);
+ 	}
++	if (at24->vcc_uV) {
++		err = pm_runtime_set_suspended(dev);
++		if (err)
++			return dev_err_probe(dev, err, "cannot initialize VCC runtime state\n");
++	}
+ 	pm_runtime_enable(dev);
+ 
+ 	/*
+@@ -766,7 +792,7 @@
+ 	 * unless powering on the device is to be avoided during probe (i.e.
+ 	 * it's powered off right now).
+ 	 */
+-	if (full_power) {
++	if (full_power || at24->vcc_uV) {
+ 		err = at24_read(at24, 0, &test_byte, 1);
+ 		if (err) {
+ 			pm_runtime_disable(dev);
+@@ -818,7 +844,7 @@
+ 	struct i2c_client *client = to_i2c_client(dev);
+ 	struct at24_data *at24 = i2c_get_clientdata(client);
+ 
+-	return regulator_disable(at24->vcc_reg);
++	return at24_vcc_off(at24);
+ }
+ 
+ static int __maybe_unused at24_resume(struct device *dev)
+@@ -826,7 +852,7 @@
+ 	struct i2c_client *client = to_i2c_client(dev);
+ 	struct at24_data *at24 = i2c_get_clientdata(client);
+ 
+-	return regulator_enable(at24->vcc_reg);
++	return at24_vcc_on(at24);
+ }
+ 
+ static const struct dev_pm_ops at24_pm_ops = {

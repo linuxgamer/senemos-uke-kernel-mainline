@@ -1,0 +1,84 @@
+From: Uke Linux maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] media: qcom: camss: add native SM7675 gen3 resources and PHY bridge
+
+SM7675 uses the reviewed gen3 CSID/VFE register family, with five PHYs and
+Uke-specific analog supplies, loads and PHY 2.2.1 programming. Keep a distinct
+version for format dispatch and preserve the existing platform profiles.
+This adds a module match only; no Device Tree node is activated.
+
+The resource and PHY helper headers are supplied by the native source archive.
+
+diff --git a/drivers/media/platform/qcom/camss/camss-csiphy-3ph-1-0.c b/drivers/media/platform/qcom/camss/camss-csiphy-3ph-1-0.c
+index 2c0b922..e85f80f 100644
+--- a/drivers/media/platform/qcom/camss/camss-csiphy-3ph-1-0.c
++++ b/drivers/media/platform/qcom/camss/camss-csiphy-3ph-1-0.c
+@@ -1276,3 +1276,5 @@ const struct csiphy_hw_ops csiphy_ops_3ph_1_0 = {
+ 	.isr = csiphy_isr,
+ 	.init = csiphy_init,
+ };
++
++#include "camss-sm7675-phy-ops.h"
+diff --git a/drivers/media/platform/qcom/camss/camss-csiphy.h b/drivers/media/platform/qcom/camss/camss-csiphy.h
+index c8fdfb6..57a6a90 100644
+--- a/drivers/media/platform/qcom/camss/camss-csiphy.h
++++ b/drivers/media/platform/qcom/camss/camss-csiphy.h
+@@ -133,5 +133,6 @@ extern const struct csiphy_formats csiphy_formats_sdm845;
+ 
+ extern const struct csiphy_hw_ops csiphy_ops_2ph_1_0;
+ extern const struct csiphy_hw_ops csiphy_ops_3ph_1_0;
++extern const struct csiphy_hw_ops csiphy_ops_sm7675;
+ 
+ #endif /* QC_MSM_CAMSS_CSIPHY_H */
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe.c b/drivers/media/platform/qcom/camss/camss-vfe.c
+index 319d191..8870c63 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe.c
+@@ -352,6 +352,7 @@ static u32 vfe_src_pad_code(struct vfe_line *line, u32 sink_code,
+ 	case CAMSS_845:
+ 	case CAMSS_8550:
+ 	case CAMSS_8650:
++	case CAMSS_7675:
+ 	case CAMSS_8775P:
+ 	case CAMSS_X1E80100:
+ 		switch (sink_code) {
+@@ -2012,6 +2013,7 @@ static int vfe_bpl_align_rdi(struct vfe_device *vfe)
+ 	case CAMSS_845:
+ 	case CAMSS_8550:
+ 	case CAMSS_8650:
++	case CAMSS_7675:
+ 	case CAMSS_8775P:
+ 	case CAMSS_X1E80100:
+ 		ret = 16;
+diff --git a/drivers/media/platform/qcom/camss/camss.c b/drivers/media/platform/qcom/camss/camss.c
+index 2123f63..fa51441 100644
+--- a/drivers/media/platform/qcom/camss/camss.c
++++ b/drivers/media/platform/qcom/camss/camss.c
+@@ -5739,6 +5739,8 @@ static const struct camss_resources x1e80100_resources = {
+ 	.vfe_num = ARRAY_SIZE(vfe_res_x1e80100),
+ };
+ 
++#include "camss-sm7675-data.h"
++
+ static const struct of_device_id camss_dt_match[] = {
+ 	{ .compatible = "qcom,msm8916-camss", .data = &msm8916_resources },
+ 	{ .compatible = "qcom,msm8939-camss", .data = &msm8939_resources },
+@@ -5757,6 +5759,7 @@ static const struct of_device_id camss_dt_match[] = {
+ 	{ .compatible = "qcom,sm8250-camss", .data = &sm8250_resources },
+ 	{ .compatible = "qcom,sm8550-camss", .data = &sm8550_resources },
+ 	{ .compatible = "qcom,sm8650-camss", .data = &sm8650_resources },
++	{ .compatible = "qcom,sm7675-camss", .data = &sm7675_resources },
+ 	{ .compatible = "qcom,x1e80100-camss", .data = &x1e80100_resources },
+ 	{ }
+ };
+diff --git a/drivers/media/platform/qcom/camss/camss.h b/drivers/media/platform/qcom/camss/camss.h
+index 93d691c..c442d9b 100644
+--- a/drivers/media/platform/qcom/camss/camss.h
++++ b/drivers/media/platform/qcom/camss/camss.h
+@@ -95,6 +95,7 @@ enum camss_version {
+ 	CAMSS_845,
+ 	CAMSS_8550,
+ 	CAMSS_8650,
++	CAMSS_7675,
+ 	CAMSS_8775P,
+ 	CAMSS_X1E80100,
+ };
