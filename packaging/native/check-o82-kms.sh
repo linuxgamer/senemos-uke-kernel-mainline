@@ -24,6 +24,16 @@ awk '
  suspend && /clk_bulk_disable_unprepare/ {clocks=NR;suspend=0}
  END {exit !(vbif && init==vbif+1 && unwind==init+2 && guard && refuse>guard && clocks>refuse)}
 ' "$kernel/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c"
+awk '
+ /^static void _dpu_kms_mmu_destroy\(/ && !/;$/ {mmu=1}
+ /^static void _dpu_kms_hw_destroy\(/ {hw=1}
+ mmu && /dpu_o82_platform_fini\(dpu_kms\);/ {drain_mmu=NR}
+ mmu && /mmu->funcs->detach\(mmu\);/ {detach=NR}
+ hw && /dpu_o82_platform_fini\(dpu_kms\);/ {drain_hw=NR}
+ hw && /dpu_kms->hw_intr = NULL;/ {destroy_hw=NR}
+ /^}/ {mmu=hw=0}
+ END {exit !(drain_mmu && drain_mmu<detach && drain_hw && drain_hw<destroy_hw)}
+' "$kernel/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c"
 mkdir -p "$out"
 cp "$profile/native.config" "$out/.config"
 export ARCH=arm64 LLVM=1 LLVM_IAS=1
@@ -41,7 +51,8 @@ linked=$out/drivers/gpu/drm/msm/msm.o
 readelf -h "$linked" | grep -E 'Machine:.*AArch64'
 for function in dpu_o82_platform_init dpu_o82_platform_suspend dpu_o82_regdma_init \
     dpu_o82_regdma_can_unmap dpu_o82_upload dpu_o82_upload_release \
-    dpu_o82_power_upload dpu_o82_power_recover; do
+    dpu_o82_power_upload dpu_o82_power_recover dpu_o82_power_close \
+    dpu_o82_platform_fini dpu_o82_regdma_reset_isolated; do
     llvm-nm --defined-only "$linked" | awk -v name="$function" '$2 ~ /^[tT]$/ && $3==name {found=1} END {exit !found}'
 done
 ! llvm-nm --undefined-only "$linked" | grep -E ' dpu_o82_(platform|regdma|upload|lutbus|power)_'

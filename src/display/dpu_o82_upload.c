@@ -62,11 +62,15 @@ int dpu_o82_upload(struct dpu_o82_regdma *dma, struct drm_device *drm,
 		return -EINVAL;
 
 	mutex_lock(&dma->lock);
+	if (dma->closing) {
+		ret = -ESHUTDOWN;
+		goto out;
+	}
 	if (!READ_ONCE(dma->power_held)) {
 		ret = -EHOSTDOWN;
 		goto out;
 	}
-	if (dma->quarantined_ctl) {
+	if (dma->quarantined_ctl || dma->bus_isolated) {
 		ret = -EBUSY;
 		goto out;
 	}
@@ -94,7 +98,7 @@ int dpu_o82_upload_release(struct dpu_o82_regdma *dma)
 	if (!dma || !dma->regs)
 		return -EINVAL;
 	mutex_lock(&dma->lock);
-	if (dma->quarantined_ctl) {
+	if (dma->quarantined_ctl && !dma->bus_isolated) {
 		ret = -EBUSY;
 		goto out;
 	}

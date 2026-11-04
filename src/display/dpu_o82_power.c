@@ -3,6 +3,7 @@
 #include <linux/errno.h>
 #include <linux/array_size.h>
 #include <linux/io.h>
+#include <linux/iopoll.h>
 #include <linux/pm_runtime.h>
 
 #include "msm_gem.h"
@@ -17,6 +18,12 @@
 #define O82_MDP_FORCE BIT(20)
 #define O82_PMU_CLOCK 0x1f0
 #define O82_PMU_FORCE (BIT(0) | BIT(16))
+#define O82_VBIF_HALT 0x200
+#define O82_VBIF_STATUS 0x204
+#define O82_XIN 7
+#define O82_XIN_REQUEST BIT(O82_XIN)
+/* Exact Cliffs SDE getter shifts the status right by 16, unlike upstream. */
+#define O82_XIN_ACK BIT(O82_XIN + 16)
 
 static bool dpu_o82_power_ready(struct dpu_kms *kms)
 {
@@ -30,10 +37,65 @@ static bool dpu_o82_power_ready(struct dpu_kms *kms)
 	    !kms->hw_mdp->ops.setup_clk_force_ctrl || !kms->hw_vbif ||
 	    !kms->hw_vbif->hw.blk_addr || !kms->hw_vbif->cap ||
 	    kms->hw_vbif->cap->qos_rp_remap_size != 0x40 ||
-	    !kms->hw_vbif->ops.set_qos_remap)
+	    kms->hw_vbif->cap->xin_halt_timeout != 0x4000 ||
+	    !kms->hw_vbif->ops.set_halt_ctrl || !kms->hw_vbif->ops.set_qos_remap)
 		return false;
 	clock = &kms->hw_mdp->caps->clk_ctrls[DPU_CLK_CTRL_REG_DMA];
 	return clock->reg_off == O82_MDP_CLOCK && clock->bit_off == 20;
+}
+
+static int dpu_o82_power_halt(struct dpu_kms *kms)
+{
+	struct dpu_o82_regdma *dma = kms->o82_regdma;
+	struct dpu_hw_vbif *vbif = kms->hw_vbif;
+	u32 value;
+	int ret;
+
+	lockdep_assert_held(&dma->power_lock);
+	vbif->ops.set_halt_ctrl(vbif, O82_XIN, true);
+	if (!(readl(vbif->hw.blk_addr + O82_VBIF_HALT) & O82_XIN_REQUEST))
+		return -EIO;
+	ret = readl_poll_timeout(vbif->hw.blk_addr + O82_VBIF_STATUS, value,
+				value & O82_XIN_ACK, 10, vbif->cap->xin_halt_timeout);
+	if (ret)
+		return ret;
+	mutex_lock(&dma->lock);
+	dma->bus_isolated = true;
+	/* A failed transport reset retained its own previously-clear force bits. */
+	dma->pmu_clock_owned |= dma->owned_clock_bits;
+	dma->owned_clock_bits = 0;
+	mutex_unlock(&dma->lock);
+	return 0;
+}
+
+static int dpu_o82_power_rearm(struct dpu_kms *kms)
+{
+	struct dpu_o82_regdma *dma = kms->o82_regdma;
+	struct dpu_hw_vbif *vbif = kms->hw_vbif;
+	u32 value;
+	int ret;
+
+	lockdep_assert_held(&dma->power_lock);
+	if (!dma->bus_isolated &&
+	    !(readl(vbif->hw.blk_addr + O82_VBIF_HALT) & O82_XIN_REQUEST) &&
+	    !(readl(vbif->hw.blk_addr + O82_VBIF_STATUS) & O82_XIN_ACK))
+		return 0;
+	ret = dpu_o82_power_halt(kms);
+	if (ret)
+		return ret;
+	ret = dpu_o82_regdma_reset_isolated(dma);
+	if (ret)
+		return ret;
+	/* Never expose a previous owner's stale IOVA by clearing halt first. */
+	vbif->ops.set_halt_ctrl(vbif, O82_XIN, false);
+	ret = readl_poll_timeout(vbif->hw.blk_addr + O82_VBIF_STATUS, value,
+				!(value & O82_XIN_ACK), 10, vbif->cap->xin_halt_timeout);
+	if (ret || (readl(vbif->hw.blk_addr + O82_VBIF_HALT) & O82_XIN_REQUEST))
+		return ret ? ret : -EIO;
+	mutex_lock(&dma->lock);
+	dma->bus_isolated = false;
+	mutex_unlock(&dma->lock);
+	return 0;
 }
 
 static int dpu_o82_power_release(struct dpu_kms *kms)
@@ -87,6 +149,10 @@ int dpu_o82_power_upload(struct dpu_kms *kms, struct dpu_hw_ctl *ctl,
 		return -EINVAL;
 	dma = kms->o82_regdma;
 	mutex_lock(&dma->power_lock);
+	if (READ_ONCE(dma->closing)) {
+		ret = -ESHUTDOWN;
+		goto out;
+	}
 	if (READ_ONCE(dma->power_held)) {
 		ret = -EBUSY;
 		goto out;
@@ -110,6 +176,9 @@ int dpu_o82_power_upload(struct dpu_kms *kms, struct dpu_hw_ctl *ctl,
 	writel(value | O82_PMU_FORCE, dma->regs + O82_PMU_CLOCK);
 	ret = (readl(dma->regs + O82_PMU_CLOCK) & O82_PMU_FORCE) == O82_PMU_FORCE ? 0 : -EIO;
 	mutex_unlock(&dma->lock);
+	if (ret)
+		goto release;
+	ret = dpu_o82_power_rearm(kms);
 	if (ret)
 		goto release;
 	for (level = 0; level < ARRAY_SIZE(priority); level++) {
@@ -137,11 +206,44 @@ int dpu_o82_power_recover(struct dpu_kms *kms)
 		return -EINVAL;
 	dma = kms->o82_regdma;
 	mutex_lock(&dma->power_lock);
-	if (READ_ONCE(dma->power_held)) {
+	if (READ_ONCE(dma->closing)) {
+		ret = -ESHUTDOWN;
+	} else if (READ_ONCE(dma->power_held)) {
 		ret = dpu_o82_regdma_recover(dma);
 		if (!ret)
 			ret = dpu_o82_power_release(kms);
 	}
+	mutex_unlock(&dma->power_lock);
+	return ret;
+}
+
+int dpu_o82_power_close(struct dpu_kms *kms)
+{
+	struct dpu_o82_regdma *dma = kms->o82_regdma;
+	int ret = 0;
+
+	if (!dma)
+		return 0;
+	mutex_lock(&dma->power_lock);
+	mutex_lock(&dma->lock);
+	WRITE_ONCE(dma->closing, true);
+	mutex_unlock(&dma->lock);
+	if (!dpu_o82_regdma_can_unmap(dma)) {
+		if (!READ_ONCE(dma->power_held) || !dpu_o82_power_ready(kms)) {
+			ret = -EHOSTDOWN;
+			goto out;
+		}
+		ret = dpu_o82_regdma_recover(dma);
+		if (ret) {
+			ret = dpu_o82_power_halt(kms);
+			if (ret)
+				goto out;
+		}
+	}
+	ret = dpu_o82_upload_release(dma);
+	if (!ret && READ_ONCE(dma->power_held))
+		ret = dpu_o82_power_release(kms);
+out:
 	mutex_unlock(&dma->power_lock);
 	return ret;
 }

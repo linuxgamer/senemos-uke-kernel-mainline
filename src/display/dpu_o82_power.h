@@ -19,4 +19,7 @@ int dpu_o82_power_upload(struct dpu_kms *kms, struct dpu_hw_ctl *ctl,
 /* Exclude new atomic callers before recovery, memory release and VM detach. */
 int dpu_o82_power_recover(struct dpu_kms *kms);
 
+/* Permanently close admission; errors retain all resources needed for retry. */
+int dpu_o82_power_close(struct dpu_kms *kms);
+
 #endif

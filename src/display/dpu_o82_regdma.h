@@ -18,6 +18,9 @@ struct dpu_o82_regdma {
 	struct mutex power_lock;
 	struct dpu_kms *kms_owner;
 	bool power_held;
+	bool closing;
+	/* Set only after the exact Uke VBIF xin7 acknowledgement. */
+	bool bus_isolated;
 	bool mdp_clock_owned;
 	u32 pmu_clock_owned;
 	u32 owned_clock_bits;
@@ -50,6 +53,9 @@ int dpu_o82_regdma_execute_locked(struct dpu_o82_regdma *dma,
 
 /* Retry a failed stop with power and both clock gates still held. */
 int dpu_o82_regdma_recover(struct dpu_o82_regdma *dma);
+
+/* Power owner holds both gates; keep xin7 halted until every queue resets. */
+int dpu_o82_regdma_reset_isolated(struct dpu_o82_regdma *dma);
 
 /* The owner excludes new submissions while releasing buffers or detaching VM. */
 bool dpu_o82_regdma_can_unmap(struct dpu_o82_regdma *dma);

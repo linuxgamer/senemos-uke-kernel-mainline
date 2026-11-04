@@ -1,0 +1,58 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] drm/msm/dpu: drain Uke REGDMA before display MMU detach
+
+Close command admission and drain the engine before destroying hardware or
+detaching the display VM, including initialization unwind. Preserve unrelated
+VBIF halt requests across concurrent register updates. The Uke owner checks
+the exact Cliffs upper-half acknowledgement separately from the generic getter.
+
+Signed-off-by: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+---
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
+@@ -1030,6 +1030,8 @@
+ {
+ 	struct msm_mmu *mmu;
+ 
++	dpu_o82_platform_fini(dpu_kms);
++
+ 	if (!dpu_kms->base.vm)
+ 		return;
+ 
+@@ -1171,6 +1173,8 @@
+ 
+ static void _dpu_kms_hw_destroy(struct dpu_kms *dpu_kms)
+ {
++	dpu_o82_platform_fini(dpu_kms);
++
+ 	dpu_kms->hw_intr = NULL;
+ 
+ 	/* safe to call these more than once during shutdown */
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_vbif.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_vbif.c
+@@ -10,6 +10,7 @@
+ #include "dpu_hw_vbif.h"
+ 
+ static DEFINE_SPINLOCK(dpu_vbif_qos_lock);
++static DEFINE_SPINLOCK(dpu_vbif_halt_lock);
+ 
+ #define VBIF_VERSION			0x0000
+ #define VBIF_CLK_FORCE_CTRL0		0x0008
+@@ -135,7 +136,9 @@
+ {
+ 	struct dpu_hw_blk_reg_map *c = &vbif->hw;
+ 	u32 reg_val;
++	unsigned long flags;
+ 
++	spin_lock_irqsave(&dpu_vbif_halt_lock, flags);
+ 	reg_val = DPU_REG_READ(c, VBIF_XIN_HALT_CTRL0);
+ 
+ 	if (enable)
+@@ -144,6 +147,7 @@
+ 		reg_val &= ~BIT(xin_id);
+ 
+ 	DPU_REG_WRITE(c, VBIF_XIN_HALT_CTRL0, reg_val);
++	spin_unlock_irqrestore(&dpu_vbif_halt_lock, flags);
+ }
+ 
+ static bool dpu_hw_get_halt_ctrl(struct dpu_hw_vbif *vbif,

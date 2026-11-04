@@ -8,6 +8,13 @@ git -C "$kernel" apply --check "$owner/patches/display/0072-o82-regdma-resource.
 git -C "$kernel" apply "$owner/patches/display/0072-o82-regdma-resource.patch"
 git -C "$kernel" apply --check "$owner/patches/display/0073-o82-regdma-power.patch"
 git -C "$kernel" apply "$owner/patches/display/0073-o82-regdma-power.patch"
+# Keep the actual former detach function for the remote negative control only.
+sed -n '/^static void _dpu_kms_mmu_destroy(/,/^}/p' \
+    "$kernel/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c" | \
+    sed 's/_dpu_kms_mmu_destroy(/_dpu_kms_mmu_destroy_before(/' > \
+    "$kernel/o82-mmu-destroy-before.h"
+git -C "$kernel" apply --check "$owner/patches/display/0074-o82-regdma-close.patch"
+git -C "$kernel" apply "$owner/patches/display/0074-o82-regdma-close.patch"
 target=$kernel/drivers/gpu/drm/msm/disp/dpu1
 for file in dpu_o82_platform.c dpu_o82_platform.h dpu_o82_regdma.c dpu_o82_regdma.h \
     dpu_o82_upload.c dpu_o82_upload.h dpu_o82_lutbus.c dpu_o82_lutbus.h \

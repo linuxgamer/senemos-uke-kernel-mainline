@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "dpu_hw_ctl.h"
@@ -40,6 +41,9 @@ static unsigned int dropped_qos_offset;
 static int runtime_usage, pm_get_error, pm_put_error;
 static unsigned int pm_gets, pm_puts, pm_noresume, suspend_callbacks;
 static unsigned int power_case;
+static bool halt_blocked, halt_wrong_half, unhalt_blocked, dropped_halt;
+static bool require_rearm, detached;
+static unsigned int reset_queues, close_sleeps, close_errors, detach_count;
 static struct drm_gem_object command_bo;
 static unsigned char commands[DPU_O82_LUTBUS_BYTES];
 static unsigned int allocations, releases;
@@ -55,6 +59,11 @@ struct drm_gpuvm *drm_gpuvm_get(struct drm_gpuvm *vm)
 
 void drm_gpuvm_put(struct drm_gpuvm *vm)
 {
+	if (detached && vm->references == 1) {
+		assert(!command_owner->lock.locked && !command_owner->command_bo);
+		vm->references--;
+		return;
+	}
 	assert(command_owner->lock.locked && vm->references == 2);
 	vm->references--;
 }
@@ -84,7 +93,8 @@ void *msm_gem_kernel_new(struct drm_device *drm, size_t bytes, u32 flags,
 void msm_gem_kernel_put(struct drm_gem_object *bo, struct drm_gpuvm *vm)
 {
 	assert(command_owner->lock.locked && vm->references == 2);
-	assert(bo == &command_bo && !active && !command_owner->quarantined_ctl);
+	assert(bo == &command_bo);
+	assert((!active && !command_owner->quarantined_ctl) || command_owner->bus_isolated);
 	releases++;
 }
 
@@ -107,7 +117,7 @@ int pm_runtime_put_sync(struct device *dev)
 {
 	assert(dev == &command_kms->pdev->dev && command_owner->power_lock.locked);
 	assert(!command_owner->power_held && !command_owner->mdp_clock_owned);
-	assert(!command_owner->pmu_clock_owned && !active && runtime_usage > 0);
+	assert(!command_owner->pmu_clock_owned && (!active || command_owner->bus_isolated) && runtime_usage > 0);
 	pm_puts++; runtime_usage--;
 	if (pm_put_error) return pm_put_error;
 	if (!runtime_usage) {
@@ -135,6 +145,43 @@ static void store(unsigned char *memory, size_t offset, uint32_t value)
 	memcpy(memory + offset, &value, 4);
 }
 
+static void test_detach(struct msm_mmu *mmu)
+{
+	assert(mmu && command_owner && command_kms);
+	if (command_owner->command_bo || command_owner->command_vm ||
+	    command_owner->power_held || command_owner->mdp_clock_owned ||
+	    command_owner->pmu_clock_owned ||
+	    (!command_owner->bus_isolated && (active || command_owner->quarantined_ctl))) {
+		fputs("Expected negative control: MMU detach still owns REGDMA resources\n", stderr);
+		abort();
+	}
+	assert(command_owner->closing && !command_owner->power_lock.locked);
+	if (command_owner->quarantined_ctl)
+		assert((load(vbif_registers, 0x200) & BIT(7)) &&
+		       (load(vbif_registers, 0x204) & BIT(23)));
+	detached = true;
+	detach_count++;
+}
+
+static void msleep(unsigned int milliseconds)
+{
+	assert(milliseconds == 20 && !command_owner->power_lock.locked);
+	assert(command_owner->closing && command_owner->power_held);
+	assert(command_owner->command_bo && command_owner->command_vm->references == 2);
+	assert(!releases && !detach_count && runtime_usage == 2);
+	assert(load(mdp_registers, 0x2bc) & BIT(20));
+	assert((load(registers, 0x1f0) & FORCE) == FORCE);
+	close_sleeps++;
+	if (close_sleeps == 2)
+		halt_blocked = halt_wrong_half = dropped_halt = false;
+}
+
+static void test_drain_error(struct device *dev, int error)
+{
+	assert(dev == &command_kms->pdev->dev && error < 0);
+	close_errors++;
+}
+
 uint32_t readl(const volatile void *address)
 {
 	uintptr_t at = (uintptr_t)address - (uintptr_t)registers;
@@ -150,9 +197,12 @@ uint32_t readl(const volatile void *address)
 	}
 	assert(at < sizeof(registers) - 3 && !(at & 3));
 	reads++;
-	if (at == base + 0x54 && (!fail_reset_from || reset_count < fail_reset_from)) {
+	if (at >= 0x1000 && at <= 0x4054 && at % 0x1000 == 0x54 &&
+	    (!fail_reset_from || reset_count < fail_reset_from)) {
 		store(registers, at, 0);
-		active = false;
+		reset_queues |= BIT(at / 0x1000);
+		if (at == base + 0x54)
+			active = false;
 	}
 	if (at == base + 0x44 && active) {
 		status_reads++;
@@ -183,10 +233,27 @@ void writel(uint32_t value, volatile void *address)
 	if ((uintptr_t)address >= (uintptr_t)vbif_registers &&
 	    (uintptr_t)address < (uintptr_t)vbif_registers + sizeof(vbif_registers)) {
 		size_t offset = (uintptr_t)address - (uintptr_t)vbif_registers;
-		assert(dpu_vbif_qos_lock && command_owner->power_lock.locked);
+		assert(command_owner->power_lock.locked);
 		assert(runtime_usage > 0 && command_owner->power_held);
 		assert(load(mdp_registers, 0x2bc) & BIT(20));
 		assert((load(registers, 0x1f0) & FORCE) == FORCE);
+		if (offset == 0x200) {
+			assert(dpu_vbif_halt_lock && !dpu_vbif_qos_lock);
+			assert((value & ~BIT(7)) == (load(vbif_registers, offset) & ~BIT(7)));
+			if (dropped_halt) return;
+			store(vbif_registers, offset, value);
+			u32 status = load(vbif_registers, 0x204);
+			if (value & BIT(7)) {
+				if (!halt_blocked && !halt_wrong_half) status |= BIT(23);
+				if (halt_wrong_half) status |= BIT(7); /* Never a valid Uke ACK. */
+			} else {
+				if (require_rearm) assert((reset_queues & 0x1e) == 0x1e);
+				if (!unhalt_blocked) status &= ~BIT(23);
+			}
+			store(vbif_registers, 0x204, status);
+			return;
+		}
+		assert(dpu_vbif_qos_lock && !dpu_vbif_halt_lock);
 
 		if (offset != dropped_qos_offset) store(vbif_registers, offset, value);
 		return;
@@ -196,6 +263,8 @@ void writel(uint32_t value, volatile void *address)
 		if (command_kms && !emulate_power_hold) {
 			assert(runtime_usage > 0 && command_owner->power_held);
 			assert(load(mdp_registers, 0x2bc) & BIT(20));
+			assert(!(load(vbif_registers, 0x200) & BIT(7)));
+			assert(!(load(vbif_registers, 0x204) & BIT(23)) && !command_owner->bus_isolated);
 			for (unsigned int level = 0; level < 8; level++) {
 				unsigned int expected = level < 4 ? 4 : 5;
 				if (((load(vbif_registers, 0x550 + 8 * level) >> 28) & 7) != expected ||
@@ -226,7 +295,7 @@ void writel(uint32_t value, volatile void *address)
 		return;
 	}
 	assert(at < sizeof(registers) - 3 && !(at & 3));
-	if (at == base + 0x54)
+	if (at >= 0x1000 && at <= 0x4054 && at % 0x1000 == 0x54)
 		reset_count++;
 	if (at == 0x1b0) {
 		assert(value == ERROR_MASK);
@@ -234,11 +303,11 @@ void writel(uint32_t value, volatile void *address)
 			store(registers, 0x170, load(registers, 0x170) & ~value);
 		return;
 	}
-	if (at == base + 0x48) {
+	if (at >= 0x1000 && at <= 0x4048 && at % 0x1000 == 0x48) {
 		assert(value == BIT(3));
 		status_clear = writes;
 		if (!broken_done_clear)
-			store(registers, base + 0x44, load(registers, base + 0x44) & ~value);
+			store(registers, at - 4, load(registers, at - 4) & ~value);
 		return;
 	}
 	if (at == base)
@@ -270,8 +339,13 @@ static void fresh(struct dpu_o82_regdma *dma, struct dpu_hw_ctl *ctl, unsigned i
 	memset(control, 0, sizeof(control));
 	memset(mdp_registers, 0, sizeof(mdp_registers));
 	memset(vbif_registers, 0x33, sizeof(vbif_registers));
+	store(vbif_registers, 0x200, BIT(2));
+	store(vbif_registers, 0x204, BIT(2));
 	store(mdp_registers, 0x2bc, BIT(12));
-	assert(!dpu_hw_clock_lock && !dpu_vbif_qos_lock);
+	assert(!dpu_hw_clock_lock && !dpu_vbif_qos_lock && !dpu_vbif_halt_lock);
+	halt_blocked = halt_wrong_half = unhalt_blocked = dropped_halt = false;
+	require_rearm = detached = false;
+	reset_queues = close_sleeps = close_errors = detach_count = 0;
 	broken_mdp_enable = broken_mdp_release = broken_pmu_release = false;
 	dropped_qos_offset = 0;
 	runtime_usage = 1; pm_get_error = pm_put_error = 0;
@@ -511,6 +585,8 @@ static void power_lifetime(void)
 	struct dpu_hw_mdp mdp;
 	struct dpu_hw_vbif vbif;
 	struct dpu_kms kms;
+	const struct msm_mmu_funcs mmu_funcs = { .detach = test_detach };
+	struct msm_mmu mmu = { .funcs = &mmu_funcs };
 	unsigned int before;
 
 	for (unsigned int channel = 0; channel < 3; channel++) {
@@ -518,17 +594,19 @@ static void power_lifetime(void)
 		igc[2 * (256 * 3 + channel) + 1] = 0x0f;
 	}
 	command_owner = &dma; command_kms = &kms; emulate_power_hold = false;
+	vm.mmu = &mmu;
 #define RESET_POWER() do { \
 	power_case++; \
 	assert(vm.references == 1); \
 	mdp_cfg = (struct dpu_mdp_cfg){ .clk_ctrls = {[DPU_CLK_CTRL_REG_DMA] = {0x2bc,20}} }; \
-	vbif_cfg = (struct dpu_vbif_cfg){ .qos_rp_remap_size = 0x40 }; \
+	vbif_cfg = (struct dpu_vbif_cfg){ .qos_rp_remap_size = 0x40, .xin_halt_timeout = 0x4000 }; \
 	mdp = (struct dpu_hw_mdp){ .hw = {mdp_registers}, .caps = &mdp_cfg, .ops = {clock_control} }; \
-	vbif = (struct dpu_hw_vbif){ .hw = {vbif_registers}, .cap = &vbif_cfg, .ops = {dpu_hw_set_qos_remap} }; \
+	vbif = (struct dpu_hw_vbif){ .hw = {vbif_registers}, .cap = &vbif_cfg, \
+		.ops = {dpu_hw_set_qos_remap, dpu_hw_set_halt_ctrl} }; \
 	kms = (struct dpu_kms){ .dev=&drm, .pdev=&pdev, .base={.vm=&vm}, .hw_mdp=&mdp, .hw_vbif=&vbif }; \
 	vm.managed = true; fresh(&dma, &ctl, 1); allocations = releases = 0; \
 } while (0)
-	for (unsigned int fault = 0; fault < 7; fault++) {
+	for (unsigned int fault = 0; fault < 9; fault++) {
 		RESET_POWER();
 		if (fault == 0) dma.kms_owner = NULL;
 		if (fault == 1) kms.base.vm = NULL;
@@ -537,6 +615,8 @@ static void power_lifetime(void)
 		if (fault == 4) mdp_cfg.clk_ctrls[DPU_CLK_CTRL_REG_DMA].reg_off++;
 		if (fault == 5) vbif_cfg.qos_rp_remap_size = 0x20;
 		if (fault == 6) vbif.ops.set_qos_remap = NULL;
+		if (fault == 7) vbif.ops.set_halt_ctrl = NULL;
+		if (fault == 8) vbif_cfg.xin_halt_timeout = 0;
 		assert(dpu_o82_power_upload(&kms, &ctl, &input, 3) == -EINVAL);
 		assert(!pm_gets && !pm_puts && !allocations && !reads && !writes);
 	}
@@ -614,7 +694,93 @@ static void power_lifetime(void)
 	assert(!dpu_o82_power_upload(&kms, &ctl, &input, 3));
 	assert(!runtime_usage && suspend_callbacks == 1 && !dma.command_bo && vm.references == 1);
 	assert(!dpu_o82_power_recover(&kms) && pm_puts == 1);
+
+	/* Idle/probe unwind closes admission without touching uninitialized MMIO. */
+	RESET_POWER();
+	assert(!dpu_o82_power_close(&kms) && dma.closing && !reads && !writes);
+	assert(dpu_o82_power_upload(&kms, &ctl, &input, 3) == -ESHUTDOWN);
+	assert(dpu_o82_upload(&dma, &drm, &vm, &ctl, &input, 3) == -ESHUTDOWN);
+	assert(dpu_o82_regdma_execute(&dma, &ctl, 0x2000, 8) == -ESHUTDOWN);
+	assert(dpu_o82_power_recover(&kms) == -ESHUTDOWN);
+	assert(!reads && !writes && !pm_gets);
+	_dpu_kms_mmu_destroy(&kms);
+	assert(detach_count == 1 && vm.references == 0 && !kms.base.vm);
+	_dpu_kms_mmu_destroy(&kms);
+	assert(detach_count == 1 && !reads && !writes);
+	vm.references = 1;
+
+	RESET_POWER();
+	assert(!dpu_o82_power_upload(&kms, &ctl, &input, 3));
+	before = reads + writes;
+	_dpu_kms_mmu_destroy(&kms);
+	assert(reads + writes == before && releases == 1 && vm.references == 0 && detach_count == 1);
+	vm.references = 1;
+
+	/* A successful reset needs no bus halt; actual detach follows all cleanup. */
+	RESET_POWER(); outcome = TIMEOUT; fail_reset_from = 2;
+	assert(dpu_o82_power_upload(&kms, &ctl, &input, 3) == -ETIMEDOUT);
+	if (getenv("O82_UNSAFE_DETACH")) {
+		_dpu_kms_mmu_destroy_before(&kms);
+		assert(!"The former detach path must fail the ownership guard");
+	}
+	fail_reset_from = 0;
+	_dpu_kms_mmu_destroy(&kms);
+	assert(!dma.bus_isolated && !active && releases == 1 && vm.references == 0);
+	assert(!dma.power_held && runtime_usage == 1 && detach_count == 1 && !close_sleeps);
+	assert(load(vbif_registers, 0x200) == BIT(2));
+	vm.references = 1;
+
+	for (unsigned int fault = 0; fault < 3; fault++) {
+		RESET_POWER(); outcome = TIMEOUT; fail_reset_from = 2;
+		assert(dpu_o82_power_upload(&kms, &ctl, &input, 3) == -ETIMEDOUT);
+		halt_blocked = fault == 0; halt_wrong_half = fault == 1; dropped_halt = fault == 2;
+		assert(dpu_o82_power_close(&kms) == (fault == 2 ? -EIO : -ETIMEDOUT));
+		assert(dma.closing && !dma.bus_isolated && dma.power_held && dma.command_bo);
+		assert(active && dma.quarantined_ctl && vm.references == 2 && !releases && !detach_count);
+		assert(runtime_usage == 2 && !pm_puts && !dpu_o82_regdma_can_unmap(&dma));
+		assert(dpu_o82_platform_suspend(&kms) == -EBUSY);
+		if (fault == 1) assert((load(vbif_registers, 0x204) & BIT(7)) &&
+					!(load(vbif_registers, 0x204) & BIT(23)));
+		_dpu_kms_mmu_destroy(&kms); /* Fake sleeps admit ACK only on the third attempt. */
+		assert(close_sleeps == 2 && close_errors == 2 && detach_count == 1);
+		assert(dma.bus_isolated && dma.quarantined_ctl && !dma.command_bo && !dma.power_held);
+		assert(releases == 1 && vm.references == 0 && runtime_usage == 1 && pm_puts == 1);
+		assert(load(vbif_registers, 0x200) == (BIT(2) | BIT(7)));
+		assert(load(vbif_registers, 0x204) & BIT(23));
+		vm.references = 1;
+	}
+
+	/* A later owner must reset every old DB queue while xin7 is still halted. */
+	dpu_o82_regdma_init(&dma, registers);
+	dma.kms_owner = &kms; kms.base.vm = &vm;
+	require_rearm = true; reset_queues = 0; fail_reset_from = 0; outcome = DONE;
+	assert(!dpu_o82_power_upload(&kms, &ctl, &input, 3));
+	assert((reset_queues & 0x1e) == 0x1e && !dma.bus_isolated && !dma.quarantined_ctl);
+	assert(load(vbif_registers, 0x200) == BIT(2) && !(load(vbif_registers, 0x204) & BIT(23)));
+	assert(trigger_count == 2 && allocations == 2 && vm.references == 2);
+	_dpu_kms_mmu_destroy(&kms);
+	assert(releases == 2 && vm.references == 0 && detach_count == 2);
+	vm.references = 1;
+
+	for (unsigned int fault = 0; fault < 2; fault++) {
+		RESET_POWER(); require_rearm = true;
+		store(vbif_registers, 0x200, BIT(2) | BIT(7));
+		store(vbif_registers, 0x204, BIT(2) | BIT(23));
+		if (fault == 0) fail_reset_from = 1;
+		if (fault == 1) unhalt_blocked = true;
+		assert(dpu_o82_power_upload(&kms, &ctl, &input, 3) == -ETIMEDOUT);
+		assert(!allocations && !trigger_count && !dma.power_held && dma.bus_isolated);
+		assert(vm.references == 1 && runtime_usage == 1 && pm_puts == 1);
+		if (fault == 0) assert(load(vbif_registers, 0x200) & BIT(7));
+		fail_reset_from = 0; unhalt_blocked = false;
+		assert(!dpu_o82_power_upload(&kms, &ctl, &input, 3));
+		assert(!dma.bus_isolated && !dma.quarantined_ctl && trigger_count == 1);
+		_dpu_kms_mmu_destroy(&kms);
+		assert(releases == 1 && vm.references == 0);
+		vm.references = 1;
+	}
 #undef RESET_POWER
 	command_owner = NULL; command_kms = NULL;
 	puts("Actual O82 power/GEM/transport/shared helpers: bound managed VM, pending-resume suspend refusal, both force gates, exact eight-level LUTDMA QoS/readbacks, preserved client fields, failed-stop/clock/PM retention, recovery and suspend-before-clock memory release passed; fake providers only");
+	puts("Actual KMS MMU detach: closed admission, reset or exact upper-half xin7 ACK before GEM/VM/power release, retained ownership across failed attempts, four-queue rearm before unhalt and failed-rearm refusal passed; fake providers only");
 }

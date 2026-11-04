@@ -37,6 +37,7 @@ git -C "$owner" archive --prefix=native-addon/ HEAD \
     src/display/sm7675-uke-native-display.dtso src/display/bindings/qcom,sm7675-dpu.yaml \
     patches/display/0072-o82-regdma-resource.patch \
     patches/display/0073-o82-regdma-power.patch \
+    patches/display/0074-o82-regdma-close.patch \
     tests/o82-platform-contract.sh tests/o82-lutbus-contract.c tests/o82-lutbus-contract.sh \
     tests/o82-regdma-transport-contract.c tests/o82-regdma-transport-contract.sh \
     packaging/native/check-o82-kms.sh LICENSE LICENSES/GPL-2.0-only.txt | \
@@ -49,7 +50,7 @@ spec=$output/uke-o82-kms-check.spec
 awk '
  /^%description/ {exit}
  /^Name:/ {$0="Name: uke-o82-kms-check"}
- /^Release:/ {$0="Release: 7%{?dist}"}
+ /^Release:/ {$0="Release: 8%{?dist}"}
  /^Summary:/ {$0="Summary: Retained Uke DPU KMS and REGDMA source integration check"}
  /^(Requires|Provides|Recommends):/ {next}
  {print}
@@ -86,6 +87,10 @@ test -s %{buildroot}%{_docdir}/%{name}/checks.txt
 %{_docdir}/%{name}/checks.txt
 
 %changelog
+* Wed Nov 04 2026 Uke contributors - 7.3.1-8
+- Drain REGDMA before actual KMS MMU detach and initialization unwind.
+- Check the exact upper-half Uke halt ACK, retained ownership and rearm order.
+
 * Wed Nov 04 2026 Uke contributors - 7.3.1-7
 - Check the complete QoS table at DMA trigger, after the setup writes.
 - Preserve strict values and ignored-write refusal tests.
@@ -114,4 +119,4 @@ test -s %{buildroot}%{_docdir}/%{name}/checks.txt
 SPEC
 sha256sum -c "$stage/retained.sha256"
 rm "$parent"
-[[ $(rpmspec --target aarch64 -q --srpm --qf '%{NAME}-%{VERSION}-%{RELEASE}' "$spec") == uke-o82-kms-check-7.3.1-7.fc46 ]]
+[[ $(rpmspec --target aarch64 -q --srpm --qf '%{NAME}-%{VERSION}-%{RELEASE}' "$spec") == uke-o82-kms-check-7.3.1-8.fc46 ]]

@@ -38,6 +38,8 @@ void dpu_o82_regdma_init(struct dpu_o82_regdma *dma, void __iomem *regs)
 	dma->command_iova = 0;
 	dma->kms_owner = NULL;
 	dma->power_held = false;
+	dma->closing = false;
+	dma->bus_isolated = false;
 	dma->mdp_clock_owned = false;
 	dma->pmu_clock_owned = 0;
 	mutex_init(&dma->lock);
@@ -86,7 +88,11 @@ int dpu_o82_regdma_execute_locked(struct dpu_o82_regdma *dma,
 		return -EINVAL;
 
 	lockdep_assert_held(&dma->lock);
-	if (dma->quarantined_ctl) {
+	if (dma->closing) {
+		ret = -ESHUTDOWN;
+		goto out;
+	}
+	if (dma->quarantined_ctl || dma->bus_isolated) {
 		ret = -EBUSY;
 		goto out;
 	}
@@ -149,7 +155,8 @@ int dpu_o82_regdma_execute(struct dpu_o82_regdma *dma, struct dpu_hw_ctl *ctl,
 		return -EINVAL;
 	mutex_lock(&dma->lock);
 	/* An owned GEM buffer excludes every unrelated raw IOVA submission. */
-	ret = dma->command_bo || READ_ONCE(dma->power_held) ? -EBUSY :
+	ret = dma->closing ? -ESHUTDOWN :
+		dma->command_bo || READ_ONCE(dma->power_held) ? -EBUSY :
 		dpu_o82_regdma_execute_locked(dma, ctl, iova, bytes);
 	mutex_unlock(&dma->lock);
 	return ret;
@@ -171,6 +178,29 @@ int dpu_o82_regdma_recover(struct dpu_o82_regdma *dma)
 	return ret;
 }
 
+int dpu_o82_regdma_reset_isolated(struct dpu_o82_regdma *dma)
+{
+	u32 ctl;
+	int ret = 0;
+
+	if (!dma || !dma->regs)
+		return -EINVAL;
+	mutex_lock(&dma->lock);
+	if (!dma->bus_isolated) {
+		ret = -EPERM;
+		goto out;
+	}
+	/* A previous owner may have left a stale descriptor in any DB queue. */
+	for (ctl = 1; ctl <= 4; ctl++) {
+		ret = dpu_o82_regdma_stop(dma, ctl);
+		if (ret)
+			break;
+	}
+out:
+	mutex_unlock(&dma->lock);
+	return ret;
+}
+
 bool dpu_o82_regdma_can_unmap(struct dpu_o82_regdma *dma)
 {
 	bool safe;
@@ -178,7 +208,7 @@ bool dpu_o82_regdma_can_unmap(struct dpu_o82_regdma *dma)
 	if (!dma || !dma->regs)
 		return false;
 	mutex_lock(&dma->lock);
-	safe = !dma->quarantined_ctl;
+	safe = !dma->quarantined_ctl || dma->bus_isolated;
 	mutex_unlock(&dma->lock);
 	return safe;
 }

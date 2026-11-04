@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Uke REGDMA resource admission, from exact Cliffs OEM DT and SDE mapping. */
 #include <linux/errno.h>
+#include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/io.h>
 #include <linux/of.h>
@@ -9,6 +10,7 @@
 
 #include "dpu_kms.h"
 #include "dpu_o82_platform.h"
+#include "dpu_o82_power.h"
 #include "dpu_o82_regdma.h"
 #include "dpu_o82_upload.h"
 
@@ -53,4 +55,15 @@ int dpu_o82_platform_suspend(struct dpu_kms *kms)
 	if (READ_ONCE(kms->o82_regdma->power_held))
 		return -EBUSY;
 	return dpu_o82_upload_release(kms->o82_regdma);
+}
+
+void dpu_o82_platform_fini(struct dpu_kms *kms)
+{
+	int ret;
+
+	/* The void KMS destructor cannot refuse devres/VM destruction on return. */
+	while ((ret = dpu_o82_power_close(kms))) {
+		dev_err_once(&kms->pdev->dev, "REGDMA drain pending: %d\n", ret);
+		msleep(20);
+	}
 }

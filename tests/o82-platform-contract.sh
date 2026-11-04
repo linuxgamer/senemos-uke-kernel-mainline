@@ -5,7 +5,8 @@ test ! -e /etc/senemos/kernel-update.conf
 root=$(cd -- "$(dirname -- "$0")/.." && pwd)
 work=$(mktemp -d)
 trap 'find "$work" -depth -delete' EXIT
-sed -n '/^int dpu_o82_platform_init/,$p' "$root/src/display/dpu_o82_platform.c" > "$work/functions.h"
+sed -n '/^int dpu_o82_platform_init(/,/^}/p; /^int dpu_o82_platform_suspend(/,/^}/p' \
+    "$root/src/display/dpu_o82_platform.c" > "$work/functions.h"
 cat > "$work/test.c" <<'C'
 #include <assert.h>
 #include <errno.h>

@@ -44,7 +44,7 @@ cat > "$scratch/drm/drm_gpuvm.h" <<'EOF'
 #ifndef TEST_GPUVM_H
 #define TEST_GPUVM_H
 #include "linux/types.h"
-struct drm_gpuvm { unsigned int references; struct drm_device *drm; bool managed; };
+struct drm_gpuvm { unsigned int references; struct drm_device *drm; bool managed; struct msm_mmu *mmu; };
 struct drm_gpuvm *drm_gpuvm_get(struct drm_gpuvm *vm);
 void drm_gpuvm_put(struct drm_gpuvm *vm);
 bool drm_gpuvm_range_valid(struct drm_gpuvm *vm, u64 address, u64 bytes);
@@ -59,6 +59,9 @@ struct drm_device { unsigned int token; };
 struct drm_gem_object { struct drm_device *dev; };
 #define MSM_BO_WC 4
 #define to_msm_vm(vm) (vm)
+struct msm_mmu;
+struct msm_mmu_funcs { void (*detach)(struct msm_mmu *); };
+struct msm_mmu { const struct msm_mmu_funcs *funcs; };
 void *msm_gem_kernel_new(struct drm_device *dev, size_t bytes, u32 flags,
     struct drm_gpuvm *vm, struct drm_gem_object **bo, u64 *iova);
 void msm_gem_kernel_put(struct drm_gem_object *bo, struct drm_gpuvm *vm);
@@ -99,11 +102,14 @@ cat > "$scratch/dpu_hw_vbif.h" <<'EOF'
 #ifndef TEST_VBIF_H
 #define TEST_VBIF_H
 #include "dpu_hw_top.h"
-struct dpu_vbif_cfg { u32 qos_rp_remap_size; };
+struct dpu_vbif_cfg { u32 qos_rp_remap_size, xin_halt_timeout; };
 struct dpu_hw_vbif {
     struct dpu_hw_blk_reg_map hw;
     const struct dpu_vbif_cfg *cap;
-    struct { bool (*set_qos_remap)(struct dpu_hw_vbif *,u32,u32,u32); } ops;
+    struct {
+        bool (*set_qos_remap)(struct dpu_hw_vbif *,u32,u32,u32);
+        void (*set_halt_ctrl)(struct dpu_hw_vbif *,u32,bool);
+    } ops;
 };
 #endif
 EOF
@@ -125,7 +131,7 @@ struct dpu_kms {
 #endif
 EOF
 {
-    printf '%s\n' 'static int dpu_hw_clock_lock, dpu_vbif_qos_lock;' \
+    printf '%s\n' 'static int dpu_hw_clock_lock, dpu_vbif_qos_lock, dpu_vbif_halt_lock;' \
         '#define spin_lock_irqsave(p,f) do { assert(!*(p)); *(p)=1; (f)=0; } while(0)' \
         '#define spin_unlock_irqrestore(p,f) do { assert(*(p)&&(f)==0); *(p)=0; } while(0)' \
         '#define DPU_REG_READ(c,off) readl((c)->blk_addr+(off))' \
@@ -136,10 +142,22 @@ EOF
         "$kernel/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_vbif.c"
     sed -n '/^static bool dpu_hw_set_qos_remap(/,/^}/p' \
         "$kernel/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_vbif.c"
+    grep -E '^#define VBIF_XIN_HALT_CTRL[01]' \
+        "$kernel/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_vbif.c"
+    sed -n '/^static void dpu_hw_set_halt_ctrl(/,/^}/p' \
+        "$kernel/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_vbif.c"
     sed -n '/^int dpu_o82_platform_suspend(/,/^}/p' "$root/src/display/dpu_o82_platform.c"
+    printf '%s\n' 'static void msleep(unsigned int milliseconds);' \
+        'static void test_drain_error(struct device *dev, int error);' \
+        '#define dev_err_once(dev,fmt,error) test_drain_error(dev,error)'
+    sed -n '/^void dpu_o82_platform_fini(/,/^}/p' "$root/src/display/dpu_o82_platform.c"
+    sed -n '/^static void _dpu_kms_mmu_destroy(/,/^}/p' \
+        "$kernel/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c"
+    cat "$kernel/o82-mmu-destroy-before.h"
 } > "$scratch/shared-helpers.h"
 grep -q '^bool dpu_hw_clk_force_ctrl(' "$scratch/shared-helpers.h"
 grep -q '^static bool dpu_hw_set_qos_remap(' "$scratch/shared-helpers.h"
+grep -q '^static void _dpu_kms_mmu_destroy_before(' "$scratch/shared-helpers.h"
 cat > "$scratch/linux/io.h" <<'EOF'
 #include "types.h"
 u32 readl(const volatile void *address);
@@ -175,3 +193,12 @@ ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 "$scratch/contract"
 clang -std=gnu11 -O1 -g -UNDEBUG -Wall -Wextra -Werror -fsanitize=address,undefined \
     -fno-omit-frame-pointer "${includes[@]}" "${sources[@]}" -o "$scratch/sanitized"
 ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 "$scratch/sanitized"
+for binary in contract sanitized; do
+    set +e
+    (ulimit -c 0; O82_UNSAFE_DETACH=1 "$scratch/$binary") > "$scratch/negative.log" 2>&1
+    status=$?
+    set -e
+    [[ $status == 134 ]]
+    grep -Fx 'Expected negative control: MMU detach still owns REGDMA resources' "$scratch/negative.log"
+done
+printf '%s\n' 'Both compilers rejected the actual former MMU detach path at the ownership guard'
