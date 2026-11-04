@@ -52,14 +52,20 @@ MSM object. Named endpoint conversion and the current payload bridge passed
 [COPR 11260921](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11260921/).
 A separate v5 memory-payload loader passed
 [COPR 11261036](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11261036/)
-for both supplier identities with strict version/fallback checks. Production
+for both supplier identities with strict version/fallback checks.
 The production JSON/v5 path and native utility0.6.0-3 passed
 [COPR 11261174](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11261174/):
 1,024 complete JSON/bundle/actual C loader cases and12,288 paired command
 streams per compiler. The native RPM is present in verified root unstable
-metadata. Cumulative kernel integration, private profile preparation/delivery
-and physical memory-color/protection/HDR acceptance remain open. Existing v4
-loading keeps memory absent.
+metadata. The reusable source layer also passed
+[COPR 11261282](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11261282/)
+on complete12101 with qualified touch and front-camera geometry: four source
+rejection controls, exact repeated application, inherited preflight and a linked
+AArch64 MSM object. Both supplier DT resources and raw configuration remain
+unchanged. The [qualification manifest](manifests/o82-memory-cumulative-source-20261105.json)
+records the exact source and receipt. Full cumulative kernel delivery, private
+profile preparation and physical memory-color/protection/HDR acceptance remain
+open. Existing v4 loading keeps memory absent; initial color selection is empty.
 
 31 October 2026. `main` is the continuation branch. Microphone capture, power management, bounded boot-watchdog and optional gaming sources are integrated. The complete combined source still requires fresh release admission and a qualified COPR build; retained candidate packages do not establish that result.
 

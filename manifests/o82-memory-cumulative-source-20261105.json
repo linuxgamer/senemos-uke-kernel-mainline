@@ -87,10 +87,27 @@
     "tablet_execution": false
   },
   "qualification": {
-    "state": "pending",
+    "state": "succeeded",
+    "copr_build": 11261282,
+    "source_commit": "4800f0b884594018885c7ebadb3238c03499199f",
+    "started_on": 1793833619,
+    "ended_on": 1793833868,
     "package": "uke-o82-memory-cumulative-check",
     "release": "7.3.1-1",
-    "scope": "Source preservation/idempotence/refusal, actual v4/v5/transport/atomic callbacks and linked AArch64 MSM object; no Image/module/boot/physical result"
+    "scope": "Source preservation/idempotence/refusal, actual v4/v5/transport/atomic callbacks and linked AArch64 MSM object; no Image/module/boot/physical result",
+    "source_log_gzip_sha256": "a0dc9c70493d11b3852d96cc7285dad225d292868693c6ee2da67ee71302aee9",
+    "native_log_gzip_sha256": "626db36e2522d512404137815ea2ec2ac3f4c52d03316f006c29c5e503fe4f24",
+    "source_layer_rejection_controls": 4,
+    "exact_source_layer_idempotence": true,
+    "inherited_preflight_retained": true,
+    "native_msm_object_linked": true,
+    "both_supplier_dt_resources_retained": true,
+    "raw_native_configuration_retained": true,
+    "receipt_rpm_sha256": "c2161930f29f2a667fdaedc9a79bc1827af6dd2ee27b9efd296454052d7c3f72",
+    "receipt_rpm_bytes": 23301,
+    "check_view_composition_sha256": "99118970b534d83ce48ea8e86626e1852be7977fd00dc345475d6f835eaa1979",
+    "receipt_payload": "Only check text, source identity, source-view composition and licenses",
+    "not_included": "Later GMU IRQ layer a85f0f660dd947d2737dca18ce043674ce55a45e still requires coordinator cumulative qualification"
   },
   "delivery": {
     "single_coordinator_required_for_full_kernel": true,

@@ -10,7 +10,13 @@ Remote checks passed COPR11261036:2,048 actual loader/encoder cases per
 compiler, repaired-CRC tampering and fallback/version checks. The `0.6.0-3`
 utility emits v5 from OEM JSON and passed COPR11261174:1,024 complete
 JSON/bundle/actual C loader cases and12,288 paired command streams per compiler.
-Cumulative kernel integration, private delivery and
+Complete12101 source integration with qualified touch and front-camera geometry
+passed COPR11261282 from4800f0b884594018885c7ebadb3238c03499199f. The reusable
+layer passes four source rejection controls and exact repeated application;
+inherited preflight and the actual linked AArch64 MSM object retain both supplier
+DT resources and the raw configuration. This receipt produces no Image, module
+or boot package. Later GMU IRQ integration remains the coordinator's separate
+cumulative gate. Full kernel delivery, private profile preparation and
 physical memory/protection/HDR acceptance remain incomplete. Initial color
 selection remains empty. Historical candidate observations below retain their
 dated scope.
