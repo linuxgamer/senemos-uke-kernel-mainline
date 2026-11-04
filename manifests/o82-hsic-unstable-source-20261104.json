@@ -1,0 +1,450 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-04",
+  "scope": "Unstable-only composed HSIC/SixZone v4 candidate retaining the booting7200 profile",
+  "kernel_parent": {
+    "build": 11259638,
+    "package_family": "senemos-uke-linux-kernel-mainline-unstable",
+    "release": "7.3.1-7200",
+    "kernel_abi": "7.3.1-7200-unstable",
+    "source_commit": "bf1f6634bafc214219de1c48b3fc72a181485343",
+    "producer_commit": "d3dcaaf3f4fca6bd9efbc7c4ebf6e6ba212ac609",
+    "url": "https://download.copr.fedorainfracloud.org/results/mcc45tr/uke-linux-unstable/fedora-rawhide-aarch64/Packages/s/senemos-uke-linux-kernel-mainline-unstable-7.3.1-7200.fc46.src.rpm",
+    "sha256": "ed57663d3bb109cb3c00132cd24ec6495cab2abc9082bc72f6166889787f6b9b",
+    "native_config_sha256": "26f2c7612028efd7bd7e79261de5f48de619f19ac231a42b6d65d6e381a78841",
+    "native_config_identity": "native-profile/native.config",
+    "effective_config_sha256": "7f1e3f7a5be62396b2b36534780aeb561dfbf7e0a10698677b860cbc91efbd38",
+    "primary_sha256": "fc940b79858a4edf279e46907ba0af15f8c2e70e61e8a6c96b83d2fd7a53e4db"
+  },
+  "minimum_fresh_revision": 7600,
+  "release_history_guard_unchanged": true,
+  "imports": [
+    {
+      "path": "src/display/dpu_o82_platform.c",
+      "sha256": "933b15a26ea11832b1dbe3ad1c2e65ac5404b45de434ef2140744dcfb1fc4484",
+      "reference_blob": "07a86e9c32f528a46f72fc0872dbeac33680858c",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_sha256": "933b15a26ea11832b1dbe3ad1c2e65ac5404b45de434ef2140744dcfb1fc4484",
+      "basis_blob": "07a86e9c32f528a46f72fc0872dbeac33680858c"
+    },
+    {
+      "path": "src/display/dpu_o82_platform.h",
+      "sha256": "23b6f1533f6b01c30a1ed2ad363b3def3ad7a3e3f3d456ee14da74ca2f6d1452",
+      "reference_blob": "3c1b62536105e94ae6a567a2ec724fcf371e4e79",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_sha256": "23b6f1533f6b01c30a1ed2ad363b3def3ad7a3e3f3d456ee14da74ca2f6d1452",
+      "basis_blob": "3c1b62536105e94ae6a567a2ec724fcf371e4e79"
+    },
+    {
+      "path": "src/display/dpu_o82_regdma.c",
+      "sha256": "82b3b85f51fc27c75e911aa0557246ab449a6261840aeacc18c6460cf7dfdaa0",
+      "reference_blob": "d40e657b9182d9e9a09bc3e9b0ce1509ca5279fb",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_sha256": "82b3b85f51fc27c75e911aa0557246ab449a6261840aeacc18c6460cf7dfdaa0",
+      "basis_blob": "d40e657b9182d9e9a09bc3e9b0ce1509ca5279fb"
+    },
+    {
+      "path": "src/display/dpu_o82_regdma.h",
+      "sha256": "96e0e077f5735b61074817962baf976581f97d078182f96552e71d8114d809be",
+      "reference_blob": "1ff3e62de955e22a92a0573853bcf25179838230",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_sha256": "96e0e077f5735b61074817962baf976581f97d078182f96552e71d8114d809be",
+      "basis_blob": "1ff3e62de955e22a92a0573853bcf25179838230"
+    },
+    {
+      "path": "src/display/dpu_o82_upload.c",
+      "sha256": "91ebecd09896d765cc6aad0515cb08867244e0d2bea0ff0f2ddb07fb45ae0145",
+      "reference_blob": "9397de922a22dad5dfd9f53aeb4422ce741f56b4",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_sha256": "91ebecd09896d765cc6aad0515cb08867244e0d2bea0ff0f2ddb07fb45ae0145",
+      "basis_blob": "9397de922a22dad5dfd9f53aeb4422ce741f56b4"
+    },
+    {
+      "path": "src/display/dpu_o82_upload.h",
+      "sha256": "dc3386e7471b92eac62330224756ccaf016301c99a38751d4152dd5e67805f4c",
+      "reference_blob": "f58522975dfaf10b1fd202aa9c03f4e5d92f2da7",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_sha256": "dc3386e7471b92eac62330224756ccaf016301c99a38751d4152dd5e67805f4c",
+      "basis_blob": "f58522975dfaf10b1fd202aa9c03f4e5d92f2da7"
+    },
+    {
+      "path": "src/display/dpu_o82_power.c",
+      "sha256": "9f90407033d2cf2ef704539ab5330cd9676cd5fbcad9c70291c92178fcdd3661",
+      "reference_blob": "632568bdf40a1d9ba26b80b94761df87c0ba9e07",
+      "qualification": "New composed v4 integration; complete kernel qualification pending",
+      "basis_sha256": "48e433d32b5614c65f2d50ce0f42773214ccfbd01bd1fe79f53cb13e90b82533",
+      "basis_blob": "abcea41b023d77e5c34d1474cc65b9164dcd39c1"
+    },
+    {
+      "path": "src/display/dpu_o82_power.h",
+      "sha256": "030cca4a0c9b3928650969bc7cbf25c83bcc5d1db26653aad77cfa9f5dd94aa3",
+      "reference_blob": "78dffa30d1cf8f1c902e4c80ca1e2b0130f8f05b",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_sha256": "030cca4a0c9b3928650969bc7cbf25c83bcc5d1db26653aad77cfa9f5dd94aa3",
+      "basis_blob": "78dffa30d1cf8f1c902e4c80ca1e2b0130f8f05b"
+    },
+    {
+      "path": "src/display/dpu_o82_color.c",
+      "sha256": "31d27a25b466c9c2024820efb69b4521cde24d66ce8d4c171a92189eff170f9f",
+      "reference_blob": "8dd7d943a34aedd760ef8b357302ebd68c855795",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_sha256": "31d27a25b466c9c2024820efb69b4521cde24d66ce8d4c171a92189eff170f9f",
+      "basis_blob": "8dd7d943a34aedd760ef8b357302ebd68c855795"
+    },
+    {
+      "path": "src/display/dpu_o82_color.h",
+      "sha256": "e8890ab33aa243b23951c5a6abd1a18831f24b6ba62c635f377368b8022bb650",
+      "reference_blob": "f99724ee8e86288d175132841013aee5ca93d843",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_sha256": "e8890ab33aa243b23951c5a6abd1a18831f24b6ba62c635f377368b8022bb650",
+      "basis_blob": "f99724ee8e86288d175132841013aee5ca93d843"
+    },
+    {
+      "path": "src/display/dpu_o82_profiles.c",
+      "sha256": "0461e362a8e3f658d0c492ac5dcb28061e5421c65ef7118392c6abc4db4ac576",
+      "reference_blob": "d074efc73d53171d0367fa269cff1a8c4acbda9a",
+      "qualification": "New composed v4 integration; complete kernel qualification pending",
+      "basis_sha256": "a255211bcdabe427d42a0c4093e77b1ad280ad3ef25462421868eb373c9a1e3a",
+      "basis_blob": "15881033be5615984b12fc62a2bbba67e47cb05f"
+    },
+    {
+      "path": "src/display/dpu_o82_profiles.h",
+      "sha256": "330ca002e70fc697d41ce050bdfa25dd5c0e420c24cfcc4bf1dbc1637e10648a",
+      "reference_blob": "f5dcb7bb8bb27e9e8ee44e8aeaadc7c21b0e43a0",
+      "qualification": "New composed v4 integration; complete kernel qualification pending",
+      "basis_sha256": "d6e52a84a4835a6214515406a8ffd66c1d0f324a9f2ae6b63ee3520860885995",
+      "basis_blob": "88fe7ebe75cb75bfa9faf754321a21c992f19260"
+    },
+    {
+      "path": "src/display/dpu_o82_lutbus.c",
+      "sha256": "2c0e88a8309a1cd2237c06c311b2be1f3799f3a228ee8d861f5811c7ef5d5077",
+      "reference_blob": "0665995e3f60d24410c49b32e3315ca04b5889b1",
+      "qualification": "New composed v4 integration; complete kernel qualification pending",
+      "basis_sha256": "eb9355db690907f7051136cb7d8bb9c7e0bf25f57f6375923ccce482642f0966",
+      "basis_blob": "07feec64a6477ffb46ce8b98806008ea1d83cca7"
+    },
+    {
+      "path": "src/display/dpu_o82_lutbus.h",
+      "sha256": "d4ee6aa1322f9ecb096104d6587d20263905fd72b60fbae1889bf8dd985104de",
+      "reference_blob": "40eaa5145e43742a6e228dad519f7f20e83496b5",
+      "qualification": "New composed v4 integration; complete kernel qualification pending",
+      "basis_sha256": "ba997baa45992b47145b820d6df1054a773ad799ad951cf44016be191d97bdde",
+      "basis_blob": "f0c1f61fb8d110632f9cf18a31296702375a3188"
+    },
+    {
+      "path": "src/display/o82-regdma.h",
+      "sha256": "6c16856cd0041aa091162910aebf4076e721b35ba4bf0205b6b315de01a52077",
+      "reference_blob": "b1148b70737bbfd752d2d64726c08afc650a0b29",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_sha256": "6c16856cd0041aa091162910aebf4076e721b35ba4bf0205b6b315de01a52077",
+      "basis_blob": "b1148b70737bbfd752d2d64726c08afc650a0b29"
+    },
+    {
+      "path": "src/display/o82-color-firmware.h",
+      "sha256": "d4fb3ae5ff6f5f1299e839dbeaa253af95c601eab209013af90e91c2e8240131",
+      "reference_blob": "b5b4e87d267e05b3c6832df26e9381e4016e3f1c",
+      "qualification": "New composed v4 integration; complete kernel qualification pending",
+      "basis_sha256": "f9c51c5e159c21f91131d1c1d12e7ed62bb762b480d24943d3f9823bf90dec5e",
+      "basis_blob": "ba43bd1105d0dee899d4fdc971b65a6634786f4b"
+    },
+    {
+      "path": "src/display/uke-o82-hdr-format.h",
+      "sha256": "537bca8c0c82946754ee334a0bd47187fe341c65e2f9c655188062a5c8ded8e8",
+      "reference_blob": "6d00a09cc2821d4a77d6f21c72a74b24e3106895",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_sha256": "537bca8c0c82946754ee334a0bd47187fe341c65e2f9c655188062a5c8ded8e8",
+      "basis_blob": "6d00a09cc2821d4a77d6f21c72a74b24e3106895"
+    },
+    {
+      "path": "src/display/prepare-o82-regdma.sh",
+      "sha256": "8357a7fe06724fa79ca1de1238b002e5548084eb6a512b207967ce2d06c1ab42",
+      "reference_blob": "0c7fc1e6165c47bc37c1493bd291e59316cc6bfd",
+      "qualification": "New composed v4 integration; complete kernel qualification pending",
+      "basis_sha256": "29fe12a2f243268e598ca802fb8cd78e11a78d0feb8d301a879c3a94011b847c",
+      "basis_blob": "5f7ebd8e1347f7ddf201c6236f8243e198366df4"
+    },
+    {
+      "path": "src/display/sm7675-uke-native-display.dtso",
+      "sha256": "53fa8913a22bacd3cd1265d8d37a122acbb803cb85b70a7c3e9ffba1884ca998",
+      "reference_blob": "69175c193e3a74863c9eff4f4fabc45e9bd01109",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_sha256": "53fa8913a22bacd3cd1265d8d37a122acbb803cb85b70a7c3e9ffba1884ca998",
+      "basis_blob": "69175c193e3a74863c9eff4f4fabc45e9bd01109"
+    },
+    {
+      "path": "src/display/bindings/qcom,sm7675-dpu.yaml",
+      "sha256": "39d9107af3e5a65c2a1d058881711ffcf3fd5fa9b55502f68c1f496152330253",
+      "reference_blob": "e5aa38f9cd366c9e75715af993acfb6c14331e62",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_sha256": "39d9107af3e5a65c2a1d058881711ffcf3fd5fa9b55502f68c1f496152330253",
+      "basis_blob": "e5aa38f9cd366c9e75715af993acfb6c14331e62"
+    },
+    {
+      "path": "patches/display/0072-o82-regdma-resource.patch",
+      "sha256": "8b25b0749be6d21d89f0227bb83646d17bcc6004e3886c4acdce844db7ae215c",
+      "reference_blob": "9af565fd742e96a43d57ba46ce22a10f2ff5b255",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_sha256": "8b25b0749be6d21d89f0227bb83646d17bcc6004e3886c4acdce844db7ae215c",
+      "basis_blob": "9af565fd742e96a43d57ba46ce22a10f2ff5b255"
+    },
+    {
+      "path": "patches/display/0073-o82-regdma-power.patch",
+      "sha256": "100f8d8e0a08a8898a48e5cb2a4424e107ce7416c0a38b35457296ac42601dd9",
+      "reference_blob": "437805b5d389b58f6e5237f09aa12a1b9ea03e46",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_sha256": "100f8d8e0a08a8898a48e5cb2a4424e107ce7416c0a38b35457296ac42601dd9",
+      "basis_blob": "437805b5d389b58f6e5237f09aa12a1b9ea03e46"
+    },
+    {
+      "path": "patches/display/0074-o82-regdma-close.patch",
+      "sha256": "65b7dd15a3ed6fbba6929ef8052a798f50e50dc4a5d52c7bc60a9af999d6bb5a",
+      "reference_blob": "dc09877d141daa8ea1f10e305f0624fb5a5855fb",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_sha256": "65b7dd15a3ed6fbba6929ef8052a798f50e50dc4a5d52c7bc60a9af999d6bb5a",
+      "basis_blob": "dc09877d141daa8ea1f10e305f0624fb5a5855fb"
+    },
+    {
+      "path": "patches/display/0075-o82-atomic-color.patch",
+      "sha256": "75c5bf4041f59ecf1e90cc3a9681a80d90965358cc62c28818a1b754e855b673",
+      "reference_blob": "58ea0dc5a7fd0136553125ecb2c6989e430eb4d6",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_blob": "58ea0dc5a7fd0136553125ecb2c6989e430eb4d6",
+      "basis_sha256": "75c5bf4041f59ecf1e90cc3a9681a80d90965358cc62c28818a1b754e855b673"
+    },
+    {
+      "path": "tests/o82-platform-contract.sh",
+      "sha256": "e358fedbc49f2edea90e2688cc0aea5ef77f33615d98fce14e80fbaa082b4512",
+      "reference_blob": "e9016b1e358938d098505fe44bdf917dd7248bed",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_sha256": "e358fedbc49f2edea90e2688cc0aea5ef77f33615d98fce14e80fbaa082b4512",
+      "basis_blob": "e9016b1e358938d098505fe44bdf917dd7248bed"
+    },
+    {
+      "path": "tests/o82-lutbus-contract.c",
+      "sha256": "4d21178bec26481d9e108a5f97f4bded7c7cef62a92705f1e3f84fc8a8ee2b3b",
+      "reference_blob": "36ada5facf56a1626a2f89c40b605045e41c89c6",
+      "qualification": "New composed v4 integration; complete kernel qualification pending",
+      "basis_sha256": "de53b61adf43257b8e7cf50fa455a280793490d47ab5a8aa0b40660a572e1b6d",
+      "basis_blob": "627704ae87d20800cf34d5366fbb08a84ef73324"
+    },
+    {
+      "path": "tests/o82-lutbus-contract.sh",
+      "sha256": "896941d01918f788198ed07ff1933af03038efba7bcce70f8df32b44866fa162",
+      "reference_blob": "47e44c6df77bbe42e6f541efad80e8ed276b6541",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_sha256": "896941d01918f788198ed07ff1933af03038efba7bcce70f8df32b44866fa162",
+      "basis_blob": "47e44c6df77bbe42e6f541efad80e8ed276b6541"
+    },
+    {
+      "path": "tests/o82-regdma-transport-contract.c",
+      "sha256": "12636bebaf2fc99cfa9d28caafb8d6b2de58cf2f422e3b18aa4070a02b68f62e",
+      "reference_blob": "2c0436f388767217d29094bb84b685a6e17b711f",
+      "qualification": "New composed v4 integration; complete kernel qualification pending",
+      "basis_sha256": "553f8410eab7f9fa46385fd0566e772c1639998066d5e7b04da2ad5551d60239",
+      "basis_blob": "13e5be4b156da57e771aa49f227296fba65a7bb2"
+    },
+    {
+      "path": "tests/o82-regdma-transport-contract.sh",
+      "sha256": "192732f05086ea7388345a06678d00187e07921ad364610bf3f30796b3d4f694",
+      "reference_blob": "63a8a1a48c7d8ea068dcd6c73c973f1402ad6498",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_sha256": "192732f05086ea7388345a06678d00187e07921ad364610bf3f30796b3d4f694",
+      "basis_blob": "63a8a1a48c7d8ea068dcd6c73c973f1402ad6498"
+    },
+    {
+      "path": "tests/o82-atomic-contract.c",
+      "sha256": "7eb52b2c1d1f8cd99ec8a24f3f3fbf63a5aa20409ab945395b8ff20dde01b15b",
+      "reference_blob": "2dd87960ae6ea9e5ba229f024a8e9f5ff98bbedd",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_sha256": "7eb52b2c1d1f8cd99ec8a24f3f3fbf63a5aa20409ab945395b8ff20dde01b15b",
+      "basis_blob": "2dd87960ae6ea9e5ba229f024a8e9f5ff98bbedd"
+    },
+    {
+      "path": "tests/o82-atomic-contract.sh",
+      "sha256": "9c589bc0109a7bf9a4a336a5c1f636717deeb3eeaa6ee17fbc18d991c0a9cad7",
+      "reference_blob": "b84dcb3f5c8d6e42a753a429d922903de724727e",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_sha256": "9c589bc0109a7bf9a4a336a5c1f636717deeb3eeaa6ee17fbc18d991c0a9cad7",
+      "basis_blob": "b84dcb3f5c8d6e42a753a429d922903de724727e"
+    },
+    {
+      "path": "tests/o82-atomic-package-contract.sh",
+      "sha256": "a18ad8a63122e3f3959e91edf5588fdbc9201afa0251e83c7e7b3afd3a9e4afb",
+      "qualification": "New composed v4 integration; complete kernel qualification pending",
+      "basis_sha256": "6f8faaac90406ba2a6555580b932c5e72042486b15980769d59aad34b2d3456a",
+      "reference_blob": "37569f090f0cb0625e4111f7ddf15e6b63d797f1",
+      "basis_blob": "1d0148e166aaa10a104fce8cef64c39c00f09817"
+    },
+    {
+      "path": "tests/o82-avr-contract.sh",
+      "sha256": "8d0e75faf0d1b64c27b3550cc9053372197264baa86cd71c8a63c78d5a40a2b7",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "reference_blob": "ae5a30eeb33b8b957cd44fd43ca236ce7170a500",
+      "basis_sha256": "8d0e75faf0d1b64c27b3550cc9053372197264baa86cd71c8a63c78d5a40a2b7",
+      "basis_blob": "ae5a30eeb33b8b957cd44fd43ca236ce7170a500"
+    },
+    {
+      "path": "tests/dpu-video-timing-contract.sh",
+      "sha256": "172d3e8f9d50b164b698358a3d89c9a4cde548f04c3b3ca83a1803716ba63469",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "reference_blob": "7ddb4cdeeb454e9b8e3d23a830b867962747073d",
+      "basis_sha256": "172d3e8f9d50b164b698358a3d89c9a4cde548f04c3b3ca83a1803716ba63469",
+      "basis_blob": "7ddb4cdeeb454e9b8e3d23a830b867962747073d"
+    },
+    {
+      "path": "tests/msm-retirement-proof-contract.sh",
+      "sha256": "b54c32638c3f9e56ee63d2caa430bf44ba03e61dfc605d70dd3eb12526fb6835",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "reference_blob": "41d06509b48a794f2baca64e21d40ffb5e95c67c",
+      "basis_sha256": "b54c32638c3f9e56ee63d2caa430bf44ba03e61dfc605d70dd3eb12526fb6835",
+      "basis_blob": "41d06509b48a794f2baca64e21d40ffb5e95c67c"
+    },
+    {
+      "path": "tests/dpu-reservation-contract.sh",
+      "sha256": "0f99c8c6cc9b6e09812b23fc2c15b140b887a86558adf08f135344e1cbe35319",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "reference_blob": "9a811365808a60787a37aaf856757bb80522d99d",
+      "basis_sha256": "0f99c8c6cc9b6e09812b23fc2c15b140b887a86558adf08f135344e1cbe35319",
+      "basis_blob": "9a811365808a60787a37aaf856757bb80522d99d"
+    },
+    {
+      "path": "tests/dpu-color-topology-contract.sh",
+      "sha256": "e96ef23e2159073f3f89581690d05e3536d0360a2fe3aebcfd1e182cd4fb6368",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "reference_blob": "c1f8b056a2490e42438f6bf1474166c6190a9da9",
+      "basis_sha256": "e96ef23e2159073f3f89581690d05e3536d0360a2fe3aebcfd1e182cd4fb6368",
+      "basis_blob": "c1f8b056a2490e42438f6bf1474166c6190a9da9"
+    },
+    {
+      "path": "src/display/o82-sixzone-format.h",
+      "sha256": "67e018625041460de4e10c2ddaa734ee9e8d0909138a3b0fe23c8a08040db86d",
+      "reference_blob": "c7b8bb5266bdb5dad1b3ab37287271b34c046236",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_sha256": "67e018625041460de4e10c2ddaa734ee9e8d0909138a3b0fe23c8a08040db86d",
+      "basis_blob": "c7b8bb5266bdb5dad1b3ab37287271b34c046236"
+    },
+    {
+      "path": "patches/display/0076-o82-sixzone-pa-flush.patch",
+      "sha256": "b802d43abdb07e49961a4da68a7316c6108e925de098988520c3e77cfe72700c",
+      "reference_blob": "f1dcf222e77e73244f1bb9f3042ed49b35adc08a",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_sha256": "b802d43abdb07e49961a4da68a7316c6108e925de098988520c3e77cfe72700c",
+      "basis_blob": "f1dcf222e77e73244f1bb9f3042ed49b35adc08a"
+    },
+    {
+      "path": "tests/o82-profile-loader-contract.c",
+      "sha256": "8ff8d1046e83311610b1193d238f2ee766cfe2b5ba86f9eca600dbe808e9e4db",
+      "reference_blob": "e89e8dc41ca925975d85e729a41fa1fcd52733fb",
+      "qualification": "New composed v4 integration; complete kernel qualification pending",
+      "basis_sha256": "9ee9081363f3f8ac184a7a17ddcad9bfb5056d828c9bcdd9ec151fdc12ceda99",
+      "basis_blob": "5f1b46fc9e17e3d889dd8464dbd8a6fb1b46a905"
+    },
+    {
+      "path": "tests/o82-profile-loader-contract.sh",
+      "sha256": "18e93120b593073d4c85e24c629cb2dc3ff7c64fa66a0b4297b5ff281db6b3cd",
+      "reference_blob": "1a429a8fa65eb7fc760cc14ac28414829e2db7a7",
+      "qualification": "11253722 qualified parent; unchanged source",
+      "basis_sha256": "18e93120b593073d4c85e24c629cb2dc3ff7c64fa66a0b4297b5ff281db6b3cd",
+      "basis_blob": "1a429a8fa65eb7fc760cc14ac28414829e2db7a7"
+    },
+    {
+      "path": "src/display/o82-hsic-format.h",
+      "sha256": "dfa79dc0ef22f87d6989b9caca60716f7abd89387e23f1be8df38cfd02bbdb05",
+      "reference_blob": "1dc7d262966d53d08f270c0da0e1c27c00139550",
+      "qualification": "11253922 C validator/composed state; full kernel integration pending"
+    },
+    {
+      "path": "tests/unstable-boot-family731-contract.sh",
+      "sha256": "3ccb91eee559a307a1c1de8baf1d30e908fb254dc9ae258cf31028b5f253a352",
+      "reference_blob": "8a7905fe588ac7105851fb8e53eb20f6004cb2d9",
+      "qualification": "Retained project d3dcaaf family contract; fresh unstable RPM validation required"
+    }
+  ],
+  "qualified_profile_compiler": {
+    "build": 11253922,
+    "release": "0.5.0-1",
+    "source_commit": "d10c0e35649c96d4e6f92316e75948cd51116784",
+    "scope": "Actual JSON/wire/composed PA and native v4 loader; optimized and sanitizer fixtures",
+    "actual_hsic_parser_wire_checks_per_run": 16479,
+    "pure_hsic_checks_per_run": 41340,
+    "sixzone_parser_wire_checks_per_run": 30724,
+    "inputs": [
+      {
+        "path": "src/display/o82-hsic.h",
+        "sha256": "ef3247bfc15efab11f5ed19bfb5c8d0c14f894c59a1bfc9d6aac16f5572ff945"
+      },
+      {
+        "path": "src/display/o82-hsic-format.h",
+        "sha256": "dfa79dc0ef22f87d6989b9caca60716f7abd89387e23f1be8df38cfd02bbdb05"
+      },
+      {
+        "path": "src/display/o82-sixzone-format.h",
+        "sha256": "67e018625041460de4e10c2ddaa734ee9e8d0909138a3b0fe23c8a08040db86d"
+      },
+      {
+        "path": "src/display/o82-color-firmware.h",
+        "sha256": "d4fb3ae5ff6f5f1299e839dbeaa253af95c601eab209013af90e91c2e8240131"
+      },
+      {
+        "path": "src/display/dpu_o82_profiles.c",
+        "sha256": "0461e362a8e3f658d0c492ac5dcb28061e5421c65ef7118392c6abc4db4ac576"
+      },
+      {
+        "path": "src/display/dpu_o82_profiles.h",
+        "sha256": "330ca002e70fc697d41ce050bdfa25dd5c0e420c24cfcc4bf1dbc1637e10648a"
+      },
+      {
+        "path": "src/display/uke-o82-hdr-format.h",
+        "sha256": "537bca8c0c82946754ee334a0bd47187fe341c65e2f9c655188062a5c8ded8e8"
+      },
+      {
+        "path": "src/display/o82-color-profile.cpp",
+        "sha256": "ed84a8b69747740412bcbb305dc4a8e28f0f7707a6335835a87b0b0839f9f0e2"
+      }
+    ]
+  },
+  "previous_kernel_qualification": {
+    "build": 11259638,
+    "release": "7.3.1-7200-unstable",
+    "producer_commit": "d3dcaaf3f4fca6bd9efbc7c4ebf6e6ba212ac609",
+    "scope": "Existing package cohort; currently running, without full feature acceptance"
+  },
+  "private_color_bundle_version": 4,
+  "command_bytes": {
+    "legacy": 37316,
+    "managed_without_sixzone": 37388,
+    "managed_with_sixzone": 41320
+  },
+  "shared_pa_flush_bit": 0,
+  "default_preset": "",
+  "native_hdr_advertisement": false,
+  "kernel_qualification": "pending",
+  "physical_acceptance": false,
+  "private_inputs_included": false,
+  "package_family": "senemos-uke-linux-kernel-mainline-unstable",
+  "kernel_abi_suffix": "-unstable",
+  "generated_changes": [
+    {
+      "path": "src/audio/uke-audio-card.c",
+      "before_identity": "uke7.3.1-7200u",
+      "after_identity": "uke7.3.1-REVISIONu",
+      "exact_occurrences": 2,
+      "scope": "Compact ALSA driver identity only, matching the retained generic UCM/topology recipe"
+    }
+  ],
+  "retained_boot_admission": {
+    "camera_stage": 0,
+    "camcc_boot_fdt_activation": false,
+    "front_geni_dt_activation": false,
+    "front_eeprom_dt_activation": false,
+    "pstore_panic_layout": true,
+    "automatic_kernel_activation": false
+  },
+  "pre_policy_color_software_reference": {
+    "build": 11259599,
+    "release": "7.3.1-7500",
+    "source_commit": "8dd80a957f8094a8a41dfa7967391d1567c68f8d",
+    "scope": "Normal-family software checks only; not stable promotion or the boot parent"
+  },
+  "normal_family_update_requires_explicit_request": true
+}

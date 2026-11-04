@@ -407,7 +407,21 @@
   "shared_pa_flush_bit": 0,
   "default_preset": "",
   "native_hdr_advertisement": false,
-  "kernel_qualification": "pending",
+  "kernel_qualification": {
+    "build": 11259599,
+    "release": "7.3.1-7500",
+    "source_commit": "8dd80a957f8094a8a41dfa7967391d1567c68f8d",
+    "state": "succeeded",
+    "software_only": true,
+    "physical_acceptance": false
+  },
   "physical_acceptance": false,
-  "private_inputs_included": false
+  "private_inputs_included": false,
+  "development_policy": {
+    "superseded": "2026-11-04",
+    "active_family": "senemos-uke-linux-kernel-mainline-unstable",
+    "active_manifest": "o82-hsic-unstable-source-20261104.json",
+    "normal_promotion": false,
+    "historical_recipe_commit": "8dd80a957f8094a8a41dfa7967391d1567c68f8d"
+  }
 }

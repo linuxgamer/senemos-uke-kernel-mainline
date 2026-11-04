@@ -14,3 +14,4 @@ These rules apply to the workspace and every project-owned component. Read compo
 - Public files must not contain credentials, private logs, unit identifiers, calibration data, home-directory paths or personal author email. Use the account's GitHub no-reply email locally.
 - Preserve stock early firmware and a documented recovery route. Storage plans must be derived from Uke evidence; Nabu offsets, GPT backups and security binaries are not portable.
 - Keep commits focused and explain what changed and why. Run the relevant checks before publication. Do not create hardware success records without evidence.
+- New kernel development and candidate builds use `senemos-uke-linux-kernel-mainline-unstable` with an `-unstable` Image ABI. Update the normal family only on an explicit user request after physical stability and feature validation; successful compilation is not promotion. Preserve the accepted kernel and existing recovery route during qualification.

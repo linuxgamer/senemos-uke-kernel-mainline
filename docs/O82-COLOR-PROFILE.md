@@ -4,7 +4,14 @@
 Fedora Rawhide AArch64 and original KWin 6.8.2. Compilation and numerical checks
 run in COPR. Optical color and HDR acceptance require separate measurements.
 
-4 November 2026 current-device check: the tablet runs 7.3.1-1500; the generator
+4 November development update: the tablet now runs `7.3.1-7200-unstable`.
+New kernel candidates use `senemos-uke-linux-kernel-mainline-unstable` and an
+`-unstable` ABI. The active v4 candidate retains that booting source and its
+camera admission boundaries. Normal-family changes require an explicit request
+and physical stability/feature validation before promotion. Earlier `1500`
+observations below retain their dated scope.
+
+Earlier 4 November 2026 device check: the tablet ran 7.3.1-1500; the generator
 package and both fixed native v2 firmware files are absent. The ICC reports
 below describe their dated trials and do not establish the current root's
 profile selection. Full private-profile application and native HDR remain open.
@@ -19,7 +26,9 @@ compiler/loader passed
 [COPR11253922](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11253922/):
 16,479 parser/wire/composed-state checks per optimized/sanitizer run, plus the
 actual v4 loader and retained numeric regressions. Complete native-kernel
-qualification remains pending. Delivered `7001`
+qualification in the 7200-based unstable family remains pending. Historical
+normal 7500 passed software checks before the channel change; it is not a
+stable promotion. Delivered `7001`
 continues to require v3; private v4 delivery and physical acceptance are open.
 Memory-color and opaque HDR operations remain refused.
 

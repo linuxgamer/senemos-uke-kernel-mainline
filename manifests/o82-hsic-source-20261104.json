@@ -132,7 +132,7 @@
     "board_settings_imported": false
   },
   "native_integration": {
-    "status": "Actual v4 compiler/loader and composed state passed; native writer/full kernel qualification pending",
+    "status": "Qualified compiler and pre-policy normal7500 software; booting7200-based unstable qualification pending",
     "utility": "0.5.0-1",
     "private_bundle_version": 4,
     "record_offset_fields": [
@@ -171,14 +171,23 @@
     },
     "default_enabled": false,
     "physical_acceptance": false,
-    "kernel_source_manifest": "o82-hsic-kernel-source-20261104.json"
+    "kernel_source_manifest": "o82-hsic-unstable-source-20261104.json",
+    "package_family": "senemos-uke-linux-kernel-mainline-unstable",
+    "kernel_abi_suffix": "-unstable",
+    "pre_policy_kernel_reference": {
+      "build": 11259599,
+      "release": "7.3.1-7500",
+      "source_commit": "8dd80a957f8094a8a41dfa7967391d1567c68f8d",
+      "state": "succeeded",
+      "software_only": true,
+      "normal_promotion": false
+    }
   },
   "remaining_work": [
-    "Qualify the v4 parser, serializer, loader and composed writer, including explicit neutral state",
-    "Deliver matching private v4 input after native kernel/package qualification; keep unsupported memory/HDR operations refused",
-    "Fault-test the combined PA mode and held-power readback across all paired feature states",
-    "Implement explicit neutral state and complete memory/protection/HDR operations",
-    "Require native kernel/package checks and separate physical acceptance"
+    "Qualify the7200-based unstable family/ABI and composed writer while preserving its boot admission",
+    "Deliver matching private v4 input after unstable kernel/package checks; keep unsupported memory/HDR refused",
+    "Complete memory/protection/HDR operations and their explicit neutral states",
+    "Require physical feature/stability acceptance; normal-family promotion requires an explicit request"
   ],
   "private_inputs_included": false,
   "oem_code_executed": false,

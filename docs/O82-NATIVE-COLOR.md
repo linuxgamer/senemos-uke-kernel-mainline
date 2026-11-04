@@ -208,9 +208,14 @@ The actual compiler/loader passed
 at source `d10c0e35649c96d4e6f92316e75948cd51116784`, with16,479 actual
 parser/wire/composed-state checks per optimized/sanitizer run and the actual
 v4 loader. Pure HSIC41,340 and SixZone30,724 checks per run remain green.
-The [full-kernel composition](../manifests/o82-hsic-kernel-source-20261104.json)
-retains exact7001 source and42 declared inputs. Native full-kernel qualification
-remains pending;
+The [active full-kernel composition](../manifests/o82-hsic-unstable-source-20261104.json)
+retains the booting7200 unstable source,43 imports and one declared compact
+audio identity update. It preserves the camera boot boundary and pstore layout.
+New development uses `senemos-uke-linux-kernel-mainline-unstable` with an
+`-unstable` Image ABI. The earlier normal 7500 build passed software checks before
+the policy change; it is historical evidence and does not authorize promotion.
+The active entry point routes only to the unstable producer. Native full-kernel
+qualification of this7200-based candidate remains pending;
 delivered `7001` retains its v3 contract and disabled default. Memory/protection,
 complete HDR, private data delivery and physical acceptance remain open.
 
