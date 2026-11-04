@@ -211,6 +211,26 @@
       "path": "tests/o82-atomic-package-contract.sh",
       "sha256": "ed021dad74906a9eaa9d0a14d399c6bde3fda8eb3e8a24138e8e6dfc4959813d",
       "qualification": "full-kernel-package-check-added-after-object-qualification"
+    },
+    {
+      "path": "tests/o82-avr-contract.sh",
+      "sha256": "8d0e75faf0d1b64c27b3550cc9053372197264baa86cd71c8a63c78d5a40a2b7",
+      "qualification": "historical fixture extended with color admission/refusal; final-source preflight required"
+    },
+    {
+      "path": "tests/dpu-video-timing-contract.sh",
+      "sha256": "172d3e8f9d50b164b698358a3d89c9a4cde548f04c3b3ca83a1803716ba63469",
+      "qualification": "historical fixture extended with color admission/refusal; final-source preflight required"
+    },
+    {
+      "path": "tests/msm-retirement-proof-contract.sh",
+      "sha256": "b54c32638c3f9e56ee63d2caa430bf44ba03e61dfc605d70dd3eb12526fb6835",
+      "qualification": "historical fixture extended with color admission/refusal; final-source preflight required"
+    },
+    {
+      "path": "tests/dpu-reservation-contract.sh",
+      "sha256": "a154e7a30831149e63cddadf7ca1beea126fd496938920b326ec0b4547b1409d",
+      "qualification": "historical fixture extended with color admission/refusal; final-source preflight required"
     }
   ]
 }

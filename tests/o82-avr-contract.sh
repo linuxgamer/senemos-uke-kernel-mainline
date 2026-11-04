@@ -314,6 +314,8 @@ struct dpu_hw_intf {struct {void (*avr_trigger)(struct dpu_hw_intf *);} ops;};
 struct dpu_encoder_phys {struct {void (*handle_post_kickoff)(struct dpu_encoder_phys *);} ops;struct dpu_hw_intf *hw_intf;};
 struct dpu_encoder_virt {struct drm_encoder base;bool avr_enabled;unsigned enc_spinlock,num_phys_encs;struct dpu_encoder_phys *phys_encs[2];};
 static unsigned stage,triggers;
+static bool color_blocked;
+static bool __attribute__((unused)) dpu_o82_color_blocked(struct drm_encoder *e) {(void)e;return color_blocked;}
 static struct dpu_encoder_virt *to_dpu_encoder_virt(struct drm_encoder *e) {return (void *)e;}
 static void _dpu_encoder_kickoff_phys(struct dpu_encoder_virt *e) {(void)e;assert(!stage);stage=1;}
 static void post(struct dpu_encoder_phys *p) {(void)p;assert(stage==1||stage==2);++stage;}
@@ -321,12 +323,20 @@ static void trigger(struct dpu_hw_intf *i) {(void)i;assert(stage==3);++triggers;
 #define spin_lock_irqsave(l,f) ((f)=0,assert(!*(l)),++*(l))
 #define spin_unlock_irqrestore(l,f) ((void)(f),assert(*(l)==1),--*(l))
 C
+if grep -Fq 'int dpu_encoder_o82_stopped(' "$encoder"; then
+ printf '#define UKE_O82_ATOMIC_COLOR 1\n' >> "$work/kickoff.c"
+fi
 awk '/^void dpu_encoder_kickoff\(/ {emit=1;found=1} emit {print} emit&&/^}/ {exit} END {if(!found)exit 1}' "$encoder" >> "$work/kickoff.c"
 cat >> "$work/kickoff.c" <<'C'
 int main(void) {
  struct dpu_hw_intf intf[2]={{{trigger}},{{trigger}}};
  struct dpu_encoder_phys phys[2]={{{post},&intf[0]},{{post},&intf[1]}};
  struct dpu_encoder_virt enc={.avr_enabled=true,.num_phys_encs=2,.phys_encs={&phys[0],&phys[1]}};
+#ifdef UKE_O82_ATOMIC_COLOR
+ color_blocked=true;
+ dpu_encoder_kickoff(&enc.base);assert(!stage&&!triggers&&!enc.enc_spinlock);
+ color_blocked=false;
+#endif
  dpu_encoder_kickoff(&enc.base);assert(stage==3&&triggers==2&&!enc.enc_spinlock);
  stage=triggers=0;enc.avr_enabled=false;
  dpu_encoder_kickoff(&enc.base);assert(stage==3&&!triggers&&!enc.enc_spinlock);
@@ -336,6 +346,9 @@ C
  -fsanitize-undefined-trap-on-error -I"$work" "$work/kickoff.c" -o "$work/kickoff"
 "$work/kickoff"
 printf 'Actual kickoff: shared CTL flush and both initial timing callbacks precede paired AVR triggers; fixed commits do not trigger AVR\n'
+if grep -Fq '#define UKE_O82_ATOMIC_COLOR 1' "$work/kickoff.c";then
+ printf 'Actual color refusal: no physical kickoff, timing callback, AVR trigger or lock mutation\n'
+fi
 
 # The nominal five-frame watchdog must also cover five stretched AVR frames.
 cat > "$work/watchdog.c" <<'C'

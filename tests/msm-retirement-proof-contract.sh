@@ -56,6 +56,8 @@ static bool drm_atomic_crtc_needs_modeset(struct drm_crtc_state *s) {return s->m
 static struct dpu_kms *_dpu_crtc_get_kms(struct drm_crtc *c) {(void)c;return &backend;}
 static bool drm_crtc_in_clone_mode(struct drm_crtc_state *s) {return s->clone;}
 static bool valid_encoder=true;
+static bool color_blocked;
+static bool __attribute__((unused)) dpu_o82_color_blocked(struct drm_encoder *e) {(void)e;return color_blocked;}
 static int clone_error,wait_result,tx_result;
 static unsigned kickoffs,waits,tx_waits,flush_calls;
 static bool flush_valid,flush_one_shot;
@@ -75,6 +77,9 @@ static bool dpu_crtc_retire_stopped(struct drm_crtc *c) {return !to_dpu_crtc(c)-
 static void dpu_crtc_retire_flush(struct drm_crtc *c,bool valid,bool one_shot) {(void)c;++flush_calls;flush_valid=valid;flush_one_shot=one_shot;}
 static int phys_wait(struct dpu_encoder_phys *p) {(void)p;return 0;}
 C
+if grep -Fq 'dpu_o82_color_requested(' "$dpu/dpu_crtc.c";then
+ printf '#define UKE_O82_ATOMIC_COLOR 1\n' >> "$work/check.c"
+fi
 extract "$dpu/dpu_crtc.c" dpu_crtc_commit_kickoff >> "$work/check.c"
 extract "$dpu/dpu_encoder.c" dpu_encoder_retire_stopped >> "$work/check.c"
 extract "$dpu/dpu_encoder.c" dpu_encoder_retire_wait >> "$work/check.c"
@@ -87,6 +92,13 @@ int main(void) {
  struct dpu_crtc crtc={.base={.dev=&dev,.state=&state.base},.enabled=true};current_crtc=&crtc;backend.dev=&dev;struct msm_kms kms={.dev=&dev};
  struct dpu_encoder_phys phys={.enable_state=DPU_ENC_ENABLED,.ops={phys_wait,phys_wait}};
  encoders[0]=(struct dpu_encoder_virt){.base={.crtc=&crtc.base},.enabled=true,.num_phys_encs=1,.phys_encs={&phys},.mode=INTF_MODE_VIDEO};
+#ifdef UKE_O82_ATOMIC_COLOR
+ color_blocked=true;
+ assert(!dpu_crtc_commit_kickoff(&crtc.base)&&!kickoffs&&!crtc.frame_pending&&!crtc.play_count&&!crtc.frame_done_comp);
+ dpu_kms_flush_commit(&kms,1);
+ assert(crtc.quarantined&&!kickoffs&&!crtc.frame_pending&&!crtc.play_count&&!crtc.frame_done_comp);
+ color_blocked=false;crtc.failed=crtc.quarantined=false;
+#endif
  assert(dpu_crtc_commit_kickoff(&crtc.base)&&kickoffs==1);state.num_mixers=0;assert(!dpu_crtc_commit_kickoff(&crtc.base)&&kickoffs==1);
  dpu_kms_flush_commit(&kms,1);assert(crtc.quarantined&&kickoffs==1);crtc.failed=crtc.quarantined=false;state.num_mixers=1;
  valid_encoder=false;assert(!dpu_crtc_commit_kickoff(&crtc.base)&&kickoffs==1);valid_encoder=true;state.base.clone=true;clone_error=-EINVAL;

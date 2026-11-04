@@ -44,7 +44,7 @@ struct drm_crtc_state {
  bool vrr_enabled,planes_changed,zpos_changed;unsigned encoder_mask;int adjusted_mode;
 };
 struct mixer {struct dpu_hw_blk *hw_lm,*lm_ctl,*hw_dspp;};
-struct dpu_crtc_state {struct drm_crtc_state base;unsigned num_mixers;struct mixer mixers[2];int new_perf;};
+struct dpu_crtc_state {struct drm_crtc_state base;unsigned num_mixers,num_ctls;struct mixer mixers[2];struct dpu_hw_blk *hw_ctls[2];int new_perf;};
 struct drm_atomic_commit {struct drm_device *dev;bool allow_modeset;struct dpu_crtc_state old,next;};
 struct drm_encoder {struct drm_device *dev;struct drm_crtc *crtc;};
 struct drm_connector_state {void *writeback_job;};
@@ -84,6 +84,8 @@ static struct dpu_hw_blk reassigned_ctl[2];
 static int counts[BLOCK_TYPES],reserves,releases,reserve_error,bounds_error,perf_error,mst_error;
 static unsigned modesets,seamless;
 static bool dfps_failed,dfps_pending,encoder_modeset;
+static bool color_requested,color_wire_changed;
+static int color_error;
 static const bool dpu_use_virtual_planes=false;
 static void log_message(const char *message,...) {(void)message;}
 #define DPU_ERROR(...) log_message(__VA_ARGS__)
@@ -137,6 +139,9 @@ static bool msm_uke_dfps_failed(void) {return dfps_failed;}
 static bool msm_dsi_manager_uke_dfps_pending(struct drm_encoder *e) {(void)e;return dfps_pending;}
 static int drm_atomic_helper_check(struct drm_device *d,struct drm_atomic_commit *s);
 static int drm_dp_mst_atomic_check(struct drm_atomic_commit *s) {(void)s;return mst_error;}
+static bool dpu_o82_color_requested(const struct drm_crtc_state *s) {(void)s;return color_requested;}
+static void dpu_o82_color_mode_changed(struct drm_crtc_state *s) {if(color_wire_changed)s->mode_changed=true;}
+static int dpu_o82_color_check(struct drm_crtc *c,struct drm_crtc_state *s) {(void)c;(void)s;return color_error;}
 C
 cat > "$work/cases.c" <<'C'
 static void fake_modeset(struct dpu_encoder_phys *p,struct drm_crtc_state *s,struct drm_connector_state *c) {(void)p;(void)s;(void)c;++modesets;}
@@ -148,6 +153,7 @@ static void reset(void) {
  memset(&fixture_encoder,0,sizeof(fixture_encoder));memset(physical,0,sizeof(physical));memset(&commit,0,sizeof(commit));
  memset(counts,0,sizeof(counts));reserves=releases=reserve_error=bounds_error=perf_error=mst_error=0;
  dfps_failed=dfps_pending=encoder_modeset=false;modesets=seamless=0;
+ color_requested=color_wire_changed=false;color_error=0;
  kms=(struct dpu_kms){.base={&funcs}};priv=(struct msm_drm_private){&kms.base};dev.dev_private=&priv;
  fixture_crtc=(struct drm_crtc){.dev=&dev,.base={1}};commit.dev=&dev;
  commit.old.base=(struct drm_crtc_state){.crtc=&fixture_crtc,.state=&commit,.active=true,.enable=true,.encoder_mask=1};
@@ -210,6 +216,19 @@ static void run(const char *which) {
  reset();dfps_pending=true;fixture_encoder.disp_info.intf_type=INTF_DP;counts[DPU_HW_BLK_CDM]=1;
  dpu_encoder_virt_atomic_mode_set(&fixture_encoder.base,&commit.next.base,&connector);
  assert(modesets==2&&seamless==2&&physical[0].hw_cdm==&blocks[DPU_HW_BLK_CDM][0]);
+#ifdef UKE_O82_ATOMIC_COLOR
+ reset();color_requested=true;
+ for(int i=0;i<2;i++)commit.old.mixers[i].hw_dspp=NULL;
+ commit.next=commit.old;commit.next.num_ctls=2;
+ commit.next.hw_ctls[0]=commit.next.hw_ctls[1]=&blocks[DPU_HW_BLK_CTL][1];
+ counts[DPU_HW_BLK_CTL]=1;counts[DPU_HW_BLK_DSPP]=2;
+ assert(!msm_atomic_check(&dev,&commit)&&commit.next.base.mode_changed);
+ assert(commit.next.num_ctls==1&&commit.next.hw_ctls[0]==&reassigned_ctl[0]&&!commit.next.hw_ctls[1]);
+ assert(commit.next.mixers[0].hw_dspp&&commit.next.mixers[1].hw_dspp);
+ reset();color_wire_changed=true;
+ assert(!dpu_crtc_check_mode_changed(&commit.old.base,&commit.next.base)&&commit.next.base.mode_changed);
+ reset();color_error=-EIO;assert(msm_atomic_check(&dev,&commit)==-EIO);
+#endif
  puts("Actual DPU color/resource admission, caller modeset flag, stale CWB/CDM/DSC/DSPP and Uke/MST/error paths passed; no hardware opened");
 }
 int main(int argc,char **argv) {run(argc==2?argv[1]:NULL);return 0;}
@@ -217,7 +236,11 @@ C
 compile() {
     local tree=$1 output=$2
     local crtc=$tree/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c
-    cat "$work/preamble.c" > "$work/$output.c"
+    : > "$work/$output.c"
+    if grep -Fq 'dpu_o82_color_requested(' "$crtc";then
+        printf '#define UKE_O82_ATOMIC_COLOR 1\n' >> "$work/$output.c"
+    fi
+    cat "$work/preamble.c" >> "$work/$output.c"
     for function in dpu_crtc_needs_dspp dpu_crtc_has_dspp; do extract "$crtc" "$function" true >> "$work/$output.c"; done
     for function in dpu_crtc_check_mode_changed dpu_crtc_assign_resources dpu_crtc_atomic_check; do extract "$crtc" "$function" >> "$work/$output.c"; done
     extract "$tree/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c" dpu_encoder_virt_atomic_mode_set >> "$work/$output.c"

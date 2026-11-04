@@ -29,6 +29,9 @@ CPP
 if grep -Fq 'retire_disable_error' "$file";then
     printf '#define UKE_RETIRE_PROOF 1\n' >> "$work/check.cpp"
 fi
+if grep -Fq 'int dpu_encoder_o82_stopped(' "$encoder";then
+    printf '#define UKE_O82_ATOMIC_COLOR 1\n' >> "$work/check.cpp"
+fi
 {
 sed -n '/^enum dpu_enc_enable_state {/,/^};/p' \
     "$kernel/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys.h"
@@ -45,6 +48,8 @@ static const dpu_mdss_cfg dpu_sm7675_cfg{&modern},other_catalog{&modern},old_cat
 struct dpu_kms {const dpu_mdss_cfg *catalog;int base;};
 struct drm_device {};
 struct drm_encoder {drm_device *dev;};
+static bool color_blocked;
+static bool __attribute__((unused)) dpu_o82_color_blocked(drm_encoder *) {return color_blocked;}
 struct dpu_hw_intf_status {bool is_en;};
 struct dpu_hw_intf;
 struct intf_ops {
@@ -374,6 +379,14 @@ int main() {
             assert(!intfs[0].enabled && !intfs[1].enabled);
             assert(ctl.pending==(catalog==&old_catalog ? 2U:6U));
             const int master_pending=p[0].pending_kickoff_cnt,slave_pending=p[1].pending_kickoff_cnt;
+#ifdef UKE_O82_ATOMIC_COLOR
+            const auto before_color=events;
+            color_blocked=true;dpu_encoder_kickoff(&virt.base);
+            assert(events==before_color && !virt.frame_busy_mask[0] && !virt.enc_spinlock);
+            assert(p[0].pending_kickoff_cnt==master_pending && p[1].pending_kickoff_cnt==slave_pending);
+            assert(!intfs[0].enabled && !intfs[1].enabled);
+            color_blocked=false;
+#endif
             dpu_encoder_kickoff(&virt.base);
             assert(p[0].pending_kickoff_cnt==master_pending+1);
             assert(p[1].pending_kickoff_cnt==slave_pending+(catalog==&old_catalog ? 0:1));

@@ -167,6 +167,15 @@ install -m644 "$boot/lock.json" "$output/boot-payload.json"
 [[ $(grep -Fxc '%global senemos_build_release 6000' "$spec") == 1 && $(grep -Fxc '%check' "$spec") == 1 ]]
 awk -v revision="$revision" '
  /^%global senemos_build_release 6000$/ {$0="%global senemos_build_release "revision}
+ /^%build$/ {
+  print "# Repeat affected historical fixtures on the final color-integrated source."
+  print "CC=clang bash native-profile/tests/o82-avr-contract.sh \"$PWD\""
+  print "CXX=clang++ bash native-profile/tests/dpu-video-timing-contract.sh \"$PWD\""
+  print "CC=clang bash native-profile/tests/msm-retirement-proof-contract.sh \"$PWD\""
+  print "CC=clang bash native-profile/tests/dpu-reservation-contract.sh \"$PWD\" \"$PWD/native-generated/dpu-reservation-before56\""
+  print "printf '\''Final-source legacy AVR/video/retirement/reservation color preflight passed\\n'\''"
+  print;next
+ }
  /^%check$/ {
   print
   print "bash native-profile/tests/o82-lutbus-contract.sh"
@@ -180,6 +189,7 @@ awk -v revision="$revision" '
   print "- Retain the complete 6000 camera, touch, sensor and power sources."
   print "- Link the qualified paired CRTC color caller with disabled initial selection."
   print "- Verify full module linkage, failure ownership and both supplier DTs."
+  print "- Exercise color refusal in retained AVR, video, retirement and reservation fixtures."
   print "";next
  }
  {print}
