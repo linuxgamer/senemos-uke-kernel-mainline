@@ -12,7 +12,7 @@ and physical stability/feature validation before promotion. Earlier `1500`
 observations below retain their dated scope.
 
 Earlier 4 November 2026 device check: the tablet ran 7.3.1-1500; the generator
-package and both fixed native v2 firmware files are absent. The ICC reports
+package and both fixed native v2 firmware files were absent. The ICC reports
 below describe their dated trials and do not establish the current root's
 profile selection. Full private-profile application and native HDR remain open.
 
@@ -26,8 +26,12 @@ compiler/loader passed
 [COPR11253922](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11253922/):
 16,479 parser/wire/composed-state checks per optimized/sanitizer run, plus the
 actual v4 loader and retained numeric regressions. Complete native-kernel
-qualification in the 7200-based unstable family remains pending. Historical
-normal 7500 passed software checks before the channel change; it is not a
+qualification of `7.3.1-7600-unstable` passed
+[COPR11259981](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11259981/):
+Image, linked/signed modules, both supplier DTs and matched boot/RPM checks.
+All six AArch64 packages and SRC are present in checksum-verified repository
+metadata. Physical color/HDR acceptance remains open. Historical normal 7500
+is software evidence from before the channel change and does not authorize
 stable promotion. Delivered `7001`
 continues to require v3; private v4 delivery and physical acceptance are open.
 Memory-color and opaque HDR operations remain refused.

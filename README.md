@@ -16,7 +16,10 @@ Linux kernel adaptations, device trees and Fedora RPM packaging for Xiaomi Pad 7
 POCO Pad X1 currently boots `7.3.1-7200-unstable`. Normal-family updates require
 an explicit request and physical stability/feature validation before promotion.
 The active color candidate retains that booting source and its camera admission
-boundaries; full peripheral and color acceptance remains open.
+boundaries. `7.3.1-7600-unstable` passed
+[COPR11259981](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11259981/)
+with Image, linked/signed modules, both supplier DTs and boot/RPM checks.
+Physical boot, full peripheral and color acceptance remain open.
 
 31 October 2026. `main` is the continuation branch. Microphone capture, power management, bounded boot-watchdog and optional gaming sources are integrated. The complete combined source still requires fresh release admission and a qualified COPR build; retained candidate packages do not establish that result.
 

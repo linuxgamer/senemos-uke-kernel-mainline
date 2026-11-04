@@ -132,7 +132,7 @@
     "board_settings_imported": false
   },
   "native_integration": {
-    "status": "Qualified compiler and pre-policy normal7500 software; booting7200-based unstable qualification pending",
+    "status": "Qualified compiler and complete7200-based unstable7600 software; private data and physical acceptance remain open",
     "utility": "0.5.0-1",
     "private_bundle_version": 4,
     "record_offset_fields": [
@@ -184,8 +184,7 @@
     }
   },
   "remaining_work": [
-    "Qualify the7200-based unstable family/ABI and composed writer while preserving its boot admission",
-    "Deliver matching private v4 input after unstable kernel/package checks; keep unsupported memory/HDR refused",
+    "Deliver matching private v4 input for qualified unstable7600; keep unsupported memory/HDR refused",
     "Complete memory/protection/HDR operations and their explicit neutral states",
     "Require physical feature/stability acceptance; normal-family promotion requires an explicit request"
   ],

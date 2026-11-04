@@ -16,7 +16,7 @@
     "effective_config_sha256": "7f1e3f7a5be62396b2b36534780aeb561dfbf7e0a10698677b860cbc91efbd38",
     "primary_sha256": "fc940b79858a4edf279e46907ba0af15f8c2e70e61e8a6c96b83d2fd7a53e4db"
   },
-  "minimum_fresh_revision": 7600,
+  "minimum_fresh_revision": 7601,
   "release_history_guard_unchanged": true,
   "imports": [
     {
@@ -71,7 +71,7 @@
       "path": "src/display/dpu_o82_power.c",
       "sha256": "9f90407033d2cf2ef704539ab5330cd9676cd5fbcad9c70291c92178fcdd3661",
       "reference_blob": "632568bdf40a1d9ba26b80b94761df87c0ba9e07",
-      "qualification": "New composed v4 integration; complete kernel qualification pending",
+      "qualification": "New composed v4 integration; complete unstable7600 qualification passed in11259981",
       "basis_sha256": "48e433d32b5614c65f2d50ce0f42773214ccfbd01bd1fe79f53cb13e90b82533",
       "basis_blob": "abcea41b023d77e5c34d1474cc65b9164dcd39c1"
     },
@@ -103,7 +103,7 @@
       "path": "src/display/dpu_o82_profiles.c",
       "sha256": "0461e362a8e3f658d0c492ac5dcb28061e5421c65ef7118392c6abc4db4ac576",
       "reference_blob": "d074efc73d53171d0367fa269cff1a8c4acbda9a",
-      "qualification": "New composed v4 integration; complete kernel qualification pending",
+      "qualification": "New composed v4 integration; complete unstable7600 qualification passed in11259981",
       "basis_sha256": "a255211bcdabe427d42a0c4093e77b1ad280ad3ef25462421868eb373c9a1e3a",
       "basis_blob": "15881033be5615984b12fc62a2bbba67e47cb05f"
     },
@@ -111,7 +111,7 @@
       "path": "src/display/dpu_o82_profiles.h",
       "sha256": "330ca002e70fc697d41ce050bdfa25dd5c0e420c24cfcc4bf1dbc1637e10648a",
       "reference_blob": "f5dcb7bb8bb27e9e8ee44e8aeaadc7c21b0e43a0",
-      "qualification": "New composed v4 integration; complete kernel qualification pending",
+      "qualification": "New composed v4 integration; complete unstable7600 qualification passed in11259981",
       "basis_sha256": "d6e52a84a4835a6214515406a8ffd66c1d0f324a9f2ae6b63ee3520860885995",
       "basis_blob": "88fe7ebe75cb75bfa9faf754321a21c992f19260"
     },
@@ -119,7 +119,7 @@
       "path": "src/display/dpu_o82_lutbus.c",
       "sha256": "2c0e88a8309a1cd2237c06c311b2be1f3799f3a228ee8d861f5811c7ef5d5077",
       "reference_blob": "0665995e3f60d24410c49b32e3315ca04b5889b1",
-      "qualification": "New composed v4 integration; complete kernel qualification pending",
+      "qualification": "New composed v4 integration; complete unstable7600 qualification passed in11259981",
       "basis_sha256": "eb9355db690907f7051136cb7d8bb9c7e0bf25f57f6375923ccce482642f0966",
       "basis_blob": "07feec64a6477ffb46ce8b98806008ea1d83cca7"
     },
@@ -127,7 +127,7 @@
       "path": "src/display/dpu_o82_lutbus.h",
       "sha256": "d4ee6aa1322f9ecb096104d6587d20263905fd72b60fbae1889bf8dd985104de",
       "reference_blob": "40eaa5145e43742a6e228dad519f7f20e83496b5",
-      "qualification": "New composed v4 integration; complete kernel qualification pending",
+      "qualification": "New composed v4 integration; complete unstable7600 qualification passed in11259981",
       "basis_sha256": "ba997baa45992b47145b820d6df1054a773ad799ad951cf44016be191d97bdde",
       "basis_blob": "f0c1f61fb8d110632f9cf18a31296702375a3188"
     },
@@ -143,7 +143,7 @@
       "path": "src/display/o82-color-firmware.h",
       "sha256": "d4fb3ae5ff6f5f1299e839dbeaa253af95c601eab209013af90e91c2e8240131",
       "reference_blob": "b5b4e87d267e05b3c6832df26e9381e4016e3f1c",
-      "qualification": "New composed v4 integration; complete kernel qualification pending",
+      "qualification": "New composed v4 integration; complete unstable7600 qualification passed in11259981",
       "basis_sha256": "f9c51c5e159c21f91131d1c1d12e7ed62bb762b480d24943d3f9823bf90dec5e",
       "basis_blob": "ba43bd1105d0dee899d4fdc971b65a6634786f4b"
     },
@@ -159,7 +159,7 @@
       "path": "src/display/prepare-o82-regdma.sh",
       "sha256": "8357a7fe06724fa79ca1de1238b002e5548084eb6a512b207967ce2d06c1ab42",
       "reference_blob": "0c7fc1e6165c47bc37c1493bd291e59316cc6bfd",
-      "qualification": "New composed v4 integration; complete kernel qualification pending",
+      "qualification": "New composed v4 integration; complete unstable7600 qualification passed in11259981",
       "basis_sha256": "29fe12a2f243268e598ca802fb8cd78e11a78d0feb8d301a879c3a94011b847c",
       "basis_blob": "5f7ebd8e1347f7ddf201c6236f8243e198366df4"
     },
@@ -223,7 +223,7 @@
       "path": "tests/o82-lutbus-contract.c",
       "sha256": "4d21178bec26481d9e108a5f97f4bded7c7cef62a92705f1e3f84fc8a8ee2b3b",
       "reference_blob": "36ada5facf56a1626a2f89c40b605045e41c89c6",
-      "qualification": "New composed v4 integration; complete kernel qualification pending",
+      "qualification": "New composed v4 integration; complete unstable7600 qualification passed in11259981",
       "basis_sha256": "de53b61adf43257b8e7cf50fa455a280793490d47ab5a8aa0b40660a572e1b6d",
       "basis_blob": "627704ae87d20800cf34d5366fbb08a84ef73324"
     },
@@ -239,7 +239,7 @@
       "path": "tests/o82-regdma-transport-contract.c",
       "sha256": "12636bebaf2fc99cfa9d28caafb8d6b2de58cf2f422e3b18aa4070a02b68f62e",
       "reference_blob": "2c0436f388767217d29094bb84b685a6e17b711f",
-      "qualification": "New composed v4 integration; complete kernel qualification pending",
+      "qualification": "New composed v4 integration; complete unstable7600 qualification passed in11259981",
       "basis_sha256": "553f8410eab7f9fa46385fd0566e772c1639998066d5e7b04da2ad5551d60239",
       "basis_blob": "13e5be4b156da57e771aa49f227296fba65a7bb2"
     },
@@ -270,7 +270,7 @@
     {
       "path": "tests/o82-atomic-package-contract.sh",
       "sha256": "a18ad8a63122e3f3959e91edf5588fdbc9201afa0251e83c7e7b3afd3a9e4afb",
-      "qualification": "New composed v4 integration; complete kernel qualification pending",
+      "qualification": "New composed v4 integration; complete unstable7600 qualification passed in11259981",
       "basis_sha256": "6f8faaac90406ba2a6555580b932c5e72042486b15980769d59aad34b2d3456a",
       "reference_blob": "37569f090f0cb0625e4111f7ddf15e6b63d797f1",
       "basis_blob": "1d0148e166aaa10a104fce8cef64c39c00f09817"
@@ -335,7 +335,7 @@
       "path": "tests/o82-profile-loader-contract.c",
       "sha256": "8ff8d1046e83311610b1193d238f2ee766cfe2b5ba86f9eca600dbe808e9e4db",
       "reference_blob": "e89e8dc41ca925975d85e729a41fa1fcd52733fb",
-      "qualification": "New composed v4 integration; complete kernel qualification pending",
+      "qualification": "New composed v4 integration; complete unstable7600 qualification passed in11259981",
       "basis_sha256": "9ee9081363f3f8ac184a7a17ddcad9bfb5056d828c9bcdd9ec151fdc12ceda99",
       "basis_blob": "5f1b46fc9e17e3d889dd8464dbd8a6fb1b46a905"
     },
@@ -351,13 +351,13 @@
       "path": "src/display/o82-hsic-format.h",
       "sha256": "dfa79dc0ef22f87d6989b9caca60716f7abd89387e23f1be8df38cfd02bbdb05",
       "reference_blob": "1dc7d262966d53d08f270c0da0e1c27c00139550",
-      "qualification": "11253922 C validator/composed state; full kernel integration pending"
+      "qualification": "11253922 C validator/composed state; full unstable kernel integration passed in11259981"
     },
     {
       "path": "tests/unstable-boot-family731-contract.sh",
       "sha256": "3ccb91eee559a307a1c1de8baf1d30e908fb254dc9ae258cf31028b5f253a352",
       "reference_blob": "8a7905fe588ac7105851fb8e53eb20f6004cb2d9",
-      "qualification": "Retained project d3dcaaf family contract; fresh unstable RPM validation required"
+      "qualification": "Retained project d3dcaaf family contract; unstable7600 RPM validation passed in11259981"
     }
   ],
   "qualified_profile_compiler": {
@@ -418,7 +418,21 @@
   "shared_pa_flush_bit": 0,
   "default_preset": "",
   "native_hdr_advertisement": false,
-  "kernel_qualification": "pending",
+  "kernel_qualification": {
+    "build": 11259981,
+    "release": "7.3.1-7600",
+    "kernel_abi": "7.3.1-7600-unstable",
+    "source_commit": "16f178ed5e4d513b1d9a415c16c181fb9bf35a0e",
+    "state": "succeeded",
+    "software_only": true,
+    "scope": "Full Image, MSM/MODPOST, signed modules, both supplier DTs, matched boot/RPMs and composed HSIC/SixZone fixtures",
+    "primary_sha256": "240f77c6e963a1f0f21ddc7e1b3c62255d2fa91ce21fbbb5f0bef1747ce9c589",
+    "source_rpm_sha256": "0527409c37437480e7c7303eaa88d8a75ae849d0605452e2ba2369d721d84e32",
+    "core_rpm_sha256": "28d2c2441cc08e907b439381a45844a906c87abea01c50815d47761d3ceba628",
+    "aarch64_packages": 6,
+    "source_packages": 1,
+    "physical_acceptance": false
+  },
   "physical_acceptance": false,
   "private_inputs_included": false,
   "package_family": "senemos-uke-linux-kernel-mainline-unstable",

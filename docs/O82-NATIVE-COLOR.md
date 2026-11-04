@@ -214,8 +214,13 @@ audio identity update. It preserves the camera boot boundary and pstore layout.
 New development uses `senemos-uke-linux-kernel-mainline-unstable` with an
 `-unstable` Image ABI. The earlier normal 7500 build passed software checks before
 the policy change; it is historical evidence and does not authorize promotion.
-The active entry point routes only to the unstable producer. Native full-kernel
-qualification of this7200-based candidate remains pending;
+The active entry point routes only to the unstable producer.
+[COPR11259981](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11259981/)
+passed the full `7.3.1-7600-unstable` Image, MSM/MODPOST, signed module, both
+supplier DT and boot/RPM checks. Actual composed loader/LUTBUS/power/atomic
+fixtures and retained display controls passed. Six AArch64 packages and SRC
+are published; future revisions require at least7601. Physical acceptance
+remains open;
 delivered `7001` retains its v3 contract and disabled default. Memory/protection,
 complete HDR, private data delivery and physical acceptance remain open.
 
