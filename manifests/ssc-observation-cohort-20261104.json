@@ -164,5 +164,13 @@
       "path": "src/sensors/Makefile",
       "sha256": "c0025f1e5c7dbd60899d90a5404c05411ee4c8eb9c394426d94ece98e15c2b5f"
     }
-  ]
+  ],
+  "delivery_held": true,
+  "delivery_hold_reason": "The coordinator has delivered12101 with additional CAMCC/source integration. This11003-based producer is historical; future kernels must preserve12101 and all subsequent handoffs through the shared queue.",
+  "superseding_coordinated_candidate": {
+    "copr_build": 11260781,
+    "release": "7.3.1-12101-unstable",
+    "source_commit": "bba194e74ab97dcb848887fa62430c20f9d755d9",
+    "observed_boot": false
+  }
 }

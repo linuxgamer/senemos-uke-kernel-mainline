@@ -41,11 +41,17 @@ present in checksum-verified root metadata. The packaged composition preserves
 acceptance is pending. This build predates the shared integration directive;
 the camera conversation owns further cumulative builds and delivery.
 
-Generic memory-color arithmetic passed
-[COPR 11260759](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11260759/)
-against an independent integer reference. JSON mapping, private format and
-joint memory/protection programming remain incomplete; this converter does
-not enable memory color or establish HDR support in 12000.
+The coordinator has staged `7.3.1-12101-unstable` through DNF; an observed boot
+is pending. Future integration preserves that candidate and subsequent feature
+handoffs. The older SSC-only source producer is held to prevent regression.
+
+5 November 2026. Native memory-color/protection programming passed
+[COPR 11260889](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11260889/):
+paired byte encoding, all register readbacks, failure ownership and a linked
+MSM object. Named endpoint conversion and the current payload bridge passed
+[COPR 11260921](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11260921/).
+Production JSON/private-bundle routing remains incomplete. Existing v4 loading
+keeps memory absent; physical memory-color/protection and HDR acceptance remain open.
 
 31 October 2026. `main` is the continuation branch. Microphone capture, power management, bounded boot-watchdog and optional gaming sources are integrated. The complete combined source still requires fresh release admission and a qualified COPR build; retained candidate packages do not establish that result.
 

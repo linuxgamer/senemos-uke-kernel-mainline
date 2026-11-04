@@ -10,6 +10,10 @@ output=$(realpath -m "$1")
 revision=$2
 [[ $revision =~ ^[1-9][0-9]{4}$ && $revision -ge 12000 ]]
 manifest=manifests/ssc-observation-cohort-20261104.json
+jq -e '(.delivery_held // false)==false' "$owner/$manifest" >/dev/null || {
+    printf 'Historical SSC source is held; integrate current cumulative sources through the shared kernel queue\n' >&2
+    exit 1
+}
 (cd "$owner"; jq -r '.imports[]|.sha256+"  "+.path' "$manifest" | sha256sum -c --strict --quiet -)
 bash "$owner/packaging/native/refuse-published-release.sh" \
     senemos-uke-linux-kernel-mainline-unstable "7.3.1-$revision"

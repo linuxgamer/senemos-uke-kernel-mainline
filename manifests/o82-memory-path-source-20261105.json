@@ -111,10 +111,10 @@
     "reason_no_dt_delta": "Exact existing Cliffs DSPP MMIO range/version; no new resource, gate or graph admission",
     "kernel_preparation": "src/display/prepare-o82-regdma.sh stages the new header",
     "qualified_scalar_converter": {
-      "copr_build": 11260759,
-      "source_commit": "ac625ec6eaed1689a6dc7086e982b0fd68252973",
+      "copr_build": 11260921,
+      "source_commit": "0d8b4a432767dd28d7a37f7055376df2c9a1c64e",
       "manifest": "manifests/o82-memory-color-source-20261104.json",
-      "status": "Superseded named range mapping; awaiting corrected1.0-3 arithmetic/semantic bridge"
+      "state": "succeeded with corrected named endpoints"
     }
   },
   "qualification": {
@@ -131,7 +131,14 @@
     "linked_msm_object": true,
     "scope": "Kernel payload, encoding, fake-MMIO readback and retained native MSM linkage; no Image or physical acceptance",
     "named_range_semantics_qualified": false,
-    "semantic_followup": "Endpoint names corrected separately after this trial; scalar1.0-3 is pending. The six native imports remain byte-identical.",
+    "semantic_followup": {
+      "copr_build": 11260921,
+      "source_commit": "0d8b4a432767dd28d7a37f7055376df2c9a1c64e",
+      "state": "succeeded",
+      "named_range_cases_per_compiler": 82740,
+      "corrected_bridge_cases_per_compiler": 36973,
+      "scope": "Corrected named endpoints and current payload validation; six native imports remain byte-identical to6763763"
+    },
     "tested_archive_assets": [
       {
         "path": "packaging/native/check-o82-memory-path.sh",
