@@ -51,7 +51,12 @@ boot=$stage/unpacked/boot-recipe
 (cd "$boot"; jq -r '.source_assets[]|.sha256+"  "+.path' lock.json | sha256sum -c --strict --quiet -)
 cmp "$boot/lock.json" "$output/boot-payload.json"
 cmp "$profile/native.config" "$boot/packaging/native/native.config"
-printf '%s  %s\n' d4836c6c291859c758aa31c38273f0b22ecbce4b09f13cd67d56ce76b86dd2dd \
+# The qualified camera controller appends CONFIG_SM_CAMCC_7675=y. Its raw
+# configuration digest is recorded by the fully pinned parent's composition.
+native_config_hash=$(jq -er .native_config_sha256 "$profile/source-composition.json")
+[[ $native_config_hash =~ ^[0-9a-f]{64}$ ]]
+printf 'Retained raw native configuration SHA-256: %s\n' "$native_config_hash"
+printf '%s  %s\n' "$native_config_hash" \
     "$profile/native.config" | sha256sum -c --strict -
 printf '%s  %s\n' f81f42c2622a6eb671fd7ca11fbb0ce700b6f5a7589a43cb379b5baa7cdfb1ca \
     "$profile/src/input/nt36532-uke-protocol.c" | sha256sum -c --strict -
