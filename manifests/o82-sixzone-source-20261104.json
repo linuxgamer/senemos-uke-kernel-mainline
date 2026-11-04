@@ -2,6 +2,16 @@
   "schema_version": 1,
   "date": "2026-11-04",
   "scope": "SixZone 2.0 source and static ABI comparison; no enabled native writer",
+  "native_converter": {
+    "path": "src/display/o82-sixzone.h",
+    "test": "tests/o82-sixzone-contract.cpp",
+    "remote_producer": "packaging/native/copr-o82-sixzone-check.sh",
+    "input_contract": "384 integer12-bit samples per required curve; integer thresholds in0..100; complete optional bands with ordered non-overlapping ranges",
+    "differences_from_permissive_oem_input": "Reject out-of-range/fractional thresholds, malformed/partial schema and overlapping bands; no string curves",
+    "refusal": "Typed converter validates all input before replacing any output word; parsing must separately enforce complete optional-band schema",
+    "remote_qualification": "pending",
+    "installed_or_hardware_enabled": false
+  },
   "exact_uke_driver": {
     "repository": "MiCode/vendor_opensource_display-drivers",
     "commit": "44275c404a677d9d9e5230fedd1af2ef02fc7b9a",
@@ -69,7 +79,7 @@
   },
   "remaining_work": [
     "Integrate separately supplied SixZoneThresholds and five-curve state with source-derived legacy-schema handling",
-    "Qualify a native converter and complete hardware enable-mask admission",
+    "Qualify a native converter against the complete parser and enable-mask chain",
     "Implement and fault-test complete native shared PA register and flush ownership",
     "Extend the private bundle without silently admitting unsupported records",
     "Validate both stopped DSPPs and separately measure physical color/HDR"
@@ -132,9 +142,31 @@
       "missing_or_null_satCurveMid": "use satCurve",
       "missing_or_null_satCurveHigh": "use satCurve",
       "array_loop": "0x70220..0x7028c uses actual Json::Value::operator[](int) const and asDouble relocations, stride40 for384 entries",
-      "remaining_limit": "Missing band-threshold initialization, enable masks and the asset-version-dependent string path still require separate proof"
+      "remaining_limit": "The asset-version-dependent string path is separate from the accepted array schema"
     },
     "relocation_limit": "Resolve calls through actual GOT relocation targets; nearest objdump PLT labels can incorrectly name Map as stack-check failure or operator delete as atoi"
+  },
+  "missing_band_fields": {
+    "parser": "0x7048c..0x70580 unconditionally reads all six band endpoints through const JSON indexing/asInt and svEnable/asBool",
+    "jsoncpp_dependency": "libjsoncpp.so is a declared NEEDED dependency; the parser library was not executed",
+    "shared_semantics_reference": {
+      "repository": "open-source-parsers/jsoncpp",
+      "commit": "5defb4ed1a4293b8e2bf641e16b156fb9de498cc",
+      "path": "src/lib_json/json_value.cpp",
+      "blob": "aa2b744ca83da5fba782e5cb42f1c2e27baf7d09",
+      "license": "MIT or public domain where recognized",
+      "classification": "shared accessor semantics; not the exact retained OEM libjsoncpp binary",
+      "rule": "missing const key returns null; null asInt returns zero and null asBool returns false"
+    },
+    "derived_legacy_state": "zero band endpoints and false SV; retain the common non-neutral curves and source-derived middle/high fallback"
+  },
+  "enable_mask_chain": {
+    "table_pointer": "GOT 0x70d90 resolves via Android APS2 GLOB_DAT to pa_sub_block_config_ at 0x70008",
+    "sixzone_entry": "index8 at 0x70088: enable flag0x100, mode mask0x70000, relocated ComputeSixZoneParams pointer at0x70090",
+    "consumer": "ApplyPAV2Features at0x59fc0..0x5a018 selects the entry, invokes its converter and stores the resulting mode at0x5a0d0",
+    "shared_hal": "GetDrmPASixZone maps mode bits16/17/18 to UAPI hue/sat/value flags0/1/2 and SV to flag3",
+    "exact_driver": "reg_dmav2_setup_dspp_sixzonev2 maps those flags to HSIC PA mode bits29/30/31 and requires PA enable",
+    "qualification_limit": "static ABI/relocation result; shared-register programming and physical acceptance remain open"
   },
   "private_inputs_included": false,
   "oem_code_executed": false,

@@ -130,10 +130,17 @@ maps the exact OEM 2.0 five-component writer and extended userspace ABI to the
 retained binary's two conversion functions. This is a static protocol result.
 The separate threshold input, percent-to-byte quantization, PWL packing and
 legacy saturation-curve selection are traced through the retained parser.
-Missing threshold initialization, complete parser semantics, shared PA control
+Complete parser admission, shared PA control
 ownership and native fault-tested programming remain required before admitting
 the currently blocked picture operations. The older three-component writer or
 an older ABI header cannot stand in for that implementation.
+
+`o82-sixzone.h` supplies a bounded, typed integer-domain converter for the
+extended UAPI words. It validates all input before replacing output, preserves
+legacy saturation curves and rejects invalid ranges/overlapping bands. Its
+synthetic optimized/sanitized COPR check is pending. This preparatory converter
+does not change the installed utility, v2 bundle, admitted presets or kernel
+writer. Complete PA register/flush integration remains required.
 
 `dpu_o82_profiles.c` validates a fixed PA/PB v2 bundle before publishing state
 and retains it until explicit unload. Refused selection leaves the previous
