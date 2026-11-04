@@ -102,12 +102,25 @@ warm-rebind, permanent-failure unbind, optical output or power-saving acceptance
 Earlier failed fixtures and corrections remain in the canonical engineering
 journal. No native compilation or device activation ran on the tablet.
 
+[COPR 11253343](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11253343/)
+completed the normal retained kernel build at source
+`90b8c9c89f8c89475c5a371f58dc7c7c88e29911`, release `7.3.1-6503.fc46`.
+All five display fixtures passed against the final prepared source before
+compilation. The complete build and package checks passed, including the actual
+MSM module, paired color functions, both supplier DT resource tuples, retained
+configuration and touch ACK checks. The six AArch64 packages and source RPM
+are present in the root unstable repository's checksum-verified primary index.
+This preserves the retained camera, sensor, power and peripheral changes.
+Initial color selection remains empty and native HDR advertisement disabled;
+the package result does not establish physical acceptance.
+
 ## Required integration and inputs
 
 The existing native CRTC already supplies GC1.8 with 1024 entries and CTM programming.
 The experimental caller coordinates those paths and stages IGC/gamut/GC flush
 bits for both DSPPs. Complete source/link/fault checks passed; normal kernel
-package qualification and a recoverable physical trial remain required.
+package qualification passed in release `6503`; a recoverable physical trial
+remains required.
 Dynamic preset control, private data delivery,
 all remaining picture/HDR operations and truthful HDR admission remain open.
 An unsupported preset must not alias a different transform.
@@ -115,7 +128,9 @@ An unsupported preset must not alias a different transform.
 The [SixZone source comparison](../manifests/o82-sixzone-source-20261104.json)
 maps the exact OEM 2.0 five-component writer and extended userspace ABI to the
 retained binary's two conversion functions. This is a static protocol result.
-Threshold/PWL units and defaults, complete parser semantics, shared PA control
+The separate threshold input, percent-to-byte quantization, PWL packing and
+legacy saturation-curve selection are traced through the retained parser.
+Missing threshold initialization, complete parser semantics, shared PA control
 ownership and native fault-tested programming remain required before admitting
 the currently blocked picture operations. The older three-component writer or
 an older ABI header cannot stand in for that implementation.
