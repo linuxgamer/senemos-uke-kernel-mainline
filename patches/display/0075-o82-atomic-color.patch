@@ -22,7 +22,7 @@ index 0e47eeb..f546c56 100644
  	disp/dpu1/dpu_rm.o \
  	disp/dpu1/dpu_vbif.o \
 diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c
-index 9907bc3..089f549 100644
+index 23aba68..3f34550 100644
 --- a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c
 +++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c
 @@ -30,6 +30,7 @@
@@ -68,7 +68,18 @@ index 9907bc3..089f549 100644
  				dspp->ops.setup_gc(dspp, gc_lut);
  				kfree(gc_lut);
  			}
-@@ -1423,7 +1434,8 @@ static struct msm_display_topology dpu_crtc_get_topology(
+@@ -1096,6 +1107,10 @@ bool dpu_crtc_commit_kickoff(struct drm_crtc *crtc)
+ 	if (unlikely(!cstate->num_mixers))
+ 		return false;
+ 
++	drm_for_each_encoder_mask(encoder, crtc->dev, crtc->state->encoder_mask)
++		if (dpu_o82_color_blocked(encoder))
++			return false;
++
+ 	DPU_ATRACE_BEGIN("crtc_commit");
+ 
+ 	drm_for_each_encoder_mask(encoder, crtc->dev,
+@@ -1426,7 +1441,8 @@ static struct msm_display_topology dpu_crtc_get_topology(
  	else
  		topology.num_lm = 1;
  
@@ -78,7 +89,7 @@ index 9907bc3..089f549 100644
  		topology.num_dspp = topology.num_lm;
  
  	return topology;
-@@ -1485,13 +1497,17 @@ static int dpu_crtc_assign_resources(struct drm_crtc *crtc,
+@@ -1488,13 +1504,17 @@ static int dpu_crtc_assign_resources(struct drm_crtc *crtc,
  	}
  
  	cstate->num_mixers = num_lm;
@@ -97,7 +108,7 @@ index 9907bc3..089f549 100644
  }
  
  static bool dpu_crtc_has_dspp(const struct drm_crtc_state *crtc_state)
-@@ -1526,6 +1542,8 @@ int dpu_crtc_check_mode_changed(struct drm_crtc_state *old_crtc_state,
+@@ -1529,6 +1549,8 @@ int dpu_crtc_check_mode_changed(struct drm_crtc_state *old_crtc_state,
  
  	DRM_DEBUG_ATOMIC("%d\n", crtc->base.id);
  
@@ -106,7 +117,7 @@ index 9907bc3..089f549 100644
  	/* Reserve new DSPPs only when the encoder is reprogrammed too. */
  	if (dpu_crtc_needs_dspp(new_crtc_state) &&
  	    !dpu_crtc_has_dspp(old_crtc_state))
-@@ -1566,6 +1584,10 @@ static int dpu_crtc_atomic_check(struct drm_crtc *crtc,
+@@ -1569,6 +1591,10 @@ static int dpu_crtc_atomic_check(struct drm_crtc *crtc,
  			return rc;
  	}
  
@@ -118,19 +129,19 @@ index 9907bc3..089f549 100644
  		if (dpu_use_virtual_planes)
  			rc = dpu_crtc_reassign_planes(crtc, crtc_state);
 diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.h b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.h
-index 6eaba56..765260a 100644
+index 4a40e98..6f25d54 100644
 --- a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.h
 +++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.h
-@@ -207,6 +207,9 @@ struct dpu_crtc {
+@@ -235,6 +235,9 @@ struct dpu_crtc {
   */
  struct dpu_crtc_state {
  	struct drm_crtc_state base;
 +	bool o82_native_color;
 +	bool o82_bt2020;
 +	bool o82_pq;
+ 	struct dpu_crtc_retire_work retire;
  
  	bool bw_control;
- 	bool bw_split_vote;
 diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c
 index 1f20695..315f8db 100644
 --- a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c

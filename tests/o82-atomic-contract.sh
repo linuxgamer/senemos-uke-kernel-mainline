@@ -44,3 +44,11 @@ awk '
  /^}/ {f=0}
  END {exit !(commit && pcc>commit && gc>pcc)}
 ' "$kernel/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c"
+awk '
+ /^bool dpu_crtc_commit_kickoff/ {f=1}
+ f && /dpu_o82_color_blocked\(encoder\)/ {guard=NR}
+ f && /return false;/ && guard && !refuse {refuse=NR}
+ f && /atomic_inc_return\(&dpu_crtc->frame_pending\)/ {pending=NR}
+ /^}/ {f=0}
+ END {exit !(guard && refuse>guard && pending>refuse)}
+' "$kernel/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c"

@@ -54,7 +54,7 @@ spec=$output/uke-o82-kms-check.spec
 awk '
  /^%description/ {exit}
  /^Name:/ {$0="Name: uke-o82-kms-check"}
- /^Release:/ {$0="Release: 10%{?dist}"}
+ /^Release:/ {$0="Release: 11%{?dist}"}
  /^Summary:/ {$0="Summary: Retained Uke DPU KMS and REGDMA source integration check"}
  /^(Requires|Provides|Recommends):/ {next}
  {print}
@@ -91,6 +91,10 @@ test -s %{buildroot}%{_docdir}/%{name}/checks.txt
 %{_docdir}/%{name}/checks.txt
 
 %changelog
+* Wed Nov 04 2026 Uke contributors - 7.3.1-11
+- Preserve the retained scanout-retirement state layout and false-submission path.
+- Refuse CRTC kickoff before frame bookkeeping after a color failure.
+
 * Wed Nov 04 2026 Uke contributors - 7.3.1-10
 - Connect private profiles to real paired CRTC modesets and standard wire state.
 - Check both physical stop states, composed gamma and complete feature flush masks.
@@ -131,4 +135,4 @@ test -s %{buildroot}%{_docdir}/%{name}/checks.txt
 SPEC
 sha256sum -c "$stage/retained.sha256"
 rm "$parent"
-[[ $(rpmspec --target aarch64 -q --srpm --qf '%{NAME}-%{VERSION}-%{RELEASE}' "$spec") == uke-o82-kms-check-7.3.1-10.fc46 ]]
+[[ $(rpmspec --target aarch64 -q --srpm --qf '%{NAME}-%{VERSION}-%{RELEASE}' "$spec") == uke-o82-kms-check-7.3.1-11.fc46 ]]
