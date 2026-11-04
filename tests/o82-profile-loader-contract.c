@@ -17,8 +17,11 @@ static bool with_sixzone, with_hsic;
 
 int request_firmware_direct(const struct firmware **fw, const char *name, struct device *dev)
 {
-	assert(dev && !strcmp(name, "qcom/sm7675/uke/o82-42-color-v4.bin"));
+	assert(dev);
 	requests++;
+	if (!strcmp(name, "qcom/sm7675/uke/o82-42-color-v5.bin"))
+		return -ENOENT;
+	assert(!strcmp(name, "qcom/sm7675/uke/o82-42-color-v4.bin"));
 	if (request_error)
 		return request_error;
 	*fw = &fixture;

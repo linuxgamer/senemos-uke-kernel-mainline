@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-05",
+  "scope": "Separate private v5 memory/protection payload routing; production generator remains v4, no physical acceptance",
+  "source_provenance": {
+    "native_memory_manifest": "manifests/o82-memory-path-source-20261105.json",
+    "native_memory_commit": "6763763a216d648928377f451fa0a4e4fd8cc746",
+    "native_memory_copr": 11260889,
+    "corrected_scalar_commit": "0d8b4a432767dd28d7a37f7055376df2c9a1c64e",
+    "corrected_scalar_copr": 11260921,
+    "json_parser_mapping_complete": false
+  },
+  "protocol": {
+    "version": 5,
+    "magic": "O82COLR5",
+    "record_bytes": 160,
+    "memory_offset_field": 152,
+    "memory_size_field": 156,
+    "memory_bytes": 112,
+    "order": "Tables, optional SixZone, HSIC, mandatory memory/protection, opaque metadata",
+    "neutral_required": true,
+    "old_v4_memory_absent": true,
+    "fallback": "Only ENOENT for the panel-specific v5 path; accepted bundle version must match requested path",
+    "blocked_memory_allowed": false,
+    "blocked_hdr_preserved": true
+  },
+  "integration": {
+    "coordinated_full_kernel_required": true,
+    "preserve_coordinator_baseline": "7.3.1-12101-unstable and all subsequent handoffs",
+    "additional_kernel_imports": [
+      "src/display/o82-color-firmware.h",
+      "src/display/dpu_o82_profiles.c"
+    ],
+    "retain_native_memory_imports_from": "manifests/o82-memory-path-source-20261105.json",
+    "dt_delta": false,
+    "dt_reason": "Private root-resident firmware routing changes no DSPP resource, panel graph, physical parameter or admission gate",
+    "generator_emits_version": 4,
+    "initial_selection_changed": false
+  },
+  "qualification": {
+    "state": "pending",
+    "package": "uke-o82-memory-bundle-check",
+    "release": "1.0-1",
+    "scope": "Actual validator, loader and command encoder with synthetic firmware; no full Image/MSM qualification, JSON mapping, private profiles or hardware"
+  },
+  "delivery": {
+    "independent_full_kernel": false,
+    "local_compilation": false,
+    "installed_firmware": false,
+    "physical_acceptance": false
+  },
+  "inputs": [
+    {
+      "path": "src/display/o82-color-firmware.h",
+      "sha256": "d9a4b176ad7be2334b5cf79af1f3a59185cf5304bf22247ea427bfb8839ae48a"
+    },
+    {
+      "path": "src/display/dpu_o82_profiles.c",
+      "sha256": "98382e04a21af440ae69672b878d267c7049d23bf517a754388a16ee9d0c6ae3"
+    },
+    {
+      "path": "src/display/dpu_o82_profiles.h",
+      "sha256": "9396a72dc5e4104f3e67566a74b666d47267fd292339858484a626a9e4106e68"
+    },
+    {
+      "path": "src/display/dpu_o82_lutbus.c",
+      "sha256": "96206e9ff6e3a56ab86df64f5d0188ca3187aa19e942ab79ed1ff5b5fd6d162a"
+    },
+    {
+      "path": "src/display/dpu_o82_lutbus.h",
+      "sha256": "b30f36d17cc3700b3bbaa6eb0469d82b9f0289fbdb8da337d560bc447018c7dd"
+    },
+    {
+      "path": "src/display/o82-regdma.h",
+      "sha256": "6c16856cd0041aa091162910aebf4076e721b35ba4bf0205b6b315de01a52077"
+    },
+    {
+      "path": "src/display/o82-hsic-format.h",
+      "sha256": "dfa79dc0ef22f87d6989b9caca60716f7abd89387e23f1be8df38cfd02bbdb05"
+    },
+    {
+      "path": "src/display/o82-sixzone-format.h",
+      "sha256": "67e018625041460de4e10c2ddaa734ee9e8d0909138a3b0fe23c8a08040db86d"
+    },
+    {
+      "path": "src/display/o82-memory-format.h",
+      "sha256": "af2008725d1e642c507eac3ca100c4a3d88214ef0702e6e5b7b2b871441b4efa"
+    },
+    {
+      "path": "src/display/uke-o82-hdr-format.h",
+      "sha256": "537bca8c0c82946754ee334a0bd47187fe341c65e2f9c655188062a5c8ded8e8"
+    },
+    {
+      "path": "tests/o82-profile-loader-contract.c",
+      "sha256": "6efbef54ba1403df09218e3bed9b0320b6cd73b6782ec70a02c9d17943feef66"
+    },
+    {
+      "path": "tests/o82-profile-loader-contract.sh",
+      "sha256": "18e93120b593073d4c85e24c629cb2dc3ff7c64fa66a0b4297b5ff281db6b3cd"
+    },
+    {
+      "path": "tests/o82-memory-bundle-contract.c",
+      "sha256": "c80801516b3a546e1cd56dd0d5dca9fe197786f4dca5c61f49a043eddc4d17f3"
+    },
+    {
+      "path": "tests/o82-memory-bundle-contract.sh",
+      "sha256": "0adffd04aaa7c4508a4efe7b052d50aa7a61890c4b3c0b0e0bc7e45c0012e4aa"
+    },
+    {
+      "path": "tests/o82-lutbus-contract.c",
+      "sha256": "9d01b20e6e545750cbf2bf891b856e4b4d55ca92a5011a55e87ffe8db501b7e4"
+    },
+    {
+      "path": "tests/o82-lutbus-contract.sh",
+      "sha256": "896941d01918f788198ed07ff1933af03038efba7bcce70f8df32b44866fa162"
+    }
+  ]
+}

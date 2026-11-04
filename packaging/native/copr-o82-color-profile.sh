@@ -17,6 +17,7 @@ src/display/uke-o82-hdr-format.h	uke-o82-hdr-format.h
 tests/o82-hdr-edid-contract.cpp	o82-hdr-edid-contract.cpp
 src/display/o82-regdma.h	o82-regdma.h
 src/display/o82-color-firmware.h	o82-color-firmware.h
+src/display/o82-memory-format.h	o82-memory-format.h
 src/display/dpu_o82_profiles.c	dpu_o82_profiles.c
 src/display/dpu_o82_profiles.h	dpu_o82_profiles.h
 tests/o82-profile-loader-contract.c	o82-profile-loader-contract.c

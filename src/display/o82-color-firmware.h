@@ -5,10 +5,13 @@
 #include "uke-o82-hdr-format.h"
 #include "o82-sixzone-format.h"
 #include "o82-hsic-format.h"
+#include "o82-memory-format.h"
 
 /* Private little-endian bundle; names and all active operations stay distinct. */
 #define O82_COLOR_FW_MAGIC "O82COLR4"
 #define O82_COLOR_FW_VERSION 4
+#define O82_COLOR_FW_MEMORY_MAGIC "O82COLR5"
+#define O82_COLOR_FW_MEMORY_VERSION 5
 #define O82_COLOR_FW_HEADER 96
 #define O82_COLOR_FW_RECORD 160
 #define O82_COLOR_FW_LIMIT (8 * 1024 * 1024)
@@ -107,16 +110,19 @@ static inline int o82_color_fw_valid(const unsigned char *data,
 		 0x02,0x82,0x86,0x8d,0x38,0x5f,0x6e,0x30,0x56,0xc0,0xa4,0xce,0x2b,0x89,0x49,0xd8},
 	};
 	const unsigned char *record, *previous = 0;
-	unsigned int i, count, cursor, size, offset, flags, blocked;
+	unsigned int i, count, cursor, size, offset, flags, blocked, version;
 
 	if (!data || length < O82_COLOR_FW_HEADER || length > O82_COLOR_FW_LIMIT ||
 	    (panel != 0x36 && panel != 0x42))
 		return 0;
+	version = o82_hdr_u32(data + 8);
+	if (version != O82_COLOR_FW_VERSION && version != O82_COLOR_FW_MEMORY_VERSION)
+		return 0;
 	for (i = 0; i < 8; i++)
-		if (data[i] != O82_COLOR_FW_MAGIC[i])
+		if (data[i] != (version == O82_COLOR_FW_VERSION ?
+			       O82_COLOR_FW_MAGIC[i] : O82_COLOR_FW_MEMORY_MAGIC[i]))
 			return 0;
-	if (o82_hdr_u32(data + 8) != O82_COLOR_FW_VERSION ||
-	    o82_hdr_u32(data + 12) != panel || o82_hdr_u32(data + 16) != length ||
+	if (o82_hdr_u32(data + 12) != panel || o82_hdr_u32(data + 16) != length ||
 	    o82_hdr_u32(data + 28) != O82_COLOR_FW_RECORD ||
 	    o82_hdr_u32(data + 64) != O82_HDR_NOMINAL_PEAK_NITS ||
 	    o82_hdr_u32(data + 68) != O82_HDR_NOMINAL_BLACK_10000 ||
@@ -137,7 +143,8 @@ static inline int o82_color_fw_valid(const unsigned char *data,
 
 		record = o82_color_fw_record(data, i);
 		if (!o82_color_fw_name(record) || o82_hdr_u32(record + 64) > 1 ||
-		    o82_hdr_u32(record + 68) > 1 || !o82_color_fw_zero(record + 152, 8) ||
+		    o82_hdr_u32(record + 68) > 1 ||
+		    (version == O82_COLOR_FW_VERSION && !o82_color_fw_zero(record + 152, 8)) ||
 		    o82_color_fw_zero(record + 96, 32))
 			return 0;
 		if (previous) {
@@ -152,7 +159,9 @@ static inline int o82_color_fw_valid(const unsigned char *data,
 		if ((flags & ~255U) || (blocked & ~14U) ||
 		    (flags & (O82_COLOR_OP_IGC | O82_COLOR_OP_GC)) !=
 		    (O82_COLOR_OP_IGC | O82_COLOR_OP_GC) ||
-		    (!!(flags & O82_COLOR_OP_MEMORY) != !!(blocked & O82_COLOR_BLOCK_MEMORY)) ||
+		    (version == O82_COLOR_FW_VERSION &&
+		     (!!(flags & O82_COLOR_OP_MEMORY) != !!(blocked & O82_COLOR_BLOCK_MEMORY))) ||
+		    (version == O82_COLOR_FW_MEMORY_VERSION && (blocked & O82_COLOR_BLOCK_MEMORY)) ||
 		    (!!(flags & O82_COLOR_OP_HDR) != !!(blocked & O82_COLOR_BLOCK_HDR)) ||
 		    ((blocked & O82_COLOR_BLOCK_SIXZONE) && !(flags & O82_COLOR_OP_SIXZONE)) ||
 		    (o82_hdr_u32(record + 68) && !(flags & O82_COLOR_OP_HDR)) ||
@@ -191,6 +200,23 @@ static inline int o82_color_fw_valid(const unsigned char *data,
 			cursor += size;
 		} else if (offset || size) {
 			return 0;
+		}
+		/* v5 owns all memory/protection state, including an explicit neutral.
+		 * Keep v4 inputs absent so their existing PA ownership stays exact.
+		 */
+		if (version == O82_COLOR_FW_MEMORY_VERSION) {
+			offset = o82_hdr_u32(record + 152);
+			size = o82_hdr_u32(record + 156);
+			if (!blocked) {
+				if (offset != cursor || size > length - cursor ||
+				    !o82_memory_valid(data + cursor, size) ||
+				    (!!(flags & O82_COLOR_OP_MEMORY) !=
+				     !!(o82_hdr_u32(data + cursor) | o82_hdr_u32(data + cursor + 4))))
+					return 0;
+				cursor += size;
+			} else if (offset || size) {
+				return 0;
+			}
 		}
 		offset = o82_hdr_u32(record + 88);
 		size = o82_hdr_u32(record + 92);

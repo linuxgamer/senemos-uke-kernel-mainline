@@ -27,6 +27,7 @@ Source21: o82-hsic.h
 Source22: o82-hsic-format.h
 Source23: o82-hsic-payload-contract.cpp
 Source24: o82-hsic-contract.cpp
+Source25: o82-memory-format.h
 ExclusiveArch: aarch64
 BuildRequires: clang gcc-c++ compiler-rt pkgconf-pkg-config
 BuildRequires: pkgconfig(json-c) pkgconfig(lcms2) pkgconfig(openssl)
@@ -56,9 +57,11 @@ cp %{SOURCE15} .
 cp %{SOURCE16} .
 cp %{SOURCE17} %{SOURCE18} %{SOURCE19} %{SOURCE20} .
 cp %{SOURCE21} %{SOURCE22} %{SOURCE23} %{SOURCE24} .
+cp %{SOURCE25} .
 mkdir -p src/display tests
 cp %{SOURCE3} %{SOURCE10} %{SOURCE11} %{SOURCE12} src/display/
 cp %{SOURCE17} %{SOURCE22} src/display/
+cp %{SOURCE25} src/display/
 cp %{SOURCE13} %{SOURCE14} tests/
 
 %build

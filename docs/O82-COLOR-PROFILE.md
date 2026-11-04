@@ -1,5 +1,17 @@
 # O82 OEM P3 mapping for original KDE
 
+5 November 2026 source update: the kernel loader supports a separate private
+v5 bundle with a mandatory 112-byte memory/protection payload for each usable
+preset, including explicit neutral state. It prefers the matching panel's
+`o82-{36,42}-color-v5.bin` and tries v4 only when v5 is absent (`ENOENT`).
+Invalid v5 data, other access errors and filename/version mismatches are terminal.
+Existing v4 inputs retain absent memory and their earlier PA ownership.
+Remote checks for this routing are pending. The generator still emits v4;
+JSON memory conversion, cumulative kernel integration, private delivery and
+physical memory/protection/HDR acceptance remain incomplete. Initial color
+selection remains empty. Historical candidate observations below retain their
+dated scope.
+
 1 November 2026. OEM P3 mapping for POCO Pad X1 / Xiaomi Pad 7 O82 panels,
 Fedora Rawhide AArch64 and original KWin 6.8.2. Compilation and numerical checks
 run in COPR. Optical color and HDR acceptance require separate measurements.
