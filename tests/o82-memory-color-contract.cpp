@@ -128,11 +128,11 @@ o82::MemoryColorData reference(const o82::MemoryColorInput &in) {
             std::uint32_t(truncated(divided(integer(2147483648), convert(integer(h * s * v))))),
             std::uint8_t(in.saturation_hold_control < 3 ? 3 - in.saturation_hold_control : 0),
             std::uint8_t(in.value_hold_control < 3 ? 3 - in.value_hold_control : 0),
-            region(in.hue_maximum) | (region(in.hue_minimum) << 16),
-            percentage(in.saturation_maximum) | (percentage(in.saturation_minimum) << 8) | (s << 16),
-            percentage(in.value_maximum) | (percentage(in.value_minimum) << 8) | (v << 16)};
+            region(in.hue_minimum) | (region(in.hue_maximum) << 16),
+            percentage(in.saturation_minimum) | (percentage(in.saturation_maximum) << 8) | (s << 16),
+            percentage(in.value_minimum) | (percentage(in.value_maximum) << 8) | (v << 16)};
 }
-unsigned checks = 0, reciprocal_differences = 0, symmetric_differences = 0;
+unsigned checks = 0, reciprocal_differences = 0, symmetric_differences = 0, reversed_ranges = 0;
 void report(const o82::MemoryColorData &actual, const o82::MemoryColorData &expected) {
     const auto print = [](const char *name, const o82::MemoryColorData &v) {
         std::fprintf(stderr, "%s: %08x %08x %08x %08x %u %u %08x %08x %08x\n",
@@ -155,6 +155,9 @@ void verify(o82::MemoryColorInput in) {
         std::clamp(double(in.saturation_adjustment), -100.0, 100.0) / 100.0 * 262144.0 / h)),
         std::int64_t(-32768), std::int64_t(32767))) & 65535;
     symmetric_differences += wrong != (result.adjust_p1 & 65535);
+    reversed_ranges += (result.hue_region & 65535) != (result.hue_region >> 16) ||
+                       (result.saturation_region & 255) != ((result.saturation_region >> 8) & 255) ||
+                       (result.value_region & 255) != ((result.value_region >> 8) & 255);
     assert(result.saturation_hold <= 3 && result.value_hold <= 3);
     assert(!(result.adjust_p0 & 0xf800u) && !(result.hue_region & 0xf800f800u));
     ++checks;
@@ -178,11 +181,15 @@ int main() {
     in.saturation_hold_control = in.value_hold_control = 3;
     in.hue_minimum = -180; in.hue_maximum = 180;
     in.saturation_maximum = in.value_maximum = 100;
-    golden(in, {0x800600,0xff5600ab,0x1010101,21,0,0,0x3000300,0xff00ff,0xff00ff});
+    golden(in, {0x800600,0xff5600ab,0x1010101,21,0,0,0x3000300,0xffff00,0xffff00});
     in = {}; in.saturation_adjustment = -100; in.value_adjustment = 100;
     golden(in, {8,0x7fff8001,0x20002000,0x400000,3,3,0,0x80000,0x80000});
     in.hue_adjustment = -180; in.hue_minimum = -360; in.hue_maximum = INT_MAX;
-    golden(in, {0xa0000008,0x7fff8001,0x20002000,0x400000,3,3,0x600,0x80000,0x80000});
+    golden(in, {0xa0000008,0x7fff8001,0x20002000,0x400000,3,3,0x6000000,0x80000,0x80000});
+    in={};in.hue_minimum=0;in.hue_maximum=90;
+    in.saturation_minimum=12.5f;in.saturation_maximum=87.25f;
+    in.value_minimum=3.125f;in.value_maximum=98.5f;
+    golden(in,{8,0,0x20002000,0x400000,3,3,0x1800000,0x8de1f,0x8fb07});
     for (int hue = -180; hue <= 180; ++hue)
         for (int width = 0; width <= 360; width += 5) {
             in = {}; in.hue_adjustment=hue; in.hue_extent=width;
@@ -226,7 +233,8 @@ int main() {
         assert(o82::compile_memory_color({},out)==o82::MemoryColorError::rounding_mode && out==original);
     }
     assert(std::fesetround(FE_TONEAREST)==0);
-    assert(reciprocal_differences && symmetric_differences);
+    assert(reciprocal_differences && symmetric_differences && reversed_ranges);
     std::printf("Memory-color conversion: %u integer-oracle cases, hand words, clamps, hue wrap, holds and unchanged refusal passed; synthetic inputs only\n",checks);
     std::printf("Required wrong alternatives differ: floor reciprocal=%u, symmetric/wide adjustment=%u\n",reciprocal_differences,symmetric_differences);
+    std::printf("Distinct endpoint cases detect reversed named ranges: %u\n",reversed_ranges);
 }

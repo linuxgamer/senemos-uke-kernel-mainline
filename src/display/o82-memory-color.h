@@ -93,11 +93,14 @@ inline MemoryColorError compile_memory_color(const MemoryColorInput &in, MemoryC
         memory_detail::divide(2147483648.0f, float(extent * saturation * value)));
     result.saturation_hold = hold(in.saturation_hold_control);
     result.value_hold = hold(in.value_hold_control);
-    result.hue_region = region(in.hue_maximum) | (region(in.hue_minimum) << 16);
-    result.saturation_region = memory_detail::percent(in.saturation_maximum) |
-                              (memory_detail::percent(in.saturation_minimum) << 8) | (saturation << 16);
-    result.value_region = memory_detail::percent(in.value_maximum) |
-                         (memory_detail::percent(in.value_minimum) << 8) | (value << 16);
+    // The parser's min/max keys establish the naming: minimum is the low
+    // qualifier and maximum is the high qualifier, unlike the earlier inference
+    // from unnamed proprietary input fields. Keep distinct endpoint fixtures.
+    result.hue_region = region(in.hue_minimum) | (region(in.hue_maximum) << 16);
+    result.saturation_region = memory_detail::percent(in.saturation_minimum) |
+                              (memory_detail::percent(in.saturation_maximum) << 8) | (saturation << 16);
+    result.value_region = memory_detail::percent(in.value_minimum) |
+                         (memory_detail::percent(in.value_maximum) << 8) | (value << 16);
     output = result;
     return MemoryColorError::none;
 }

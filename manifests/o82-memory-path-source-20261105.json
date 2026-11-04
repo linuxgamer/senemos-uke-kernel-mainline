@@ -113,13 +113,159 @@
     "qualified_scalar_converter": {
       "copr_build": 11260759,
       "source_commit": "ac625ec6eaed1689a6dc7086e982b0fd68252973",
-      "manifest": "manifests/o82-memory-color-source-20261104.json"
+      "manifest": "manifests/o82-memory-color-source-20261104.json",
+      "status": "Superseded named range mapping; awaiting corrected1.0-3 arithmetic/semantic bridge"
     }
   },
   "qualification": {
-    "state": "pending",
+    "state": "succeeded",
     "package": "uke-o82-memory-path-check-7.3.1-1",
-    "scope": "Synthetic integer/semantic/wire/MMIO/caller checks and native linked MSM object, no Image or hardware test"
+    "copr_build": 11260889,
+    "source_commit": "6763763a216d648928377f451fa0a4e4fd8cc746",
+    "raw_dimension_cases_per_compiler": 47209404,
+    "plain_integer_division_differences": 1214,
+    "raw_bridge_cases_per_compiler": 36973,
+    "encoded_mode_cases_per_compiler": 6144,
+    "powered_mode_cases_per_compiler": 768,
+    "ignored_memory_writes": 84,
+    "linked_msm_object": true,
+    "scope": "Kernel payload, encoding, fake-MMIO readback and retained native MSM linkage; no Image or physical acceptance",
+    "named_range_semantics_qualified": false,
+    "semantic_followup": "Endpoint names corrected separately after this trial; scalar1.0-3 is pending. The six native imports remain byte-identical.",
+    "tested_archive_assets": [
+      {
+        "path": "packaging/native/check-o82-memory-path.sh",
+        "sha256": "cb240fe792df09ed843666b1b3df3f698dcd25ac8b42f2873a87ca468f426b77"
+      },
+      {
+        "path": "packaging/native/copr-o82-memory-path-check.sh",
+        "sha256": "b71426381ccdeb7e684398489aa773ed6a8bb02c787e831a74ba9d6f737923ab"
+      },
+      {
+        "path": "src/display/dpu_o82_color.c",
+        "sha256": "31d27a25b466c9c2024820efb69b4521cde24d66ce8d4c171a92189eff170f9f"
+      },
+      {
+        "path": "src/display/dpu_o82_color.h",
+        "sha256": "e8890ab33aa243b23951c5a6abd1a18831f24b6ba62c635f377368b8022bb650"
+      },
+      {
+        "path": "src/display/dpu_o82_lutbus.c",
+        "sha256": "96206e9ff6e3a56ab86df64f5d0188ca3187aa19e942ab79ed1ff5b5fd6d162a"
+      },
+      {
+        "path": "src/display/dpu_o82_lutbus.h",
+        "sha256": "b30f36d17cc3700b3bbaa6eb0469d82b9f0289fbdb8da337d560bc447018c7dd"
+      },
+      {
+        "path": "src/display/dpu_o82_platform.c",
+        "sha256": "933b15a26ea11832b1dbe3ad1c2e65ac5404b45de434ef2140744dcfb1fc4484"
+      },
+      {
+        "path": "src/display/dpu_o82_platform.h",
+        "sha256": "23b6f1533f6b01c30a1ed2ad363b3def3ad7a3e3f3d456ee14da74ca2f6d1452"
+      },
+      {
+        "path": "src/display/dpu_o82_power.c",
+        "sha256": "5e37041ea46d689793a2c686c210ef8c532183c6cb10acd968f94584cf98394b"
+      },
+      {
+        "path": "src/display/dpu_o82_power.h",
+        "sha256": "030cca4a0c9b3928650969bc7cbf25c83bcc5d1db26653aad77cfa9f5dd94aa3"
+      },
+      {
+        "path": "src/display/dpu_o82_profiles.c",
+        "sha256": "0461e362a8e3f658d0c492ac5dcb28061e5421c65ef7118392c6abc4db4ac576"
+      },
+      {
+        "path": "src/display/dpu_o82_profiles.h",
+        "sha256": "9396a72dc5e4104f3e67566a74b666d47267fd292339858484a626a9e4106e68"
+      },
+      {
+        "path": "src/display/dpu_o82_regdma.c",
+        "sha256": "82b3b85f51fc27c75e911aa0557246ab449a6261840aeacc18c6460cf7dfdaa0"
+      },
+      {
+        "path": "src/display/dpu_o82_regdma.h",
+        "sha256": "96e0e077f5735b61074817962baf976581f97d078182f96552e71d8114d809be"
+      },
+      {
+        "path": "src/display/dpu_o82_upload.c",
+        "sha256": "8060ecdc74c792fe5126f818237ac7e5d413e0755ea81ee8b24ef56fe0ca90c5"
+      },
+      {
+        "path": "src/display/dpu_o82_upload.h",
+        "sha256": "dc3386e7471b92eac62330224756ccaf016301c99a38751d4152dd5e67805f4c"
+      },
+      {
+        "path": "src/display/o82-color-firmware.h",
+        "sha256": "d4fb3ae5ff6f5f1299e839dbeaa253af95c601eab209013af90e91c2e8240131"
+      },
+      {
+        "path": "src/display/o82-hsic-format.h",
+        "sha256": "dfa79dc0ef22f87d6989b9caca60716f7abd89387e23f1be8df38cfd02bbdb05"
+      },
+      {
+        "path": "src/display/o82-memory-color.h",
+        "sha256": "effff5eaf12e25f6ee99a4e020d16e626992e15e580f7ad9b88f95e34b7cd4da"
+      },
+      {
+        "path": "src/display/o82-memory-format.h",
+        "sha256": "af2008725d1e642c507eac3ca100c4a3d88214ef0702e6e5b7b2b871441b4efa"
+      },
+      {
+        "path": "src/display/o82-regdma.h",
+        "sha256": "6c16856cd0041aa091162910aebf4076e721b35ba4bf0205b6b315de01a52077"
+      },
+      {
+        "path": "src/display/o82-sixzone-format.h",
+        "sha256": "67e018625041460de4e10c2ddaa734ee9e8d0909138a3b0fe23c8a08040db86d"
+      },
+      {
+        "path": "src/display/prepare-o82-regdma.sh",
+        "sha256": "74ed6ce15e3a054e8ad887159df11a854be6a1be97fb21f2e23b831709073e63"
+      },
+      {
+        "path": "src/display/uke-o82-hdr-format.h",
+        "sha256": "537bca8c0c82946754ee334a0bd47187fe341c65e2f9c655188062a5c8ded8e8"
+      },
+      {
+        "path": "tests/o82-atomic-contract.c",
+        "sha256": "7eb52b2c1d1f8cd99ec8a24f3f3fbf63a5aa20409ab945395b8ff20dde01b15b"
+      },
+      {
+        "path": "tests/o82-atomic-contract.sh",
+        "sha256": "9c589bc0109a7bf9a4a336a5c1f636717deeb3eeaa6ee17fbc18d991c0a9cad7"
+      },
+      {
+        "path": "tests/o82-lutbus-contract.c",
+        "sha256": "9d01b20e6e545750cbf2bf891b856e4b4d55ca92a5011a55e87ffe8db501b7e4"
+      },
+      {
+        "path": "tests/o82-lutbus-contract.sh",
+        "sha256": "896941d01918f788198ed07ff1933af03038efba7bcce70f8df32b44866fa162"
+      },
+      {
+        "path": "tests/o82-memory-pipeline-contract.cpp",
+        "sha256": "c0fe305a8177b52be9406357b3a0588b6b735a6bc72709710922c40558ffe277"
+      },
+      {
+        "path": "tests/o82-profile-loader-contract.c",
+        "sha256": "71b1e112ee6da8aae8f94a45350373e1bff83899a7f00c05fd77857740957416"
+      },
+      {
+        "path": "tests/o82-profile-loader-contract.sh",
+        "sha256": "18e93120b593073d4c85e24c629cb2dc3ff7c64fa66a0b4297b5ff281db6b3cd"
+      },
+      {
+        "path": "tests/o82-regdma-transport-contract.c",
+        "sha256": "7db7296bba4a32a6294a8953a043f1e7bdf80cb15dc25059567dfd58601f1f2d"
+      },
+      {
+        "path": "tests/o82-regdma-transport-contract.sh",
+        "sha256": "192732f05086ea7388345a06678d00187e07921ad364610bf3f30796b3d4f694"
+      }
+    ]
   },
   "build_dependency": {
     "host_only": "Existing pinned upstream MSM gen_header.py; no practical substitute for the generated register headers",
@@ -242,7 +388,7 @@
     },
     {
       "path": "src/display/o82-memory-color.h",
-      "sha256": "effff5eaf12e25f6ee99a4e020d16e626992e15e580f7ad9b88f95e34b7cd4da"
+      "sha256": "c4a684bf4465e326907159acef5cc89d21a2b57a756520be87286eed5ff1c651"
     },
     {
       "path": "src/display/o82-memory-format.h",

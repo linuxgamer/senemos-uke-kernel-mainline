@@ -22,8 +22,8 @@
       "adjustments": "binary32 (clamp(x,-100,100)+100)/100-1, multiply262144/divide scaled hue extent, add+0.5 for both signs, truncate, signed16 saturation",
       "reciprocal": "binary64 65536/extent+0.5, truncate, cap32767; different from SixZone floor",
       "blend": "binary32 2^31 divided by binary32 product of three scaled extents; truncate",
-      "hue_region": "For negative integer endpoints add360 once; clamp0..360 and scale1536/360; maximum low11, minimum high11",
-      "sat_val_region": "binary32 clamp0..100,multiply255/divide100/truncate; maximum low8,minimum next8,scaled extent next8",
+      "hue_region": "For negative integer endpoints add360 once; clamp0..360 and scale1536/360; minimum low11, maximum high11",
+      "sat_val_region": "binary32 clamp0..100,multiply255/divide100/truncate; minimum low8,maximum next8,scaled extent next8",
       "holds": "Unsigned control0/1/2 maps3/2/1; >=3 maps0"
     },
     "typed_interface": "Semantic conversion fields only; not a binary copy of PAMemColorConfig and not a JSON-to-PAMem mapping"
@@ -69,14 +69,14 @@
     "implementation": "src/display/o82-memory-color.h",
     "fixture": "tests/o82-memory-color-contract.cpp",
     "producer": "packaging/native/copr-o82-memory-color-check.sh",
-    "state": "Passed optimized GCC and Clang ASan/UBSan arithmetic checks",
+    "state": "Named endpoint correction pending remote qualification; scalar arithmetic previously qualified",
     "oracle": "Independent integer rational IEEE754 rounding for binary32/binary64; hand words, clamp/extents/holds/hue wrap, deterministic bit patterns and wrong-alternative differences",
     "refusals": "Nonfinite inputs or non-nearest rounding leave caller output unchanged",
     "activation_changed": false
   },
   "qualification": {
-    "state": "succeeded",
-    "release": "1.0-2",
+    "state": "pending",
+    "release": "1.0-3",
     "previous_trials": [
       {
         "copr_build": 11260752,
@@ -84,21 +84,17 @@
         "source_commit": "73cddc4610dd4837b26e1560f18bde6fee52b826",
         "state": "failed",
         "reason": "Hand-coded expected reciprocal for scaled extent255 was258; exact65536/255+0.5 truncates257. Converter unchanged; fix golden word and add synthetic mismatch diagnostics."
+      },
+      {
+        "copr_build": 11260759,
+        "release": "1.0-2",
+        "source_commit": "ac625ec6eaed1689a6dc7086e982b0fd68252973",
+        "state": "succeeded",
+        "checks_per_compiler": 82739,
+        "limitation": "Arithmetic passed, but named min/max endpoints were inferred in reverse. Primary parser constructors and stack stores now establish min low / max high; this semantic qualification is superseded."
       }
     ],
-    "scope": "Arithmetic only; no native writer, private firmware, JSON mapping or physical acceptance",
-    "copr_build": 11260759,
-    "source_commit": "ac625ec6eaed1689a6dc7086e982b0fd68252973",
-    "checks_per_compiler": 82739,
-    "compilers": [
-      "GCC optimized, contraction enabled",
-      "Clang ASan/UBSan, contraction disabled"
-    ],
-    "wrong_alternative_differences": {
-      "floor_reciprocal": 14079,
-      "symmetric_or_wide_adjustment": 67976
-    },
-    "native_memory_color_enabled": false
+    "scope": "Named endpoint semantics, independent arithmetic and current kernel-validator bridge; no native writer activation, private firmware, complete JSON mapping or physical acceptance"
   },
   "delivery": {
     "coordinated_kernel_queue_required": true,
@@ -109,11 +105,51 @@
   "inputs": [
     {
       "path": "src/display/o82-memory-color.h",
-      "sha256": "effff5eaf12e25f6ee99a4e020d16e626992e15e580f7ad9b88f95e34b7cd4da"
+      "sha256": "c4a684bf4465e326907159acef5cc89d21a2b57a756520be87286eed5ff1c651"
     },
     {
       "path": "tests/o82-memory-color-contract.cpp",
-      "sha256": "ab43d22d4e062fd0b228df307b9b250a7d7f8f0db07a83e2388f59ffb166d379"
+      "sha256": "9109aef0236e41fd77d8a74435999f1fbd705fe798327dba12696d9cb654f6f1"
+    },
+    {
+      "path": "src/display/o82-memory-format.h",
+      "sha256": "af2008725d1e642c507eac3ca100c4a3d88214ef0702e6e5b7b2b871441b4efa"
+    },
+    {
+      "path": "src/display/o82-hsic-format.h",
+      "sha256": "dfa79dc0ef22f87d6989b9caca60716f7abd89387e23f1be8df38cfd02bbdb05"
+    },
+    {
+      "path": "src/display/o82-sixzone-format.h",
+      "sha256": "67e018625041460de4e10c2ddaa734ee9e8d0909138a3b0fe23c8a08040db86d"
+    },
+    {
+      "path": "src/display/uke-o82-hdr-format.h",
+      "sha256": "537bca8c0c82946754ee334a0bd47187fe341c65e2f9c655188062a5c8ded8e8"
+    },
+    {
+      "path": "tests/o82-memory-pipeline-contract.cpp",
+      "sha256": "c0fe305a8177b52be9406357b3a0588b6b735a6bc72709710922c40558ffe277"
     }
-  ]
+  ],
+  "json_named_range_evidence": {
+    "repository": "Xiaomi-Pad-7-Development/android_vendor_xiaomi_uke",
+    "commit": "6739c8ec275318a156aa3a65f04f54f8dad82926",
+    "path": "proprietary/vendor/lib64/libqdcm-json-mode-parser.so",
+    "sha256": "00b1a5fcfe89e1a67834cba59115e8a0460a29daf10c250787587d5efa4d0f75",
+    "inspection": "Static key constructors and actual PLT/GOT bindings; no execution or private JSON values",
+    "constructors": "0x3eaf4..0x3eb70: object0x944d0=min,0x944e8=mid,0x94500=max",
+    "skin_base": "PAMemColorConfig at SetConfig stack768; matching32-byte body offset and84-byte region stride",
+    "typed_field_offsets": {
+      "hue_minimum": 52,
+      "hue_maximum": 48,
+      "saturation_minimum": 64,
+      "saturation_maximum": 60,
+      "value_minimum": 76,
+      "value_maximum": 72
+    },
+    "output": "ComputeMemoryColorParams reads minimum offsets into low qualifiers and maximum offsets into high qualifiers",
+    "scope": "Endpoint names only; full JSON/protection/edge activation routing remains incomplete"
+  },
+  "semantic_review_date": "2026-11-05"
 }
