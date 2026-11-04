@@ -76,7 +76,16 @@
   },
   "qualification": {
     "state": "pending",
-    "release": "1.0-1",
+    "release": "1.0-2",
+    "previous_trials": [
+      {
+        "copr_build": 11260752,
+        "release": "1.0-1",
+        "source_commit": "73cddc4610dd4837b26e1560f18bde6fee52b826",
+        "state": "failed",
+        "reason": "Hand-coded expected reciprocal for scaled extent255 was258; exact65536/255+0.5 truncates257. Converter unchanged; fix golden word and add synthetic mismatch diagnostics."
+      }
+    ],
     "scope": "Arithmetic only; no native writer, private firmware, JSON mapping or physical acceptance"
   },
   "delivery": {
@@ -92,7 +101,7 @@
     },
     {
       "path": "tests/o82-memory-color-contract.cpp",
-      "sha256": "11198d7b04b585fbabc2eb823083a5149f1be2212d3caff23606d0d37d3f98c1"
+      "sha256": "ab43d22d4e062fd0b228df307b9b250a7d7f8f0db07a83e2388f59ffb166d379"
     }
   ]
 }

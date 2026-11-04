@@ -133,11 +133,22 @@ o82::MemoryColorData reference(const o82::MemoryColorInput &in) {
             percentage(in.value_maximum) | (percentage(in.value_minimum) << 8) | (v << 16)};
 }
 unsigned checks = 0, reciprocal_differences = 0, symmetric_differences = 0;
+void report(const o82::MemoryColorData &actual, const o82::MemoryColorData &expected) {
+    const auto print = [](const char *name, const o82::MemoryColorData &v) {
+        std::fprintf(stderr, "%s: %08x %08x %08x %08x %u %u %08x %08x %08x\n",
+            name, v.adjust_p0, v.adjust_p1, v.adjust_p2, v.blend_gain,
+            unsigned(v.saturation_hold), unsigned(v.value_hold),
+            v.hue_region, v.saturation_region, v.value_region);
+    };
+    print("actual synthetic words", actual); print("expected synthetic words", expected);
+}
 void verify(o82::MemoryColorInput in) {
     const auto original = o82::MemoryColorData{1,2,3,4,1,2,5,6,7};
     auto result = original;
     assert(o82::compile_memory_color(in, result) == o82::MemoryColorError::none);
-    assert(result == reference(in));
+    const auto expected = reference(in);
+    if (!(result == expected)) { std::fprintf(stderr, "Integer-oracle case %u\n", checks); report(result, expected); }
+    assert(result == expected);
     const auto h = result.adjust_p0 & 0x7ffu, s = result.saturation_region >> 16;
     reciprocal_differences += (result.adjust_p2 & 65535) != 65536 / s;
     const auto wrong = std::uint32_t(std::clamp(std::int64_t(std::round(
@@ -151,6 +162,7 @@ void verify(o82::MemoryColorInput in) {
 void golden(o82::MemoryColorInput in, o82::MemoryColorData expected) {
     o82::MemoryColorData out;
     assert(o82::compile_memory_color(in,out) == o82::MemoryColorError::none);
+    if (!(out == expected)) report(out, expected);
     assert(out == expected);
     verify(in);
 }
@@ -166,7 +178,7 @@ int main() {
     in.saturation_hold_control = in.value_hold_control = 3;
     in.hue_minimum = -180; in.hue_maximum = 180;
     in.saturation_maximum = in.value_maximum = 100;
-    golden(in, {0x800600,0xff5600ab,0x1020102,21,0,0,0x3000300,0xff00ff,0xff00ff});
+    golden(in, {0x800600,0xff5600ab,0x1010101,21,0,0,0x3000300,0xff00ff,0xff00ff});
     in = {}; in.saturation_adjustment = -100; in.value_adjustment = 100;
     golden(in, {8,0x7fff8001,0x20002000,0x400000,3,3,0,0x80000,0x80000});
     in.hue_adjustment = -180; in.hue_minimum = -360; in.hue_maximum = INT_MAX;
