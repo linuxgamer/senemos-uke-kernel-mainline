@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-05",
+  "scope": "Production OEM JSON memory-color and protection conversion into private v5 bundles; physical qualification remains separate",
+  "primary_parser": {
+    "repository": "Xiaomi-Pad-7-Development/android_vendor_xiaomi_uke",
+    "commit": "6739c8ec275318a156aa3a65f04f54f8dad82926",
+    "path": "proprietary/vendor/lib64/libqdcm-json-mode-parser.so",
+    "sha256": "00b1a5fcfe89e1a67834cba59115e8a0460a29daf10c250787587d5efa4d0f75",
+    "inspection": "Static key constructors and actual PLT/GOT bindings; no execution or private JSON values",
+    "constructors": "0x3eaf4..0x3eb70: object0x944d0=min,0x944e8=mid,0x94500=max",
+    "skin_base": "PAMemColorConfig at SetConfig stack768; matching32-byte body offset and84-byte region stride",
+    "typed_field_offsets": {
+      "hue_minimum": 52,
+      "hue_maximum": 48,
+      "saturation_minimum": 64,
+      "saturation_maximum": 60,
+      "value_minimum": 76,
+      "value_maximum": 72
+    },
+    "output": "ComputeMemoryColorParams reads minimum offsets into low qualifiers and maximum offsets into high qualifiers",
+    "scope": "JSON field types, named ranges, region order, global protection and edge conversion",
+    "function": "HwAssetPA::SetConfig 0x6ee94..0x70d90",
+    "field_types": {
+      "hue_adj_min_max": "signed32",
+      "hue_mid": "unsigned32 bits interpreted as signed32 by the manager",
+      "sat_val_adj_min_max": "binary32",
+      "sat_val_mid": "unsigned32"
+    },
+    "region_names": [
+      "MemColSkin",
+      "MemColSky",
+      "MemColFol"
+    ],
+    "protection_flags": "Global OR of hue/sat/value protect, protectContrast, protectVsSixZone and inverse blendingEnable, including disabled regions",
+    "edge_mapping": "Map left SLOPE bit0, right SLOPE bit1; compiler hold is3-control",
+    "skin_saturation_compatibility": "Exact parser checks right key at0x6f1d8 then rereads left key at0x6f1f0; use the left edge for both inputs only for skin saturation. Other sat/value components use both keys.",
+    "validation": "Require complete typed finite fields, bounded integer representations, booleans/0-or-1 integers and known edge strings; no vendor execution or private preset data"
+  },
+  "qualified_prerequisites": {
+    "scalar": {
+      "source_commit": "0d8b4a432767dd28d7a37f7055376df2c9a1c64e",
+      "copr_build": 11260921,
+      "manifest": "manifests/o82-memory-color-source-20261104.json"
+    },
+    "native_writer": {
+      "source_commit": "6763763a216d648928377f451fa0a4e4fd8cc746",
+      "copr_build": 11260889,
+      "manifest": "manifests/o82-memory-path-source-20261105.json"
+    },
+    "versioned_loader": {
+      "source_commit": "f6aa6d96cfa467e3617d33219ab1441d92aabd4e",
+      "copr_build": 11261036,
+      "manifest": "manifests/o82-memory-bundle-source-20261105.json"
+    }
+  },
+  "package": {
+    "name": "uke-o82-color-profile",
+    "version": "0.6.0",
+    "release": 1,
+    "producer": "packaging/native/copr-o82-color-profile.sh",
+    "installed_payload": "Native offline utility, documentation and license; no firmware, kernel or private table"
+  },
+  "protocol": {
+    "emitted_version": 5,
+    "mandatory_memory_payload": true,
+    "canonical_inactive_regions": true,
+    "global_protection_from_disabled_regions": true,
+    "old_v4_loader_supported": true,
+    "hdr_opaque_operations_still_blocked": true,
+    "initial_color_selection_changed": false
+  },
+  "qualification": {
+    "state": "pending",
+    "scope": "Production JSON/compiler -> generated v5 bundle -> actual native C loader -> actual paired command encoder, optimized and sanitized; retained utility/ICC/HSIC/SixZone and actual former gamut-source rejection",
+    "private_input_exported": false
+  },
+  "integration": {
+    "shared_kernel_queue_required": true,
+    "preserve_latest_cumulative_sources": true,
+    "full_kernel_submission": false,
+    "dt_delta": false,
+    "dt_reason": "Generic JSON/private firmware conversion uses the previously qualified DSPP resources and ownership; no physical DT values change",
+    "additional_kernel_delta_this_change": false,
+    "private_profile_generation_delivery_pending": true,
+    "physical_memory_color_protection_hdr": false
+  },
+  "inputs": [
+    {
+      "path": "src/display/o82-color-profile.cpp",
+      "sha256": "9eac400f21111edce84367769630f1e32e82568dbc1f2806276fd530154b9904"
+    },
+    {
+      "path": "src/display/o82-memory-color.h",
+      "sha256": "c4a684bf4465e326907159acef5cc89d21a2b57a756520be87286eed5ff1c651"
+    },
+    {
+      "path": "src/display/o82-memory-format.h",
+      "sha256": "af2008725d1e642c507eac3ca100c4a3d88214ef0702e6e5b7b2b871441b4efa"
+    },
+    {
+      "path": "src/display/o82-color-firmware.h",
+      "sha256": "d9a4b176ad7be2334b5cf79af1f3a59185cf5304bf22247ea427bfb8839ae48a"
+    },
+    {
+      "path": "src/display/o82-hsic-format.h",
+      "sha256": "dfa79dc0ef22f87d6989b9caca60716f7abd89387e23f1be8df38cfd02bbdb05"
+    },
+    {
+      "path": "src/display/o82-sixzone-format.h",
+      "sha256": "67e018625041460de4e10c2ddaa734ee9e8d0909138a3b0fe23c8a08040db86d"
+    },
+    {
+      "path": "src/display/uke-o82-hdr-format.h",
+      "sha256": "537bca8c0c82946754ee334a0bd47187fe341c65e2f9c655188062a5c8ded8e8"
+    },
+    {
+      "path": "src/display/dpu_o82_profiles.c",
+      "sha256": "98382e04a21af440ae69672b878d267c7049d23bf517a754388a16ee9d0c6ae3"
+    },
+    {
+      "path": "src/display/dpu_o82_profiles.h",
+      "sha256": "9396a72dc5e4104f3e67566a74b666d47267fd292339858484a626a9e4106e68"
+    },
+    {
+      "path": "src/display/dpu_o82_lutbus.c",
+      "sha256": "96206e9ff6e3a56ab86df64f5d0188ca3187aa19e942ab79ed1ff5b5fd6d162a"
+    },
+    {
+      "path": "src/display/dpu_o82_lutbus.h",
+      "sha256": "b30f36d17cc3700b3bbaa6eb0469d82b9f0289fbdb8da337d560bc447018c7dd"
+    },
+    {
+      "path": "tests/o82-memory-payload-contract.cpp",
+      "sha256": "1102e5d63e515fe70f2898924c36c6b50aee1f01739c2bd535fee496c94b2b75"
+    },
+    {
+      "path": "tests/o82-memory-payload-contract.sh",
+      "sha256": "a6aa9d260b38591acfda1617af542751a006a13072f881ca7e343132529082b3"
+    }
+  ]
+}

@@ -4,7 +4,9 @@ set -Eeuo pipefail
 test ! -e /etc/senemos/kernel-update.conf
 owner=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 output=$(realpath -m "${1:?Pass the remote source result directory}")
-bash "$owner/packaging/native/refuse-published-release.sh" uke-o82-color-profile 0.5.0-1
+bash "$owner/packaging/native/refuse-published-release.sh" uke-o82-color-profile 0.6.0-1
+(cd "$owner"; jq -r '.inputs[]|.sha256+"  "+.path' \
+    manifests/o82-memory-json-source-20261105.json | sha256sum -c --strict --quiet -)
 mkdir -p "$output"
 while IFS=$'\t' read -r path name; do
     install -m644 "$owner/$path" "$output/$name"
@@ -18,6 +20,11 @@ tests/o82-hdr-edid-contract.cpp	o82-hdr-edid-contract.cpp
 src/display/o82-regdma.h	o82-regdma.h
 src/display/o82-color-firmware.h	o82-color-firmware.h
 src/display/o82-memory-format.h	o82-memory-format.h
+src/display/o82-memory-color.h	o82-memory-color.h
+tests/o82-memory-payload-contract.cpp	o82-memory-payload-contract.cpp
+tests/o82-memory-payload-contract.sh	o82-memory-payload-contract.sh
+src/display/dpu_o82_lutbus.c	dpu_o82_lutbus.c
+src/display/dpu_o82_lutbus.h	dpu_o82_lutbus.h
 src/display/dpu_o82_profiles.c	dpu_o82_profiles.c
 src/display/dpu_o82_profiles.h	dpu_o82_profiles.h
 tests/o82-profile-loader-contract.c	o82-profile-loader-contract.c
@@ -44,4 +51,4 @@ test "$(git -C "$owner" hash-object "$output/o82-color-before-grid.cpp")" = \
 printf 'Color utility source %s; actual pre-fix source %s\n' \
     "$(git -C "$owner" rev-parse HEAD)" "$before"
 test "$(rpmspec --target aarch64 -q --srpm --qf '%{NAME}-%{VERSION}-%{RELEASE}' \
-    "$output/uke-o82-color-profile.spec")" = uke-o82-color-profile-0.5.0-1.fc46
+    "$output/uke-o82-color-profile.spec")" = uke-o82-color-profile-0.6.0-1.fc46

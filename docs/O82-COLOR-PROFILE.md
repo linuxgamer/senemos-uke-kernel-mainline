@@ -7,11 +7,22 @@ preset, including explicit neutral state. It prefers the matching panel's
 Invalid v5 data, other access errors and filename/version mismatches are terminal.
 Existing v4 inputs retain absent memory and their earlier PA ownership.
 Remote checks passed COPR11261036:2,048 actual loader/encoder cases per
-compiler, repaired-CRC tampering and fallback/version checks. The generator still emits v4;
-JSON memory conversion, cumulative kernel integration, private delivery and
+compiler, repaired-CRC tampering and fallback/version checks. The `0.6.0-1`
+source candidate emits v5 from OEM JSON; its utility qualification is pending.
+Cumulative kernel integration, private delivery and
 physical memory/protection/HDR acceptance remain incomplete. Initial color
 selection remains empty. Historical candidate observations below retain their
 dated scope.
+
+The v5 generator converts all three memory-color regions and ORs their global
+hue, saturation, value, contrast, SixZone and blending protection, including
+protection from disabled regions. Each usable preset includes explicit active
+or neutral state. Conversion preserves the O82 parser's observed skin
+saturation edge behavior and refuses malformed typed fields. The remote
+pipeline check connects actual JSON conversion, generated bundles, the native
+C loader and paired command encoding for both supplier identities. Private
+profiles remain local; the package contains no factory tables. Active opaque
+HDR operations remain explicitly blocked pending their implementation.
 
 1 November 2026. OEM P3 mapping for POCO Pad X1 / Xiaomi Pad 7 O82 panels,
 Fedora Rawhide AArch64 and original KWin 6.8.2. Compilation and numerical checks

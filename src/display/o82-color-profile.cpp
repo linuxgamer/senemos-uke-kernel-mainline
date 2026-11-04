@@ -5,6 +5,7 @@
 #include <openssl/evp.h>
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cassert>
 #include <charconv>
 #include <cmath>
@@ -24,6 +25,7 @@
 #include "o82-color-firmware.h"
 #include "o82-sixzone.h"
 #include "o82-hsic.h"
+#include "o82-memory-color.h"
 
 namespace {
 using Vec = std::array<double, 3>;
@@ -37,14 +39,15 @@ json_object *field(json_object *object, const char *name) {
             json_object_object_get_ex(object, name, &value), "missing profile field");
     return value;
 }
-bool enabled(json_object *object) {
-    auto value = field(object, "enable");
+bool boolean_field(json_object *object, const char *key) {
+    auto value = field(object, key);
     require(json_object_is_type(value, json_type_boolean) ||
             (json_object_is_type(value, json_type_int) &&
              (json_object_get_int64(value) == 0 || json_object_get_int64(value) == 1)),
-            "invalid enable field");
+            "invalid boolean field");
     return json_object_get_boolean(value);
 }
+bool enabled(json_object *object) { return boolean_field(object, "enable"); }
 std::string_view text_field(json_object *object, const char *name) {
     auto value = field(object, name);
     require(json_object_is_type(value, json_type_string), "non-string profile metadata");
@@ -511,6 +514,74 @@ std::vector<unsigned char> native_hsic(json_object *picture) {
     require(o82_hsic_valid(data.data(), data.size()), "invalid native HSIC payload");
     return data;
 }
+std::vector<unsigned char> native_memory(json_object *picture) {
+    // Primary O82 parser and arithmetic provenance, including its skin edge
+    // behavior: manifests/o82-memory-json-source-20261105.json.
+    const auto signed_field = [](json_object *object, const char *key) {
+        const double value = number(field(object, key));
+        require(value == std::floor(value) && value >= std::numeric_limits<std::int32_t>::min() &&
+                value <= std::numeric_limits<std::int32_t>::max(), "invalid memory signed field");
+        return static_cast<std::int32_t>(value);
+    };
+    const auto unsigned_field = [](json_object *object, const char *key) {
+        const double value = number(field(object, key));
+        require(value == std::floor(value) && value >= 0 &&
+                value <= std::numeric_limits<std::uint32_t>::max(), "invalid memory unsigned field");
+        return static_cast<std::uint32_t>(value);
+    };
+    const auto scalar = [](json_object *object, const char *key) {
+        const double value = number(field(object, key));
+        require(std::abs(value) <= std::numeric_limits<float>::max(), "invalid memory scalar");
+        return static_cast<float>(value);
+    };
+    const auto edge_control = [](json_object *object, bool skin_saturation) {
+        const auto left = text_field(object, "trapezoidEdgeLeft");
+        const auto right = text_field(object, "trapezoidEdgeRight");
+        require((left == "SLOPE" || left == "STEP") &&
+                (right == "SLOPE" || right == "STEP"), "invalid memory edge");
+        // Exact O82 SetConfig checks the right key, then reads the left key
+        // again for skin saturation only. Preserve this observed conversion.
+        return unsigned(left == "SLOPE") | (unsigned((skin_saturation ? left : right) == "SLOPE") << 1);
+    };
+    std::vector<unsigned char> data(O82_MEMORY_BYTES);
+    put_word(data, 8, O82_MEMORY_VERSION);
+    unsigned enabled_mask = 0, protection = 0;
+    constexpr const char *regions[]{"MemColSkin", "MemColSky", "MemColFol"};
+    for (unsigned i = 0; i < 3; ++i) {
+        auto region = field(picture, regions[i]);
+        auto hue = field(region, "hue"), sat = field(region, "sat"), val = field(region, "val");
+        // Protection is global and is also collected from disabled regions.
+        protection |= unsigned(boolean_field(hue, "protect"));
+        protection |= unsigned(boolean_field(sat, "protect")) << 1;
+        protection |= unsigned(boolean_field(val, "protect")) << 2;
+        protection |= unsigned(boolean_field(region, "protectContrast")) << 3;
+        protection |= unsigned(boolean_field(region, "protectVsSixZone")) << 4;
+        protection |= unsigned(!boolean_field(region, "blendingEnable")) << 5;
+        o82::MemoryColorInput input;
+        input.hue_adjustment = signed_field(hue, "adj");
+        input.hue_extent = std::bit_cast<std::int32_t>(unsigned_field(hue, "mid"));
+        input.hue_minimum = signed_field(hue, "min"); input.hue_maximum = signed_field(hue, "max");
+        input.saturation_adjustment = scalar(sat, "adj"); input.value_adjustment = scalar(val, "adj");
+        input.saturation_extent = unsigned_field(sat, "mid"); input.value_extent = unsigned_field(val, "mid");
+        input.saturation_minimum = scalar(sat, "min"); input.saturation_maximum = scalar(sat, "max");
+        input.value_minimum = scalar(val, "min"); input.value_maximum = scalar(val, "max");
+        input.saturation_hold_control = edge_control(sat, i == 0);
+        input.value_hold = edge_control(val, false);
+        if (!enabled(region)) continue;
+        enabled_mask |= 1U << i;
+        o82::MemoryColorData output;
+        require(o82::compile_memory_color(input, output) == o82::MemoryColorError::none,
+                "memory-color conversion refused");
+        const std::array<unsigned, 8> words{output.adjust_p0, output.adjust_p1, output.adjust_p2,
+            output.blend_gain, unsigned(output.saturation_hold) | (unsigned(output.value_hold) << 2),
+            output.hue_region, output.saturation_region, output.value_region};
+        for (unsigned j = 0; j < words.size(); ++j)
+            put_word(data, O82_MEMORY_HEADER + i * O82_MEMORY_REGION_BYTES + j * 4, words[j]);
+    }
+    put_word(data, 0, enabled_mask); put_word(data, 4, protection);
+    require(o82_memory_valid(data.data(), data.size()), "invalid native memory payload");
+    return data;
+}
 std::vector<unsigned char> native_sixzone(json_object *picture) {
     auto six = field(picture, "SixZone");
     if (!enabled(six)) return {};
@@ -602,8 +673,8 @@ std::vector<unsigned char> native_presets(json_object *document, const char *pan
     require(!names.empty() && names.size() <= O82_COLOR_FW_MAX_PRESETS, "invalid preset count");
     std::sort(names.begin(), names.end());
     std::vector<unsigned char> data(O82_COLOR_FW_HEADER + names.size() * O82_COLOR_FW_RECORD);
-    std::copy_n(O82_COLOR_FW_MAGIC, 8, data.begin());
-    put_word(data, 8, O82_COLOR_FW_VERSION); put_word(data, 12, panel_id);
+    std::copy_n(O82_COLOR_FW_MEMORY_MAGIC, 8, data.begin());
+    put_word(data, 8, O82_COLOR_FW_MEMORY_VERSION); put_word(data, 12, panel_id);
     put_word(data, 24, names.size()); put_word(data, 28, O82_COLOR_FW_RECORD);
     put_hash(data, 32, source_hash);
     put_word(data, 64, O82_HDR_NOMINAL_PEAK_NITS); put_word(data, 68, O82_HDR_NOMINAL_BLACK_10000);
@@ -659,10 +730,8 @@ std::vector<unsigned char> native_presets(json_object *document, const char *pan
         }
         const auto hsic = native_hsic(picture.get());
         if (o82_hdr_u32(hsic.data())) flags |= O82_COLOR_OP_HSIC;
-        for (const char *memory : {"MemColFol", "MemColSkin", "MemColSky"})
-            if (enabled(field(picture.get(), memory))) {
-                flags |= O82_COLOR_OP_MEMORY; blocked |= O82_COLOR_BLOCK_MEMORY;
-            }
+        const auto memory = native_memory(picture.get());
+        if (o82_hdr_u32(memory.data()) || o82_hdr_u32(memory.data() + 4)) flags |= O82_COLOR_OP_MEMORY;
         const auto sixzone = native_sixzone(picture.get());
         if (!sixzone.empty()) flags |= O82_COLOR_OP_SIXZONE;
         Json opaque(json_object_new_object(), json_object_put);
@@ -688,6 +757,8 @@ std::vector<unsigned char> native_presets(json_object *document, const char *pan
             }
             put_word(data, record + 144, data.size()); put_word(data, record + 148, hsic.size());
             append(hsic);
+            put_word(data, record + 152, data.size()); put_word(data, record + 156, memory.size());
+            append(memory);
         }
         const std::string bytes = json_object_to_json_string_ext(opaque.get(), JSON_C_TO_STRING_PLAIN);
         require(!bytes.empty() && bytes.size() <= 2 * 1024 * 1024, "invalid preserved preset data length");
@@ -724,6 +795,10 @@ void preset_self_test(const Profile &identity) {
     auto gamut = parse(R"({"enable":false})");
     assert(!json_object_object_add(mode.get(), "PostBlendGamut", encode(gamut.get())));
     auto picture = parse(R"({"hue":0,"sat":0,"satThresh":0,"cont":0,"val":0,"MemColFol":{"enable":false},"MemColSkin":{"enable":false},"MemColSky":{"enable":false},"SixZone":{"enable":false,"hueCurve":[],"satCurve":[],"valCurve":[]}})");
+    for (const char *name : {"MemColSkin", "MemColSky", "MemColFol"}) {
+        auto memory = parse(R"({"enable":false,"blendingEnable":true,"protectContrast":false,"protectVsSixZone":false,"hue":{"adj":0,"min":0,"max":0,"mid":0,"protect":false},"sat":{"adj":0,"min":0,"max":0,"mid":0,"protect":false,"trapezoidEdgeLeft":"SLOPE","trapezoidEdgeRight":"SLOPE"},"val":{"adj":0,"min":0,"max":0,"mid":0,"protect":false,"trapezoidEdgeLeft":"SLOPE","trapezoidEdgeRight":"SLOPE"}})");
+        assert(!json_object_object_add(picture.get(), name, memory.release()));
+    }
     assert(!json_object_object_add(mode.get(), "PostBlendPa", encode(picture.get())));
     Json modes(json_object_new_object(), json_object_put), document(json_object_new_object(), json_object_put);
     auto add_mode = [&](const char *name) {
@@ -768,6 +843,8 @@ void preset_self_test(const Profile &identity) {
     assert(!json_object_object_add(document.get(), "test_panel", modes.release()));
     constexpr const char *hash = "2b6442ce0e8fef6d1b008cdeca3838450282868d385f6e3056c0a4ce2b8949d8";
     auto bundle = native_presets(document.get(), "test_panel", 0x42, hash);
+    assert(o82_hdr_u32(bundle.data() + 8) == O82_COLOR_FW_MEMORY_VERSION &&
+           !std::memcmp(bundle.data(), O82_COLOR_FW_MEMORY_MAGIC, 8));
     assert(o82_color_fw_valid(bundle.data(), bundle.size(), 0x42));
     assert(!o82_color_fw_valid(nullptr, bundle.size(), 0x42));
     assert(!o82_color_fw_valid(bundle.data(), bundle.size() - 1, 0x42));
@@ -797,8 +874,13 @@ void preset_self_test(const Profile &identity) {
     for (unsigned component : {1u, 2u, 3u})
         assert(o82_hdr_u16(bundle.data() + six_at + O82_SIXZONE_HEADER + 7 * 10 + component * 2) == 4095);
     assert(o82_color_fw_data(bundle.data(), 5, 0, 0, &igc, &gc));
+    assert(o82_color_fw_data(bundle.data(), 4, 0, 0, &igc, &gc));
+    const auto *memory_record = o82_color_fw_record(bundle.data(), 4);
+    assert((o82_hdr_u32(memory_record + 72) & O82_COLOR_OP_MEMORY) && !o82_hdr_u32(memory_record + 76));
+    assert(o82_hdr_u32(memory_record + 156) == O82_MEMORY_BYTES);
+    assert(o82_hdr_u32(bundle.data() + o82_hdr_u32(memory_record + 152)) == 1);
     const auto *retained_igc = igc, *retained_gc = gc;
-    for (unsigned index : {4u, 6u, 8u, ~0u}) {
+    for (unsigned index : {6u, 8u, ~0u}) {
         assert(!o82_color_fw_data(bundle.data(), index, 0, 0, &igc, &gc));
         assert(igc == retained_igc && gc == retained_gc);
     }
@@ -843,7 +925,7 @@ void preset_self_test(const Profile &identity) {
     const unsigned node = (2 * 17 + 4) * 17 + 8;
     const double expected = 1.055 * std::pow(gamut_knot(8), 1 / 2.4) - 0.055;
     assert(std::abs(o82_hdr_u16(p3_tables.data() + 2 * O82_COLOR_FW_CURVE_BYTES + node * 6) / 4095.0 - expected) < 0.0003);
-    std::cout << "Native v3 preset bundle: distinct gamuts, four wire inputs, active/neutral SixZone, legacy curves, explicit unsupported operations and parser bounds passed\n";
+    std::cout << "Native v5 preset bundle: distinct gamuts, four wire inputs, active/neutral SixZone and memory, explicit unsupported HDR and parser bounds passed\n";
 }
 void self_test() {
     Profile identity;

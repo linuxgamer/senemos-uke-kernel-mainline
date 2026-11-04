@@ -1,5 +1,5 @@
 Name: uke-o82-color-profile
-Version: 0.5.0
+Version: 0.6.0
 Release: 1%{?dist}
 Summary: Generate private O82 OEM color mappings and native preset data
 License: MIT
@@ -11,7 +11,7 @@ Source3: uke-o82-hdr-format.h
 Source4: o82-hdr-edid-contract.cpp
 Source5: o82-regdma.h
 # The independent KMS check owns the DMA transport and prepared-kernel fixtures.
-# This utility builds and installs no DMA or kernel transport implementation.
+# No DMA or kernel transport implementation is installed by this utility.
 Source10: o82-color-firmware.h
 Source11: dpu_o82_profiles.c
 Source12: dpu_o82_profiles.h
@@ -28,6 +28,11 @@ Source22: o82-hsic-format.h
 Source23: o82-hsic-payload-contract.cpp
 Source24: o82-hsic-contract.cpp
 Source25: o82-memory-format.h
+Source26: o82-memory-color.h
+Source27: o82-memory-payload-contract.cpp
+Source28: o82-memory-payload-contract.sh
+Source29: dpu_o82_lutbus.c
+Source30: dpu_o82_lutbus.h
 ExclusiveArch: aarch64
 BuildRequires: clang gcc-c++ compiler-rt pkgconf-pkg-config
 BuildRequires: pkgconfig(json-c) pkgconfig(lcms2) pkgconfig(openssl)
@@ -44,6 +49,8 @@ The native-preset preparation command retains each preset's identity and
 compiles independent native/BT.2020 and gamma2.2/PQ inputs. Active operations
 without a complete implementation remain preserved and explicitly refused;
 the command does not install firmware or advertise new display capabilities.
+Private v5 presets carry explicit memory-color and global protection state,
+including neutral transitions and protection from disabled regions.
 
 %prep
 cp %{SOURCE0} .
@@ -57,12 +64,14 @@ cp %{SOURCE15} .
 cp %{SOURCE16} .
 cp %{SOURCE17} %{SOURCE18} %{SOURCE19} %{SOURCE20} .
 cp %{SOURCE21} %{SOURCE22} %{SOURCE23} %{SOURCE24} .
-cp %{SOURCE25} .
+cp %{SOURCE25} %{SOURCE26} .
 mkdir -p src/display tests
 cp %{SOURCE3} %{SOURCE10} %{SOURCE11} %{SOURCE12} src/display/
 cp %{SOURCE17} %{SOURCE22} src/display/
 cp %{SOURCE25} src/display/
 cp %{SOURCE13} %{SOURCE14} tests/
+cp %{SOURCE27} %{SOURCE28} tests/
+cp %{SOURCE29} %{SOURCE30} src/display/
 
 %build
 g++ -std=c++20 %{optflags} -UNDEBUG -Wall -Wextra -Werror \
@@ -87,6 +96,7 @@ g++ -std=c++20 -O2 -UNDEBUG -Wall -Wextra -Werror -I. \
     o82-hdr-edid-contract.cpp $(pkg-config --cflags --libs libdisplay-info) -o edid-contract
 ./edid-contract
 bash tests/o82-profile-loader-contract.sh .
+bash tests/o82-memory-payload-contract.sh .
 g++ -std=c++20 -O2 -UNDEBUG -Wall -Wextra -Werror -I. \
     -Wl,--wrap=main o82-hsic-payload-contract.cpp $(pkg-config --cflags --libs json-c lcms2 openssl) -o hsic-payload
 ./hsic-payload
@@ -134,6 +144,11 @@ grep -E '^OEM gamut grid regression rejected: [1-9][0-9]*/[0-9]+ checks failed$'
 %{_bindir}/uke-o82-color-profile
 
 %changelog
+* Thu Nov 05 2026 Uke contributors - 0.6.0-1
+- Compile OEM memory-color fields and protection into private v5 presets.
+- Check actual JSON, bundle, kernel loader and paired command encoding together.
+- Preserve v4 loading and the observed O82 skin saturation edge conversion.
+
 * Wed Nov 04 2026 Uke contributors - 0.5.0-1
 - Compile explicit active and neutral HSIC into a bounded private v4 bundle.
 - Validate composed PA state, actual parser/loader and scalar rounding contracts.
