@@ -61,6 +61,16 @@
     "c2_c1_low": "output B",
     "lutbus_order": "R, G, B; each 12-bit component shifted left by 4"
   },
+  "compiler_qualification": {
+    "copr_build": 11252971,
+    "source_commit": "78937e5b596eda58c302669755f07944b3086317",
+    "package": "uke-o82-color-profile-0.3.0-6.fc46.aarch64",
+    "synthetic_checks_per_run": 29532,
+    "old_source_failed_checks": 14583,
+    "checks": "GCC optimized and Clang ASan/UBSan; actual pre-fix source negative control",
+    "oem_calibration_used_in_build": false,
+    "physical_tested": false
+  },
   "limits": [
     "Static reference and interface evidence does not establish optical interpolation or live atomic ownership",
     "No factory calibration arrays or proprietary implementation are included",

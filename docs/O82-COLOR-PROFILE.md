@@ -15,7 +15,12 @@ interval. Earlier generated ICC and native data require regeneration with the
 corrected utility. The accepted input hashes and file formats remain unchanged.
 The [source record](../manifests/o82-gamut-source-20261104.json) distinguishes
 this protocol evidence from optical validation. Remote regression qualification
-of this correction is pending.
+of this correction passed in `0.3.0-6`,
+[COPR 11252971](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11252971/).
+GCC and Clang ASan/UBSan each passed 29,532 independent synthetic coordinate
+and native-output checks. The actual former source failed 14,583 of those
+checks as required. The first `0.3.0-5` attempt stopped in the test entry-point
+compilation; its replacement retains strict compiler diagnostics.
 
 The initial `0.1.0-2` passed numerical checks and saved ICC selection, but its
 serialized stage order was rejected when original KWin rendered the output.

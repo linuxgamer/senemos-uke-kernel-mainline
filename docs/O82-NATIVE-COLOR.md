@@ -65,6 +65,13 @@ with an active DMA owner would release resources still accessible to hardware.
 
 ## Qualification
 
+The private-data compiler's input grid is separately qualified in
+[COPR 11252971](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11252971/),
+utility `0.3.0-6`. Both optimized and ASan/UBSan runs passed 29,532 asymmetric
+knot/midpoint/native-output checks; the actual previous implementation failed
+14,583 checks. This source-derived numeric correction requires regenerating
+private ICC/native data. It does not exercise a live paired output.
+
 [COPR 11252759](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11252759/)
 passed complete retained preparation and:
 
@@ -86,9 +93,9 @@ journal. No native compilation or device activation ran on the tablet.
 
 The existing native CRTC already supplies GC1.8 with 1024 entries and CTM programming.
 Full-profile application must coordinate with that atomic path, reserve the
-paired DSPPs and prove both output halves stopped. It must also establish the
-private firmware lifetime, independent
-native/BT.2020 and gamma2.2/PQ selection, and all required picture/HDR operations.
+paired DSPPs and prove both output halves stopped. It must also establish
+private firmware lifetime, independent native/BT.2020 and gamma2.2/PQ selection,
+and all required picture/HDR operations.
 An unsupported preset must not alias a different transform.
 
 `dpu_o82_profiles.c` validates a fixed PA/PB v2 bundle before publishing state
