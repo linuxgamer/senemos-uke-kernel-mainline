@@ -661,7 +661,7 @@
     },
     {
       "path": "tests/pm8010-population-contract.sh",
-      "sha256": "514b6340db247b32c3732bd8106b131527d55ed4e8a63fd07d4815aad73eef20"
+      "sha256": "e82f86346b90dc1c0d67f6599afe3fba67fa3ec976cc2313139c47d2b2d197b3"
     },
     {
       "path": "tests/qup-interconnect-contract.sh",
@@ -737,11 +737,11 @@
     },
     {
       "path": "tests/ufs-mcq-allocation-contract.sh",
-      "sha256": "750e060fd0e3d78f20754de245ffb58b8a160ed432116dbef0c5bde3b6249237"
+      "sha256": "32698594b24fac7fe5c83273f2c3673c990c18eceda697d171dcbbdedc32dc71"
     },
     {
       "path": "tests/ufs-mcq-contract.sh",
-      "sha256": "65e6f8ab12aac419b41f203ebaad2fa6bab3ed69de71983709d910ba2b870e51"
+      "sha256": "2552c28bd07e94f03caabbe83ad2272e23eb1eeea58c2129bde8a8e977681047"
     },
     {
       "path": "tests/uke-build-scope-contract.sh",
@@ -761,7 +761,7 @@
     },
     {
       "path": "tests/usbss-reset-lifetime-contract.sh",
-      "sha256": "e2073e29cb9c8685f7ceb16a32abffb2c67d48c1970c856cc4e27e1856ebfb62"
+      "sha256": "b27216988679ff21a9bd0452e1e283ff02c31d5d69f669b664c73ae421d2eafe"
     },
     {
       "path": "tests/wcd939x-channel-switch-contract.sh",
