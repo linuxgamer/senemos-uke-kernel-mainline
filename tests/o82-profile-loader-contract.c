@@ -9,14 +9,15 @@
 #include "dpu_o82_profiles.h"
 #include "o82-color-firmware.h"
 
-static unsigned char bytes[O82_COLOR_FW_HEADER + 2 * O82_COLOR_FW_RECORD + O82_COLOR_FW_DATA_BYTES + 2];
+static unsigned char bytes[O82_COLOR_FW_HEADER + 2 * O82_COLOR_FW_RECORD + O82_COLOR_FW_DATA_BYTES + O82_SIXZONE_BYTES + 2];
 static struct firmware fixture;
 static unsigned int requests, releases;
 static int request_error;
+static bool with_sixzone;
 
 int request_firmware_direct(const struct firmware **fw, const char *name, struct device *dev)
 {
-	assert(dev && !strcmp(name, "qcom/sm7675/uke/o82-42-color-v2.bin"));
+	assert(dev && !strcmp(name, "qcom/sm7675/uke/o82-42-color-v3.bin"));
 	requests++;
 	if (request_error)
 		return request_error;
@@ -48,7 +49,8 @@ static void make_fixture(bool missing_default, bool blocked_default)
 
 		strcpy((char *)bytes + record, !index ? "blocked" : missing_default ? "z_no_default" : "standard_P3");
 		word(record + 64, 1);
-		word(record + 72, O82_COLOR_OP_IGC | O82_COLOR_OP_GC | (blocked ? O82_COLOR_OP_MEMORY : 0));
+		word(record + 72, O82_COLOR_OP_IGC | O82_COLOR_OP_GC | (blocked ? O82_COLOR_OP_MEMORY : 0) |
+				 (with_sixzone && !blocked ? O82_COLOR_OP_SIXZONE : 0));
 		word(record + 76, blocked ? O82_COLOR_BLOCK_MEMORY : 0);
 		bytes[record + 96] = 1;
 		if (!blocked) {
@@ -59,6 +61,14 @@ static void make_fixture(bool missing_default, bool blocked_default)
 					bytes[endpoint] = 255; bytes[endpoint + 1] = 15;
 				}
 			cursor += O82_COLOR_FW_DATA_BYTES;
+			if (with_sixzone) {
+				word(record + 136, cursor); word(record + 140, O82_SIXZONE_BYTES);
+				word(cursor, 7); word(cursor + 28, 384);
+				bytes[cursor + 24] = 3; bytes[cursor + 25] = 3;
+				/* An asymmetric nonzero tuple survives lookup unchanged. */
+				bytes[cursor + O82_SIXZONE_HEADER + 4] = 23;
+				cursor += O82_SIXZONE_BYTES;
+			}
 		}
 		word(record + 88, cursor); word(record + 92, 1); bytes[cursor++] = 'x';
 	}
@@ -94,6 +104,7 @@ int main(void)
 		for (unsigned int pq = 0; pq < 2; pq++) {
 			assert(!dpu_o82_profiles_input(&profiles, wide, pq, &input));
 			assert(input.primaries == 1 && input.igc && input.gamut && input.gc);
+			assert(input.pa_managed && !input.sixzone && !input.sixzone_bytes);
 			assert(input.gamut == bytes + 417 + 2 * O82_COLOR_FW_CURVE_BYTES + wide * O82_COLOR_FW_CUBE_BYTES);
 			assert(input.igc == bytes + 417 + pq * O82_COLOR_FW_CURVE_BYTES);
 		}
@@ -114,6 +125,24 @@ int main(void)
            input.dither_strength == retained.dither_strength && input.dither_enabled == retained.dither_enabled);
 	dpu_o82_profiles_unload(&profiles); dpu_o82_profiles_unload(NULL);
 	assert(releases == 4);
-	puts("Actual kernel preset loader: missing/corrupt data, default admission, refusal, all four inputs and lifetime passed");
+	with_sixzone = true; make_fixture(false, false);
+	assert(!dpu_o82_profiles_load(&profiles, &dev, 0x42));
+	for (unsigned int wide = 0; wide < 2; wide++)
+		for (unsigned int pq = 0; pq < 2; pq++) {
+			assert(!dpu_o82_profiles_input(&profiles, wide, pq, &input));
+			assert(input.pa_managed && input.sixzone_bytes == O82_SIXZONE_BYTES);
+			assert(o82_sixzone_valid(input.sixzone, input.sixzone_bytes));
+			assert(input.sixzone[O82_SIXZONE_HEADER + 4] == 23);
+			for (unsigned int i = 0; i < 3; i++) assert(!input.pa_mode[i] && !input.pa_hold[i]);
+		}
+	retained = input;
+	assert(dpu_o82_profiles_select(&profiles, "blocked") == -EOPNOTSUPP);
+	assert(dpu_o82_profiles_input(&profiles, 2, 0, &input) == -EINVAL);
+	assert(input.sixzone == retained.sixzone && input.pa_managed);
+	dpu_o82_profiles_unload(&profiles);
+	memcpy(bytes, "O82COLR2", 8); word(8, 2);
+	word(20, o82_hdr_crc32(bytes + 24, fixture.size - 24));
+	assert(dpu_o82_profiles_load(&profiles, &dev, 0x42) == -EBADMSG && !profiles.fw);
+	puts("Actual v3 kernel preset loader: corrupt/legacy refusal, active/disabled SixZone, four wire inputs and lifetime passed");
 	return 0;
 }

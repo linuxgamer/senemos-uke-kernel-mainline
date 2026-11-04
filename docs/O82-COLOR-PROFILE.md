@@ -9,10 +9,19 @@ package and both fixed native v2 firmware files are absent. The ICC reports
 below describe their dated trials and do not establish the current root's
 profile selection. Full private-profile application and native HDR remain open.
 
+The `0.4.0-1` source adds a private v3 bundle with explicit SixZone 2.0 data:
+32 bytes of flags/thresholds/PWL/hold state and 384 five-component tuples.
+The actual JSON parser uses separate `SixZoneThresholds`, preserves legacy
+middle/high curve selection and refuses fractional/invalid thresholds, partial
+bands and unknown edge names. The native loader requests only the matching
+`o82-36-color-v3.bin` or `o82-42-color-v3.bin`; older bundles are refused.
+Compiler/loader qualification is pending. Complete native PA programming and
+physical acceptance remain required before applying these candidate bundles.
+
 The `0.3.0-5` source corrects factory gamut interpolation and native sampling
 to the OEM 12-bit coordinates 0,256,...,3840,4095, including the shorter final
 interval. Earlier generated ICC and native data require regeneration with the
-corrected utility. The accepted input hashes and file formats remain unchanged.
+corrected utility. That correction retained the accepted input hashes and file formats.
 The [source record](../manifests/o82-gamut-source-20261104.json) distinguishes
 this protocol evidence from optical validation. Remote regression qualification
 of this correction passed in `0.3.0-6`,

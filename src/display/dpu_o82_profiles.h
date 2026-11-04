@@ -17,6 +17,11 @@ struct dpu_o82_color_input {
 	const u8 *igc;
 	const u8 *gamut;
 	const u8 *gc;
+	const u8 *sixzone;
+	unsigned int sixzone_bytes;
+	/* Hardware snapshots are filled by the powered wrapper, never firmware. */
+	unsigned int pa_mode[3], pa_hold[3];
+	bool pa_managed;
 	unsigned int primaries;
 	unsigned int dither_strength;
 	bool dither_enabled;

@@ -3,10 +3,11 @@
 #define O82_COLOR_FIRMWARE_H
 
 #include "uke-o82-hdr-format.h"
+#include "o82-sixzone-format.h"
 
 /* Private little-endian bundle; names and all active operations stay distinct. */
-#define O82_COLOR_FW_MAGIC "O82COLR2"
-#define O82_COLOR_FW_VERSION 2
+#define O82_COLOR_FW_MAGIC "O82COLR3"
+#define O82_COLOR_FW_VERSION 3
 #define O82_COLOR_FW_HEADER 96
 #define O82_COLOR_FW_RECORD 160
 #define O82_COLOR_FW_LIMIT (8 * 1024 * 1024)
@@ -135,7 +136,7 @@ static inline int o82_color_fw_valid(const unsigned char *data,
 
 		record = o82_color_fw_record(data, i);
 		if (!o82_color_fw_name(record) || o82_hdr_u32(record + 64) > 1 ||
-		    o82_hdr_u32(record + 68) > 1 || !o82_color_fw_zero(record + 136, 24) ||
+		    o82_hdr_u32(record + 68) > 1 || !o82_color_fw_zero(record + 144, 16) ||
 		    o82_color_fw_zero(record + 96, 32))
 			return 0;
 		if (previous) {
@@ -169,6 +170,16 @@ static inline int o82_color_fw_valid(const unsigned char *data,
 			    !o82_color_fw_tables(data + cursor))
 				return 0;
 			cursor += size;
+		}
+		offset = o82_hdr_u32(record + 136);
+		size = o82_hdr_u32(record + 140);
+		if (!blocked && (flags & O82_COLOR_OP_SIXZONE)) {
+			if (offset != cursor || size > length - cursor ||
+			    !o82_sixzone_valid(data + cursor, size))
+				return 0;
+			cursor += size;
+		} else if (offset || size) {
+			return 0;
 		}
 		offset = o82_hdr_u32(record + 88);
 		size = o82_hdr_u32(record + 92);

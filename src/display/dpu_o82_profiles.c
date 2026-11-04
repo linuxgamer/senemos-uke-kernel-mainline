@@ -39,8 +39,8 @@ int dpu_o82_profiles_load(struct dpu_o82_profiles *profiles, struct device *dev,
 		return -EINVAL;
 	if (profiles->fw)
 		return -EBUSY;
-	name = panel == 0x42 ? "qcom/sm7675/uke/o82-42-color-v2.bin" :
-			      "qcom/sm7675/uke/o82-36-color-v2.bin";
+	name = panel == 0x42 ? "qcom/sm7675/uke/o82-42-color-v3.bin" :
+			      "qcom/sm7675/uke/o82-36-color-v3.bin";
 	ret = request_firmware_direct(&candidate.fw, name, dev);
 	if (ret)
 		return ret;
@@ -72,7 +72,7 @@ int dpu_o82_profiles_input(const struct dpu_o82_profiles *profiles,
 			  unsigned int bt2020, unsigned int pq,
 			  struct dpu_o82_color_input *input)
 {
-	struct dpu_o82_color_input candidate;
+	struct dpu_o82_color_input candidate = { 0 };
 	const unsigned char *record;
 
 	if (!profiles || !input)
@@ -87,6 +87,10 @@ int dpu_o82_profiles_input(const struct dpu_o82_profiles *profiles,
 	candidate.primaries = o82_hdr_u32(record + 64);
 	candidate.dither_enabled = o82_hdr_u32(record + 128);
 	candidate.dither_strength = o82_hdr_u32(record + 132);
+	candidate.pa_managed = true;
+	candidate.sixzone_bytes = o82_hdr_u32(record + 140);
+	if (candidate.sixzone_bytes)
+		candidate.sixzone = profiles->fw->data + o82_hdr_u32(record + 136);
 	*input = candidate;
 	return 0;
 }

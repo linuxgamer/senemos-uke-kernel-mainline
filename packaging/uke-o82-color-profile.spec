@@ -1,6 +1,6 @@
 Name: uke-o82-color-profile
-Version: 0.3.0
-Release: 6%{?dist}
+Version: 0.4.0
+Release: 1%{?dist}
 Summary: Generate private O82 OEM color mappings and native preset data
 License: MIT
 URL: https://github.com/MCC45TR/senemos-uke-kernel-mainline
@@ -19,6 +19,10 @@ Source13: o82-profile-loader-contract.c
 Source14: o82-profile-loader-contract.sh
 Source15: o82-gamut-grid-contract.cpp
 Source16: o82-color-before-grid.cpp
+Source17: o82-sixzone-format.h
+Source18: o82-sixzone.h
+Source19: o82-sixzone-payload-contract.cpp
+Source20: o82-sixzone-contract.cpp
 ExclusiveArch: aarch64
 BuildRequires: clang gcc-c++ compiler-rt pkgconf-pkg-config
 BuildRequires: pkgconfig(json-c) pkgconfig(lcms2) pkgconfig(openssl)
@@ -46,8 +50,10 @@ cp %{SOURCE5} .
 cp %{SOURCE10} .
 cp %{SOURCE15} .
 cp %{SOURCE16} .
+cp %{SOURCE17} %{SOURCE18} %{SOURCE19} %{SOURCE20} .
 mkdir -p src/display tests
 cp %{SOURCE3} %{SOURCE10} %{SOURCE11} %{SOURCE12} src/display/
+cp %{SOURCE17} src/display/
 cp %{SOURCE13} %{SOURCE14} tests/
 
 %build
@@ -61,6 +67,7 @@ install -Dpm755 uke-o82-color-profile %{buildroot}%{_bindir}/uke-o82-color-profi
 %check
 gcc -std=c11 -Wall -Wextra -Werror -x c -fsyntax-only o82-regdma.h
 gcc -std=c11 -Wall -Wextra -Werror -x c -fsyntax-only o82-color-firmware.h
+gcc -std=c11 -Wall -Wextra -Werror -x c -fsyntax-only o82-sixzone-format.h
 ./uke-o82-color-profile --self-test
 clang++ -std=c++20 -O1 -g -UNDEBUG -Wall -Wextra -Werror \
     -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer \
@@ -71,6 +78,16 @@ g++ -std=c++20 -O2 -UNDEBUG -Wall -Wextra -Werror -I. \
     o82-hdr-edid-contract.cpp $(pkg-config --cflags --libs libdisplay-info) -o edid-contract
 ./edid-contract
 bash tests/o82-profile-loader-contract.sh .
+g++ -std=c++20 -O2 -UNDEBUG -Wall -Wextra -Werror -I. \
+    -Wl,--wrap=main o82-sixzone-payload-contract.cpp $(pkg-config --cflags --libs json-c lcms2 openssl) -o sixzone-payload
+./sixzone-payload
+clang++ -std=c++20 -O1 -g -UNDEBUG -Wall -Wextra -Werror -I. \
+    -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer \
+    -Wl,--wrap=main o82-sixzone-payload-contract.cpp $(pkg-config --cflags --libs json-c lcms2 openssl) -o sixzone-payload-sanitized
+./sixzone-payload-sanitized
+g++ -std=c++20 -O2 -UNDEBUG -Wall -Wextra -Werror -I. \
+    o82-sixzone-contract.cpp -o sixzone-converter
+./sixzone-converter
 g++ -std=c++20 -O2 -UNDEBUG -Wall -Wextra -Werror -I. \
     -Wl,--wrap=main o82-gamut-grid-contract.cpp $(pkg-config --cflags --libs json-c lcms2 openssl) -o gamut-grid
 ./gamut-grid
@@ -94,6 +111,11 @@ grep -E '^OEM gamut grid regression rejected: [1-9][0-9]*/[0-9]+ checks failed$'
 %{_bindir}/uke-o82-color-profile
 
 %changelog
+* Wed Nov 04 2026 Uke contributors - 0.4.0-1
+- Encode bounded active SixZone state in private v3 bundles with legacy curve selection.
+- Validate actual parser, shared PA semantics and native loader using synthetic data.
+- Retain unsupported HSIC, memory-color and HDR operations as explicit refusals.
+
 * Wed Nov 04 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 0.3.0-6
 - Redirect only the fixture entry at link time and retain strict production diagnostics.
 

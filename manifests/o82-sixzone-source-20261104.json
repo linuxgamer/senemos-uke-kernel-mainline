@@ -201,6 +201,20 @@
   "private_inputs_included": false,
   "oem_code_executed": false,
   "native_sixzone_enabled": false,
-  "existing_blocked_presets_unchanged": true,
+  "delivered_v2_blocked_presets_unchanged": true,
+  "bundle_integration": {
+    "version": 3,
+    "payload_bytes": 3872,
+    "header_bytes": 32,
+    "tuple_order": ["hue", "sat_low", "sat_mid", "sat_high", "value"],
+    "tuple_component_bits": 12,
+    "tuple_storage_bits": 16,
+    "record_offset_fields": [136, 140],
+    "implementation": ["src/display/o82-sixzone-format.h", "src/display/o82-color-profile.cpp", "src/display/dpu_o82_profiles.c"],
+    "utility": "0.4.0-1",
+    "qualification": "pending actual parser, firmware validator and native loader checks",
+    "kernel_writer_qualification_required": true,
+    "private_inputs_included": false
+  },
   "physical_acceptance": false
 }

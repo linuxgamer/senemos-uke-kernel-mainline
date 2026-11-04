@@ -150,11 +150,16 @@ passed 25,155 checks in each optimized GCC and Clang ASan/UBSan run at source
 does not change the installed utility, v2 bundle, admitted presets or kernel
 writer. Complete PA register/flush integration remains required.
 
-`dpu_o82_profiles.c` validates a fixed PA/PB v2 bundle before publishing state
+Delivered release `6503` validates a fixed PA/PB v2 bundle before publishing state
 and retains it until explicit unload. Refused selection leaves the previous
-record/pointers unchanged. The current data format has 59 records: 47 compiled
+record/pointers unchanged. The recorded v2 preparation has 59 records: 47 compiled
 transforms and 12 explicitly blocked nonzero picture/HDR operations. That
 preparation does not complete the full native color objective.
+
+The new v3 compiler/loader source carries explicit bounded SixZone data and
+rejects older input. Its remote utility qualification is pending; complete
+paired PA hardware integration and kernel qualification are separate gates.
+The delivered `6503` cohort and its disabled default are unchanged.
 
 The 4 November tablet inspection found neither fixed native bundle nor the
 `uke-o82-color-profile` package installed. Earlier private ICC trials describe
