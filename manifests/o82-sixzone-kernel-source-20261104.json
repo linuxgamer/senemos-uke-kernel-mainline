@@ -15,7 +15,7 @@
     "preceding_parent": "6000 full-file pinned source URL now returns404; first7000 source stage11253605 failed before creating an SRPM",
     "current_parent": "6503 repository source URL returns200; full-file digest comes from checksum-verified primary metadata",
     "admission": "Full-file SHA256, exact6503 RPM/profile identity, all retained profile/boot/config receipts and unchanged legacy checks",
-    "minimum_fresh_revision": 7001,
+    "minimum_fresh_revision": 7002,
     "release_history_guard_unchanged": true
   },
   "qualified_color": {
@@ -57,7 +57,7 @@
       "path": "src/display/dpu_o82_upload.c",
       "sha256": "91ebecd09896d765cc6aad0515cb08867244e0d2bea0ff0f2ddb07fb45ae0145",
       "reference_blob": "9397de922a22dad5dfd9f53aeb4422ce741f56b4",
-      "qualification": "New SixZone integration; complete remote kernel qualification required",
+      "qualification": "11253722 full kernel/package checks; no physical acceptance",
       "basis_sha256": "3191a9dd8535bd61db17dfe46173f4112ce21b6f14307d54a9c7a0ba388fcd10",
       "basis_blob": "dcaaf252de2bd9e9074128f653b3123ee552396e"
     },
@@ -65,7 +65,7 @@
       "path": "src/display/dpu_o82_upload.h",
       "sha256": "dc3386e7471b92eac62330224756ccaf016301c99a38751d4152dd5e67805f4c",
       "reference_blob": "f58522975dfaf10b1fd202aa9c03f4e5d92f2da7",
-      "qualification": "New SixZone integration; complete remote kernel qualification required",
+      "qualification": "11253722 full kernel/package checks; no physical acceptance",
       "basis_sha256": "3639ec71173af23e55fdcdb0d38bee40395650168e1327a5848b1d2146bd9ffd",
       "basis_blob": "4216d791ef64cb03b0eeb084a828183caacdb6a9"
     },
@@ -73,7 +73,7 @@
       "path": "src/display/dpu_o82_power.c",
       "sha256": "48e433d32b5614c65f2d50ce0f42773214ccfbd01bd1fe79f53cb13e90b82533",
       "reference_blob": "abcea41b023d77e5c34d1474cc65b9164dcd39c1",
-      "qualification": "New SixZone integration; complete remote kernel qualification required",
+      "qualification": "11253722 full kernel/package checks; no physical acceptance",
       "basis_sha256": "4bcaa07296bc6562bcaa3e09db2ba57afaea97b02e2ac63a7c20135e38537100",
       "basis_blob": "4aa44b10c5a9806d005ea1d253e25f5b4aa646a0"
     },
@@ -81,7 +81,7 @@
       "path": "src/display/dpu_o82_power.h",
       "sha256": "030cca4a0c9b3928650969bc7cbf25c83bcc5d1db26653aad77cfa9f5dd94aa3",
       "reference_blob": "78dffa30d1cf8f1c902e4c80ca1e2b0130f8f05b",
-      "qualification": "New SixZone integration; complete remote kernel qualification required",
+      "qualification": "11253722 full kernel/package checks; no physical acceptance",
       "basis_sha256": "b7ca004ed702823300fb6f1a90339fb67ba98f5c7fa43b1de9e09ca17c2397a5",
       "basis_blob": "bec8d3c281ce07acf6cc6f86315fcd6ec67494d7"
     },
@@ -89,7 +89,7 @@
       "path": "src/display/dpu_o82_color.c",
       "sha256": "31d27a25b466c9c2024820efb69b4521cde24d66ce8d4c171a92189eff170f9f",
       "reference_blob": "8dd7d943a34aedd760ef8b357302ebd68c855795",
-      "qualification": "New SixZone integration; complete remote kernel qualification required",
+      "qualification": "11253722 full kernel/package checks; no physical acceptance",
       "basis_sha256": "0993afb547c72cb26260382f8fd177f82889c918269eed7bcb768233ff774d24",
       "basis_blob": "12af08a60d1235ee979984e1008ae2bc20b9b019"
     },
@@ -103,7 +103,7 @@
       "path": "src/display/dpu_o82_profiles.c",
       "sha256": "a255211bcdabe427d42a0c4093e77b1ad280ad3ef25462421868eb373c9a1e3a",
       "reference_blob": "15881033be5615984b12fc62a2bbba67e47cb05f",
-      "qualification": "11253576 compiler/loader; full kernel integration qualification required",
+      "qualification": "11253576 compiler/loader and11253722 full kernel/package checks; no physical acceptance",
       "basis_sha256": "65c963c6b2d63ecd1cbc76a1d7f58a8f5528c5b02fdc14eac67837d964f4b4c8",
       "basis_blob": "a14055995e038958dba41b04d9896eead6de9627"
     },
@@ -111,7 +111,7 @@
       "path": "src/display/dpu_o82_profiles.h",
       "sha256": "d6e52a84a4835a6214515406a8ffd66c1d0f324a9f2ae6b63ee3520860885995",
       "reference_blob": "88fe7ebe75cb75bfa9faf754321a21c992f19260",
-      "qualification": "11253576 compiler/loader; full kernel integration qualification required",
+      "qualification": "11253576 compiler/loader and11253722 full kernel/package checks; no physical acceptance",
       "basis_sha256": "53ef42517cbdad323069927efbef703359e797210aeb34b635f23c4a256ae489",
       "basis_blob": "27fd1d01f5c9793a367fdc2f104ee66a442a3896"
     },
@@ -119,7 +119,7 @@
       "path": "src/display/dpu_o82_lutbus.c",
       "sha256": "eb9355db690907f7051136cb7d8bb9c7e0bf25f57f6375923ccce482642f0966",
       "reference_blob": "07feec64a6477ffb46ce8b98806008ea1d83cca7",
-      "qualification": "New SixZone integration; complete remote kernel qualification required",
+      "qualification": "11253722 full kernel/package checks; no physical acceptance",
       "basis_sha256": "eee1f6a2d589ccaa0f32470dec1adccd237737c18465071de5337cbd771521d2",
       "basis_blob": "ba719fec550052992aa48ad1048b0a0cb10e7bbf"
     },
@@ -127,7 +127,7 @@
       "path": "src/display/dpu_o82_lutbus.h",
       "sha256": "ba997baa45992b47145b820d6df1054a773ad799ad951cf44016be191d97bdde",
       "reference_blob": "f0c1f61fb8d110632f9cf18a31296702375a3188",
-      "qualification": "New SixZone integration; complete remote kernel qualification required",
+      "qualification": "11253722 full kernel/package checks; no physical acceptance",
       "basis_sha256": "800ff42d7f78b63f6386648928677d02c225b6f172d3039a224784b06f79236c",
       "basis_blob": "32631e2f5549eb2a83e9e351551e0355f7041d8f"
     },
@@ -141,7 +141,7 @@
       "path": "src/display/o82-color-firmware.h",
       "sha256": "f9c51c5e159c21f91131d1c1d12e7ed62bb762b480d24943d3f9823bf90dec5e",
       "reference_blob": "ba43bd1105d0dee899d4fdc971b65a6634786f4b",
-      "qualification": "11253576 compiler/loader; full kernel integration qualification required",
+      "qualification": "11253576 compiler/loader and11253722 full kernel/package checks; no physical acceptance",
       "basis_sha256": "7cac536f24d45d5cba4a299d4a730a8036c6e20a313b09b333f5a4f804733131",
       "basis_blob": "edbe308fe50d45b0b57b057a161ccde70ee05d42"
     },
@@ -155,7 +155,7 @@
       "path": "src/display/prepare-o82-regdma.sh",
       "sha256": "29fe12a2f243268e598ca802fb8cd78e11a78d0feb8d301a879c3a94011b847c",
       "reference_blob": "5f7ebd8e1347f7ddf201c6236f8243e198366df4",
-      "qualification": "New SixZone integration; complete remote kernel qualification required",
+      "qualification": "11253722 full kernel/package checks; no physical acceptance",
       "basis_sha256": "01c0caf18dd901b730aaf9c8debfa09a099cc725badd949a78790690c0739fd2",
       "basis_blob": "c5f2d627428e61b626eac26d1cf4e32b3a079c60"
     },
@@ -206,7 +206,7 @@
       "path": "tests/o82-lutbus-contract.c",
       "sha256": "de53b61adf43257b8e7cf50fa455a280793490d47ab5a8aa0b40660a572e1b6d",
       "reference_blob": "627704ae87d20800cf34d5366fbb08a84ef73324",
-      "qualification": "New SixZone integration; complete remote kernel qualification required",
+      "qualification": "11253722 full kernel/package checks; no physical acceptance",
       "basis_sha256": "2b5e122bef7276b40b3f31450ab4756461b83495c5adcec9bbdc4923661fef9a",
       "basis_blob": "7261f66f2dc1e88b8b08a5efd43546dea4f50f6b"
     },
@@ -220,7 +220,7 @@
       "path": "tests/o82-regdma-transport-contract.c",
       "sha256": "553f8410eab7f9fa46385fd0566e772c1639998066d5e7b04da2ad5551d60239",
       "reference_blob": "13e5be4b156da57e771aa49f227296fba65a7bb2",
-      "qualification": "New SixZone integration; complete remote kernel qualification required",
+      "qualification": "11253722 full kernel/package checks; no physical acceptance",
       "basis_sha256": "ff6b536038bf1a63a8c4be34f76fbfa35866ef0b03d3ee4ec2d3b04888d5659c",
       "basis_blob": "6be3adb350f5801a466c40ade8b44b40b8435c69"
     },
@@ -228,7 +228,7 @@
       "path": "tests/o82-regdma-transport-contract.sh",
       "sha256": "192732f05086ea7388345a06678d00187e07921ad364610bf3f30796b3d4f694",
       "reference_blob": "63a8a1a48c7d8ea068dcd6c73c973f1402ad6498",
-      "qualification": "New SixZone integration; complete remote kernel qualification required",
+      "qualification": "11253722 full kernel/package checks; no physical acceptance",
       "basis_sha256": "b5e00865ac5fbaffe9048382cdf637f3c0a0b8d33395f2ee532296ebb8906b08",
       "basis_blob": "9c77346ebb6f607b245613b99ecf238e54298900"
     },
@@ -236,7 +236,7 @@
       "path": "tests/o82-atomic-contract.c",
       "sha256": "7eb52b2c1d1f8cd99ec8a24f3f3fbf63a5aa20409ab945395b8ff20dde01b15b",
       "reference_blob": "2dd87960ae6ea9e5ba229f024a8e9f5ff98bbedd",
-      "qualification": "New SixZone integration; complete remote kernel qualification required",
+      "qualification": "11253722 full kernel/package checks; no physical acceptance",
       "basis_sha256": "0f71da31d862fa8a3f80ec2aa684c26539443aca134869a2857eb8d00fc316bf",
       "basis_blob": "653eb49fac1489d50fe2c9aeb651cfd523a79115"
     },
@@ -249,7 +249,7 @@
     {
       "path": "tests/o82-atomic-package-contract.sh",
       "sha256": "6f8faaac90406ba2a6555580b932c5e72042486b15980769d59aad34b2d3456a",
-      "qualification": "New SixZone integration; complete remote kernel qualification required",
+      "qualification": "11253722 full kernel/package checks; no physical acceptance",
       "basis_sha256": "ed021dad74906a9eaa9d0a14d399c6bde3fda8eb3e8a24138e8e6dfc4959813d",
       "reference_blob": "1d0148e166aaa10a104fce8cef64c39c00f09817"
     },
@@ -287,25 +287,25 @@
       "path": "src/display/o82-sixzone-format.h",
       "sha256": "67e018625041460de4e10c2ddaa734ee9e8d0909138a3b0fe23c8a08040db86d",
       "reference_blob": "c7b8bb5266bdb5dad1b3ab37287271b34c046236",
-      "qualification": "11253576 compiler/loader; full kernel integration qualification required"
+      "qualification": "11253576 compiler/loader and11253722 full kernel/package checks; no physical acceptance"
     },
     {
       "path": "patches/display/0076-o82-sixzone-pa-flush.patch",
       "sha256": "b802d43abdb07e49961a4da68a7316c6108e925de098988520c3e77cfe72700c",
       "reference_blob": "f1dcf222e77e73244f1bb9f3042ed49b35adc08a",
-      "qualification": "New SixZone integration; complete remote kernel qualification required"
+      "qualification": "11253722 full kernel/package checks; no physical acceptance"
     },
     {
       "path": "tests/o82-profile-loader-contract.c",
       "sha256": "9ee9081363f3f8ac184a7a17ddcad9bfb5056d828c9bcdd9ec151fdc12ceda99",
       "reference_blob": "5f1b46fc9e17e3d889dd8464dbd8a6fb1b46a905",
-      "qualification": "New SixZone integration; complete remote kernel qualification required"
+      "qualification": "11253722 full kernel/package checks; no physical acceptance"
     },
     {
       "path": "tests/o82-profile-loader-contract.sh",
       "sha256": "18e93120b593073d4c85e24c629cb2dc3ff7c64fa66a0b4297b5ff281db6b3cd",
       "reference_blob": "1a429a8fa65eb7fc760cc14ac28414829e2db7a7",
-      "qualification": "New SixZone integration; complete remote kernel qualification required"
+      "qualification": "11253722 full kernel/package checks; no physical acceptance"
     }
   ],
   "previous_kernel_qualification": {
@@ -343,7 +343,7 @@
     ]
   },
   "private_color_bundle_version": 3,
-  "sixzone_native_integration": "pending complete kernel and package qualification",
+  "sixzone_native_integration": "Full native kernel and package checks passed; private input delivery and physical acceptance remain open",
   "ancestral_kernel_parent": {
     "build": 11252822,
     "release": "7.3.1-6000",
@@ -360,5 +360,85 @@
     "result": "Source published; target preflight refused an obsolete fixture assertion comparing allocation capacity with base-only descriptor length",
     "correction": "Keep the maximum allocation; assert exact 37316/37356/41288-byte emitted descriptor lengths for legacy/off/on streams",
     "hardware_access": false
+  },
+  "kernel_qualification": {
+    "build": 11253722,
+    "release": "7.3.1-7001.fc46",
+    "source_commit": "be068c2f3cf9f561aedab27410b626eeeb1322b0",
+    "state": "succeeded",
+    "full_kernel_modules_dt_boot_and_rpm_checks": true,
+    "final_source_preflight": true,
+    "retained_display_fixtures_and_negative_controls": true,
+    "actual_paired_PA_and_atomic_fixtures": true,
+    "default_preset": "",
+    "native_hdr_advertisement": false,
+    "private_bundle_version": 3,
+    "physical_acceptance": false,
+    "repository_primary_sha256": "7f9de6ad84bc8e7e962aa44dfebb91474af0fa1c461b9ed214985c35b4b51f5f",
+    "packages": [
+      {
+        "name": "senemos-uke-linux-kernel-mainline",
+        "version": "7.3.1",
+        "release": "7001.fc46",
+        "arch": "aarch64",
+        "sha256": "c79f7929aa9ecc680114bb605ffe9560d496e3b8956d9c71ddd35889dcf9bbdc",
+        "href": "Packages/s/senemos-uke-linux-kernel-mainline-7.3.1-7001.fc46.aarch64.rpm",
+        "bytes": 30852
+      },
+      {
+        "name": "senemos-uke-linux-kernel-mainline",
+        "version": "7.3.1",
+        "release": "7001.fc46",
+        "arch": "src",
+        "sha256": "3a79239f9856ec938207a27e2fcaceae4eef0f12c71aa4904edf2dad14011d6d",
+        "href": "Packages/s/senemos-uke-linux-kernel-mainline-7.3.1-7001.fc46.src.rpm",
+        "bytes": 164336784
+      },
+      {
+        "name": "senemos-uke-linux-kernel-mainline-boot",
+        "version": "7.3.1",
+        "release": "7001.fc46",
+        "arch": "aarch64",
+        "sha256": "e5d4866538f086e7cef7de52ea164e9ca6d208a03f8b5793ef037f5832e6c113",
+        "href": "Packages/s/senemos-uke-linux-kernel-mainline-boot-7.3.1-7001.fc46.aarch64.rpm",
+        "bytes": 64976106
+      },
+      {
+        "name": "senemos-uke-linux-kernel-mainline-core",
+        "version": "7.3.1",
+        "release": "7001.fc46",
+        "arch": "aarch64",
+        "sha256": "e15c75b81764fbdf2444680f1a7c2b1e05e01d29f8d36b4c5d9b70e03544b268",
+        "href": "Packages/s/senemos-uke-linux-kernel-mainline-core-7.3.1-7001.fc46.aarch64.rpm",
+        "bytes": 33764863
+      },
+      {
+        "name": "senemos-uke-linux-kernel-mainline-dtbs",
+        "version": "7.3.1",
+        "release": "7001.fc46",
+        "arch": "aarch64",
+        "sha256": "e45d296048294d27d08081f4f09e821d7ae4e44ce1f4ffe065e348d48db35666",
+        "href": "Packages/s/senemos-uke-linux-kernel-mainline-dtbs-7.3.1-7001.fc46.aarch64.rpm",
+        "bytes": 16779
+      },
+      {
+        "name": "senemos-uke-linux-kernel-mainline-modules",
+        "version": "7.3.1",
+        "release": "7001.fc46",
+        "arch": "aarch64",
+        "sha256": "9d6d74b3a9471b0705ffb645ecf6ec680ff78fd61f0ea8ccd9f6419d1cb68d13",
+        "href": "Packages/s/senemos-uke-linux-kernel-mainline-modules-7.3.1-7001.fc46.aarch64.rpm",
+        "bytes": 13843094
+      },
+      {
+        "name": "senemos-uke-linux-kernel-mainline-singleboot",
+        "version": "7.3.1",
+        "release": "7001.fc46",
+        "arch": "aarch64",
+        "sha256": "0b8a4422993a0ad3feaa61c8acbc4e08f88ab1268487de740d06b0b0f144158f",
+        "href": "Packages/s/senemos-uke-linux-kernel-mainline-singleboot-7.3.1-7001.fc46.aarch64.rpm",
+        "bytes": 11266
+      }
+    ]
   }
 }

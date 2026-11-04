@@ -160,8 +160,8 @@ The v3 compiler/loader carries explicit bounded SixZone data and rejects older
 input. Utility `0.4.0-1` passed
 [COPR 11253576](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11253576/),
 including 30,724 actual parser/wire/shared-state checks per optimized/sanitized
-run and the actual loader. Complete kernel qualification remains a separate gate.
-The delivered `6503` cohort and its disabled default are unchanged.
+run and the actual loader. Release `6503` retains its historical v2 contract;
+the separately qualified `7001` consumer below requires matching v3 input.
 
 The paired PA source appends SixZone LUTBUS block3 (192 transfers), exact
 threshold/PWL/SV writes and individual shared hold/mode modifies. The power
@@ -169,9 +169,18 @@ wrapper admits only the exact Uke catalog, reads each selected DSPP's current
 state under held runtime power and verifies controls after DMA. Disable retains
 another PA feature's enable state; the actual CRTC stages shared PA flush bit0
 for both DSPPs. The command buffer accommodates 41,288 bytes while descriptors
-cover the selected stream length. Complete remote qualification is pending;
-private data delivery, all remaining picture/HDR operations and physical
-acceptance remain open.
+cover the selected stream length.
+
+[COPR11253722](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11253722/)
+passed the complete `7.3.1-7001.fc46` kernel and package checks from source
+`be068c2f3cf9f561aedab27410b626eeeb1322b0`. Actual paired loader, LUTBUS,
+power/transport and atomic fixtures passed optimized and sanitizer runs; all
+retained display controls, full MSM linkage and both supplier DT checks passed.
+Six AArch64 RPMs and the source RPM appear in checksum-verified root unstable
+metadata. Initial preset selection and native HDR advertisement remain disabled.
+Private data delivery, remaining picture/HDR operations and physical acceptance
+remain open. The tablet still runs `1500`, with all six kernel packages pinned
+to that release by DNF versionlocks; repository delivery does not remove them.
 
 The separate [HSIC source record](../manifests/o82-hsic-source-20261104.json)
 traces exact OEM scalar ranges and signed packing. Its saturation/contrast

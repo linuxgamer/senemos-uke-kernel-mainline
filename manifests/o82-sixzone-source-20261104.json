@@ -90,12 +90,18 @@
     "curve_input_stride_bytes": 40,
     "curve_conversion": "double to integer truncation, 12-bit masks; low/high packing matches the extended ABI"
   },
+  "kernel_writer_qualification": {
+    "build": 11253722,
+    "release": "7.3.1-7001.fc46",
+    "source_commit": "be068c2f3cf9f561aedab27410b626eeeb1322b0",
+    "software_only": true,
+    "default_enabled": false,
+    "physical_acceptance": false
+  },
   "remaining_work": [
-    "Integrate separately supplied SixZoneThresholds and five-curve state with source-derived legacy-schema handling",
-    "Qualify a native converter against the complete parser and enable-mask chain",
-    "Implement and fault-test complete native shared PA register and flush ownership",
-    "Extend the private bundle without silently admitting unsupported records",
-    "Validate both stopped DSPPs and separately measure physical color/HDR"
+    "Prepare matching private v3 input without admitting HSIC/memory/HDR operations that remain unsupported",
+    "Qualify complete HSIC/memory/protection/HDR composition and truthful native HDR capability separately",
+    "Validate both stopped DSPPs and physically measure color/HDR on both panel variants"
   ],
   "parser_threshold_chain": {
     "repository": "Xiaomi-Pad-7-Development/android_vendor_xiaomi_uke",
@@ -196,13 +202,13 @@
     "disable": "clear only SixZone enable bits; clear PA enable only when no remaining memory/HSIC/histogram/SixZone feature requires it",
     "modify_opcode": "0x20000000 | relative_offset, then preserve mask, then new value",
     "flush": "OEM dspp_sub_blk_flush_tbl maps HSIC/memory/SixZone to bit0; UPDATE_MASK uses BIT(index), so zero is a valid shared PA flush bit",
-    "remaining_work": "Qualify the actual paired writer, powered snapshots/readback, shared flush and complete AArch64 kernel before data delivery and physical acceptance"
+    "remaining_work": "Deliver matching private v3 input and separately validate stopped/paired physical color; remaining HSIC/memory/HDR operations stay refused"
   },
   "private_inputs_included": false,
   "oem_code_executed": false,
   "native_sixzone_enabled": false,
   "native_writer_present_in_source": true,
-  "native_writer_qualified": false,
+  "native_writer_qualified": true,
   "delivered_v2_blocked_presets_unchanged": true,
   "bundle_integration": {
     "version": 3,
@@ -221,7 +227,7 @@
       "actual_parser_wire_checks_per_run": 30724,
       "optimized_and_sanitized": true,
       "actual_loader": true,
-      "kernel_writer_qualification": "pending"
+      "kernel_writer_qualification": "11253722 full native kernel and package checks passed"
     },
     "kernel_writer_qualification_required": true,
     "private_inputs_included": false

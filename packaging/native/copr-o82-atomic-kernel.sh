@@ -6,8 +6,8 @@ test ! -e /etc/senemos/kernel-update.conf
 [[ $(rpm --eval '%{_host_cpu}') == aarch64 && $(rpm --eval '%{fedora}') == 46 ]]
 owner=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 output=$(realpath -m "${1:?Pass the remote source result directory}")
-revision=${2:?Pass a fresh kernel revision of at least 7001}
-[[ $revision =~ ^[1-9][0-9]{3,4}$ && $revision -ge 7001 ]]
+revision=${2:?Pass a fresh kernel revision of at least 7002}
+[[ $revision =~ ^[1-9][0-9]{3,4}$ && $revision -ge 7002 ]]
 manifest=manifests/o82-sixzone-kernel-source-20261104.json
 (cd "$owner"; jq -r '.imports[]|.sha256+"  "+.path' "$manifest" | sha256sum -c --strict --quiet -)
 (cd "$owner"; jq -r '.qualified_sixzone_compiler.inputs[]|.sha256+"  "+.path' "$manifest" | sha256sum -c --strict --quiet -)

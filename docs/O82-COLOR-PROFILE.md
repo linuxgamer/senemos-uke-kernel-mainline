@@ -20,8 +20,10 @@ Compiler/loader qualification passed in
 at source `33035dff7573775fb5f7ae7e3909e36451043899`. Actual parser/wire/shared-state
 fixtures each passed 30,724 optimized/sanitized checks; actual native loader,
 25,155 converter checks and retained gamut regressions also passed.
-Complete native PA kernel qualification and
-physical acceptance remain required before applying these candidate bundles.
+The matching PA consumer passed full kernel and package qualification in
+[COPR11253722](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11253722/),
+`7.3.1-7001.fc46`. Its default preset is empty; private input delivery,
+remaining picture/HDR operations and physical acceptance remain required.
 
 The `0.3.0-5` source corrects factory gamut interpolation and native sampling
 to the OEM 12-bit coordinates 0,256,...,3840,4095, including the shorter final
