@@ -6,11 +6,11 @@
 #include <string.h>
 #include "dpu_o82_profiles.h"
 #include "dpu_o82_lutbus.h"
-#include "o82-sixzone-format.h"
+#include "o82-hsic-format.h"
 
 static u8 igc[257 * 3 * 2], gamut[4913 * 3 * 2], gc[1024 * 3 * 2];
 _Alignas(16) static u8 storage[DPU_O82_LUTBUS_MAX_BYTES + 32], saved[sizeof(storage)];
-static u8 sixzone[O82_SIXZONE_BYTES];
+static u8 sixzone[O82_SIXZONE_BYTES], hsic[O82_HSIC_BYTES];
 static u8 *stream;
 static size_t cursor, bytes;
 
@@ -70,15 +70,21 @@ static void pa_protocol(void)
 	for (unsigned int i = 0; i < 384 * 5; i++) set16(sixzone + 32 + 2 * i, (i * 23 + 7) % 4096);
 	assert(o82_sixzone_valid(sixzone, sizeof(sixzone)));
 	const unsigned int masks[] = {3,5,6};
-	for (unsigned int m = 0; m < 3; m++) for (unsigned int enabled = 0; enabled < 2; enabled++) {
+	for (unsigned int m = 0; m < 3; m++) for (unsigned int enabled = 0; enabled < 2; enabled++)
+	for (unsigned int hsic_on = 0; hsic_on < 2; hsic_on++) {
 		struct dpu_o82_color_input in = input();
 		in.pa_managed = true; in.sixzone = enabled ? sixzone : NULL;
 		in.sixzone_bytes = enabled ? sizeof(sixzone) : 0;
-		in.pa_mode[0] = 0x20100101; in.pa_mode[1] = 0x24100101; in.pa_mode[2] = 0x08100101;
+		memset(hsic, 0, sizeof(hsic));
+		if (hsic_on) {set32(hsic,15);set32(hsic+4,0xb3);set32(hsic+8,0x7f20);set32(hsic+12,0x20);set32(hsic+16,0xe0);}
+		in.hsic = hsic; in.hsic_bytes = sizeof(hsic);
+		in.pa_mode[0] = 0x24100101; in.pa_mode[1] = 0x24100121; in.pa_mode[2] = 0x08110141;
 		memset(storage, 0xa5, sizeof(storage)); stream = storage + 8; bytes = 0;
 		assert(!dpu_o82_lutbus_build(&in, masks[m], stream, DPU_O82_LUTBUS_MAX_BYTES, &bytes));
 		assert(bytes == (enabled ? DPU_O82_LUTBUS_MAX_BYTES : DPU_O82_LUTBUS_PA_OFF_BYTES));
 		cursor = DPU_O82_LUTBUS_BYTES;
+		const unsigned int scalar_words[] = {0xb3,0x7f20,0x20,0xe0};
+		for (unsigned int j=0;j<4;j++) {expect32(0x1000081c+4*j);expect32(hsic_on?scalar_words[j]:0);}
 		if (enabled) {
 			lut(3, 5, sixzone + 32, 384 * 5, 384 * 5);
 			const unsigned int values[] = {0xe5cc3319,0x160c,0x0ba21555,0x3a359b33,0x046904d4};
@@ -89,8 +95,9 @@ static void pa_protocol(void)
 			if (!(masks[m] & (1U << i))) continue;
 			expect32(0x18180114); expect32((1U << i) << 17);
 			if (enabled) { expect32(0x20000840); expect32(0xfff); expect32(0x9000); }
-			expect32(0x20000800); expect32(0x1fefffff);
-			expect32(enabled ? 0xe0100000 : i ? 0x100000 : 0);
+			expect32(0x20000800); expect32(0x01efffff);
+			const unsigned int owned=(enabled?0xe0000000:0)|(hsic_on?0x1e000000:0);
+			expect32(owned|((owned||i)?0x100000:0));
 		}
 		assert(cursor == bytes);
 		for (unsigned int i = 0; i < 8; i++) assert(storage[i] == 0xa5);
@@ -98,7 +105,11 @@ static void pa_protocol(void)
 	}
 	struct dpu_o82_color_input in = input(); in.pa_managed = true;
 	in.sixzone = sixzone; in.sixzone_bytes = sizeof(sixzone);
+	in.hsic = hsic; in.hsic_bytes = sizeof(hsic);
 	refused(&in, 3, DPU_O82_LUTBUS_MAX_BYTES - 1, -ENOSPC);
+	in.hsic_bytes--; refused(&in, 3, DPU_O82_LUTBUS_MAX_BYTES, -EINVAL); in.hsic_bytes++;
+	in.hsic = NULL; refused(&in, 3, DPU_O82_LUTBUS_MAX_BYTES, -EINVAL); in.hsic = hsic;
+	set32(hsic, 1); refused(&in, 3, DPU_O82_LUTBUS_MAX_BYTES, -EINVAL); set32(hsic,15);
 	in.sixzone_bytes--; refused(&in, 3, DPU_O82_LUTBUS_MAX_BYTES, -EINVAL); in.sixzone_bytes++;
 	in.pa_managed = false; refused(&in, 3, DPU_O82_LUTBUS_MAX_BYTES, -EINVAL); in.pa_managed = true;
 	sixzone[26] = 1; refused(&in, 3, DPU_O82_LUTBUS_MAX_BYTES, -EINVAL); sixzone[26] = 0;
@@ -108,7 +119,12 @@ static void pa_protocol(void)
 	memcpy(saved, storage, sizeof(storage)); in.sixzone = storage + 8; bytes = 123;
 	assert(dpu_o82_lutbus_build(&in, 3, storage + 8, DPU_O82_LUTBUS_MAX_BYTES, &bytes) == -EINVAL);
 	assert(bytes == 123 && !memcmp(saved, storage, sizeof(storage)));
-	puts("Actual SixZone LUTBUS: five components,192 transfers, exact controls, per-DSPP PA preservation, disable and refusal-before-write passed; no hardware operation");
+	in.sixzone = sixzone;
+	memset(storage, 0xa5, sizeof(storage)); memcpy(storage + 8, hsic, sizeof(hsic));
+	memcpy(saved, storage, sizeof(storage)); in.hsic = storage + 8; bytes = 123;
+	assert(dpu_o82_lutbus_build(&in, 3, storage + 8, DPU_O82_LUTBUS_MAX_BYTES, &bytes) == -EINVAL);
+	assert(bytes == 123 && !memcmp(saved, storage, sizeof(storage)));
+	puts("Actual composed HSIC/SixZone LUTBUS: five components,192 transfers, exact controls, per-DSPP PA preservation, disable and refusal-before-write passed; no hardware operation");
 }
 int main(void)
 {

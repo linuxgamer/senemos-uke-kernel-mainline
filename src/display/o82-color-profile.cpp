@@ -23,6 +23,7 @@
 #include "o82-regdma.h"
 #include "o82-color-firmware.h"
 #include "o82-sixzone.h"
+#include "o82-hsic.h"
 
 namespace {
 using Vec = std::array<double, 3>;
@@ -490,6 +491,26 @@ void put_hash(std::vector<unsigned char> &data, size_t at, std::string_view hash
         data.at(at + i) = byte;
     }
 }
+std::vector<unsigned char> native_hsic(json_object *picture) {
+    const double hue = number(field(picture, "hue"));
+    require(hue == std::floor(hue) && hue >= std::numeric_limits<std::int32_t>::min() &&
+            hue <= std::numeric_limits<std::int32_t>::max(), "invalid HSIC hue");
+    const auto scalar = [&](const char *key) {
+        const double value = number(field(picture, key));
+        require(std::abs(value) <= std::numeric_limits<float>::max(), "invalid HSIC scalar");
+        return static_cast<float>(value);
+    };
+    const o82::HsicInput input{static_cast<std::int32_t>(hue), scalar("sat"), scalar("val"),
+                               scalar("cont"), scalar("satThresh")};
+    o82::HsicData output;
+    require(o82::compile_hsic(input, output) == o82::HsicError::none, "HSIC conversion refused");
+    std::vector<unsigned char> data(O82_HSIC_BYTES);
+    put_word(data, 0, output.enabled ? O82_HSIC_FLAGS : 0);
+    put_word(data, 4, output.hue); put_word(data, 8, output.saturation);
+    put_word(data, 12, output.value); put_word(data, 16, output.contrast);
+    require(o82_hsic_valid(data.data(), data.size()), "invalid native HSIC payload");
+    return data;
+}
 std::vector<unsigned char> native_sixzone(json_object *picture) {
     auto six = field(picture, "SixZone");
     if (!enabled(six)) return {};
@@ -636,10 +657,8 @@ std::vector<unsigned char> native_presets(json_object *document, const char *pan
                 require(!enabled(decoded.get()), "unsupported active preset operation");
             }
         }
-        for (const char *scalar : {"hue", "sat", "satThresh", "cont", "val"})
-            if (number(field(picture.get(), scalar)) != 0) {
-                flags |= O82_COLOR_OP_HSIC; blocked |= O82_COLOR_BLOCK_HSIC;
-            }
+        const auto hsic = native_hsic(picture.get());
+        if (o82_hdr_u32(hsic.data())) flags |= O82_COLOR_OP_HSIC;
         for (const char *memory : {"MemColFol", "MemColSkin", "MemColSky"})
             if (enabled(field(picture.get(), memory))) {
                 flags |= O82_COLOR_OP_MEMORY; blocked |= O82_COLOR_BLOCK_MEMORY;
@@ -667,6 +686,8 @@ std::vector<unsigned char> native_presets(json_object *document, const char *pan
                 put_word(data, record + 136, data.size()); put_word(data, record + 140, sixzone.size());
                 append(sixzone);
             }
+            put_word(data, record + 144, data.size()); put_word(data, record + 148, hsic.size());
+            append(hsic);
         }
         const std::string bytes = json_object_to_json_string_ext(opaque.get(), JSON_C_TO_STRING_PLAIN);
         require(!bytes.empty() && bytes.size() <= 2 * 1024 * 1024, "invalid preserved preset data length");
@@ -775,8 +796,9 @@ void preset_self_test(const Profile &identity) {
     // Missing middle/high curves each use the ordinary saturation curve.
     for (unsigned component : {1u, 2u, 3u})
         assert(o82_hdr_u16(bundle.data() + six_at + O82_SIXZONE_HEADER + 7 * 10 + component * 2) == 4095);
+    assert(o82_color_fw_data(bundle.data(), 5, 0, 0, &igc, &gc));
     const auto *retained_igc = igc, *retained_gc = gc;
-    for (unsigned index : {4u, 5u, 6u, 8u, ~0u}) {
+    for (unsigned index : {4u, 6u, 8u, ~0u}) {
         assert(!o82_color_fw_data(bundle.data(), index, 0, 0, &igc, &gc));
         assert(igc == retained_igc && gc == retained_gc);
     }
@@ -794,6 +816,7 @@ void preset_self_test(const Profile &identity) {
     };
     bad_word(24, 65); bad_word(28, 159); bad_word(64, 1000); bad_word(72, 0);
     bad_word(8, 2);
+    bad_word(8, 3);
     bad_word(O82_COLOR_FW_HEADER + 64, 2); bad_word(O82_COLOR_FW_HEADER + 76, O82_COLOR_BLOCK_MEMORY);
     bad_word(O82_COLOR_FW_HEADER + 80, ~0U); bad_word(O82_COLOR_FW_HEADER + 84, 1);
     bad_word(O82_COLOR_FW_HEADER + 88, 0); bad_word(O82_COLOR_FW_HEADER + 92, ~0U);
@@ -802,6 +825,8 @@ void preset_self_test(const Profile &identity) {
     bad_word(O82_COLOR_FW_HEADER + 136, six_at);
     bad_word(O82_COLOR_FW_HEADER + 3 * O82_COLOR_FW_RECORD + 136, six_at + 4);
     bad_word(O82_COLOR_FW_HEADER + 3 * O82_COLOR_FW_RECORD + 140, O82_SIXZONE_BYTES - 4);
+    bad_word(O82_COLOR_FW_HEADER + 144, 0); bad_word(O82_COLOR_FW_HEADER + 148, 0);
+    bad_word(O82_COLOR_FW_HEADER + 152, 1);
     bad_word(six_at + 28, 383); bad_word(six_at + 12, 1); bad_word(six_at, 1);
     const size_t data_start = o82_hdr_u32(snapshot.data() + O82_COLOR_FW_HEADER + 80);
     bundle = snapshot; bundle[data_start] = 1; seal();

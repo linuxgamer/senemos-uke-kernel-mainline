@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "date": "2026-11-04",
-  "scope": "Static HSIC1.7 scalar conversion and shared PA protocol; native integration pending",
+  "scope": "HSIC1.7 scalar protocol and composed native PA candidate; remote integration qualification pending",
   "exact_uke_driver": {
     "repository": "MiCode/vendor_opensource_display-drivers",
     "commit": "44275c404a677d9d9e5230fedd1af2ef02fc7b9a",
@@ -113,10 +113,58 @@
     "scope": "Pure scalar conversion and hosted synthetic fixtures only; no JSON/wire/loader/shared-PA or physical acceptance",
     "native_hsic_enabled": false
   },
+  "full_mode_routing": {
+    "full_mode_function": "ApplyPAV2FeaturesAll at0x59040",
+    "typed_global_flag": "0x5910c..0x59118 reads the incoming PA bit0",
+    "dispatch": "0x5915c..0x59174 uses global config type1 and body+8; PLT0x6fa68/GOT0x71750 binds ApplyPAV2Features at0x59960",
+    "shared_hal_disable": "kOpsDisable or a mode with no global HSIC masks yields a null UAPI payload",
+    "native_policy": "Complete stopped-preset replacement owns all four scalar fields; it is not an implementation of the OEM incremental cache API"
+  },
+  "same_soc_comparison": {
+    "repository": "OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm7675",
+    "commit": "1138e00fee63582a0cc6a53af3286621786827b7",
+    "path": "vendor/qcom/opensource/display-drivers/msm/sde/sde_hw_reg_dma_v1_color_proc.c",
+    "blob": "fa8f951582003084bee74e30c73a7ec4d599bf7a",
+    "function": "reg_dmav1_setup_dspp_pa_hsicv17",
+    "bytes": 4389,
+    "byte_identical_to_uke": true,
+    "license": "GPL-2.0-only Foundation/QIC notices",
+    "board_settings_imported": false
+  },
+  "native_integration": {
+    "status": "Native compiler/loader and composed writer implemented; remote integration qualification pending",
+    "utility": "0.5.0-1",
+    "private_bundle_version": 4,
+    "record_offset_fields": [
+      144,
+      148
+    ],
+    "payload_bytes": 24,
+    "fields": [
+      "flags:0-or15",
+      "hue:signed12 bounded768",
+      "saturation:threshold8 plus signed8 bounded65",
+      "value:signed8 bounded65",
+      "contrast:signed8 bounded65",
+      "reserved:zero"
+    ],
+    "neutral": "Mandatory zero payload for every unblocked neutral record; write all four scalar words and clear only owned HSIC bits",
+    "mode": "One composed SixZone/HSIC modify per DSPP; decide shared PA enable after both desired states",
+    "mode_preserve_mask": "0x01efffff",
+    "command_bytes": {
+      "legacy": 37316,
+      "managed_without_sixzone": 37388,
+      "managed_with_sixzone": 41320
+    },
+    "old_bundles": "Refuse v2/v3 and request only matching color-v4.bin",
+    "remote_qualification": null,
+    "default_enabled": false,
+    "physical_acceptance": false
+  },
   "remaining_work": [
-    "Complete outer enable/action routing and full/neutral state semantics; scalar JSON types and the global body flag are established",
-    "Extend private input and native wire/loader/PA integration after the qualified pure converter; keep unsupported operations refused",
-    "Compose one final shared PA mode with SixZone before encoding paired changes",
+    "Qualify the v4 parser, serializer, loader and composed writer, including explicit neutral state",
+    "Deliver matching private v4 input after native kernel/package qualification; keep unsupported memory/HDR operations refused",
+    "Fault-test the combined PA mode and held-power readback across all paired feature states",
     "Implement explicit neutral state and complete memory/protection/HDR operations",
     "Require native kernel/package checks and separate physical acceptance"
   ],

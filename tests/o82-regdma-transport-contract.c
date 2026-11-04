@@ -12,7 +12,7 @@
 #include "dpu_o82_upload.h"
 #include "dpu_o82_lutbus.h"
 #include "dpu_o82_profiles.h"
-#include "o82-sixzone-format.h"
+#include "o82-hsic-format.h"
 #include "msm_gem.h"
 #include "linux/io.h"
 #include "dpu_kms.h"
@@ -216,7 +216,7 @@ static void apply_pa_commands(void)
 		assert((op >> 28) == 1 || (op >> 28) == 2);
 		unsigned int reg = op & 0xfffff, preserve = 0;
 		if ((op >> 28) == 2) { preserve = value; value = load(commands, at); at += 4; }
-		if (reg != 0x800 && reg != 0x840 && reg != 0x920 && (reg < 0x908 || reg > 0x918)) continue;
+		if (reg != 0x800 && reg != 0x840 && reg != 0x920 && (reg < 0x81c || reg > 0x828) && (reg < 0x908 || reg > 0x918)) continue;
 		for (unsigned int i = 0; i < 3; i++) {
 			if (!(mask & BIT(i)) || ((int)i == dropped_pa_dspp && reg == dropped_pa_reg)) continue;
 			store(pa_mmio, bases[i] + reg, (load(pa_mmio, bases[i] + reg) & preserve) | value);
@@ -838,7 +838,8 @@ static void power_lifetime(void)
 	struct dpu_dspp_cfg dspp_cfg[3];
 	struct dpu_mdss_cfg catalog;
 	const unsigned int pa_bases[] = { 0x54000, 0x56000, 0x58000 };
-	const unsigned int pa_regs[] = { 0x800, 0x840, 0x908, 0x90c, 0x910, 0x914, 0x918, 0x920 };
+	const unsigned int pa_regs[] = { 0x800, 0x840, 0x908, 0x90c, 0x910, 0x914, 0x918, 0x920, 0x81c, 0x820, 0x824, 0x828 };
+	unsigned char hsic_data[O82_HSIC_BYTES];
 	memset(sixzone_data, 0, sizeof(sixzone_data));
 	store(sixzone_data, 0, 15); store(sixzone_data, 4, 0xe5cc3319);
 	store(sixzone_data, 8, 0x160c); store(sixzone_data, 12, 0x0ba21555);
@@ -847,11 +848,14 @@ static void power_lifetime(void)
 	assert(o82_sixzone_valid(sixzone_data, sizeof(sixzone_data)));
 #define SETUP_PA() do { \
 	input.pa_managed = true; input.sixzone = sixzone_data; input.sixzone_bytes = sizeof(sixzone_data); \
+	memset(hsic_data, 0, sizeof(hsic_data)); store(hsic_data,0,15); store(hsic_data,4,0xb3); \
+	store(hsic_data,8,0x7f20); store(hsic_data,12,0x20); store(hsic_data,16,0xe0); \
+	input.hsic = hsic_data; input.hsic_bytes = sizeof(hsic_data); \
 	for (unsigned int pi = 0; pi < 3; pi++) { \
 		dspp_cfg[pi] = (struct dpu_dspp_cfg){DSPP_0 + pi, pa_bases[pi], 0x1800}; \
-		store(pa_mmio, pa_bases[pi] + 0x800, 0x20100101 | (pi ? BIT(26) : 0)); \
+		store(pa_mmio, pa_bases[pi] + 0x800, 0x24100101 | (pi ? BIT(5) : 0)); \
 		store(pa_mmio, pa_bases[pi] + 0x840, 0xaaaa0123 + pi * 0x100); \
-		for (unsigned int pj = 2; pj < 8; pj++) \
+		for (unsigned int pj = 2; pj < 12; pj++) \
 			store(pa_mmio, pa_bases[pi] + pa_regs[pj], 0xa5000000 | pi << 12 | pa_regs[pj]); \
 		input.pa_mode[pi] = 0xdeadbeef; input.pa_hold[pi] = 0xdeadbeef; \
 	} \
@@ -870,35 +874,57 @@ static void power_lifetime(void)
 		assert(dpu_o82_power_upload(&kms, &ctl, &input, 3) == -EINVAL);
 		assert(!pa_reads && !allocations && !trigger_count && !dma.power_held && runtime_usage == 1);
 	}
-	const unsigned int pa_masks[] = {3,5,6};
-	for (unsigned int m = 0; m < 3; m++) for (unsigned int enable = 0; enable < 2; enable++) {
-		RESET_POWER(); SETUP_PA(); expected_command_mask = pa_masks[m];
-		if (!enable) { input.sixzone = NULL; input.sixzone_bytes = 0; }
-		unsigned char original[sizeof(input)]; memcpy(original, &input, sizeof(input));
-		assert(!dpu_o82_power_upload(&kms, &ctl, &input, pa_masks[m]));
-		assert(load(registers, 0x1004) == ((1U << 24) | (1U << 22) |
-			((enable ? 41288U : 37356U) / 4)));
-		assert(!memcmp(original, &input, sizeof(input)));
-		assert(pa_reads == (enable ? 20u : 8u) && trigger_count == 1 && !dma.power_held);
-		for (unsigned int i = 0; i < 3; i++) {
-			unsigned int mode = load(pa_mmio, pa_bases[i] + 0x800);
-			unsigned int hold = load(pa_mmio, pa_bases[i] + 0x840);
-			if (!(pa_masks[m] & BIT(i))) {
-				assert(mode == (0x20100101 | (i ? BIT(26) : 0)));
-				assert(hold == 0xaaaa0123 + i * 0x100);
+	for (unsigned int defect=0;defect<8;defect++) {
+		RESET_POWER(); SETUP_PA();
+		if (defect==0) input.hsic=NULL;
+		if (defect==1) input.hsic_bytes--;
+		if (defect==2) store(hsic_data,0,1);
+		if (defect==3) store(hsic_data,4,0x1000);
+		if (defect==4) store(hsic_data,8,0x10000);
+		if (defect==5) store(hsic_data,12,0x100);
+		if (defect==6) store(hsic_data,20,1);
+		if (defect==7) store(hsic_data,0,0);
+		assert(dpu_o82_power_upload(&kms,&ctl,&input,3)==-EINVAL);
+		assert(!pa_reads && !allocations && !trigger_count && !dma.power_held && runtime_usage==1);
+	}
+	const unsigned int pa_masks[] = {3,5,6}, hsic_words[] = {0xb3,0x7f20,0x20,0xe0};
+	for (unsigned int m=0;m<3;m++) for (unsigned int enable=0;enable<2;enable++)
+	for (unsigned int hsic_on=0;hsic_on<2;hsic_on++) {
+		RESET_POWER(); SETUP_PA(); expected_command_mask=pa_masks[m];
+		if (!enable) {input.sixzone=NULL;input.sixzone_bytes=0;}
+		if (!hsic_on) memset(hsic_data,0,sizeof(hsic_data));
+		unsigned char original[sizeof(input)]; memcpy(original,&input,sizeof(input));
+		assert(!dpu_o82_power_upload(&kms,&ctl,&input,pa_masks[m]));
+		assert(load(registers,0x1004)==((1U<<24)|(1U<<22)|((enable?41320U:37388U)/4)));
+		assert(!memcmp(original,&input,sizeof(input)));
+		assert(pa_reads==(enable?28u:16u) && trigger_count==1 && !dma.power_held);
+		for (unsigned int i=0;i<3;i++) {
+			const unsigned int mode=load(pa_mmio,pa_bases[i]+0x800);
+			const unsigned int hold=load(pa_mmio,pa_bases[i]+0x840);
+			if (!(pa_masks[m]&BIT(i))) {
+				assert(mode==(0x24100101|(i?BIT(5):0)));
+				assert(hold==0xaaaa0123+i*0x100);
 			} else {
-				assert(mode == (enable ? 0xe0100101 | (i ? BIT(26) : 0) :
-							0x101 | (i ? BIT(26) | BIT(20) : 0)));
-				assert(hold == (enable ? 0x9123 + i * 0x100 : 0xaaaa0123 + i * 0x100));
+				const unsigned int owned=(enable?0xe0000000u:0)|(hsic_on?0x1e000000u:0);
+				assert(mode==(0x101|(i?0x20:0)|owned|((i||owned)?0x100000:0)));
+				assert(hold==(enable?0x9123+i*0x100:0xaaaa0123+i*0x100));
+				for (unsigned int j=0;j<4;j++) assert(load(pa_mmio,pa_bases[i]+0x81c+4*j)==(hsic_on?hsic_words[j]:0));
 			}
 		}
-		_dpu_kms_mmu_destroy(&kms); assert(releases == 1 && vm.references == 0); vm.references = 1;
+		_dpu_kms_mmu_destroy(&kms);assert(releases==1&&vm.references==0);vm.references=1;
 	}
-	for (unsigned int half = 0; half < 2; half++) for (unsigned int reg = 0; reg < 8; reg++) {
+	for (unsigned int half = 0; half < 2; half++) for (unsigned int reg = 0; reg < 12; reg++) {
 		RESET_POWER(); SETUP_PA(); dropped_pa_dspp = half; dropped_pa_reg = pa_regs[reg];
 		assert(dpu_o82_power_upload(&kms, &ctl, &input, 3) == -EIO);
 		assert(trigger_count == 1 && !dma.power_held && runtime_usage == 1);
 		_dpu_kms_mmu_destroy(&kms); assert(releases == 1 && vm.references == 0); vm.references = 1;
+	}
+	for (unsigned int half=0;half<2;half++) for (unsigned int reg=8;reg<12;reg++) {
+		RESET_POWER(); SETUP_PA(); memset(hsic_data,0,sizeof(hsic_data));
+		dropped_pa_dspp=half;dropped_pa_reg=pa_regs[reg];
+		assert(dpu_o82_power_upload(&kms,&ctl,&input,3)==-EIO);
+		assert(trigger_count==1&&!dma.power_held&&runtime_usage==1);
+		_dpu_kms_mmu_destroy(&kms);assert(releases==1&&vm.references==0);vm.references=1;
 	}
 	RESET_POWER(); SETUP_PA(); outcome = TIMEOUT; fail_reset_from = 1;
 	assert(dpu_o82_power_upload(&kms, &ctl, &input, 3) == -ETIMEDOUT);
@@ -910,5 +936,5 @@ static void power_lifetime(void)
 	command_owner = NULL; command_kms = NULL;
 	puts("Actual O82 power/GEM/transport/shared helpers: bound managed VM, pending-resume suspend refusal, both force gates, exact eight-level LUTDMA QoS/readbacks, preserved client fields, failed-stop/clock/PM retention, recovery and suspend-before-clock memory release passed; fake providers only");
 	puts("Actual KMS MMU detach: closed admission, reset or exact upper-half xin7 ACK before GEM/VM/power release, retained ownership across failed attempts, four-queue rearm before unhalt and failed-rearm refusal passed; fake providers only");
-	puts("Actual paired PA: catalog refusal before reads/DMA, owned snapshots, enable/disable across all DSPP pairs, preserved foreign state, both-half ignored-write refusal and failed-stop retention passed; fake providers only");
+	puts("Actual composed PA: malformed HSIC/catalog refusal, owned snapshots, HSIC/SixZone combinations across all DSPP pairs, explicit neutral words, foreign-state preservation, both-half ignored-write refusal and failed-stop retention passed; fake providers only");
 }

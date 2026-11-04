@@ -39,8 +39,8 @@ int dpu_o82_profiles_load(struct dpu_o82_profiles *profiles, struct device *dev,
 		return -EINVAL;
 	if (profiles->fw)
 		return -EBUSY;
-	name = panel == 0x42 ? "qcom/sm7675/uke/o82-42-color-v3.bin" :
-			      "qcom/sm7675/uke/o82-36-color-v3.bin";
+	name = panel == 0x42 ? "qcom/sm7675/uke/o82-42-color-v4.bin" :
+			      "qcom/sm7675/uke/o82-36-color-v4.bin";
 	ret = request_firmware_direct(&candidate.fw, name, dev);
 	if (ret)
 		return ret;
@@ -91,6 +91,8 @@ int dpu_o82_profiles_input(const struct dpu_o82_profiles *profiles,
 	candidate.sixzone_bytes = o82_hdr_u32(record + 140);
 	if (candidate.sixzone_bytes)
 		candidate.sixzone = profiles->fw->data + o82_hdr_u32(record + 136);
+	candidate.hsic = profiles->fw->data + o82_hdr_u32(record + 144);
+	candidate.hsic_bytes = o82_hdr_u32(record + 148);
 	*input = candidate;
 	return 0;
 }

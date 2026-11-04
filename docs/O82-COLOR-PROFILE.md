@@ -9,6 +9,16 @@ package and both fixed native v2 firmware files are absent. The ICC reports
 below describe their dated trials and do not establish the current root's
 profile selection. Full private-profile application and native HDR remain open.
 
+The `0.5.0-1` candidate adds private v4 data with explicit active or neutral
+HSIC. Every unblocked record carries24 bytes of flags and bounded register
+words; the parser retains the qualified single-precision conversion order.
+The candidate loader requests only `o82-{36,42}-color-v4.bin` and rejects older
+bundles. The matching kernel writer composes HSIC/SixZone mode once per DSPP,
+programs neutral scalar words and checks readback under held power. Remote
+compiler/loader and full-kernel qualification are pending. Delivered `7001`
+continues to require v3; private v4 delivery and physical acceptance are open.
+Memory-color and opaque HDR operations remain refused.
+
 The `0.4.0-1` source adds a private v3 bundle with explicit SixZone 2.0 data:
 32 bytes of flags/thresholds/PWL/hold state and 384 five-component tuples.
 The actual JSON parser uses separate `SixZoneThresholds`, preserves legacy

@@ -10,7 +10,7 @@
 #include <linux/errno.h>
 #include "dpu_o82_profiles.h"
 #include "dpu_o82_lutbus.h"
-#include "o82-sixzone-format.h"
+#include "o82-hsic-format.h"
 
 #define O82_IGC_ENTRIES (257U * 3)
 #define O82_GAMUT_ENTRIES (4913U * 3)
@@ -28,8 +28,8 @@ _Static_assert(DPU_O82_LUTBUS_BYTES ==
 	(8 + O82_GAMUT_PAD_ENTRIES * 2 + 12 + 8) + 3 * (8 + 8 + 512 * 4) + 16,
 	"Cliffs LUT command stream size must include padding and workaround NOPs");
 _Static_assert(DPU_O82_LUTBUS_MAX_BYTES == DPU_O82_LUTBUS_BYTES +
-	8 + 384 * 5 * 2 + 12 + 6 * 8 + 2 * (8 + 12 + 12),
-	"SixZone includes LUT workaround, six registers and individual PA modifies");
+	4 * 8 + 8 + 384 * 5 * 2 + 12 + 6 * 8 + 2 * (8 + 12 + 12),
+	"PA includes four HSIC words, SixZone and individual shared mode modifies");
 
 struct o82_stream {
 	u8 *data;
@@ -102,12 +102,15 @@ static void o82_lutbus(struct o82_stream *stream, unsigned int block,
 		o82_put32(stream, 0);
 }
 
-static void o82_sixzone(struct o82_stream *stream,
+static void o82_pa(struct o82_stream *stream,
 			const struct dpu_o82_color_input *input, unsigned int mask)
 {
 	const u8 *data = input->sixzone;
 	unsigned int i, value;
 
+	/* Full preset replacement clears stale scalar words even in neutral mode. */
+	for (i = 0; i < 4; i++)
+		o82_write(stream, 0x81c + 4 * i, o82_hdr_u32(input->hsic + 4 + 4 * i));
 	if (data) {
 		o82_lutbus(stream, 3, 5, data + O82_SIXZONE_HEADER, 384 * 5, 384 * 5);
 		for (i = 0; i < 5; i++)
@@ -123,8 +126,8 @@ static void o82_sixzone(struct o82_stream *stream,
 			value = (unsigned int)data[24] << 12 | (unsigned int)data[25] << 14;
 			o82_modify(stream, 0x840, O82_PA_HOLD_PRESERVE, value);
 		}
-		value = o82_sixzone_pa_mode(input->pa_mode[i], data) & ~O82_PA_MODE_PRESERVE;
-		o82_modify(stream, 0x800, O82_PA_MODE_PRESERVE, value);
+		value = o82_pa_mode(input->pa_mode[i], data, input->hsic) & ~O82_PA_FULL_MODE_PRESERVE;
+		o82_modify(stream, 0x800, O82_PA_FULL_MODE_PRESERVE, value);
 	}
 }
 
@@ -146,6 +149,9 @@ int dpu_o82_lutbus_build(const struct dpu_o82_color_input *input,
 	if ((input->sixzone || input->sixzone_bytes) &&
 	    (!input->pa_managed || !o82_sixzone_valid(input->sixzone, input->sixzone_bytes)))
 		return -EINVAL;
+	if ((input->pa_managed || input->hsic || input->hsic_bytes) &&
+	    (!input->pa_managed || !o82_hsic_valid(input->hsic, input->hsic_bytes)))
+		return -EINVAL;
 	needed = !input->pa_managed ? DPU_O82_LUTBUS_BYTES : input->sixzone ?
 		 DPU_O82_LUTBUS_MAX_BYTES : DPU_O82_LUTBUS_PA_OFF_BYTES;
 	if (capacity < needed)
@@ -162,6 +168,9 @@ int dpu_o82_lutbus_build(const struct dpu_o82_color_input *input,
 			return -EINVAL;
 	if (input->sixzone && (!o82_disjoint(buffer, needed, input->sixzone, input->sixzone_bytes) ||
 	    !o82_disjoint(bytes, sizeof(*bytes), input->sixzone, input->sixzone_bytes)))
+		return -EINVAL;
+	if (input->hsic && (!o82_disjoint(buffer, needed, input->hsic, input->hsic_bytes) ||
+	    !o82_disjoint(bytes, sizeof(*bytes), input->hsic, input->hsic_bytes)))
 		return -EINVAL;
 	/* IGC4's257th sample is the explicit full-scale endpoint in the OEM ABI. */
 	for (channel = 0; channel < 3; channel++)
@@ -194,7 +203,7 @@ int dpu_o82_lutbus_build(const struct dpu_o82_color_input *input,
 	o82_write(&stream, 0x17dc, 1); /* GC table swap */
 	o82_write(&stream, 0x17c0, 1); /* GC enable; no8-bit rounding */
 	if (input->pa_managed)
-		o82_sixzone(&stream, input, dspp_mask);
+		o82_pa(&stream, input, dspp_mask);
 	*bytes = stream.at;
 	return 0;
 }

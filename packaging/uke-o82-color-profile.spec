@@ -1,5 +1,5 @@
 Name: uke-o82-color-profile
-Version: 0.4.0
+Version: 0.5.0
 Release: 1%{?dist}
 Summary: Generate private O82 OEM color mappings and native preset data
 License: MIT
@@ -23,6 +23,10 @@ Source17: o82-sixzone-format.h
 Source18: o82-sixzone.h
 Source19: o82-sixzone-payload-contract.cpp
 Source20: o82-sixzone-contract.cpp
+Source21: o82-hsic.h
+Source22: o82-hsic-format.h
+Source23: o82-hsic-payload-contract.cpp
+Source24: o82-hsic-contract.cpp
 ExclusiveArch: aarch64
 BuildRequires: clang gcc-c++ compiler-rt pkgconf-pkg-config
 BuildRequires: pkgconfig(json-c) pkgconfig(lcms2) pkgconfig(openssl)
@@ -51,9 +55,10 @@ cp %{SOURCE10} .
 cp %{SOURCE15} .
 cp %{SOURCE16} .
 cp %{SOURCE17} %{SOURCE18} %{SOURCE19} %{SOURCE20} .
+cp %{SOURCE21} %{SOURCE22} %{SOURCE23} %{SOURCE24} .
 mkdir -p src/display tests
 cp %{SOURCE3} %{SOURCE10} %{SOURCE11} %{SOURCE12} src/display/
-cp %{SOURCE17} src/display/
+cp %{SOURCE17} %{SOURCE22} src/display/
 cp %{SOURCE13} %{SOURCE14} tests/
 
 %build
@@ -68,6 +73,7 @@ install -Dpm755 uke-o82-color-profile %{buildroot}%{_bindir}/uke-o82-color-profi
 gcc -std=c11 -Wall -Wextra -Werror -x c -fsyntax-only o82-regdma.h
 gcc -std=c11 -Wall -Wextra -Werror -x c -fsyntax-only o82-color-firmware.h
 gcc -std=c11 -Wall -Wextra -Werror -x c -fsyntax-only o82-sixzone-format.h
+gcc -std=c11 -Wall -Wextra -Werror -x c -fsyntax-only o82-hsic-format.h
 ./uke-o82-color-profile --self-test
 clang++ -std=c++20 -O1 -g -UNDEBUG -Wall -Wextra -Werror \
     -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer \
@@ -78,6 +84,20 @@ g++ -std=c++20 -O2 -UNDEBUG -Wall -Wextra -Werror -I. \
     o82-hdr-edid-contract.cpp $(pkg-config --cflags --libs libdisplay-info) -o edid-contract
 ./edid-contract
 bash tests/o82-profile-loader-contract.sh .
+g++ -std=c++20 -O2 -UNDEBUG -Wall -Wextra -Werror -I. \
+    -Wl,--wrap=main o82-hsic-payload-contract.cpp $(pkg-config --cflags --libs json-c lcms2 openssl) -o hsic-payload
+./hsic-payload
+clang++ -std=c++20 -O1 -g -UNDEBUG -Wall -Wextra -Werror -I. \
+    -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer \
+    -Wl,--wrap=main o82-hsic-payload-contract.cpp $(pkg-config --cflags --libs json-c lcms2 openssl) -o hsic-payload-sanitized
+./hsic-payload-sanitized
+g++ -std=c++20 -O2 -UNDEBUG -Wall -Wextra -Werror -I. o82-hsic-contract.cpp -o hsic-converter
+./hsic-converter
+clang++ -std=c++20 -O1 -g -UNDEBUG -Wall -Wextra -Werror -I. \
+    -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer \
+    o82-hsic-contract.cpp -o hsic-converter-sanitized
+./hsic-converter-sanitized
+
 g++ -std=c++20 -O2 -UNDEBUG -Wall -Wextra -Werror -I. \
     -Wl,--wrap=main o82-sixzone-payload-contract.cpp $(pkg-config --cflags --libs json-c lcms2 openssl) -o sixzone-payload
 ./sixzone-payload
@@ -111,6 +131,10 @@ grep -E '^OEM gamut grid regression rejected: [1-9][0-9]*/[0-9]+ checks failed$'
 %{_bindir}/uke-o82-color-profile
 
 %changelog
+* Wed Nov 04 2026 Uke contributors - 0.5.0-1
+- Compile explicit active and neutral HSIC into a bounded private v4 bundle.
+- Validate composed PA state, actual parser/loader and scalar rounding contracts.
+
 * Wed Nov 04 2026 Uke contributors - 0.4.0-1
 - Encode bounded active SixZone state in private v3 bundles with legacy curve selection.
 - Validate actual parser, shared PA semantics and native loader using synthetic data.

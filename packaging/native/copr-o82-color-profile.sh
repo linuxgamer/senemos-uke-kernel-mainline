@@ -4,6 +4,7 @@ set -Eeuo pipefail
 test ! -e /etc/senemos/kernel-update.conf
 owner=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 output=$(realpath -m "${1:?Pass the remote source result directory}")
+bash "$owner/packaging/native/refuse-published-release.sh" uke-o82-color-profile 0.5.0-1
 mkdir -p "$output"
 while IFS=$'\t' read -r path name; do
     install -m644 "$owner/$path" "$output/$name"
@@ -25,6 +26,10 @@ src/display/o82-sixzone-format.h	o82-sixzone-format.h
 src/display/o82-sixzone.h	o82-sixzone.h
 tests/o82-sixzone-payload-contract.cpp	o82-sixzone-payload-contract.cpp
 tests/o82-sixzone-contract.cpp	o82-sixzone-contract.cpp
+src/display/o82-hsic.h	o82-hsic.h
+src/display/o82-hsic-format.h	o82-hsic-format.h
+tests/o82-hsic-payload-contract.cpp	o82-hsic-payload-contract.cpp
+tests/o82-hsic-contract.cpp	o82-hsic-contract.cpp
 SOURCES
 # Retain the actual pre-fix implementation for an independent negative control.
 before=f414294fae8932dbe53c253cd498226f9ca8f0f9
@@ -38,4 +43,4 @@ test "$(git -C "$owner" hash-object "$output/o82-color-before-grid.cpp")" = \
 printf 'Color utility source %s; actual pre-fix source %s\n' \
     "$(git -C "$owner" rev-parse HEAD)" "$before"
 test "$(rpmspec --target aarch64 -q --srpm --qf '%{NAME}-%{VERSION}-%{RELEASE}' \
-    "$output/uke-o82-color-profile.spec")" = uke-o82-color-profile-0.4.0-1.fc46
+    "$output/uke-o82-color-profile.spec")" = uke-o82-color-profile-0.5.0-1.fc46

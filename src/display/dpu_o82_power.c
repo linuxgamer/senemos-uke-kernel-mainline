@@ -15,7 +15,7 @@
 #include "dpu_o82_profiles.h"
 #include "dpu_o82_regdma.h"
 #include "dpu_o82_upload.h"
-#include "o82-sixzone-format.h"
+#include "o82-hsic-format.h"
 
 #define O82_MDP_CLOCK 0x2bc
 #define O82_MDP_FORCE BIT(20)
@@ -146,6 +146,8 @@ static int dpu_o82_pa_snapshot(struct dpu_kms *kms,
 
 	if (!input->pa_managed)
 		return 0;
+	if (!o82_hsic_valid(input->hsic, input->hsic_bytes))
+		return -EINVAL;
 	if (!kms->mmio || !kms->catalog || !kms->catalog->dspp || kms->catalog->dspp_count != 3)
 		return -EINVAL;
 	for (i = 0; i < 3; i++) {
@@ -177,9 +179,12 @@ static int dpu_o82_pa_verify(struct dpu_kms *kms,
 
 		if (!(mask & BIT(i)))
 			continue;
-		if (readl(base + 0x800) != o82_sixzone_pa_mode(input->pa_mode[i], input->sixzone) ||
+		if (readl(base + 0x800) != o82_pa_mode(input->pa_mode[i], input->sixzone, input->hsic) ||
 		    readl(base + 0x840) != o82_sixzone_pa_hold(input->pa_hold[i], input->sixzone))
 			return -EIO;
+		for (j = 0; j < 4; j++)
+			if (readl(base + 0x81c + 4 * j) != o82_hdr_u32(input->hsic + 4 + 4 * j))
+				return -EIO;
 		if (!input->sixzone)
 			continue;
 		for (j = 0; j < 5; j++)

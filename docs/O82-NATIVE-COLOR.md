@@ -197,7 +197,15 @@ and Clang ASan/UBSan run in
 An independent integer IEEE754 reference checks the single-precision operations;
 wide intermediates and rounded conversion differ in128 and1,540 required
 negative cases. Its receipt-only RPM contains no executable or private input.
-JSON/wire/loader integration and paired HSIC programming remain unimplemented.
+The new `0.5.0-1` compiler/loader and composed kernel writer carry private v4
+HSIC data explicitly, including neutral state. The writer broadcasts all four
+scalar words, then combines HSIC/SixZone enables with each DSPP's own powered
+snapshot and modifies shared mode once with preserve mask `0x01efffff`.
+Both active and neutral words are read back. Buffers cover41,320 bytes and
+descriptors retain the actual37,388/41,320-byte managed stream length.
+Actual compiler/loader and complete kernel qualification remain pending;
+delivered `7001` retains its v3 contract and disabled default. Memory/protection,
+complete HDR, private data delivery and physical acceptance remain open.
 
 The 4 November tablet inspection found neither fixed native bundle nor the
 `uke-o82-color-profile` package installed. Earlier private ICC trials describe
