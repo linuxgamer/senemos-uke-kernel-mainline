@@ -6,9 +6,13 @@ test ! -e /etc/senemos/kernel-update.conf
 [[ $(rpm --eval '%{_host_cpu}') == aarch64 && $(rpm --eval '%{fedora}') == 46 ]]
 owner=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 output=$(realpath -m "${1:?Pass the remote source result directory}")
-revision=${2:?Pass a fresh kernel revision of at least 10000}
-[[ $revision =~ ^[1-9][0-9]{3,4}$ && $revision -ge 10000 ]]
+revision=${2:?Pass a fresh kernel revision of at least 10001}
+[[ $revision =~ ^[1-9][0-9]{3,4}$ && $revision -ge 10001 ]]
 manifest=manifests/o82-hsic-unstable-source-20261104.json
+jq -e '(.delivery_held // false)==false' "$owner/$manifest" >/dev/null || {
+    printf 'Color source is held: preserve the newer installed camera boot trial and review cumulative source first\n' >&2
+    exit 1
+}
 (cd "$owner"; jq -r '.imports[]|.sha256+"  "+.path' "$manifest" | sha256sum -c --strict --quiet -)
 (cd "$owner"; jq -r '.qualified_profile_compiler.inputs[]|.sha256+"  "+.path' "$manifest" | sha256sum -c --strict --quiet -)
 # Admit the qualified complete7300 source by its full-file digest, RPM

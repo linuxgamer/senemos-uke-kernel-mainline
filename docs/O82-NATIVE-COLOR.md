@@ -171,7 +171,7 @@ another PA feature's enable state; the actual CRTC stages shared PA flush bit0
 for both DSPPs. The command buffer accommodates 41,288 bytes while descriptors
 cover the selected stream length.
 
-[COPR11253722](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11253722/)
+[COPR 11253722](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11253722/)
 passed the complete `7.3.1-7001.fc46` kernel and package checks from source
 `be068c2f3cf9f561aedab27410b626eeeb1322b0`. Actual paired loader, LUTBUS,
 power/transport and atomic fixtures passed optimized and sanitizer runs; all
@@ -193,7 +193,7 @@ and one composed shared PA state remain required.
 
 The typed pure HSIC converter passed41,340 synthetic checks per GCC optimized
 and Clang ASan/UBSan run in
-[COPR11253747](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11253747/).
+[COPR 11253747](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11253747/).
 An independent integer IEEE754 reference checks the single-precision operations;
 wide intermediates and rounded conversion differ in128 and1,540 required
 negative cases. Its receipt-only RPM contains no executable or private input.
@@ -204,26 +204,32 @@ snapshot and modifies shared mode once with preserve mask `0x01efffff`.
 Both active and neutral words are read back. Buffers cover41,320 bytes and
 descriptors retain the actual37,388/41,320-byte managed stream length.
 The actual compiler/loader passed
-[COPR11253922](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11253922/)
+[COPR 11253922](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11253922/)
 at source `d10c0e35649c96d4e6f92316e75948cd51116784`, with16,479 actual
 parser/wire/composed-state checks per optimized/sanitizer run and the actual
 v4 loader. Pure HSIC41,340 and SixZone30,724 checks per run remain green.
 The [active full-kernel composition](../manifests/o82-hsic-unstable-source-20261104.json)
-retains installed7300, its read-only RTC gate,43 imports and one declared
+retains installed 7300, its read-only RTC gate, 43 imports and one declared
 compact audio identity update. It preserves the camera boot boundary and pstore layout.
 New development uses `senemos-uke-linux-kernel-mainline-unstable` with an
 `-unstable` Image ABI. The earlier normal 7500 build passed software checks before
 the policy change; it is historical evidence and does not authorize promotion.
 The active entry point routes only to the unstable producer.
-[COPR11259981](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11259981/)
+[COPR 11259981](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11259981/)
 passed the full `7.3.1-7600-unstable` Image, MSM/MODPOST, signed module, both
 supplier DT and boot/RPM checks. Actual composed loader/LUTBUS/power/atomic
 fixtures and retained display controls passed. Six AArch64 packages and SRC
-are published as a software reference. That7200-based trial is held from
-delivery because installed7300 adds a read-only RTC gate. The active producer
-retains7300 exactly and requires a fresh revision of at least10000 after
-concurrent source publication. Complete new-kernel qualification and physical
-acceptance remain open;
+are published as a software reference. That 7200-based trial is held from
+delivery because installed 7300 adds a read-only RTC gate. The active producer
+retains 7300 exactly and used a fresh 10000 ABI after concurrent source publication.
+Complete kernel qualification passed in
+[COPR 11260145](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11260145/)
+for 10000-unstable, including Image, linked/signed modules, both supplier DTs,
+boot/RPM and paired color fixtures. Source SHA and all seven repository
+identities are recorded in the manifest. Future revisions require at least 10001.
+Delivery is held after an external 8101 installation/selection added CAMCC
+stage1. Preserve that isolated boot trial and review cumulative source before
+another color build. Physical acceptance remains open;
 delivered `7001` retains its v3 contract and disabled default. Memory/protection,
 complete HDR, private data delivery and physical acceptance remain open.
 

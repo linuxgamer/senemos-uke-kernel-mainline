@@ -6,7 +6,7 @@ run in COPR. Optical color and HDR acceptance require separate measurements.
 
 4 November development update: the tablet now runs `7.3.1-7200-unstable`.
 New kernel candidates use `senemos-uke-linux-kernel-mainline-unstable` and an
-`-unstable` ABI. The active v4 candidate retains separately installed7300, its
+`-unstable` ABI. The active v4 candidate retains separately installed 7300, its
 read-only RTC gate and camera admission boundaries. Normal-family changes require an explicit request
 and physical stability/feature validation before promotion. Earlier `1500`
 observations below retain their dated scope.
@@ -23,16 +23,19 @@ The candidate loader requests only `o82-{36,42}-color-v4.bin` and rejects older
 bundles. The matching kernel writer composes HSIC/SixZone mode once per DSPP,
 programs neutral scalar words and checks readback under held power. The actual
 compiler/loader passed
-[COPR11253922](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11253922/):
+[COPR 11253922](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11253922/):
 16,479 parser/wire/composed-state checks per optimized/sanitizer run, plus the
 actual v4 loader and retained numeric regressions. Complete native-kernel
 qualification of `7.3.1-7600-unstable` passed
-[COPR11259981](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11259981/):
+[COPR 11259981](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11259981/):
 Image, linked/signed modules, both supplier DTs and matched boot/RPM checks.
 All six AArch64 packages and SRC are present in checksum-verified repository
-metadata. This7200-based trial is held from delivery because it lacks the
-later7300 RTC gate. The active7300-based source requires fresh full-kernel
-qualification. Physical color/HDR acceptance remains open. Historical normal 7500
+metadata. This 7200-based trial is held from delivery because it lacks the
+later 7300 RTC gate. The 7300-based 10000 source passed full kernel/package qualification in
+[COPR 11260145](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11260145/).
+Delivery remains held because 8101 was installed/selected independently during
+the build and adds a CAMCC stage absent from this color composition. Preserve
+that isolated boot trial and review cumulative source before another build. Physical color/HDR acceptance remains open. Historical normal 7500
 is software evidence from before the channel change and does not authorize
 stable promotion. Delivered `7001`
 continues to require v3; private v4 delivery and physical acceptance are open.
@@ -50,7 +53,7 @@ at source `33035dff7573775fb5f7ae7e3909e36451043899`. Actual parser/wire/shared-
 fixtures each passed 30,724 optimized/sanitized checks; actual native loader,
 25,155 converter checks and retained gamut regressions also passed.
 The matching PA consumer passed full kernel and package qualification in
-[COPR11253722](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11253722/),
+[COPR 11253722](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11253722/),
 `7.3.1-7001.fc46`. Its default preset is empty; private input delivery,
 remaining picture/HDR operations and physical acceptance remain required.
 
@@ -70,7 +73,7 @@ compilation; its replacement retains strict compiler diagnostics.
 The initial `0.1.0-2` passed numerical checks and saved ICC selection, but its
 serialized stage order was rejected when original KWin rendered the output.
 User photographs reported crushed shadows and excessive contrast/saturation.
-COPR11239895 built signed `0.2.0-3` with the corrected LUT16 leading-matrix
+COPR 11239895 built signed `0.2.0-3` with the corrected LUT16 leading-matrix
 layout, serialized-stage validation, dark/gray roundtrips and ASan/UBSan checks.
 That version was installed for the recorded trial and generated a replacement private PB profile.
 A short active-output trial on Linux 7.3.1-115 produced no former ICC shader
@@ -139,7 +142,7 @@ before writing an output file. The `0.3.0-2` source preserves each preset's
 IGC dither flag and four-bit strength explicitly. The native engine must apply
 that state with its selected input tables; preparation is not hardware support.
 
-COPR11240486 passes utility0.3.0-4 and actual Linux7.3.1 AArch64 object checks.
+COPR 11240486 passes utility0.3.0-4 and actual Linux7.3.1 AArch64 object checks.
 The verified production generator creates both private PA/PB bundles with59
 records,47 compiled transforms and12 explicitly refused nonzero picture/HDR
 operations. Each preserves32 IGC-dither configurations. No firmware is installed,

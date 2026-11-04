@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "date": "2026-11-04",
-  "scope": "Unstable-only composed HSIC/SixZone v4 candidate retaining installed7300 and its read-only RTC gate",
+  "scope": "Unstable-only composed HSIC/SixZone v4 candidate retaining installed 7300 and its read-only RTC gate",
   "kernel_parent": {
     "build": 11259919,
     "package_family": "senemos-uke-linux-kernel-mainline-unstable",
@@ -17,7 +17,7 @@
     "primary_sha256": "7687ecbef289ca99d0e3ff906e912a28ab440e42ddc3bf36dbdc287616b0c2d5",
     "composition_sha256": "758b4880da102746d0540f88b15f5338312d1f9533c18cf6bf862f39af463fa2"
   },
-  "minimum_fresh_revision": 10000,
+  "minimum_fresh_revision": 10001,
   "release_history_guard_unchanged": true,
   "imports": [
     {
@@ -72,7 +72,7 @@
       "path": "src/display/dpu_o82_power.c",
       "sha256": "9f90407033d2cf2ef704539ab5330cd9676cd5fbcad9c70291c92178fcdd3661",
       "reference_blob": "632568bdf40a1d9ba26b80b94761df87c0ba9e07",
-      "qualification": "New composed v4 integration; complete unstable7600 qualification passed in11259981",
+      "qualification": "New composed v4 integration; complete unstable 7600 qualification passed in 11259981",
       "basis_sha256": "48e433d32b5614c65f2d50ce0f42773214ccfbd01bd1fe79f53cb13e90b82533",
       "basis_blob": "abcea41b023d77e5c34d1474cc65b9164dcd39c1"
     },
@@ -104,7 +104,7 @@
       "path": "src/display/dpu_o82_profiles.c",
       "sha256": "0461e362a8e3f658d0c492ac5dcb28061e5421c65ef7118392c6abc4db4ac576",
       "reference_blob": "d074efc73d53171d0367fa269cff1a8c4acbda9a",
-      "qualification": "New composed v4 integration; complete unstable7600 qualification passed in11259981",
+      "qualification": "New composed v4 integration; complete unstable 7600 qualification passed in 11259981",
       "basis_sha256": "a255211bcdabe427d42a0c4093e77b1ad280ad3ef25462421868eb373c9a1e3a",
       "basis_blob": "15881033be5615984b12fc62a2bbba67e47cb05f"
     },
@@ -112,7 +112,7 @@
       "path": "src/display/dpu_o82_profiles.h",
       "sha256": "330ca002e70fc697d41ce050bdfa25dd5c0e420c24cfcc4bf1dbc1637e10648a",
       "reference_blob": "f5dcb7bb8bb27e9e8ee44e8aeaadc7c21b0e43a0",
-      "qualification": "New composed v4 integration; complete unstable7600 qualification passed in11259981",
+      "qualification": "New composed v4 integration; complete unstable 7600 qualification passed in 11259981",
       "basis_sha256": "d6e52a84a4835a6214515406a8ffd66c1d0f324a9f2ae6b63ee3520860885995",
       "basis_blob": "88fe7ebe75cb75bfa9faf754321a21c992f19260"
     },
@@ -120,7 +120,7 @@
       "path": "src/display/dpu_o82_lutbus.c",
       "sha256": "2c0e88a8309a1cd2237c06c311b2be1f3799f3a228ee8d861f5811c7ef5d5077",
       "reference_blob": "0665995e3f60d24410c49b32e3315ca04b5889b1",
-      "qualification": "New composed v4 integration; complete unstable7600 qualification passed in11259981",
+      "qualification": "New composed v4 integration; complete unstable 7600 qualification passed in 11259981",
       "basis_sha256": "eb9355db690907f7051136cb7d8bb9c7e0bf25f57f6375923ccce482642f0966",
       "basis_blob": "07feec64a6477ffb46ce8b98806008ea1d83cca7"
     },
@@ -128,7 +128,7 @@
       "path": "src/display/dpu_o82_lutbus.h",
       "sha256": "d4ee6aa1322f9ecb096104d6587d20263905fd72b60fbae1889bf8dd985104de",
       "reference_blob": "40eaa5145e43742a6e228dad519f7f20e83496b5",
-      "qualification": "New composed v4 integration; complete unstable7600 qualification passed in11259981",
+      "qualification": "New composed v4 integration; complete unstable 7600 qualification passed in 11259981",
       "basis_sha256": "ba997baa45992b47145b820d6df1054a773ad799ad951cf44016be191d97bdde",
       "basis_blob": "f0c1f61fb8d110632f9cf18a31296702375a3188"
     },
@@ -144,7 +144,7 @@
       "path": "src/display/o82-color-firmware.h",
       "sha256": "d4fb3ae5ff6f5f1299e839dbeaa253af95c601eab209013af90e91c2e8240131",
       "reference_blob": "b5b4e87d267e05b3c6832df26e9381e4016e3f1c",
-      "qualification": "New composed v4 integration; complete unstable7600 qualification passed in11259981",
+      "qualification": "New composed v4 integration; complete unstable 7600 qualification passed in 11259981",
       "basis_sha256": "f9c51c5e159c21f91131d1c1d12e7ed62bb762b480d24943d3f9823bf90dec5e",
       "basis_blob": "ba43bd1105d0dee899d4fdc971b65a6634786f4b"
     },
@@ -160,7 +160,7 @@
       "path": "src/display/prepare-o82-regdma.sh",
       "sha256": "8357a7fe06724fa79ca1de1238b002e5548084eb6a512b207967ce2d06c1ab42",
       "reference_blob": "0c7fc1e6165c47bc37c1493bd291e59316cc6bfd",
-      "qualification": "New composed v4 integration; complete unstable7600 qualification passed in11259981",
+      "qualification": "New composed v4 integration; complete unstable 7600 qualification passed in 11259981",
       "basis_sha256": "29fe12a2f243268e598ca802fb8cd78e11a78d0feb8d301a879c3a94011b847c",
       "basis_blob": "5f7ebd8e1347f7ddf201c6236f8243e198366df4"
     },
@@ -224,7 +224,7 @@
       "path": "tests/o82-lutbus-contract.c",
       "sha256": "4d21178bec26481d9e108a5f97f4bded7c7cef62a92705f1e3f84fc8a8ee2b3b",
       "reference_blob": "36ada5facf56a1626a2f89c40b605045e41c89c6",
-      "qualification": "New composed v4 integration; complete unstable7600 qualification passed in11259981",
+      "qualification": "New composed v4 integration; complete unstable 7600 qualification passed in 11259981",
       "basis_sha256": "de53b61adf43257b8e7cf50fa455a280793490d47ab5a8aa0b40660a572e1b6d",
       "basis_blob": "627704ae87d20800cf34d5366fbb08a84ef73324"
     },
@@ -240,7 +240,7 @@
       "path": "tests/o82-regdma-transport-contract.c",
       "sha256": "12636bebaf2fc99cfa9d28caafb8d6b2de58cf2f422e3b18aa4070a02b68f62e",
       "reference_blob": "2c0436f388767217d29094bb84b685a6e17b711f",
-      "qualification": "New composed v4 integration; complete unstable7600 qualification passed in11259981",
+      "qualification": "New composed v4 integration; complete unstable 7600 qualification passed in 11259981",
       "basis_sha256": "553f8410eab7f9fa46385fd0566e772c1639998066d5e7b04da2ad5551d60239",
       "basis_blob": "13e5be4b156da57e771aa49f227296fba65a7bb2"
     },
@@ -271,7 +271,7 @@
     {
       "path": "tests/o82-atomic-package-contract.sh",
       "sha256": "a18ad8a63122e3f3959e91edf5588fdbc9201afa0251e83c7e7b3afd3a9e4afb",
-      "qualification": "New composed v4 integration; complete unstable7600 qualification passed in11259981",
+      "qualification": "New composed v4 integration; complete unstable 7600 qualification passed in 11259981",
       "basis_sha256": "6f8faaac90406ba2a6555580b932c5e72042486b15980769d59aad34b2d3456a",
       "reference_blob": "37569f090f0cb0625e4111f7ddf15e6b63d797f1",
       "basis_blob": "1d0148e166aaa10a104fce8cef64c39c00f09817"
@@ -336,7 +336,7 @@
       "path": "tests/o82-profile-loader-contract.c",
       "sha256": "8ff8d1046e83311610b1193d238f2ee766cfe2b5ba86f9eca600dbe808e9e4db",
       "reference_blob": "e89e8dc41ca925975d85e729a41fa1fcd52733fb",
-      "qualification": "New composed v4 integration; complete unstable7600 qualification passed in11259981",
+      "qualification": "New composed v4 integration; complete unstable 7600 qualification passed in 11259981",
       "basis_sha256": "9ee9081363f3f8ac184a7a17ddcad9bfb5056d828c9bcdd9ec151fdc12ceda99",
       "basis_blob": "5f1b46fc9e17e3d889dd8464dbd8a6fb1b46a905"
     },
@@ -352,13 +352,13 @@
       "path": "src/display/o82-hsic-format.h",
       "sha256": "dfa79dc0ef22f87d6989b9caca60716f7abd89387e23f1be8df38cfd02bbdb05",
       "reference_blob": "1dc7d262966d53d08f270c0da0e1c27c00139550",
-      "qualification": "11253922 C validator/composed state; full unstable kernel integration passed in11259981"
+      "qualification": "11253922 C validator/composed state; full unstable kernel integration passed in 11259981"
     },
     {
       "path": "tests/unstable-boot-family731-contract.sh",
       "sha256": "3ccb91eee559a307a1c1de8baf1d30e908fb254dc9ae258cf31028b5f253a352",
       "reference_blob": "8a7905fe588ac7105851fb8e53eb20f6004cb2d9",
-      "qualification": "Retained project d3dcaaf family contract; unstable7600 RPM validation passed in11259981"
+      "qualification": "Retained project d3dcaaf family contract; unstable 7600 RPM validation passed in 11259981"
     }
   ],
   "qualified_profile_compiler": {
@@ -408,7 +408,7 @@
     "build": 11259919,
     "release": "7.3.1-7300-unstable",
     "producer_commit": "00ebf622ca473b9b7a799b2f531b4871ddc70497",
-    "scope": "Installed7300 source and successful package checks; currently running7200"
+    "scope": "Installed 7300 source and successful package checks; currently running 7200"
   },
   "private_color_bundle_version": 4,
   "command_bytes": {
@@ -419,7 +419,21 @@
   "shared_pa_flush_bit": 0,
   "default_preset": "",
   "native_hdr_advertisement": false,
-  "kernel_qualification": "pending",
+  "kernel_qualification": {
+    "build": 11260145,
+    "release": "7.3.1-10000",
+    "kernel_abi": "7.3.1-10000-unstable",
+    "source_commit": "34d29c4946fa62ef10fdb1424be304407aee5ed8",
+    "state": "succeeded",
+    "software_only": true,
+    "scope": "Full Image, MSM/MODPOST, signed modules, both supplier DTs, matched boot/RPMs and composed HSIC/SixZone fixtures with the 7300 read-only RTC gate",
+    "primary_sha256": "b1b85dff51a7c11f2815e1b4204ebb48eaf7f06932885b1080077ef2f803fc3e",
+    "source_rpm_sha256": "0bea898c8678d14af5f021648cb25c4474130876f8dc1075d662c50b766d8358",
+    "core_rpm_sha256": "64abab3be827f624e847e88e1746b51f6d4145b69641ac85981c6385e9c40817",
+    "aarch64_packages": 6,
+    "source_packages": 1,
+    "physical_acceptance": false
+  },
   "physical_acceptance": false,
   "private_inputs_included": false,
   "package_family": "senemos-uke-linux-kernel-mainline-unstable",
@@ -467,6 +481,18 @@
     "source_packages": 1,
     "physical_acceptance": false,
     "delivery_held": true,
-    "reason": "Retains7200 and lacks the separately installed7300 read-only RTC gate"
+    "reason": "Retains 7200 and lacks the separately installed 7300 read-only RTC gate"
+  },
+  "delivery_held": true,
+  "delivery_hold_reason": "External 8101 installation/selection adds CAMCC stage1; the 7300-based 10000 color trial does not include that change. Preserve the current isolated camera boot trial and review cumulative source before another color build.",
+  "installed_after_candidate_freeze": {
+    "kernel_abi": "7.3.1-8101-unstable",
+    "composition_sha256": "9adce449e3a5fbfe793297cafd31152d3c00efa7b6e4cb7902b91e4b313254d7",
+    "camera_stage": 1,
+    "camcc_boot_fdt_activation": true,
+    "selected_image_release": "7.3.1-8101-unstable",
+    "local_automatic_policy": 1,
+    "running_kernel": "7.3.1-7200-unstable",
+    "boot_observed": false
   }
 }

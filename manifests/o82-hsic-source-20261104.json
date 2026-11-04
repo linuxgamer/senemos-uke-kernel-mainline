@@ -132,7 +132,7 @@
     "board_settings_imported": false
   },
   "native_integration": {
-    "status": "Qualified compiler and unstable7600 software; installed7300 RTC-preserving candidate pending",
+    "status": "Qualified compiler and complete RTC-preserving 10000 software; cumulative delivery held after 8101 selection",
     "utility": "0.5.0-1",
     "private_bundle_version": 4,
     "record_offset_fields": [
@@ -167,7 +167,7 @@
       "sixzone_parser_wire_checks_per_run": 30724,
       "actual_v4_loader": true,
       "optimized_and_sanitized": true,
-      "native_writer_qualification": "pending complete kernel"
+      "native_writer_qualification": "11260145 complete 10000 software passed; physical acceptance open"
     },
     "default_enabled": false,
     "physical_acceptance": false,
@@ -184,8 +184,8 @@
     }
   },
   "remaining_work": [
-    "Qualify the installed7300 read-only RTC gate with the composed color writer in a fresh unstable kernel",
-    "Deliver matching private v4 input after the RTC-preserving candidate passes; keep unsupported memory/HDR refused",
+    "Preserve the selected 8101 camera boot trial and review cumulative source before another color build",
+    "Deliver matching private v4 input after cumulative qualification; keep unsupported memory/HDR refused",
     "Complete memory/protection/HDR operations and their explicit neutral states",
     "Require physical feature/stability acceptance; normal-family promotion requires an explicit request"
   ],

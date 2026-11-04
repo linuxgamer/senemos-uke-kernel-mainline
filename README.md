@@ -13,15 +13,18 @@ Linux kernel adaptations, device trees and Fedora RPM packaging for Xiaomi Pad 7
 ## Development status
 4 November 2026. New development and candidate builds use
 `senemos-uke-linux-kernel-mainline-unstable` with an `-unstable` Image ABI.
-POCO Pad X1 currently boots `7.3.1-7200-unstable`. Normal-family updates require
-an explicit request and physical stability/feature validation before promotion.
-The active color candidate retains separately installed7300, its read-only
-RTC gate and the camera admission boundaries. `7.3.1-7600-unstable` passed
-[COPR11259981](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11259981/)
-with Image, linked/signed modules, both supplier DTs and boot/RPM checks.
-That7600 trial retains7200 and is held from delivery because it lacks the later
-7300 RTC gate. A fresh7300-based candidate requires full qualification.
-Physical boot, full peripheral and color acceptance remain open.
+Normal-family updates require an explicit request and physical qualification
+before promotion. The legacy upstream-update workflow and normal COPR webhook
+rebuilds are disabled.
+
+The 7300-based color trial `7.3.1-10000-unstable` passed
+[COPR 11260145](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11260145/),
+including Image, linked/signed modules, both supplier DTs and boot/RPM checks.
+Delivery is held: 8101 was installed and selected independently during this
+build and adds a CAMCC boot stage absent from the color trial. Preserve that
+isolated boot trial and review cumulative source before another color build.
+The tablet still runs 7200; physical boot, full peripheral and color/HDR
+acceptance remain open.
 
 31 October 2026. `main` is the continuation branch. Microphone capture, power management, bounded boot-watchdog and optional gaming sources are integrated. The complete combined source still requires fresh release admission and a qualified COPR build; retained candidate packages do not establish that result.
 
@@ -33,7 +36,8 @@ The normal boot path currently enters **EL1**. EL2/KVM work is maintained separa
 
 ## Install on Fedora
 
-Development RPMs are published to [COPR unstable](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/). For an existing unstable-family installation on Fedora Rawhide AArch64:
+Development RPMs are published to [COPR unstable](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/). For an existing unstable-family installation on Fedora Rawhide AArch64, use
+DNF after the chosen candidate's source and delivery conditions are satisfied:
 
 ```bash
 sudo dnf copr enable mcc45tr/uke-linux-unstable
@@ -41,9 +45,9 @@ sudo dnf update
 ```
 
 The kernel, modules, device trees and boot image must use matching versions.
-Unstable RPMs have no automatic activation scriptlets. Installing or updating
-them does not select a boot slot or reboot the tablet; the existing explicit
-trial procedure and recovery checks still apply. Keep the accepted kernel and
+Unstable RPMs contain no activation scriptlets. Installed boot policy and
+selection remain separate state and must be rechecked before a transaction;
+the local automatic policy was enabled independently during this trial. Keep the accepted kernel and
 its matching modules available. Initial migration between package families
 requires a reviewed DNF transaction and recovery route.
 
