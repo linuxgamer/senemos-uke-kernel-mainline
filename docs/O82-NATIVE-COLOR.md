@@ -112,6 +112,14 @@ Dynamic preset control, private data delivery,
 all remaining picture/HDR operations and truthful HDR admission remain open.
 An unsupported preset must not alias a different transform.
 
+The [SixZone source comparison](../manifests/o82-sixzone-source-20261104.json)
+maps the exact OEM 2.0 five-component writer and extended userspace ABI to the
+retained binary's two conversion functions. This is a static protocol result.
+Threshold/PWL units and defaults, complete parser semantics, shared PA control
+ownership and native fault-tested programming remain required before admitting
+the currently blocked picture operations. The older three-component writer or
+an older ABI header cannot stand in for that implementation.
+
 `dpu_o82_profiles.c` validates a fixed PA/PB v2 bundle before publishing state
 and retains it until explicit unload. Refused selection leaves the previous
 record/pointers unchanged. The current data format has 59 records: 47 compiled

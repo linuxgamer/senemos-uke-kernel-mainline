@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-04",
+  "scope": "SixZone 2.0 source and static ABI comparison; no enabled native writer",
+  "exact_uke_driver": {
+    "repository": "MiCode/vendor_opensource_display-drivers",
+    "commit": "44275c404a677d9d9e5230fedd1af2ef02fc7b9a",
+    "paths": [
+      "msm/sde/sde_hw_reg_dma_v1_color_proc.c",
+      "include/uapi/display/drm/msm_drm_pp.h"
+    ],
+    "function": "reg_dmav2_setup_dspp_sixzonev2",
+    "licenses": {
+      "driver": "GPL-2.0-only",
+      "uapi": "GPL-2.0-only WITH Linux-syscall-note"
+    },
+    "samples": 384,
+    "components": ["hue", "sat_low", "sat_mid", "sat_high", "value"],
+    "component_bits": 12,
+    "lutbus_slot_bits": 16,
+    "slot_left_shift": 4,
+    "curve_p0": "hue",
+    "curve_p1": {"high16": "sat_low", "low16": "value"},
+    "curve_p2": {"low16": "sat_mid", "high16": "sat_high"},
+    "additional_state": [
+      "threshold", "adjust_p0", "adjust_p1", "sat_adjust_p0", "sat_adjust_p1",
+      "sat_hold", "val_hold", "SV enable", "HSIC shared PA enable and hold masks"
+    ]
+  },
+  "shared_userspace_abi": {
+    "repository": "AOSPA/android_hardware_qcom_display",
+    "commit": "d40d593a63a56ae7a7e9616518c7158fbb27e447",
+    "classification": "shared display ABI; not an exact Uke product build",
+    "files": [
+      {"path": "sdm/include/private/color_params.h", "blob": "0028afa8be90c3986d135b62458d84fb4aa955b1"},
+      {"path": "sdm/libs/dal/hw_color_manager_drm.cpp", "blob": "b14345e25501a1e8dbc1edae0008e06c53d15542"}
+    ],
+    "license": "BSD redistribution notices from The Linux Foundation and Qualcomm Innovation Center",
+    "difference_from_older_header": "SDEPaData keeps its original prefix and appends SixZone saturation PWL, third curve pointer and SV enable",
+    "aarch64_SDEPaData_offsets": {
+      "six_zone_thresh": 116,
+      "six_zone_adj_p0": 120,
+      "six_zone_adj_p1": 124,
+      "six_zone_sat_hold": 128,
+      "six_zone_val_hold": 129,
+      "six_zone_len": 132,
+      "six_zone_curve_p0": 136,
+      "six_zone_curve_p1": 144,
+      "six_zone_sat_adj_p0": 152,
+      "six_zone_sat_adj_p1": 156,
+      "six_zone_curve_p2": 160,
+      "six_zone_sv_enable": 168
+    }
+  },
+  "retained_oem_binary": {
+    "repository": "Xiaomi-Pad-7-Development/android_vendor_xiaomi_uke",
+    "commit": "6739c8ec275318a156aa3a65f04f54f8dad82926",
+    "path": "proprietary/vendor/lib64/libsdm-color.so",
+    "sha256": "99f02b1114ffa3886e921353ddd54842c66a55871d4a58b2b1e340789a3f1c05",
+    "provenance": "third-party-retained proprietary OEM binary; no redistribution permission inferred",
+    "inspection": "readelf and objdump only; not executed, linked or installed",
+    "common_sixzone_entry": "0x6df28 -> 0x58438",
+    "v2_entry": "0x6df00 -> 0x57fcc",
+    "common_to_v2_call": "0x58838 -> PLT 0x6fa80 -> GOT 0x71758 -> ComputeSixzoneV2Params",
+    "curve_p0_p1_loop": "0x587cc..0x58828",
+    "curve_p2_loop": "0x5835c..0x583a4",
+    "curve_input_stride_bytes": 40,
+    "curve_conversion": "double to integer truncation, 12-bit masks; low/high packing matches the extended ABI"
+  },
+  "remaining_work": [
+    "Complete the JSON/parser-to-PA configuration semantic chain",
+    "Prove threshold/PWL units and defaults, hold and SV admission",
+    "Implement and fault-test complete native shared PA register and flush ownership",
+    "Extend the private bundle without silently admitting unsupported records",
+    "Validate both stopped DSPPs and separately measure physical color/HDR"
+  ],
+  "private_inputs_included": false,
+  "oem_code_executed": false,
+  "native_sixzone_enabled": false,
+  "existing_blocked_presets_unchanged": true,
+  "physical_acceptance": false
+}
