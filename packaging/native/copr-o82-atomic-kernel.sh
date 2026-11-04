@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# COPR only: retain6000 and qualify paired atomic SixZone/PA integration.
+# COPR only: retain6503 and qualify paired atomic SixZone/PA integration.
 set -Eeuo pipefail
 test ! -e /etc/senemos/kernel-update.conf
 [[ $(rpm --eval '%{_host_cpu}') == aarch64 && $(rpm --eval '%{fedora}') == 46 ]]
@@ -10,10 +10,9 @@ revision=${2:?Pass a fresh kernel revision of at least 7000}
 manifest=manifests/o82-sixzone-kernel-source-20261104.json
 (cd "$owner"; jq -r '.imports[]|.sha256+"  "+.path' "$manifest" | sha256sum -c --strict --quiet -)
 (cd "$owner"; jq -r '.qualified_sixzone_compiler.inputs[]|.sha256+"  "+.path' "$manifest" | sha256sum -c --strict --quiet -)
-# The 6000 history object is no longer available, while its exact source RPM
-# remains archived. Admit that immutable artifact only by the full-file digest,
-# RPM identity and complete profile/boot receipts below. A missing mutable API
-# object does not replace any of those identity checks.
+# Admit the complete6503 source by its full-file digest, RPM identity and
+# profile/boot receipts. The preceding6000 repository artifact now returns404;
+# do not substitute a different archive under its old digest.
 for pair in 11253576:uke-o82-color-profile:0.4.0-1; do
     build=${pair%%:*} rest=${pair#*:}
     name=${rest%%:*} version=${rest#*:}
@@ -33,7 +32,7 @@ parent_hash=$(jq -er .kernel_parent.sha256 "$owner/$manifest")
 curl -fLsS --retry 2 --max-time 1200 --proto '=https' --proto-redir '=https' \
     "$parent_url" -o "$stage/parent.src.rpm"
 printf '%s  %s\n' "$parent_hash" "$stage/parent.src.rpm" | sha256sum -c --strict -
-[[ $(rpm -qp --qf '%{NAME}-%{VERSION}-%{RELEASE}' "$stage/parent.src.rpm") == senemos-uke-linux-kernel-mainline-7.3.1-6000.fc46 ]]
+[[ $(rpm -qp --qf '%{NAME}-%{VERSION}-%{RELEASE}' "$stage/parent.src.rpm") == senemos-uke-linux-kernel-mainline-7.3.1-6503.fc46 ]]
 rpmkeys --checksig --nosignature --verbose "$stage/parent.src.rpm"
 rpm2cpio "$stage/parent.src.rpm" > "$stage/parent.cpio"
 cpio -t --quiet < "$stage/parent.cpio" > "$stage/entries"
@@ -53,7 +52,7 @@ for archive in "$native_archive" "$boot_archive"; do
 done
 profile=$stage/unpacked/native-profile
 boot=$stage/unpacked/boot-recipe
-[[ $(cat "$profile/source-commit") == bf1f6634bafc214219de1c48b3fc72a181485343 ]]
+[[ $(cat "$profile/source-commit") == 90b8c9c89f8c89475c5a371f58dc7c7c88e29911 ]]
 (cd "$profile"; sha256sum -c --strict --quiet SHA256SUMS)
 (cd "$boot"; jq -r '.source_assets[]|.sha256+"  "+.path' lock.json | sha256sum -c --strict --quiet -)
 cmp "$boot/lock.json" "$output/boot-payload.json"
@@ -67,8 +66,9 @@ printf '%s  %s\n' "$native_config_hash" \
     "$profile/native.config" | sha256sum -c --strict -
 printf '%s  %s\n' f81f42c2622a6eb671fd7ca11fbb0ce700b6f5a7589a43cb379b5baa7cdfb1ca \
     "$profile/src/input/nt36532-uke-protocol.c" | sha256sum -c --strict -
-jq -e '.source_mode=="retained5000-with-qualified-camera4000-front-provider" and
- .kernel_release=="7.3.1-6000" and .native_ssc_iio_abi==1 and
+jq -e '.source_mode=="retained6000-with-qualified-paired-atomic-color-caller" and
+ .kernel_release=="7.3.1-6503" and .o82_atomic_color_caller and
+ .o82_color_initial_preset=="" and .native_ssc_iio_abi==1 and
  .front_geni_dt_activation and .front_eeprom_dt_activation and .front_eeprom_read_only and
  .front_eeprom_size==8192 and (.camera_sensor_dt_activation|not) and
  (.camera_capture_graph_activation|not) and (.rear_eeprom_dt_activation|not) and
@@ -123,7 +123,7 @@ jq -e --slurpfile old "$stage/parent-boot-lock.json" --rawfile overlays "$stage/
    any($old[0].source_assets[];.path==$p) or ($allowed|index($p)!=null)) and
  ((.source_assets|map(.path)|length)==(.source_assets|map(.path)|unique|length))' \
     "$boot/lock.json" >/dev/null
-cp "$profile/source-composition.json" "$profile/source-composition-before6500.json"
+cp "$profile/source-composition.json" "$profile/source-composition-before7000.json"
 install -Dm644 "$owner/$manifest" "$profile/$manifest"
 commit=$(git -C "$owner" rev-parse HEAD)
 epoch=$(git -C "$owner" show -s --format=%ct HEAD)
@@ -132,10 +132,10 @@ jq -Rn '[inputs]' < "$stage/overlays" > "$stage/overlays.json"
 jq --arg commit "$commit" --arg revision "$revision" --arg hash "$parent_hash" \
     --slurpfile overlays "$stage/overlays.json" '. + {
  source_commit:$commit,kernel_release:("7.3.1-"+$revision),rpm_revision:$revision,
- source_mode:"retained6000-with-paired-sixzone-v3-color-caller",
- parent_copr_build:11252822,parent_srpm_sha256:$hash,
- parent_source_commit:"bf1f6634bafc214219de1c48b3fc72a181485343",
- parent_composition:"source-composition-before6500.json",overlays:$overlays[0],
+ source_mode:"retained6503-with-paired-sixzone-v3-color-caller",
+ parent_copr_build:11253343,parent_srpm_sha256:$hash,
+ parent_source_commit:"90b8c9c89f8c89475c5a371f58dc7c7c88e29911",
+ parent_composition:"source-composition-before7000.json",overlays:$overlays[0],
  o82_atomic_source_manifest:"manifests/o82-sixzone-kernel-source-20261104.json",
  qualified_o82_kms_check:11253082,
  qualified_o82_source_commit:"48aa87956b9d59c09dd8e0a82279c757cd59fb03",
@@ -168,7 +168,7 @@ jq --arg commit "$commit" --arg revision "$revision" --arg hash "$parent_hash" \
  "drivers/gpu/drm/msm/disp/dpu1/o82-sixzone-format.h",
  "drivers/gpu/drm/msm/disp/dpu1/uke-o82-hdr-format.h"],
  native_hdr_advertised:false,device_installation:false,physical_acceptance:false
-}' "$profile/source-composition-before6500.json" > "$profile/source-composition.json"
+}' "$profile/source-composition-before7000.json" > "$profile/source-composition.json"
 (cd "$profile"; find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 (cd "$boot"; jq -r '.source_assets[]|.sha256+"  "+.path' lock.json | sha256sum -c --strict --quiet -)
 for tree in native-profile boot-recipe; do
@@ -178,35 +178,33 @@ for tree in native-profile boot-recipe; do
         -cJf "$output/$archive" -C "$stage/unpacked" "$tree"
 done
 install -m644 "$boot/lock.json" "$output/boot-payload.json"
-[[ $(grep -Fxc '%global senemos_build_release 6000' "$spec") == 1 && $(grep -Fxc '%check' "$spec") == 1 ]]
+[[ $(grep -Fxc '%global senemos_build_release 6503' "$spec") == 1 && $(grep -Fxc '%check' "$spec") == 1 ]]
+# The6503 spec already runs the five final-source display fixtures and its
+# four package checks. Preserve each once and add only the new PA preflight.
+for command in \
+    'CC=clang bash native-profile/tests/o82-avr-contract.sh "$PWD"' \
+    'bash native-profile/tests/o82-atomic-package-contract.sh "$PWD" %{_uke_out}'; do
+    [[ $(grep -Fxc "$command" "$spec") == 1 ]]
+done
 awk -v revision="$revision" '
- /^%global senemos_build_release 6000$/ {$0="%global senemos_build_release "revision}
+ /^%global senemos_build_release 6503$/ {$0="%global senemos_build_release "revision}
  /^%build$/ {
-  print "# Repeat affected historical fixtures on the final color-integrated source."
-  print "CC=clang bash native-profile/tests/o82-avr-contract.sh \"$PWD\""
-  print "CXX=clang++ bash native-profile/tests/dpu-video-timing-contract.sh \"$PWD\""
-  print "CC=clang bash native-profile/tests/msm-retirement-proof-contract.sh \"$PWD\""
-  print "CC=clang bash native-profile/tests/dpu-reservation-contract.sh \"$PWD\" \"$PWD/native-generated/dpu-reservation-before56\""
-  print "CC=clang bash native-profile/tests/dpu-color-topology-contract.sh \"$PWD/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c\""
+  print "# Check the new PA source after the retained final-source display fixtures."
   print "bash native-profile/tests/o82-profile-loader-contract.sh native-profile"
   print "bash native-profile/tests/o82-lutbus-contract.sh"
   print "bash native-profile/tests/o82-regdma-transport-contract.sh native-profile \"$PWD\""
   print "bash native-profile/tests/o82-atomic-contract.sh native-profile \"$PWD\""
-  print "printf '\''Final-source legacy AVR/video/retirement/reservation/topology color preflight passed\\n'\''"
+  print "printf '\''Final-source v3 loader, LUTBUS, power and atomic PA preflight passed\\n'\''"
   print;next
  }
  /^%check$/ {
   print
-  print "bash native-profile/tests/o82-lutbus-contract.sh"
-  print "bash native-profile/tests/o82-regdma-transport-contract.sh native-profile \"$PWD\""
-  print "bash native-profile/tests/o82-atomic-contract.sh native-profile \"$PWD\""
-  print "bash native-profile/tests/o82-atomic-package-contract.sh \"$PWD\" %{_uke_out}"
   print "bash native-profile/tests/o82-profile-loader-contract.sh native-profile"
   next
  }
  /^%changelog$/ {
   print;print "* Wed Nov 04 2026 Uke contributors - 7.3.1-"revision
-  print "- Retain the complete 6000 camera, touch, sensor and power sources."
+  print "- Retain the complete 6503 camera, touch, sensor, power and display sources."
   print "- Add bounded SixZone v3 tables and paired shared PA enable, disable and readback."
   print "- Preserve disabled initial selection and require matching private v3 input."
   print "- Verify full module linkage, failure ownership and both supplier DTs."

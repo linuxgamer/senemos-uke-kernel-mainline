@@ -2,19 +2,19 @@
   "schema_version": 1,
   "date": "2026-11-04",
   "kernel_parent": {
-    "build": 11252822,
-    "release": "7.3.1-6000",
-    "source_commit": "bf1f6634bafc214219de1c48b3fc72a181485343",
-    "url": "https://download.copr.fedorainfracloud.org/results/mcc45tr/uke-linux-unstable/fedora-rawhide-aarch64/Packages/s/senemos-uke-linux-kernel-mainline-7.3.1-6000.fc46.src.rpm",
-    "sha256": "6cc6db94c26f2533d08d13660f26a0ba5fc4b5a41cc81d6403ae2bb3d0163448",
+    "build": 11253343,
+    "release": "7.3.1-6503",
+    "source_commit": "90b8c9c89f8c89475c5a371f58dc7c7c88e29911",
+    "url": "https://download.copr.fedorainfracloud.org/results/mcc45tr/uke-linux-unstable/fedora-rawhide-aarch64/Packages/s/senemos-uke-linux-kernel-mainline-7.3.1-6503.fc46.src.rpm",
+    "sha256": "0a2c470f2351ded3dc3cb3575daaae6d980b7186a4215ef75e1703c5bae22a8e",
     "native_config_identity": "SHA-256 recorded in the fully pinned parent source-composition.json native_config_sha256 field",
     "effective_config_sha256": "7f1e3f7a5be62396b2b36534780aeb561dfbf7e0a10698677b860cbc91efbd38"
   },
   "parent_history_availability": {
     "observed": "2026-11-04",
-    "build_api": "11252822 returns 404; the pinned source RPM remains reachable",
-    "admission": "Full-file SHA-256, RPM identity and complete retained profile/boot receipts; no replacement artifact",
-    "later_consumption": "11253131 verified this exact parent, completed Image/module compilation and passed the new module/DT/config checks; final legacy AVR fixture failed",
+    "preceding_parent": "6000 full-file pinned source URL now returns404; first7000 source stage11253605 failed before creating an SRPM",
+    "current_parent": "6503 repository source URL returns200; full-file digest comes from checksum-verified primary metadata",
+    "admission": "Full-file SHA256, exact6503 RPM/profile identity, all retained profile/boot/config receipts and unchanged legacy checks",
     "minimum_fresh_revision": 7000,
     "release_history_guard_unchanged": true
   },
@@ -343,5 +343,14 @@
     ]
   },
   "private_color_bundle_version": 3,
-  "sixzone_native_integration": "pending complete kernel and package qualification"
+  "sixzone_native_integration": "pending complete kernel and package qualification",
+  "ancestral_kernel_parent": {
+    "build": 11252822,
+    "release": "7.3.1-6000",
+    "source_commit": "bf1f6634bafc214219de1c48b3fc72a181485343",
+    "url": "https://download.copr.fedorainfracloud.org/results/mcc45tr/uke-linux-unstable/fedora-rawhide-aarch64/Packages/s/senemos-uke-linux-kernel-mainline-7.3.1-6000.fc46.src.rpm",
+    "sha256": "6cc6db94c26f2533d08d13660f26a0ba5fc4b5a41cc81d6403ae2bb3d0163448",
+    "native_config_identity": "SHA-256 recorded in the fully pinned parent source-composition.json native_config_sha256 field",
+    "effective_config_sha256": "7f1e3f7a5be62396b2b36534780aeb561dfbf7e0a10698677b860cbc91efbd38"
+  }
 }
