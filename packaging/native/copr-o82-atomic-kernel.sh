@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # COPR only: retain6503 and qualify paired atomic SixZone/PA integration.
 set -Eeuo pipefail
+trap 'o82_source_status=$?; printf "O82 source preparation failed at line %s (status%s)\n" "$LINENO" "$o82_source_status" >&2; exit "$o82_source_status"' ERR
 test ! -e /etc/senemos/kernel-update.conf
 [[ $(rpm --eval '%{_host_cpu}') == aarch64 && $(rpm --eval '%{fedora}') == 46 ]]
 owner=$(cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -179,13 +180,19 @@ for tree in native-profile boot-recipe; do
 done
 install -m644 "$boot/lock.json" "$output/boot-payload.json"
 [[ $(grep -Fxc '%global senemos_build_release 6503' "$spec") == 1 && $(grep -Fxc '%check' "$spec") == 1 ]]
-# The6503 spec already runs the five final-source display fixtures and its
-# four package checks. Preserve each once and add only the new PA preflight.
-for command in \
-    'CC=clang bash native-profile/tests/o82-avr-contract.sh "$PWD"' \
-    'bash native-profile/tests/o82-atomic-package-contract.sh "$PWD" %{_uke_out}'; do
-    [[ $(grep -Fxc "$command" "$spec") == 1 ]]
+# The6503 spec runs AVR once in prep and once in check. Admit both original
+# calls separately, preserving the final-source preflight and package check.
+for section in prep check; do
+    [[ $(awk -v section="$section" \
+        -v command='CC=clang bash native-profile/tests/o82-avr-contract.sh "$PWD"' '
+        /^%(prep|build|install|check|files|changelog)([[:space:]]|$)/ {active=($0=="%"section)}
+        active && $0==command {count++}
+        END {print count+0}' "$spec") == 1 ]]
 done
+[[ $(awk -v command='bash native-profile/tests/o82-atomic-package-contract.sh "$PWD" %{_uke_out}' '
+    /^%(prep|build|install|check|files|changelog)([[:space:]]|$)/ {active=($0=="%check")}
+    active && $0==command {count++}
+    END {print count+0}' "$spec") == 1 ]]
 awk -v revision="$revision" '
  /^%global senemos_build_release 6503$/ {$0="%global senemos_build_release "revision}
  /^%build$/ {
