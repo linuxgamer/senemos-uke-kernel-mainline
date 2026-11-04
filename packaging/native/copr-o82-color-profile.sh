@@ -4,7 +4,7 @@ set -Eeuo pipefail
 test ! -e /etc/senemos/kernel-update.conf
 owner=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 output=$(realpath -m "${1:?Pass the remote source result directory}")
-bash "$owner/packaging/native/refuse-published-release.sh" uke-o82-color-profile 0.6.0-2
+bash "$owner/packaging/native/refuse-published-release.sh" uke-o82-color-profile 0.6.0-3
 (cd "$owner"; jq -r '.inputs[]|.sha256+"  "+.path' \
     manifests/o82-memory-json-source-20261105.json | sha256sum -c --strict --quiet -)
 mkdir -p "$output"
@@ -15,6 +15,7 @@ packaging/uke-o82-color-profile.spec	uke-o82-color-profile.spec
 src/display/o82-color-profile.cpp	o82-color-profile.cpp
 docs/O82-COLOR-PROFILE.md	O82-COLOR-PROFILE.md
 LICENSE	LICENSE
+LICENSES/GPL-2.0-only.txt	GPL-2.0-only.txt
 src/display/uke-o82-hdr-format.h	uke-o82-hdr-format.h
 tests/o82-hdr-edid-contract.cpp	o82-hdr-edid-contract.cpp
 src/display/o82-regdma.h	o82-regdma.h
@@ -51,4 +52,4 @@ test "$(git -C "$owner" hash-object "$output/o82-color-before-grid.cpp")" = \
 printf 'Color utility source %s; actual pre-fix source %s\n' \
     "$(git -C "$owner" rev-parse HEAD)" "$before"
 test "$(rpmspec --target aarch64 -q --srpm --qf '%{NAME}-%{VERSION}-%{RELEASE}' \
-    "$output/uke-o82-color-profile.spec")" = uke-o82-color-profile-0.6.0-2.fc46
+    "$output/uke-o82-color-profile.spec")" = uke-o82-color-profile-0.6.0-3.fc46

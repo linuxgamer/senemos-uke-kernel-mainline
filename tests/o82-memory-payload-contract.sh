@@ -10,6 +10,7 @@ mkdir -p "$scratch/linux"
 cat > "$scratch/linux/types.h" <<'C'
 #ifndef TEST_LINUX_TYPES_H
 #define TEST_LINUX_TYPES_H
+#include_next <linux/types.h>
 #include <stdbool.h>
 #include <stddef.h>
 typedef unsigned char u8;
@@ -18,7 +19,7 @@ C
 cat > "$scratch/linux/firmware.h" <<'C'
 #ifndef TEST_FIRMWARE_H
 #define TEST_FIRMWARE_H
-#include "types.h"
+#include <linux/types.h>
 struct device { int unused; };
 struct firmware { const u8 *data; size_t size; };
 int request_firmware_direct(const struct firmware **fw, const char *name, struct device *dev);

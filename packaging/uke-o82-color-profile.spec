@@ -1,6 +1,6 @@
 Name: uke-o82-color-profile
 Version: 0.6.0
-Release: 2%{?dist}
+Release: 3%{?dist}
 Summary: Generate private O82 OEM color mappings and native preset data
 License: MIT
 URL: https://github.com/MCC45TR/senemos-uke-kernel-mainline
@@ -33,6 +33,8 @@ Source27: o82-memory-payload-contract.cpp
 Source28: o82-memory-payload-contract.sh
 Source29: dpu_o82_lutbus.c
 Source30: dpu_o82_lutbus.h
+# GPL fixture sources are not linked into the installed MIT utility.
+Source31: GPL-2.0-only.txt
 ExclusiveArch: aarch64
 BuildRequires: clang gcc-c++ compiler-rt pkgconf-pkg-config
 BuildRequires: pkgconfig(json-c) pkgconfig(lcms2) pkgconfig(openssl)
@@ -65,6 +67,7 @@ cp %{SOURCE16} .
 cp %{SOURCE17} %{SOURCE18} %{SOURCE19} %{SOURCE20} .
 cp %{SOURCE21} %{SOURCE22} %{SOURCE23} %{SOURCE24} .
 cp %{SOURCE25} %{SOURCE26} .
+cp %{SOURCE31} .
 mkdir -p src/display tests
 cp %{SOURCE3} %{SOURCE10} %{SOURCE11} %{SOURCE12} src/display/
 cp %{SOURCE17} %{SOURCE22} src/display/
@@ -144,6 +147,10 @@ grep -E '^OEM gamut grid regression rejected: [1-9][0-9]*/[0-9]+ checks failed$'
 %{_bindir}/uke-o82-color-profile
 
 %changelog
+* Thu Nov 05 2026 Uke contributors - 0.6.0-3
+- Preserve system UAPI integer types in the mixed C/C++ pipeline fixture.
+- Include the existing GPL license text with the native fixture sources.
+
 * Thu Nov 05 2026 Uke contributors - 0.6.0-2
 - Correct the typed value hold-control field used by memory conversion.
 

@@ -57,7 +57,7 @@
   "package": {
     "name": "uke-o82-color-profile",
     "version": "0.6.0",
-    "release": 2,
+    "release": 3,
     "producer": "packaging/native/copr-o82-color-profile.sh",
     "installed_payload": "Native offline utility, documentation and license; no firmware, kernel or private table"
   },
@@ -82,6 +82,15 @@
         "state": "failed",
         "stage": "Utility compilation before fixtures",
         "reason": "The new JSON converter used value_hold instead of the existing MemoryColorInput::value_hold_control field. Correct the member name and use a fresh release; no device or private profile was changed."
+      },
+      {
+        "copr_build": 11261162,
+        "source_commit": "b28ccfc3c984706b1bddbcc39254a49f7dbcb925",
+        "release": "0.6.0-2",
+        "state": "failed",
+        "stage": "Mixed C/C++ hosted pipeline fixture compilation",
+        "passed": "Production utility compilation and optimized/sanitized self-tests, EDID and actual v4 loader passed",
+        "reason": "The fixture minimal linux/types.h shadows system UAPI types needed by POSIX scheduler/stat headers in the actual C++ utility. Wrap the real UAPI header and retain the native u8 alias; production code is unchanged."
       }
     ]
   },
@@ -146,7 +155,11 @@
     },
     {
       "path": "tests/o82-memory-payload-contract.sh",
-      "sha256": "a6aa9d260b38591acfda1617af542751a006a13072f881ca7e343132529082b3"
+      "sha256": "8ac80d78fa6795673212f59256d97af0717513459657ad4853eeb9fa440820df"
+    },
+    {
+      "path": "LICENSES/GPL-2.0-only.txt",
+      "sha256": "f6b78c087c3ebdf0f3c13415070dd480a3f35d8fc76f3d02180a407c1c812f79"
     }
   ]
 }
