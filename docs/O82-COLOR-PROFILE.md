@@ -4,12 +4,17 @@
 Fedora Rawhide AArch64 and original KWin 6.8.2. Compilation and numerical checks
 run in COPR. Optical color and HDR acceptance require separate measurements.
 
+4 November 2026 current-device check: the tablet runs 7.3.1-1500; the generator
+package and both fixed native v2 firmware files are absent. The ICC reports
+below describe their dated trials and do not establish the current root's
+profile selection. Full private-profile application and native HDR remain open.
+
 The initial `0.1.0-2` passed numerical checks and saved ICC selection, but its
 serialized stage order was rejected when original KWin rendered the output.
 User photographs reported crushed shadows and excessive contrast/saturation.
 COPR11239895 built signed `0.2.0-3` with the corrected LUT16 leading-matrix
 layout, serialized-stage validation, dark/gray roundtrips and ASan/UBSan checks.
-That version is installed and generated a replacement private PB profile.
+That version was installed for the recorded trial and generated a replacement private PB profile.
 A short active-output trial on Linux 7.3.1-115 produced no former ICC shader
 error. The previous disabled-output state and brightness were restored.
 Optical accuracy and comparison with Android remain unverified.
@@ -50,9 +55,11 @@ The separately tested HDR descriptor is not attached to the live connector.
 A separate native Cliffs DB transport now implements bounded descriptor
 submission, completion/error polling, checked reset and a failed-stop latch.
 Its actual C source is checked against deterministic MMIO in COPR; it has no
-live driver caller. Both clock gates, GEM/VM ownership, paired-DSPP state,
-all preset operations and the four compositor input combinations still need
-integration. Native HDR10/WCG therefore remains unavailable in KDE. See the
+live atomic color caller. Main now contains bound-KMS GEM/VM, runtime-power,
+clock/QoS and explicit MMU-drain ownership, qualified by COPR 11252759. Paired
+atomic application, gamut component mapping, all preset operations and the
+four compositor input combinations still require integration. Native HDR
+advertisement remains disabled. See the
 [native transport contract](O82-NATIVE-COLOR.md) for the current boundary.
 
 The `0.3.0` source adds `--native-presets OEM_JSON NEW_PRIVATE_BUNDLE`.
@@ -78,7 +85,8 @@ COPR11240486 passes utility0.3.0-4 and actual Linux7.3.1 AArch64 object checks.
 The verified production generator creates both private PA/PB bundles with59
 records,47 compiled transforms and12 explicitly refused nonzero picture/HDR
 operations. Each preserves32 IGC-dither configurations. No firmware is installed,
-no profile is applied and original KDE still uses the corrected temporary ICC.
+no profile was applied in that data-generation trial and its corrected
+temporary ICC was retained. Current profile selection is a separate check.
 
 ## Use
 
