@@ -1,0 +1,27 @@
+From: Uke Linux maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] boot: connect the configured native camera controller (abl)
+
+--- a/src/boot/uke-abl.c
++++ b/src/boot/uke-abl.c
+@@ -169,6 +169,9 @@
+ #include "uke-cpu-thermal.h"
+ #include "uke-clock-debug.h"
+ #include "uke-rtc.h"
++#ifdef CONFIG_SM_CAMCC_7675
++#include "uke-camcc-dt.h"
++#endif
+ #include "uke-hall.h"
+ 
+ static int UKE_INIT uke_reboot_cell(const void *fdt)
+@@ -962,6 +965,11 @@
+ 	if (ret)
+ 		return ret;
+ #endif
++#ifdef CONFIG_SM_CAMCC_7675
++	ret = uke_camcc_controller_graph(output);
++	if (ret)
++		return ret;
++#endif
+ 	/* OEM zero-width bits means the whole byte; upstream rejects bits=<0 0>. */
+ 	ret = uke_rtc_secure_offset(output);
+ 	if (ret)

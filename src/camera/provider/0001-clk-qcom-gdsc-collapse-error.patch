@@ -1,0 +1,31 @@
+From 417ad75a6f267e82ccd1e8e95696a1ac776bc1db Mon Sep 17 00:00:00 2001
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Date: Wed, 21 Oct 2026 18:29:01 +0300
+Subject: [PATCH] clk: qcom: gdsc: preserve collapse write errors
+
+Do not replace a failed collapse write with a successful status poll or
+the votable power-off fast path. Keep resources held when the requested
+transition is uncertain. Generic regulator and ICC retry accounting is
+outside this change.
+
+Signed-off-by: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+---
+ drivers/clk/qcom/gdsc.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/clk/qcom/gdsc.c b/drivers/clk/qcom/gdsc.c
+index b99d701..b182ca2 100644
+--- a/drivers/clk/qcom/gdsc.c
++++ b/drivers/clk/qcom/gdsc.c
+@@ -162,6 +162,8 @@ static int gdsc_toggle_logic(struct gdsc *sc, enum gdsc_status status,
+ 	}
+ 
+ 	ret = gdsc_update_collapse_bit(sc, status == GDSC_OFF);
++	if (ret)
++		return ret;
+ 
+ 	/* If disabling votable gdscs, don't poll on status */
+ 	if ((sc->flags & VOTABLE) && status == GDSC_OFF && !wait) {
+-- 
+2.56.0
+

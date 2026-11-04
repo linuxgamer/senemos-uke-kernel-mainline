@@ -1,0 +1,20 @@
+From: Uke Linux maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] tests: admit only built-in reviewed Uke camera clock support
+
+Retain the existing supplier exclusions and require boolean permanent linkage
+for the reviewed SM7675 camera controller. A module remains inadmissible.
+
+--- a/tests/uke-build-scope-contract.sh
++++ b/tests/uke-build-scope-contract.sh
+@@ -41,6 +41,11 @@
+     case $symbol in
+         CONFIG_SM_*CC_*|CONFIG_CLK_*CC*|CONFIG_IPQ_*|CONFIG_MSM_*CC_*|CONFIG_SC_*CC_*|CONFIG_SDM_*CC_*|CONFIG_PINCTRL_*|CONFIG_INTERCONNECT_QCOM_*)
+             case $symbol in
++                CONFIG_SM_CAMCC_7675)
++                    [[ $setting == CONFIG_SM_CAMCC_7675=y ]] || {
++                        echo 'Native camera controller requires permanent built-in linkage' >&2; exit 1;
++                    }
++                    ;;
+                 CONFIG_SM_GCC_CLIFFS|CONFIG_SM_GPUCC_CLIFFS|CONFIG_SM_DISPCC_8550|CONFIG_SM_VIDEOCC_8550|\
+                 CONFIG_PINCTRL|CONFIG_PINCTRL_MSM|CONFIG_PINCTRL_CLIFFS|CONFIG_PINCTRL_QCOM_SPMI_PMIC|\
+                 CONFIG_PINCTRL_LPASS_LPI|CONFIG_PINCTRL_SM8650_LPASS_LPI|CONFIG_PINCTRL_PALAWAN_LPASS_LPI|CONFIG_PINCTRL_SINGLE|CONFIG_PINCTRL_GENERIC|\

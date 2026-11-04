@@ -1,0 +1,57 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 04:00:00 +0300
+Subject: [PATCH] clk: qcom: gdsc: unwind initialized domains after probe failure
+
+Remove initialized genpds if a later initialization, parent link or OF
+provider registration fails. Remove parent links first and skip holes in
+the domain array. A failed gdsc_init has not registered its genpd.
+
+This rebases the inactive 23 October camera prerequisite onto Linux 7.3.1.
+The initialized-domain unwind follows Konrad Dybcio's required-domain RFC
+12/16. Keep physical power ownership and camera activation separate: this
+only fixes genpd object registration and does not qualify failed-probe
+rail ownership or a native camera provider.
+
+Link: https://lore.kernel.org/all/20261014-topic-qc_clk_dvfs-v1-12-3041b788e9f7@oss.qualcomm.com/
+Signed-off-by: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+--- a/drivers/clk/qcom/gdsc.c
++++ b/drivers/clk/qcom/gdsc.c
+@@ -604,6 +604,7 @@ int gdsc_register(struct gdsc_desc *desc,
+ 	struct device *dev = desc->dev;
+ 	struct gdsc **scs = desc->scs;
+ 	size_t num = desc->num;
++	size_t initialized = 0;
+ 
+ 	data = devm_kzalloc(dev, sizeof(*data), GFP_KERNEL);
+ 	if (!data)
+@@ -650,8 +651,9 @@ int gdsc_register(struct gdsc_desc *desc,
+ 		scs[i]->rcdev = rcdev;
+ 		ret = gdsc_init(scs[i]);
+ 		if (ret)
+-			return ret;
++			goto err_remove_domains;
+ 		data->domains[i] = &scs[i]->pd;
++		initialized = i + 1;
+ 	}
+ 
+ 	/* Add subdomains */
+@@ -667,10 +669,18 @@ int gdsc_register(struct gdsc_desc *desc,
+ 			goto err_pm_subdomain_remove;
+ 	}
+ 
+-	return of_genpd_add_provider_onecell(dev->of_node, data);
++	ret = of_genpd_add_provider_onecell(dev->of_node, data);
++	if (!ret)
++		return 0;
+ 
+ err_pm_subdomain_remove:
+ 	gdsc_pm_subdomain_remove(desc, i);
++err_remove_domains:
++	while (initialized > 0) {
++		initialized--;
++		if (scs[initialized])
++			pm_genpd_remove(&scs[initialized]->pd);
++	}
+ 
+ 	return ret;
+ }

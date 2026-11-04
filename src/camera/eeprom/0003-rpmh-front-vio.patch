@@ -1,0 +1,21 @@
+From: Uke Linux maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] regulator: admit the exact Uke camera VIO resource
+
+MiCode kernel_devicetree 94c84aeb and camera-devicetree 57d2135
+route the front EEPROM VIO to PMXR2230 L20B, resource ldob20.
+Admit only that resource. Preserve command-DB/type/mode validation,
+the shared provider constraints and native error ownership.
+The read-only at24 consumer owns its separate 1.8 V request.
+
+--- a/drivers/regulator/qcom-rpmh-regulator-uke.c
++++ b/drivers/regulator/qcom-rpmh-regulator-uke.c
+@@ -2014,7 +2014,8 @@
+ 	    strcmp(aggr_vreg->resource_name, "ldob8") &&
+ 	    strcmp(aggr_vreg->resource_name, "ldod3") &&
+ 	    strcmp(aggr_vreg->resource_name, "ldoe7") &&
+-	    strcmp(aggr_vreg->resource_name, "bobb1"))
++	    strcmp(aggr_vreg->resource_name, "bobb1") &&
++	    strcmp(aggr_vreg->resource_name, "ldob20"))
+ 		return -ENODEV;
+ 
+ 	aggr_vreg->addr = cmd_db_read_addr(aggr_vreg->resource_name);

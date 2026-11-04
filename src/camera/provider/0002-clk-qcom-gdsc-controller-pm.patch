@@ -1,0 +1,232 @@
+From f0722aefe8c1a562757ddb0624a8059c5de65ffe Mon Sep 17 00:00:00 2001
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Date: Wed, 21 Oct 2026 18:30:09 +0300
+Subject: [PATCH] clk: qcom: gdsc: retain controller PM across domain
+ transitions
+
+Opt in only permanent software-controlled OFF/ON domains. Resume before
+MMIO, retain one reference through ON or ambiguous errors, and release
+after verified OFF. Refuse unsupported contracts and forced-inactive
+access; propagate retain-FF errors.
+
+This inactive prerequisite does not qualify provider probe-failure
+lifetime, publication/removal or forced suspend. No domain opts in until
+the native controller implements and tests those paths.
+
+Signed-off-by: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+---
+ drivers/clk/qcom/gdsc.c | 100 +++++++++++++++++++++++++++++++++++++---
+ drivers/clk/qcom/gdsc.h |   6 +++
+ 2 files changed, 100 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/clk/qcom/gdsc.c b/drivers/clk/qcom/gdsc.c
+index b182ca2..1b7317c 100644
+--- a/drivers/clk/qcom/gdsc.c
++++ b/drivers/clk/qcom/gdsc.c
+@@ -12,6 +12,7 @@
+ #include <linux/kernel.h>
+ #include <linux/ktime.h>
+ #include <linux/pm_domain.h>
++#include <linux/pm_runtime.h>
+ #include <linux/regmap.h>
+ #include <linux/regulator/consumer.h>
+ #include <linux/reset-controller.h>
+@@ -277,11 +278,66 @@ static inline void gdsc_assert_reset_aon(struct gdsc *sc)
+ 			   GMEM_RESET_MASK, 0);
+ }
+ 
+-static void gdsc_retain_ff_on(struct gdsc *sc)
++static int gdsc_retain_ff_on(struct gdsc *sc)
+ {
+ 	u32 mask = GDSC_RETAIN_FF_ENABLE;
+ 
+-	regmap_update_bits(sc->regmap, sc->gdscr, mask, mask);
++	return regmap_update_bits(sc->regmap, sc->gdscr, mask, mask);
++}
++
++static int gdsc_enable(struct generic_pm_domain *domain);
++static int gdsc_disable(struct generic_pm_domain *domain);
++
++static int gdsc_pm_validate(struct gdsc *sc, struct device *dev)
++{
++	if (!(sc->flags & GDSC_CONTROLLER_PM))
++		return 0;
++
++	/* This opt-in currently covers only permanent, software-controlled domains. */
++	if (!dev->driver || dev->driver->owner || !dev->driver->suppress_bind_attrs ||
++	    !dev->driver->pm || !dev->driver->pm->runtime_suspend ||
++	    !dev->driver->pm->runtime_resume || sc->pwrsts != PWRSTS_OFF_ON ||
++	    sc->flags & ~(GDSC_CONTROLLER_PM | POLL_CFG_GDSCR | RETAIN_FF_ENABLE) ||
++	    sc->pd.flags & GENPD_FLAG_IRQ_SAFE || sc->supply || sc->rsupply ||
++	    sc->needs_icc || sc->icc_path || sc->cxc_count || sc->reset_count ||
++	    sc->pd.set_hwmode_dev || sc->pd.get_hwmode_dev ||
++	    (sc->pd.power_on && sc->pd.power_on != gdsc_enable) ||
++	    (sc->pd.power_off && sc->pd.power_off != gdsc_disable))
++		return -EINVAL;
++	if (sc->controller_pm_held)
++		return -EBUSY;
++	if (!pm_runtime_enabled(dev))
++		return -EACCES;
++
++	return 0;
++}
++
++static int gdsc_pm_get(struct gdsc *sc)
++{
++	int ret;
++
++	if (!(sc->flags & GDSC_CONTROLLER_PM))
++		return 0;
++	if (!sc->controller_dev || !pm_runtime_enabled(sc->controller_dev))
++		return -EACCES;
++	if (sc->controller_pm_held)
++		return pm_runtime_active(sc->controller_dev) ? 0 : -EHOSTDOWN;
++
++	ret = pm_runtime_resume_and_get(sc->controller_dev);
++	if (ret < 0)
++		return ret;
++	sc->controller_pm_held = true;
++	/* A failed transition retains this vote until power-off is verified. */
++	return 0;
++}
++
++static void gdsc_pm_put(struct gdsc *sc)
++{
++	if (!(sc->flags & GDSC_CONTROLLER_PM) || !sc->controller_pm_held)
++		return;
++
++	sc->controller_pm_held = false;
++	pm_runtime_put(sc->controller_dev);
+ }
+ 
+ static int gdsc_enable(struct generic_pm_domain *domain)
+@@ -289,6 +345,10 @@ static int gdsc_enable(struct generic_pm_domain *domain)
+ 	struct gdsc *sc = domain_to_gdsc(domain);
+ 	int ret;
+ 
++	ret = gdsc_pm_get(sc);
++	if (ret)
++		return ret;
++
+ 	if (sc->pwrsts == PWRSTS_ON)
+ 		return gdsc_deassert_reset(sc);
+ 
+@@ -320,8 +380,11 @@ static int gdsc_enable(struct generic_pm_domain *domain)
+ 	 */
+ 	udelay(1);
+ 
+-	if (sc->flags & RETAIN_FF_ENABLE)
+-		gdsc_retain_ff_on(sc);
++	if (sc->flags & RETAIN_FF_ENABLE) {
++		ret = gdsc_retain_ff_on(sc);
++		if (ret)
++			return ret;
++	}
+ 
+ 	/* Turn on HW trigger mode if supported */
+ 	if (sc->flags & HW_CTRL) {
+@@ -347,6 +410,10 @@ static int gdsc_disable(struct generic_pm_domain *domain)
+ 	struct gdsc *sc = domain_to_gdsc(domain);
+ 	int ret;
+ 
++	ret = gdsc_pm_get(sc);
++	if (ret)
++		return ret;
++
+ 	if (sc->pwrsts == PWRSTS_ON)
+ 		return gdsc_assert_reset(sc);
+ 
+@@ -388,6 +455,7 @@ static int gdsc_disable(struct generic_pm_domain *domain)
+ 	if (sc->flags & CLAMP_IO)
+ 		gdsc_assert_clamp_io(sc);
+ 
++	gdsc_pm_put(sc);
+ 	return 0;
+ }
+ 
+@@ -433,6 +501,10 @@ static int gdsc_init(struct gdsc *sc)
+ 	u32 mask, val;
+ 	int on, ret;
+ 
++	ret = gdsc_pm_get(sc);
++	if (ret)
++		return ret;
++
+ 	/*
+ 	 * Disable HW trigger: collapse/restore occur based on registers writes.
+ 	 * Disable SW override: Use hardware state-machine for sequencing.
+@@ -490,8 +562,11 @@ static int gdsc_init(struct gdsc *sc)
+ 		 * otherwise we end up turning off the GDSC and destroying all
+ 		 * the register contents that we thought we were saving.
+ 		 */
+-		if (sc->flags & RETAIN_FF_ENABLE)
+-			gdsc_retain_ff_on(sc);
++		if (sc->flags & RETAIN_FF_ENABLE) {
++			ret = gdsc_retain_ff_on(sc);
++			if (ret)
++				goto err_disable_supply;
++		}
+ 
+ 		/* Turn on HW trigger mode if supported */
+ 		if (sc->flags & HW_CTRL) {
+@@ -528,6 +603,8 @@ static int gdsc_init(struct gdsc *sc)
+ 	if (ret)
+ 		goto err_disable_supply;
+ 
++	if (!on)
++		gdsc_pm_put(sc);
+ 	return 0;
+ 
+ err_disable_supply:
+@@ -605,6 +682,15 @@ int gdsc_register(struct gdsc_desc *desc,
+ 	struct gdsc **scs = desc->scs;
+ 	size_t num = desc->num;
+ 
++	/* Reject unsupported PM contracts before any domain register is touched. */
++	for (i = 0; i < num; i++) {
++		if (!scs[i])
++			continue;
++		ret = gdsc_pm_validate(scs[i], dev);
++		if (ret)
++			return ret;
++	}
++
+ 	data = devm_kzalloc(dev, sizeof(*data), GFP_KERNEL);
+ 	if (!data)
+ 		return -ENOMEM;
+@@ -648,6 +734,8 @@ int gdsc_register(struct gdsc_desc *desc,
+ 			continue;
+ 		scs[i]->regmap = regmap;
+ 		scs[i]->rcdev = rcdev;
++		if (scs[i]->flags & GDSC_CONTROLLER_PM)
++			scs[i]->controller_dev = dev;
+ 		ret = gdsc_init(scs[i]);
+ 		if (ret)
+ 			return ret;
+diff --git a/drivers/clk/qcom/gdsc.h b/drivers/clk/qcom/gdsc.h
+index 2f9665b..3b15f02 100644
+--- a/drivers/clk/qcom/gdsc.h
++++ b/drivers/clk/qcom/gdsc.h
+@@ -31,6 +31,8 @@ struct reset_controller_dev;
+  * @resets: ids of resets associated with this gdsc
+  * @reset_count: number of @resets
+  * @rcdev: reset controller
++ * @controller_dev: permanent controller owning runtime PM, when opted in
++ * @controller_pm_held: controller reference retained until verified power-off
+  */
+ struct gdsc {
+ 	struct generic_pm_domain	pd;
+@@ -69,6 +71,10 @@ struct gdsc {
+ #define RETAIN_FF_ENABLE	BIT(7)
+ #define NO_RET_PERIPH	BIT(8)
+ #define HW_CTRL_TRIGGER	BIT(9)
++/* Source prerequisite: qualify provider failure lifetime before opting in. */
++#define GDSC_CONTROLLER_PM BIT(10)
++	struct device			*controller_dev;
++	bool				controller_pm_held;
+ 	struct reset_controller_dev	*rcdev;
+ 	unsigned int			*resets;
+ 	unsigned int			reset_count;
+-- 
+2.56.0
+

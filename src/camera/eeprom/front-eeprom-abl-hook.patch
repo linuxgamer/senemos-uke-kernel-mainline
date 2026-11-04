@@ -1,0 +1,25 @@
+From: Uke Linux maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] boot: admit front EEPROM after the general QUP quarantine
+
+--- a/src/boot/uke-abl.c
++++ b/src/boot/uke-abl.c
+@@ -171,6 +171,7 @@
+ #include "uke-rtc.h"
+ #ifdef CONFIG_SM_CAMCC_7675
+ #include "uke-camcc-dt.h"
++#include "uke-front-eeprom-dt.h"
+ #endif
+ #include "uke-hall.h"
+ 
+@@ -1020,6 +1021,11 @@
+ 	ret = uke_scope_qup_buses(output);
+ 	if (ret)
+ 		return ret;
++#ifdef CONFIG_SM_CAMCC_7675
++	ret = uke_front_eeprom_graph(output);
++	if (ret)
++		return ret;
++#endif
+ 	ret = uke_empty_spmi_bus(output);
+ 	if (ret)
+ 		return ret;

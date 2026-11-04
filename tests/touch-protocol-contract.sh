@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 # Compile the actual kernel C consumer against small host header shims.
 set -Eeuo pipefail
+test ! -e /etc/senemos/kernel-update.conf
 root=$(cd -- "$(dirname -- "$0")/.." && pwd)
+protocol=${UKE_TOUCH_PROTOCOL_SOURCE:-$root/src/input/nt36532-uke-protocol.c}
+gesture_only=${UKE_TOUCH_GESTURE_ONLY:-0}
+[[ $gesture_only == 0 || $gesture_only == 1 ]]
+test -s "$protocol"
 stage=$(mktemp -d)
-trap 'rm -rf -- "$stage"' EXIT
+trap 'find "$stage" -depth -delete' EXIT
 sanitize=()
-[[ -z ${UKE_TOUCH_SANITIZE:-} ]] || sanitize=("-fsanitize=address,undefined" -fno-omit-frame-pointer)
+[[ -z ${UKE_TOUCH_SANITIZE:-} ]] || sanitize=("-fsanitize=address,undefined" -fno-sanitize-recover=all -fno-omit-frame-pointer)
 mkdir -p "$stage/linux"
 cat > "$stage/linux/types.h" <<'C'
 #ifndef UKE_TOUCH_TYPES
@@ -38,23 +43,42 @@ static inline void put_unaligned_le32(u32 v,void *p) {
 }
 C
 printf '#include <string.h>\n' > "$stage/linux/string.h"
+cat > "$stage/linux/printk.h" <<'C'
+#include <stdarg.h>
+#include <stdio.h>
+static inline void __attribute__((format(printf, 1, 2)))
+nvt_host_warn(const char *format, ...) {
+ char text[160];
+ va_list args;
+ va_start(args, format);
+ (void)vsnprintf(text, sizeof(text), format, args);
+ va_end(args);
+}
+#define pr_warn_ratelimited(...) nvt_host_warn(__VA_ARGS__)
+C
 # glibc's errno header imports Linux errno; retain the system constants there.
 printf '#include_next <linux/errno.h>\n' > "$stage/linux/errno.h"
+if [[ $gesture_only == 0 ]]; then
 "${CC:-cc}" -std=gnu11 -O2 -g -Wall -Wextra -Werror -Wconversion \
-    -I "$stage" "$root/tests/touch-protocol.c" "$root/src/input/nt36532-uke-protocol.c" \
+    -I "$stage" -I "$root/src/input" "$root/tests/touch-protocol.c" "$protocol" \
     "${sanitize[@]}" -o "$stage/check"
 "$stage/check"
 "${CC:-cc}" -std=gnu11 -O2 -g -Wall -Wextra -Werror -Wconversion \
-    -DNVT_TEST_VARIANT=NVT_UKE_TIANMA -I "$stage" "$root/tests/touch-protocol.c" \
-    "$root/src/input/nt36532-uke-protocol.c" "${sanitize[@]}" -o "$stage/check-tianma"
+    -DNVT_TEST_VARIANT=NVT_UKE_TIANMA -I "$stage" -I "$root/src/input" "$root/tests/touch-protocol.c" \
+    "$protocol" "${sanitize[@]}" -o "$stage/check-tianma"
 "$stage/check-tianma"
+fi
 "${CC:-cc}" -std=gnu11 -O2 -g -Wall -Wextra -Werror -Wconversion \
-    -I "$stage" "$root/tests/touch-gesture.c" "$root/src/input/nt36532-uke-protocol.c" \
+    -I "$stage" -I "$root/src/input" "$root/tests/touch-gesture.c" "$protocol" \
     "${sanitize[@]}" -o "$stage/gesture"
-"$stage/gesture"
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 "$stage/gesture" "${UKE_TOUCH_GESTURE_MODE:-all}"
+if [[ $gesture_only == 1 ]]; then
+    printf 'Actual touch gesture protocol: %s PASS; mandatory ACK/error/readiness and coordinate readback retained\n' "${UKE_TOUCH_GESTURE_MODE:-all}"
+    exit 0
+fi
 "${CC:-cc}" -std=gnu11 -O2 -g -Wall -Wextra -Werror -Wconversion \
-    -I "$stage" "$root/tests/touch-matrix.c" "$root/src/input/nt36532-uke-matrix.c" \
-    "$root/src/input/nt36532-uke-protocol.c" "${sanitize[@]}" -o "$stage/matrix"
+    -I "$stage" -I "$root/src/input" "$root/tests/touch-matrix.c" "$root/src/input/nt36532-uke-matrix.c" \
+    "$protocol" "${sanitize[@]}" -o "$stage/matrix"
 "$stage/matrix" "$@"
 awk '
  /^static void nvt_release_contacts\(/ || /^static int nvt_stable_axis\(/ || /^static void nvt_order_new_slots\(/ || /^static void nvt_publish_contacts\(/ { copying=1 }
@@ -64,24 +88,24 @@ awk '
 [[ $(grep -c '^static void ' "$stage/production-contacts.h") == 3 ]]
 [[ $(grep -c '^static int nvt_stable_axis' "$stage/production-contacts.h") == 1 ]]
 "${CC:-cc}" -std=gnu11 -O2 -g -Wall -Wextra -Werror -Wconversion \
-    -I "$stage" "$root/tests/touch-publish.c" \
+    -I "$stage" -I "$root/src/input" "$root/tests/touch-publish.c" \
     "${sanitize[@]}" -o "$stage/publish"
 "$stage/publish"
 printf 'Production input publisher: slots, lifts, packet failure and quiesce releases: PASS\n'
 printf 'Checked Uke gesture command sequence, checksum, filtering and failure paths: PASS\n'
 if [[ -n ${UKE_TOUCH_REFERENCE_DECODER:-} ]]; then
     [[ -f $UKE_TOUCH_REFERENCE_DECODER ]]
-    "${CC:-cc}" -std=gnu11 -O2 -Wall -Wextra -Werror -I "$stage" \
-        "${sanitize[@]}" -c "$root/src/input/nt36532-uke-protocol.c" -o "$stage/protocol.o"
-    "${CXX:-c++}" -std=c++20 -O2 -Wall -Wextra -Werror -I "$stage" \
+    "${CC:-cc}" -std=gnu11 -O2 -Wall -Wextra -Werror -I "$stage" -I "$root/src/input" \
+        "${sanitize[@]}" -c "$protocol" -o "$stage/protocol.o"
+    "${CXX:-c++}" -std=c++20 -O2 -Wall -Wextra -Werror -I "$stage" -I "$root/src/input" \
         "-DUKE_TOUCH_REFERENCE_DECODER=\"$UKE_TOUCH_REFERENCE_DECODER\"" \
         "${sanitize[@]}" "$root/tests/touch-protocol-equivalence.cpp" "$stage/protocol.o" -o "$stage/equivalence"
     "$stage/equivalence" "$@"
 fi
 if [[ -n ${UKE_TOUCH_NORMAL_IMAGE:-} ]]; then
     [[ -f $UKE_TOUCH_NORMAL_IMAGE ]]
-    "${CC:-cc}" -std=gnu11 -O2 -Wall -Wextra -Werror -I "$stage" \
-        "$root/tests/touch-protocol-firmware.c" "$root/src/input/nt36532-uke-protocol.c" \
+    "${CC:-cc}" -std=gnu11 -O2 -Wall -Wextra -Werror -I "$stage" -I "$root/src/input" \
+        "$root/tests/touch-protocol-firmware.c" "$protocol" \
         "${sanitize[@]}" -lcrypto -o "$stage/firmware"
     "$stage/firmware" "$UKE_TOUCH_NORMAL_IMAGE" "${UKE_TOUCH_NORMAL_VARIANT:-csot}"
 fi

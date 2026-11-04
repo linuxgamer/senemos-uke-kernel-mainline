@@ -1,0 +1,65 @@
+From: Uke contributors
+Subject: [PATCH] ASoC: wcd939x: expose cached jack telemetry as read-only
+
+These getters have no put callback. Unspecified access defaults to writable
+in snd_ctl_new1(), causing ALSA state restore to attempt refused writes.
+
+Use explicit read access, the existing MBHC type limit and a signed mixer
+maximum. The range choices follow upstream WCD934x commit
+61163c3e7480106804269182e24db05244866493 and the equivalent WCD938x fix.
+WCD939x's floating-impedance sentinel 0x0ffffffe fits INT_MAX.
+
+Control identities, integer type, channel shifts and cached getter values
+remain unchanged. No hardware, detection, gain or calibration operation changes.
+The original source remains GPL-2.0-only.
+
+diff --git a/sound/soc/codecs/wcd939x.c b/sound/soc/codecs/wcd939x.c
+--- a/sound/soc/codecs/wcd939x.c
++++ b/sound/soc/codecs/wcd939x.c
+@@ -2450,17 +2450,35 @@
+ 	return 0;
+ }
+ 
+-static const struct snd_kcontrol_new hph_type_detect_controls[] = {
+-	SOC_SINGLE_EXT("HPH Type", 0, 0, UINT_MAX, 0,
+-		       wcd939x_get_hph_type, NULL),
+-};
+-
+-static const struct snd_kcontrol_new impedance_detect_controls[] = {
+-	SOC_SINGLE_EXT("HPHL Impedance", 0, 0, UINT_MAX, 0,
+-		       wcd939x_hph_impedance_get, NULL),
+-	SOC_SINGLE_EXT("HPHR Impedance", 0, 1, UINT_MAX, 0,
+-		       wcd939x_hph_impedance_get, NULL),
+-};
++static const struct snd_kcontrol_new hph_type_detect_controls[] = {
++	{
++		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
++		.name = "HPH Type",
++		.access = SNDRV_CTL_ELEM_ACCESS_READ,
++		.info = snd_soc_info_volsw,
++		.get = wcd939x_get_hph_type,
++		.private_value = SOC_SINGLE_VALUE(0, 0, 0, WCD_MBHC_HPH_STEREO, 0, 0),
++	},
++};
++
++static const struct snd_kcontrol_new impedance_detect_controls[] = {
++	{
++		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
++		.name = "HPHL Impedance",
++		.access = SNDRV_CTL_ELEM_ACCESS_READ,
++		.info = snd_soc_info_volsw,
++		.get = wcd939x_hph_impedance_get,
++		.private_value = SOC_SINGLE_VALUE(0, 0, 0, INT_MAX, 0, 0),
++	},
++	{
++		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
++		.name = "HPHR Impedance",
++		.access = SNDRV_CTL_ELEM_ACCESS_READ,
++		.info = snd_soc_info_volsw,
++		.get = wcd939x_hph_impedance_get,
++		.private_value = SOC_SINGLE_VALUE(0, 1, 0, INT_MAX, 0, 0),
++	},
++};
+ 
+ static int wcd939x_mbhc_init(struct snd_soc_component *component)
+ {

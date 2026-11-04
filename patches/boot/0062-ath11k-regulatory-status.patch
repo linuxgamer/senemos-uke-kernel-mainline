@@ -1,0 +1,61 @@
+From: Uke contributors
+Subject: [PATCH] wifi: ath11k: report the parsed firmware country status
+
+Assign the converted status before either channel-list parser logs it.
+Keep the existing refusal and return code, and include the already parsed
+status, country, PHY and event kind in the existing warning. No regulatory
+rule, request, retry, country choice or firmware behavior changes.
+
+--- a/drivers/net/wireless/ath/ath11k/wmi.c
++++ b/drivers/net/wireless/ath/ath11k/wmi.c
+@@ -5328,13 +5328,13 @@
+ 	reg_info->ctry_code = chan_list_event_hdr->country_id;
+ 	reg_info->reg_dmn_pair = chan_list_event_hdr->domain_code;
+ 
++	reg_info->status_code =
++		ath11k_wmi_cc_setting_code_to_reg(chan_list_event_hdr->status_code);
++
+ 	ath11k_dbg(ab, ATH11K_DBG_WMI,
+ 		   "status_code %s",
+ 		   ath11k_cc_status_to_str(reg_info->status_code));
+ 
+-	reg_info->status_code =
+-		ath11k_wmi_cc_setting_code_to_reg(chan_list_event_hdr->status_code);
+-
+ 	reg_info->is_ext_reg_event = false;
+ 
+ 	reg_info->min_bw_2ghz = chan_list_event_hdr->min_bw_2ghz;
+@@ -5572,13 +5572,13 @@
+ 	reg_info->ctry_code = ev->country_id;
+ 	reg_info->reg_dmn_pair = ev->domain_code;
+ 
++	reg_info->status_code =
++		ath11k_wmi_cc_setting_code_to_reg(ev->status_code);
++
+ 	ath11k_dbg(ab, ATH11K_DBG_WMI,
+ 		   "status_code %s",
+ 		   ath11k_cc_status_to_str(reg_info->status_code));
+ 
+-	reg_info->status_code =
+-		ath11k_wmi_cc_setting_code_to_reg(ev->status_code);
+-
+ 	reg_info->is_ext_reg_event = true;
+ 
+ 	reg_info->min_bw_2ghz = ev->min_bw_2ghz;
+--- a/drivers/net/wireless/ath/ath11k/reg.c
++++ b/drivers/net/wireless/ath/ath11k/reg.c
+@@ -888,7 +888,13 @@
+ 		 * fw retains the current regd. We print a failure info
+ 		 * and return from here.
+ 		 */
+-		ath11k_warn(ab, "Failed to set the requested Country regulatory setting\n");
++		ath11k_warn(ab,
++			    "Failed to set the requested Country regulatory setting: status %s (%u), alpha2 %c%c, phy %u, %s event\n",
++			    ath11k_cc_status_to_str(reg_info->status_code),
++			    reg_info->status_code,
++			    reg_info->alpha2[0], reg_info->alpha2[1],
++			    reg_info->phy_id,
++			    reg_info->is_ext_reg_event ? "extended" : "legacy");
+ 		return -EINVAL;
+ 	}
+ 

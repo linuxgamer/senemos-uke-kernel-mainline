@@ -1,0 +1,62 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Date: Fri, 23 Oct 2026 14:00:00 +0300
+Subject: [PATCH] clk: qcom: gdsc: remove initialized domains on registration failure
+
+Remove initialized genpds when a later initialization, parent link or OF
+provider registration fails. Unlink parents before removing domains and
+skip holes in the domain array. The failing init has not registered a
+genpd.
+
+The initialized-domain unwind follows Konrad Dybcio's required-domain RFC
+12/16. Its wider DVFS and rail-voter changes are not needed for this fix.
+Controller PM references and physical power recovery remain separate work;
+this cleanup does not qualify a camera provider for activation.
+
+Link: https://lore.kernel.org/all/20261014-topic-qc_clk_dvfs-v1-12-3041b788e9f7@oss.qualcomm.com/
+Signed-off-by: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+---
+ drivers/clk/qcom/gdsc.c | 13 +++++++++++--
+ 1 file changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/clk/qcom/gdsc.c b/drivers/clk/qcom/gdsc.c
+index 1b7317c0cd978214db8038ba4fa6b7b1b5b5298b..42efc3efde0933117713ba6bf0d89f8e8ef0e9fc 100644
+--- a/drivers/clk/qcom/gdsc.c
++++ b/drivers/clk/qcom/gdsc.c
+@@ -681,6 +681,7 @@ int gdsc_register(struct gdsc_desc *desc,
+ 	struct device *dev = desc->dev;
+ 	struct gdsc **scs = desc->scs;
+ 	size_t num = desc->num;
++	size_t initialized = 0;
+ 
+ 	/* Reject unsupported PM contracts before any domain register is touched. */
+ 	for (i = 0; i < num; i++) {
+@@ -738,8 +739,9 @@ int gdsc_register(struct gdsc_desc *desc,
+ 			scs[i]->controller_dev = dev;
+ 		ret = gdsc_init(scs[i]);
+ 		if (ret)
+-			return ret;
++			goto err_remove_domains;
+ 		data->domains[i] = &scs[i]->pd;
++		initialized = i + 1;
+ 	}
+ 
+ 	/* Add subdomains */
+@@ -757,10 +759,17 @@ int gdsc_register(struct gdsc_desc *desc,
+ 			goto err_pm_subdomain_remove;
+ 	}
+ 
+-	return of_genpd_add_provider_onecell(dev->of_node, data);
++	ret = of_genpd_add_provider_onecell(dev->of_node, data);
++	if (!ret)
++		return 0;
+ 
+ err_pm_subdomain_remove:
+ 	gdsc_pm_subdomain_remove(desc, i);
++err_remove_domains:
++	while (initialized--) {
++		if (scs[initialized])
++			pm_genpd_remove(&scs[initialized]->pd);
++	}
+ 
+ 	return ret;
+ }

@@ -1,0 +1,13 @@
+From: Uke Linux maintainers <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] boot: install the front EEPROM graph helper
+
+--- a/src/boot/prepare-abl-source.sh
++++ b/src/boot/prepare-abl-source.sh
+@@ -149,6 +149,7 @@
+ install -m644 "$here/uke-identity.c" "$kernel/arch/arm64/kernel/uke-identity.c"
+ install -m644 "$here/uke-hardware.h" "$kernel/arch/arm64/kernel/uke-hardware.h"
+ install -m644 "$here/uke-camcc-dt.h" "$kernel/arch/arm64/kernel/uke-camcc-dt.h"
++install -m644 "$here/uke-front-eeprom-dt.h" "$kernel/arch/arm64/kernel/uke-front-eeprom-dt.h"
+ install -m644 "$here/uke-bwmon.h" "$kernel/arch/arm64/kernel/uke-bwmon.h"
+ install -m644 "$here/uke-cpu-bwmon.h" "$kernel/arch/arm64/kernel/uke-cpu-bwmon.h"
+ install -Dm644 "$here/bindings/firmware/xiaomi,uke-ssc-sensors.yaml" "$kernel/Documentation/devicetree/bindings/firmware/xiaomi,uke-ssc-sensors.yaml"
