@@ -114,6 +114,12 @@ This preserves the retained camera, sensor, power and peripheral changes.
 Initial color selection remains empty and native HDR advertisement disabled;
 the package result does not establish physical acceptance.
 
+The subsequent tablet RPM check still finds kernel `1500` as the highest
+installed release and `uke-nfc-ir 1.0.0-1`. Local DNF version locks pin all six
+kernel packages and that client. Those locks prevent an ordinary update from
+selecting the new versions on this installation. They were left unchanged;
+repository availability and local transaction eligibility are separate results.
+
 ## Required integration and inputs
 
 The existing native CRTC already supplies GC1.8 with 1024 entries and CTM programming.
@@ -138,7 +144,9 @@ an older ABI header cannot stand in for that implementation.
 `o82-sixzone.h` supplies a bounded, typed integer-domain converter for the
 extended UAPI words. It validates all input before replacing output, preserves
 legacy saturation curves and rejects invalid ranges/overlapping bands. Its
-synthetic optimized/sanitized COPR check is pending. This preparatory converter
+synthetic [COPR 11253462](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11253462/)
+passed 25,155 checks in each optimized GCC and Clang ASan/UBSan run at source
+`8413155dcd18debd30333f935cae43e488cb3798`. This preparatory converter
 does not change the installed utility, v2 bundle, admitted presets or kernel
 writer. Complete PA register/flush integration remains required.
 

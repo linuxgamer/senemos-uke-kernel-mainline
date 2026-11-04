@@ -9,7 +9,16 @@
     "input_contract": "384 integer12-bit samples per required curve; integer thresholds in0..100; complete optional bands with ordered non-overlapping ranges",
     "differences_from_permissive_oem_input": "Reject out-of-range/fractional thresholds, malformed/partial schema and overlapping bands; no string curves",
     "refusal": "Typed converter validates all input before replacing any output word; parsing must separately enforce complete optional-band schema",
-    "remote_qualification": "pending",
+    "remote_qualification": {
+      "state": "succeeded",
+      "build": 11253462,
+      "source_commit": "8413155dcd18debd30333f935cae43e488cb3798",
+      "chroot": "fedora-rawhide-aarch64",
+      "checks_per_run": 25155,
+      "runs": ["GCC optimized", "Clang ASan/UBSan"],
+      "delivered_package": "uke-o82-sixzone-check-1.0-1.fc46.noarch; text receipt only",
+      "limits": "Typed converter only; no JSON/native-bundle integration, LUTBUS writer or physical acceptance"
+    },
     "installed_or_hardware_enabled": false
   },
   "exact_uke_driver": {
@@ -17,6 +26,10 @@
     "commit": "44275c404a677d9d9e5230fedd1af2ef02fc7b9a",
     "paths": [
       "msm/sde/sde_hw_reg_dma_v1_color_proc.c",
+      "msm/sde/sde_hw_reg_dma_v1.c",
+      "msm/sde/sde_hw_color_proc_common_v4.h",
+      "msm/sde/sde_reg_dma.h",
+      "msm/sde/sde_hw_ctl.c",
       "include/uapi/display/drm/msm_drm_pp.h"
     ],
     "function": "reg_dmav2_setup_dspp_sixzonev2",
@@ -167,6 +180,23 @@
     "shared_hal": "GetDrmPASixZone maps mode bits16/17/18 to UAPI hue/sat/value flags0/1/2 and SV to flag3",
     "exact_driver": "reg_dmav2_setup_dspp_sixzonev2 maps those flags to HSIC PA mode bits29/30/31 and requires PA enable",
     "qualification_limit": "static ABI/relocation result; shared-register programming and physical acceptance remain open"
+  },
+  "native_writer_contract": {
+    "lutbus": "block3, transfer size5 DWORDs,192 transfers,3840 payload bytes; five16-bit MSB-aligned components per entry",
+    "sixzone_registers_relative_to_block": {
+      "threshold": "0x08",
+      "adjust_p0": "0x0c",
+      "adjust_p1": "0x10",
+      "sat_adjust_p0": "0x14",
+      "sat_adjust_p1": "0x18",
+      "sv_control": "0x20"
+    },
+    "shared_hold": "HSIC+0x40: sat bits12/13, val bits14/15; OEM single-modify preserve mask0x00000fff",
+    "shared_mode": "HSIC base: SixZone bits29/30/31, PA enable bit20; OEM single-modify preserve mask0x1fefffff",
+    "disable": "clear only SixZone enable bits; clear PA enable only when no remaining memory/HSIC/histogram/SixZone feature requires it",
+    "modify_opcode": "0x20000000 | relative_offset, then preserve mask, then new value",
+    "flush": "OEM dspp_sub_blk_flush_tbl maps HSIC/memory/SixZone to bit0; UPDATE_MASK uses BIT(index), so zero is a valid shared PA flush bit",
+    "remaining_work": "Implement the native writer, paired shared-state ownership and fault-tested atomic enable/disable before data or preset admission"
   },
   "private_inputs_included": false,
   "oem_code_executed": false,
