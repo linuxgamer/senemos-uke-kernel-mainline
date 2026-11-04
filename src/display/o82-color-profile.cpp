@@ -566,7 +566,7 @@ std::vector<unsigned char> native_memory(json_object *picture) {
         input.saturation_minimum = scalar(sat, "min"); input.saturation_maximum = scalar(sat, "max");
         input.value_minimum = scalar(val, "min"); input.value_maximum = scalar(val, "max");
         input.saturation_hold_control = edge_control(sat, i == 0);
-        input.value_hold = edge_control(val, false);
+        input.value_hold_control = edge_control(val, false);
         if (!enabled(region)) continue;
         enabled_mask |= 1U << i;
         o82::MemoryColorData output;

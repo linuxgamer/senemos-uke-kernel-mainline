@@ -7,7 +7,7 @@ preset, including explicit neutral state. It prefers the matching panel's
 Invalid v5 data, other access errors and filename/version mismatches are terminal.
 Existing v4 inputs retain absent memory and their earlier PA ownership.
 Remote checks passed COPR11261036:2,048 actual loader/encoder cases per
-compiler, repaired-CRC tampering and fallback/version checks. The `0.6.0-1`
+compiler, repaired-CRC tampering and fallback/version checks. The `0.6.0-2`
 source candidate emits v5 from OEM JSON; its utility qualification is pending.
 Cumulative kernel integration, private delivery and
 physical memory/protection/HDR acceptance remain incomplete. Initial color

@@ -1,6 +1,6 @@
 Name: uke-o82-color-profile
 Version: 0.6.0
-Release: 1%{?dist}
+Release: 2%{?dist}
 Summary: Generate private O82 OEM color mappings and native preset data
 License: MIT
 URL: https://github.com/MCC45TR/senemos-uke-kernel-mainline
@@ -144,6 +144,9 @@ grep -E '^OEM gamut grid regression rejected: [1-9][0-9]*/[0-9]+ checks failed$'
 %{_bindir}/uke-o82-color-profile
 
 %changelog
+* Thu Nov 05 2026 Uke contributors - 0.6.0-2
+- Correct the typed value hold-control field used by memory conversion.
+
 * Thu Nov 05 2026 Uke contributors - 0.6.0-1
 - Compile OEM memory-color fields and protection into private v5 presets.
 - Check actual JSON, bundle, kernel loader and paired command encoding together.

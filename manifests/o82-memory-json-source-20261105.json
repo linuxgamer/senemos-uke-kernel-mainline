@@ -57,7 +57,7 @@
   "package": {
     "name": "uke-o82-color-profile",
     "version": "0.6.0",
-    "release": 1,
+    "release": 2,
     "producer": "packaging/native/copr-o82-color-profile.sh",
     "installed_payload": "Native offline utility, documentation and license; no firmware, kernel or private table"
   },
@@ -73,7 +73,17 @@
   "qualification": {
     "state": "pending",
     "scope": "Production JSON/compiler -> generated v5 bundle -> actual native C loader -> actual paired command encoder, optimized and sanitized; retained utility/ICC/HSIC/SixZone and actual former gamut-source rejection",
-    "private_input_exported": false
+    "private_input_exported": false,
+    "previous_trials": [
+      {
+        "copr_build": 11261149,
+        "source_commit": "bd642aa803590adf2df175b0ed00a26b912c47b6",
+        "release": "0.6.0-1",
+        "state": "failed",
+        "stage": "Utility compilation before fixtures",
+        "reason": "The new JSON converter used value_hold instead of the existing MemoryColorInput::value_hold_control field. Correct the member name and use a fresh release; no device or private profile was changed."
+      }
+    ]
   },
   "integration": {
     "shared_kernel_queue_required": true,
@@ -88,7 +98,7 @@
   "inputs": [
     {
       "path": "src/display/o82-color-profile.cpp",
-      "sha256": "9eac400f21111edce84367769630f1e32e82568dbc1f2806276fd530154b9904"
+      "sha256": "cdd301e7e2d2b4dff66bd232629859b579420d302dd1c7267e141552d4703617"
     },
     {
       "path": "src/display/o82-memory-color.h",
