@@ -16,6 +16,7 @@
 #include "dpu_o82_regdma.h"
 #include "dpu_o82_upload.h"
 #include "o82-hsic-format.h"
+#include "o82-memory-format.h"
 
 #define O82_MDP_CLOCK 0x2bc
 #define O82_MDP_FORCE BIT(20)
@@ -144,6 +145,9 @@ static int dpu_o82_pa_snapshot(struct dpu_kms *kms,
 	static const unsigned int bases[] = { 0x54000, 0x56000, 0x58000 };
 	unsigned int i;
 
+	if ((input->memory || input->memory_bytes) &&
+	    (!input->pa_managed || !o82_memory_valid(input->memory, input->memory_bytes)))
+		return -EINVAL;
 	if (!input->pa_managed)
 		return 0;
 	if (!o82_hsic_valid(input->hsic, input->hsic_bytes))
@@ -179,12 +183,31 @@ static int dpu_o82_pa_verify(struct dpu_kms *kms,
 
 		if (!(mask & BIT(i)))
 			continue;
-		if (readl(base + 0x800) != o82_pa_mode(input->pa_mode[i], input->sixzone, input->hsic) ||
-		    readl(base + 0x840) != o82_sixzone_pa_hold(input->pa_hold[i], input->sixzone))
+		if (readl(base + 0x800) != o82_memory_pa_mode(input->pa_mode[i], input->sixzone,
+							   input->hsic, input->memory) ||
+		    readl(base + 0x840) != o82_memory_pa_hold(input->pa_hold[i], input->sixzone,
+							   input->memory))
 			return -EIO;
 		for (j = 0; j < 4; j++)
 			if (readl(base + 0x81c + 4 * j) != o82_hdr_u32(input->hsic + 4 + 4 * j))
 				return -EIO;
+		if (input->memory) {
+			unsigned int region;
+
+			for (region = 0; region < O82_MEMORY_REGIONS; region++) {
+				const u8 *p = o82_memory_region(input->memory, region);
+
+				if (readl(base + 0x880 + 20 * region) != o82_hdr_u32(p) ||
+				    readl(base + 0x884 + 20 * region) != o82_hdr_u32(p + 4) ||
+				    readl(base + 0x8bc + 8 * region) != o82_hdr_u32(p + 8) ||
+				    readl(base + 0x8c0 + 8 * region) != o82_hdr_u32(p + 12))
+					return -EIO;
+				for (j = 0; j < 3; j++)
+					if (readl(base + 0x888 + 20 * region + 4 * j) !=
+					    o82_hdr_u32(p + 20 + 4 * j))
+						return -EIO;
+			}
+		}
 		if (!input->sixzone)
 			continue;
 		for (j = 0; j < 5; j++)

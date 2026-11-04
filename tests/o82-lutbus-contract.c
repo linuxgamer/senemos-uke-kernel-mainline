@@ -7,10 +7,12 @@
 #include "dpu_o82_profiles.h"
 #include "dpu_o82_lutbus.h"
 #include "o82-hsic-format.h"
+#include "o82-memory-format.h"
 
 static u8 igc[257 * 3 * 2], gamut[4913 * 3 * 2], gc[1024 * 3 * 2];
 _Alignas(16) static u8 storage[DPU_O82_LUTBUS_MAX_BYTES + 32], saved[sizeof(storage)];
 static u8 sixzone[O82_SIXZONE_BYTES], hsic[O82_HSIC_BYTES];
+static u8 memory_data[O82_MEMORY_BYTES], legacy_stream[DPU_O82_LUTBUS_MAX_BYTES];
 static u8 *stream;
 static size_t cursor, bytes;
 
@@ -81,7 +83,7 @@ static void pa_protocol(void)
 		in.pa_mode[0] = 0x24100101; in.pa_mode[1] = 0x24100121; in.pa_mode[2] = 0x08110141;
 		memset(storage, 0xa5, sizeof(storage)); stream = storage + 8; bytes = 0;
 		assert(!dpu_o82_lutbus_build(&in, masks[m], stream, DPU_O82_LUTBUS_MAX_BYTES, &bytes));
-		assert(bytes == (enabled ? DPU_O82_LUTBUS_MAX_BYTES : DPU_O82_LUTBUS_PA_OFF_BYTES));
+		assert(bytes == (enabled ? DPU_O82_LUTBUS_SIXZONE_BYTES : DPU_O82_LUTBUS_PA_OFF_BYTES));
 		cursor = DPU_O82_LUTBUS_BYTES;
 		const unsigned int scalar_words[] = {0xb3,0x7f20,0x20,0xe0};
 		for (unsigned int j=0;j<4;j++) {expect32(0x1000081c+4*j);expect32(hsic_on?scalar_words[j]:0);}
@@ -106,7 +108,7 @@ static void pa_protocol(void)
 	struct dpu_o82_color_input in = input(); in.pa_managed = true;
 	in.sixzone = sixzone; in.sixzone_bytes = sizeof(sixzone);
 	in.hsic = hsic; in.hsic_bytes = sizeof(hsic);
-	refused(&in, 3, DPU_O82_LUTBUS_MAX_BYTES - 1, -ENOSPC);
+	refused(&in, 3, DPU_O82_LUTBUS_SIXZONE_BYTES - 1, -ENOSPC);
 	in.hsic_bytes--; refused(&in, 3, DPU_O82_LUTBUS_MAX_BYTES, -EINVAL); in.hsic_bytes++;
 	in.hsic = NULL; refused(&in, 3, DPU_O82_LUTBUS_MAX_BYTES, -EINVAL); in.hsic = hsic;
 	set32(hsic, 1); refused(&in, 3, DPU_O82_LUTBUS_MAX_BYTES, -EINVAL); set32(hsic,15);
@@ -125,6 +127,91 @@ static void pa_protocol(void)
 	assert(dpu_o82_lutbus_build(&in, 3, storage + 8, DPU_O82_LUTBUS_MAX_BYTES, &bytes) == -EINVAL);
 	assert(bytes == 123 && !memcmp(saved, storage, sizeof(storage)));
 	puts("Actual composed HSIC/SixZone LUTBUS: five components,192 transfers, exact controls, per-DSPP PA preservation, disable and refusal-before-write passed; no hardware operation");
+}
+
+static void memory_payload(unsigned int enabled, unsigned int protection)
+{
+	memset(memory_data, 0, sizeof(memory_data));
+	set32(memory_data, enabled); set32(memory_data + 4, protection);
+	set32(memory_data + 8, 1);
+	for (unsigned int i = 0; i < 3; i++) {
+		if (!(enabled & (1U << i))) continue;
+		u8 *p = memory_data + 16 + i * 32;
+		set32(p, 8 | ((256 + i) << 16)); set32(p + 4, 0x7fff8001 + i);
+		set32(p + 8, 0x20002000); set32(p + 12, 0x400000);
+		set32(p + 16, 1 + 5 * i); set32(p + 20, 0x03000300 + i);
+		set32(p + 24, 0x000800ff + 0x100 * i); set32(p + 28, 0x000800e0 + 0x100 * i);
+	}
+	assert(o82_memory_valid(memory_data, sizeof(memory_data)));
+}
+
+static void memory_protocol(void)
+{
+	const unsigned int masks[] = {3,5,6};
+	const unsigned int region_modes[] = {0x20,0x80,0x40};
+	const unsigned int protect_modes[] = {0x400000,0x800000,0x1000000,0x40000,0x20000,8};
+	const unsigned int prior[] = {~0U,0x80000000,0x10080011};
+	unsigned int count = 0;
+
+	for (unsigned int m=0;m<3;m++) for (unsigned int six=0;six<2;six++)
+	for (unsigned int scalar=0;scalar<2;scalar++) {
+		struct dpu_o82_color_input in = input();
+		in.pa_managed=true; in.hsic=hsic; in.hsic_bytes=sizeof(hsic);
+		memset(hsic,0,sizeof(hsic));
+		if (scalar) {set32(hsic,15);set32(hsic+4,0x300);set32(hsic+8,0x41);}
+		in.sixzone=six?sixzone:NULL; in.sixzone_bytes=six?sizeof(sixzone):0;
+		for (unsigned int i=0;i<3;i++) {in.pa_mode[i]=prior[i];in.pa_hold[i]=0xabcd9123+i;}
+		bytes=0; assert(!dpu_o82_lutbus_build(&in,masks[m],legacy_stream,sizeof(legacy_stream),&bytes));
+		const size_t prefix=37316+32+(six?3908:0);
+		assert(bytes==(six?41320:37388));
+		for (unsigned int enabled=0;enabled<8;enabled++) for (unsigned int protection=0;protection<64;protection++) {
+			memory_payload(enabled,protection); in.memory=memory_data;in.memory_bytes=sizeof(memory_data);
+			memset(storage,0xa5,sizeof(storage));stream=storage+8;bytes=0;
+			assert(!dpu_o82_lutbus_build(&in,masks[m],stream,DPU_O82_LUTBUS_MAX_BYTES,&bytes));
+			assert(bytes==(six?41488:37580));assert(!memcmp(stream,legacy_stream,prefix));cursor=prefix;
+			for (unsigned int region=0;region<3;region++) {
+				const u8 *p=memory_data+16+region*32;
+				const unsigned int offsets[]={0,4,20,24,28,8,12};
+				const unsigned int regs[]={0x880+20*region,0x884+20*region,0x888+20*region,
+					0x88c+20*region,0x890+20*region,0x8bc+8*region,0x8c0+8*region};
+				for (unsigned int j=0;j<7;j++) {
+					expect32(0x10000000|regs[j]);expect32(o82_hdr_u32(p+offsets[j]));
+				}
+			}
+			for (unsigned int i=0;i<3;i++) {
+				if (!(masks[m]&(1U<<i))) continue;
+				unsigned int owned=(six?0xe0000000U:0)|(scalar?0x1e000000U:0),hold=0;
+				for (unsigned int j=0;j<3;j++) if(enabled&(1U<<j)) {owned|=region_modes[j];hold|=(1+5*j)<<(4*j);}
+				for (unsigned int j=0;j<6;j++) if(protection&(1U<<j)) owned|=protect_modes[j];
+				if ((owned|(prior[i]&0x10000))!=0) owned|=0x100000;
+				expect32(0x18180114);expect32((1U<<i)<<17);
+				expect32(0x20000840);expect32(six?0:0xf000);expect32(hold|(six?0x9000:0));
+				expect32(0x20000800);expect32(0x0029ff17);expect32(owned);
+			}
+			assert(cursor==bytes);
+			for (unsigned int i=0;i<8;i++) assert(storage[i]==0xa5);
+			for (size_t i=bytes+8;i<sizeof(storage);i++) assert(storage[i]==0xa5);
+			count++;
+		}
+	}
+	struct dpu_o82_color_input in=input();in.pa_managed=true;memset(hsic,0,sizeof(hsic));
+	in.hsic=hsic;in.hsic_bytes=sizeof(hsic);in.memory=memory_data;in.memory_bytes=sizeof(memory_data);
+	memory_payload(7,63);refused(&in,3,37579,-ENOSPC);
+	in.memory=NULL;refused(&in,3,sizeof(storage)-8,-EINVAL);in.memory=memory_data;
+	in.memory_bytes--;refused(&in,3,sizeof(storage)-8,-EINVAL);in.memory_bytes++;
+	in.pa_managed=false;refused(&in,3,sizeof(storage)-8,-EINVAL);in.pa_managed=true;
+	const unsigned int locations[]={0,4,8,12,16,16,16,16+8,16+12,16+16,16+20,16+24,16+28};
+	const unsigned int values[]={8,64,2,1,0x808,7,0x60010008,0,0,16,0x6010000,0x10080000,0x70000};
+	for(unsigned int i=0;i<sizeof(locations)/sizeof(*locations);i++) {
+		memory_payload(7,63);set32(memory_data+locations[i],values[i]);
+		refused(&in,3,sizeof(storage)-8,-EINVAL);
+	}
+	memory_payload(0,0);set32(memory_data+16,8);refused(&in,3,sizeof(storage)-8,-EINVAL);
+	memory_payload(7,63);memset(storage,0xa5,sizeof(storage));memcpy(storage+8,memory_data,sizeof(memory_data));
+	memcpy(saved,storage,sizeof(storage));in.memory=storage+8;bytes=123;
+	assert(dpu_o82_lutbus_build(&in,3,storage+8,sizeof(storage)-8,&bytes)==-EINVAL);
+	assert(bytes==123&&!memcmp(storage,saved,sizeof(storage)));
+	printf("Actual memory/protection LUTBUS: %u region/protection/HSIC/SixZone/DSPP combinations, unchanged v4 prefix, all21 words, canonical neutral, shared PA/holds and refusal-before-write passed; synthetic only\n",count);
 }
 int main(void)
 {
@@ -186,5 +273,6 @@ int main(void)
 	assert(dpu_o82_lutbus_build(&in, 3, storage, sizeof(storage), (size_t *)(storage + 16)) == -EINVAL);
 	assert(!memcmp(storage, saved, sizeof(storage)));
 	pa_protocol();
+	memory_protocol();
 	puts("Actual Cliffs IGC4/gamut4.3/GC1.8 stream: all paired DSPP masks, RGB/GBR packing, endpoints, LUT alignment/padding, three-NOP workaround, bounds and refusal-before-write passed; no DMA or hardware operation");
 }

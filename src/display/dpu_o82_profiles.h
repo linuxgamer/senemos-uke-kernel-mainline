@@ -21,6 +21,8 @@ struct dpu_o82_color_input {
 	unsigned int sixzone_bytes;
 	const u8 *hsic;
 	unsigned int hsic_bytes;
+	const u8 *memory;
+	unsigned int memory_bytes;
 	/* Hardware snapshots are filled by the powered wrapper, never firmware. */
 	unsigned int pa_mode[3], pa_hold[3];
 	bool pa_managed;

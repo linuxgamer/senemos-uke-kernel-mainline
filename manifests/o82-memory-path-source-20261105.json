@@ -1,0 +1,304 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-05",
+  "timezone": "Europe/Istanbul",
+  "scope": "Native paired memory/protection payload validation, encoding and readback; production JSON/private-bundle routing remains incomplete",
+  "kernel_parent": {
+    "copr_build": 11260662,
+    "release": "7.3.1-12000-unstable",
+    "source_commit": "ad6b68ff403d57bc8e64b4f92e0dcfa41ea43e09",
+    "url": "https://download.copr.fedorainfracloud.org/results/mcc45tr/uke-linux-unstable/fedora-rawhide-aarch64/Packages/s/senemos-uke-linux-kernel-mainline-unstable-7.3.1-12000.fc46.src.rpm",
+    "sha256": "7c8e9cf1da817031e5d924d3001ec6504ad1ef85693d0c55322a922f5ada0ae4",
+    "composition_sha256": "068c2f0bcdfa6598fd8cf4b95a6f13ef8db090c83d8099fb793ec21ab6597501",
+    "native_config_sha256": "739882b3a07fc6a701bae81ac6623a4b576871bd4289de3a095acabc20d49d34"
+  },
+  "source_provenance": {
+    "exact_uke": {
+      "repository": "MiCode/vendor_opensource_display-drivers",
+      "commit": "44275c404a677d9d9e5230fedd1af2ef02fc7b9a",
+      "color_proc": {
+        "path": "msm/sde/sde_hw_reg_dma_v1_color_proc.c",
+        "blob": "76530c34430bfc095f25819e27a06cefaf216f81"
+      },
+      "common_header": {
+        "path": "msm/sde/sde_hw_color_proc_common_v4.h",
+        "blob": "9faeb309f5dc35024039888c8d6645ec426bf523"
+      },
+      "uapi": {
+        "path": "include/uapi/display/drm/msm_drm_pp.h",
+        "blob": "a4c68f7a094145fca6a7e4cd8aa20691511b1ab9"
+      },
+      "license": "GPL-2.0-only Foundation/QIC notices; UAPI Linux-syscall-note"
+    },
+    "same_soc": {
+      "repository": "OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm7675",
+      "commit": "1138e00fee63582a0cc6a53af3286621786827b7",
+      "path": "vendor/qcom/opensource/display-drivers/msm/sde/sde_hw_reg_dma_v1_color_proc.c",
+      "blob": "fa8f951582003084bee74e30c73a7ec4d599bf7a",
+      "all_five_memory_functions_byte_identical": true,
+      "board_values_imported": false
+    },
+    "exact_uke_dt": {
+      "repository": "MiCode/vendor_qcom_proprietary_display-devicetree",
+      "commit": "4a3e1c391130237c5e8c2b250d1c94f3e25b9b11",
+      "path": "display/cliffs-sde-common.dtsi",
+      "blob": "d7588a689406bba89920c6a4702f796b270c346e",
+      "hsic_base": "0x800",
+      "memory_base": "0x880",
+      "version": "0x00010007"
+    },
+    "upstream": {
+      "repository": "gregkh/linux",
+      "commit": "79a907609d53d5cd645b42c11550d295d43abf99",
+      "path": "drivers/gpu/drm/msm/disp/dpu1/dpu_hw_dspp.h",
+      "blob": "b47b7788064b2c7e231a632967d12e2e2671dc6a",
+      "scope": "No existing memory-color operation; native path retains current paired power/GEM ownership"
+    }
+  },
+  "protocol": {
+    "semantic_payload_version": 1,
+    "payload_bytes": 112,
+    "header": "Enabled3, protection6, version1, reserved0; four little-endian32-bit words",
+    "regions": [
+      "skin",
+      "sky",
+      "foliage"
+    ],
+    "region_words": [
+      "adjust_p0",
+      "adjust_p1",
+      "adjust_p2",
+      "blend_gain",
+      "sat_hold|(val_hold<<2)",
+      "hue_region",
+      "sat_region",
+      "val_region"
+    ],
+    "inactive_region": "All32 bytes zero; explicit neutral still writes all21 hardware words",
+    "blend_validation": "Integer IEEE754 binary32 product/division rounding, then truncation; no floating point in kernel",
+    "mode_preserve": "0x0029ff17 when memory-managed; byte-exact existing0x01efffff without memory",
+    "region_enable_bits": [
+      5,
+      7,
+      6
+    ],
+    "protection_bits": [
+      22,
+      23,
+      24,
+      18,
+      17,
+      3
+    ],
+    "shared_pa_enable_bit": 20,
+    "hold_preserve": "Existing v4 unchanged if no memory; f000 without SixZone or0 with SixZone when memory-managed",
+    "stream_bytes": {
+      "legacy": 37316,
+      "v4_hsic": 37388,
+      "v4_hsic_sixzone": 41320,
+      "memory_without_sixzone": 37580,
+      "memory_with_sixzone": 41488
+    },
+    "mmio": "All21 memory register words are broadcast and read back separately on both selected DSPPs; unselected DSPP retained"
+  },
+  "integration": {
+    "existing_bundle_version": 4,
+    "existing_bundle_and_initial_selection_unchanged": true,
+    "production_loader_populates_memory": false,
+    "json_mapping_complete": false,
+    "private_bundle_activation": false,
+    "additional_dt_changes": false,
+    "reason_no_dt_delta": "Exact existing Cliffs DSPP MMIO range/version; no new resource, gate or graph admission",
+    "kernel_preparation": "src/display/prepare-o82-regdma.sh stages the new header",
+    "qualified_scalar_converter": {
+      "copr_build": 11260759,
+      "source_commit": "ac625ec6eaed1689a6dc7086e982b0fd68252973",
+      "manifest": "manifests/o82-memory-color-source-20261104.json"
+    }
+  },
+  "qualification": {
+    "state": "pending",
+    "package": "uke-o82-memory-path-check-7.3.1-1",
+    "scope": "Synthetic integer/semantic/wire/MMIO/caller checks and native linked MSM object, no Image or hardware test"
+  },
+  "build_dependency": {
+    "host_only": "Existing pinned upstream MSM gen_header.py; no practical substitute for the generated register headers",
+    "sha256": "81763fc03ea0ebf254ab7427af2113dc0c7c0d80dceab61232b6e371463d1f90",
+    "tablet_execution": false
+  },
+  "delivery": {
+    "single_kernel_queue_required": true,
+    "full_kernel_submission": false,
+    "normal_kernel_promotion": false,
+    "automatic_staging_unchanged": true,
+    "local_rollback_preference_unchanged": true,
+    "physical_acceptance": false,
+    "private_input_included": false
+  },
+  "kernel_imports": [
+    {
+      "path": "src/display/dpu_o82_profiles.h",
+      "sha256": "9396a72dc5e4104f3e67566a74b666d47267fd292339858484a626a9e4106e68",
+      "before_sha256": "330ca002e70fc697d41ce050bdfa25dd5c0e420c24cfcc4bf1dbc1637e10648a"
+    },
+    {
+      "path": "src/display/dpu_o82_lutbus.c",
+      "sha256": "96206e9ff6e3a56ab86df64f5d0188ca3187aa19e942ab79ed1ff5b5fd6d162a",
+      "before_sha256": "2c0e88a8309a1cd2237c06c311b2be1f3799f3a228ee8d861f5811c7ef5d5077"
+    },
+    {
+      "path": "src/display/dpu_o82_lutbus.h",
+      "sha256": "b30f36d17cc3700b3bbaa6eb0469d82b9f0289fbdb8da337d560bc447018c7dd",
+      "before_sha256": "d4ee6aa1322f9ecb096104d6587d20263905fd72b60fbae1889bf8dd985104de"
+    },
+    {
+      "path": "src/display/dpu_o82_upload.c",
+      "sha256": "8060ecdc74c792fe5126f818237ac7e5d413e0755ea81ee8b24ef56fe0ca90c5",
+      "before_sha256": "91ebecd09896d765cc6aad0515cb08867244e0d2bea0ff0f2ddb07fb45ae0145"
+    },
+    {
+      "path": "src/display/dpu_o82_power.c",
+      "sha256": "5e37041ea46d689793a2c686c210ef8c532183c6cb10acd968f94584cf98394b",
+      "before_sha256": "9f90407033d2cf2ef704539ab5330cd9676cd5fbcad9c70291c92178fcdd3661"
+    },
+    {
+      "path": "src/display/o82-memory-format.h",
+      "sha256": "af2008725d1e642c507eac3ca100c4a3d88214ef0702e6e5b7b2b871441b4efa",
+      "before_sha256": null
+    }
+  ],
+  "archive_assets": [
+    {
+      "path": "packaging/native/check-o82-memory-path.sh",
+      "sha256": "cb240fe792df09ed843666b1b3df3f698dcd25ac8b42f2873a87ca468f426b77"
+    },
+    {
+      "path": "packaging/native/copr-o82-memory-path-check.sh",
+      "sha256": "b71426381ccdeb7e684398489aa773ed6a8bb02c787e831a74ba9d6f737923ab"
+    },
+    {
+      "path": "src/display/dpu_o82_color.c",
+      "sha256": "31d27a25b466c9c2024820efb69b4521cde24d66ce8d4c171a92189eff170f9f"
+    },
+    {
+      "path": "src/display/dpu_o82_color.h",
+      "sha256": "e8890ab33aa243b23951c5a6abd1a18831f24b6ba62c635f377368b8022bb650"
+    },
+    {
+      "path": "src/display/dpu_o82_lutbus.c",
+      "sha256": "96206e9ff6e3a56ab86df64f5d0188ca3187aa19e942ab79ed1ff5b5fd6d162a"
+    },
+    {
+      "path": "src/display/dpu_o82_lutbus.h",
+      "sha256": "b30f36d17cc3700b3bbaa6eb0469d82b9f0289fbdb8da337d560bc447018c7dd"
+    },
+    {
+      "path": "src/display/dpu_o82_platform.c",
+      "sha256": "933b15a26ea11832b1dbe3ad1c2e65ac5404b45de434ef2140744dcfb1fc4484"
+    },
+    {
+      "path": "src/display/dpu_o82_platform.h",
+      "sha256": "23b6f1533f6b01c30a1ed2ad363b3def3ad7a3e3f3d456ee14da74ca2f6d1452"
+    },
+    {
+      "path": "src/display/dpu_o82_power.c",
+      "sha256": "5e37041ea46d689793a2c686c210ef8c532183c6cb10acd968f94584cf98394b"
+    },
+    {
+      "path": "src/display/dpu_o82_power.h",
+      "sha256": "030cca4a0c9b3928650969bc7cbf25c83bcc5d1db26653aad77cfa9f5dd94aa3"
+    },
+    {
+      "path": "src/display/dpu_o82_profiles.c",
+      "sha256": "0461e362a8e3f658d0c492ac5dcb28061e5421c65ef7118392c6abc4db4ac576"
+    },
+    {
+      "path": "src/display/dpu_o82_profiles.h",
+      "sha256": "9396a72dc5e4104f3e67566a74b666d47267fd292339858484a626a9e4106e68"
+    },
+    {
+      "path": "src/display/dpu_o82_regdma.c",
+      "sha256": "82b3b85f51fc27c75e911aa0557246ab449a6261840aeacc18c6460cf7dfdaa0"
+    },
+    {
+      "path": "src/display/dpu_o82_regdma.h",
+      "sha256": "96e0e077f5735b61074817962baf976581f97d078182f96552e71d8114d809be"
+    },
+    {
+      "path": "src/display/dpu_o82_upload.c",
+      "sha256": "8060ecdc74c792fe5126f818237ac7e5d413e0755ea81ee8b24ef56fe0ca90c5"
+    },
+    {
+      "path": "src/display/dpu_o82_upload.h",
+      "sha256": "dc3386e7471b92eac62330224756ccaf016301c99a38751d4152dd5e67805f4c"
+    },
+    {
+      "path": "src/display/o82-color-firmware.h",
+      "sha256": "d4fb3ae5ff6f5f1299e839dbeaa253af95c601eab209013af90e91c2e8240131"
+    },
+    {
+      "path": "src/display/o82-hsic-format.h",
+      "sha256": "dfa79dc0ef22f87d6989b9caca60716f7abd89387e23f1be8df38cfd02bbdb05"
+    },
+    {
+      "path": "src/display/o82-memory-color.h",
+      "sha256": "effff5eaf12e25f6ee99a4e020d16e626992e15e580f7ad9b88f95e34b7cd4da"
+    },
+    {
+      "path": "src/display/o82-memory-format.h",
+      "sha256": "af2008725d1e642c507eac3ca100c4a3d88214ef0702e6e5b7b2b871441b4efa"
+    },
+    {
+      "path": "src/display/o82-regdma.h",
+      "sha256": "6c16856cd0041aa091162910aebf4076e721b35ba4bf0205b6b315de01a52077"
+    },
+    {
+      "path": "src/display/o82-sixzone-format.h",
+      "sha256": "67e018625041460de4e10c2ddaa734ee9e8d0909138a3b0fe23c8a08040db86d"
+    },
+    {
+      "path": "src/display/prepare-o82-regdma.sh",
+      "sha256": "74ed6ce15e3a054e8ad887159df11a854be6a1be97fb21f2e23b831709073e63"
+    },
+    {
+      "path": "src/display/uke-o82-hdr-format.h",
+      "sha256": "537bca8c0c82946754ee334a0bd47187fe341c65e2f9c655188062a5c8ded8e8"
+    },
+    {
+      "path": "tests/o82-atomic-contract.c",
+      "sha256": "7eb52b2c1d1f8cd99ec8a24f3f3fbf63a5aa20409ab945395b8ff20dde01b15b"
+    },
+    {
+      "path": "tests/o82-atomic-contract.sh",
+      "sha256": "9c589bc0109a7bf9a4a336a5c1f636717deeb3eeaa6ee17fbc18d991c0a9cad7"
+    },
+    {
+      "path": "tests/o82-lutbus-contract.c",
+      "sha256": "9d01b20e6e545750cbf2bf891b856e4b4d55ca92a5011a55e87ffe8db501b7e4"
+    },
+    {
+      "path": "tests/o82-lutbus-contract.sh",
+      "sha256": "896941d01918f788198ed07ff1933af03038efba7bcce70f8df32b44866fa162"
+    },
+    {
+      "path": "tests/o82-memory-pipeline-contract.cpp",
+      "sha256": "c0fe305a8177b52be9406357b3a0588b6b735a6bc72709710922c40558ffe277"
+    },
+    {
+      "path": "tests/o82-profile-loader-contract.c",
+      "sha256": "71b1e112ee6da8aae8f94a45350373e1bff83899a7f00c05fd77857740957416"
+    },
+    {
+      "path": "tests/o82-profile-loader-contract.sh",
+      "sha256": "18e93120b593073d4c85e24c629cb2dc3ff7c64fa66a0b4297b5ff281db6b3cd"
+    },
+    {
+      "path": "tests/o82-regdma-transport-contract.c",
+      "sha256": "7db7296bba4a32a6294a8953a043f1e7bdf80cb15dc25059567dfd58601f1f2d"
+    },
+    {
+      "path": "tests/o82-regdma-transport-contract.sh",
+      "sha256": "192732f05086ea7388345a06678d00187e07921ad364610bf3f30796b3d4f694"
+    }
+  ]
+}

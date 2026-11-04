@@ -24,7 +24,8 @@ for file in dpu_o82_platform.c dpu_o82_platform.h dpu_o82_regdma.c dpu_o82_regdm
     dpu_o82_upload.c dpu_o82_upload.h dpu_o82_lutbus.c dpu_o82_lutbus.h \
     dpu_o82_power.c dpu_o82_power.h \
     dpu_o82_color.c dpu_o82_color.h dpu_o82_profiles.c dpu_o82_profiles.h \
-    o82-color-firmware.h o82-sixzone-format.h o82-hsic-format.h uke-o82-hdr-format.h o82-regdma.h; do
+    o82-color-firmware.h o82-sixzone-format.h o82-hsic-format.h o82-memory-format.h \
+    uke-o82-hdr-format.h o82-regdma.h; do
     install -m644 "$owner/src/display/$file" "$target/$file"
 done
 install -Dm644 "$owner/src/display/bindings/qcom,sm7675-dpu.yaml" \

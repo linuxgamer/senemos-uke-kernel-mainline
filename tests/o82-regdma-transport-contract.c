@@ -13,6 +13,7 @@
 #include "dpu_o82_lutbus.h"
 #include "dpu_o82_profiles.h"
 #include "o82-hsic-format.h"
+#include "o82-memory-format.h"
 #include "msm_gem.h"
 #include "linux/io.h"
 #include "dpu_kms.h"
@@ -28,6 +29,7 @@ enum completion { DONE, TIMEOUT, ERROR, ERROR_AND_DONE, QUEUE1_ONLY };
 static unsigned char registers[0x7000], control[0x200];
 static unsigned char mdp_registers[0x400], vbif_registers[0x1000];
 static unsigned char pa_mmio[0x5a000], sixzone_data[O82_SIXZONE_BYTES];
+static unsigned char memory_data[O82_MEMORY_BYTES];
 static unsigned int expected_command_mask = 3, pa_reads, dropped_pa_reg;
 static int dropped_pa_dspp = -1;
 static enum completion outcome;
@@ -157,6 +159,21 @@ static void store(unsigned char *memory, size_t offset, uint32_t value)
 	memcpy(memory + offset, &value, 4);
 }
 
+static void setup_memory(unsigned int enabled, unsigned int protection)
+{
+	memset(memory_data,0,sizeof(memory_data));
+	store(memory_data,0,enabled);store(memory_data,4,protection);store(memory_data,8,1);
+	for(unsigned int i=0;i<3;i++) {
+		if(!(enabled&BIT(i)))continue;
+		unsigned int at=16+32*i;
+		store(memory_data,at,8);store(memory_data,at+4,0x7fff8001+i);
+		store(memory_data,at+8,0x20002000);store(memory_data,at+12,0x400000);
+		store(memory_data,at+16,1+5*i);store(memory_data,at+20,0x03000300);
+		store(memory_data,at+24,0x000800ff);store(memory_data,at+28,0x000800e0);
+	}
+	assert(o82_memory_valid(memory_data,sizeof(memory_data)));
+}
+
 static void test_detach(struct msm_mmu *mmu)
 {
 	assert(mmu && command_owner && command_kms);
@@ -216,7 +233,8 @@ static void apply_pa_commands(void)
 		assert((op >> 28) == 1 || (op >> 28) == 2);
 		unsigned int reg = op & 0xfffff, preserve = 0;
 		if ((op >> 28) == 2) { preserve = value; value = load(commands, at); at += 4; }
-		if (reg != 0x800 && reg != 0x840 && reg != 0x920 && (reg < 0x81c || reg > 0x828) && (reg < 0x908 || reg > 0x918)) continue;
+		if (reg != 0x800 && reg != 0x840 && reg != 0x920 && (reg < 0x81c || reg > 0x828) &&
+		    (reg < 0x908 || reg > 0x918) && (reg < 0x880 || reg > 0x8d0)) continue;
 		for (unsigned int i = 0; i < 3; i++) {
 			if (!(mask & BIT(i)) || ((int)i == dropped_pa_dspp && reg == dropped_pa_reg)) continue;
 			store(pa_mmio, bases[i] + reg, (load(pa_mmio, bases[i] + reg) & preserve) | value);
@@ -848,6 +866,7 @@ static void power_lifetime(void)
 	assert(o82_sixzone_valid(sixzone_data, sizeof(sixzone_data)));
 #define SETUP_PA() do { \
 	input.pa_managed = true; input.sixzone = sixzone_data; input.sixzone_bytes = sizeof(sixzone_data); \
+	input.memory = NULL; input.memory_bytes = 0; \
 	memset(hsic_data, 0, sizeof(hsic_data)); store(hsic_data,0,15); store(hsic_data,4,0xb3); \
 	store(hsic_data,8,0x7f20); store(hsic_data,12,0x20); store(hsic_data,16,0xe0); \
 	input.hsic = hsic_data; input.hsic_bytes = sizeof(hsic_data); \
@@ -857,6 +876,8 @@ static void power_lifetime(void)
 		store(pa_mmio, pa_bases[pi] + 0x840, 0xaaaa0123 + pi * 0x100); \
 		for (unsigned int pj = 2; pj < 12; pj++) \
 			store(pa_mmio, pa_bases[pi] + pa_regs[pj], 0xa5000000 | pi << 12 | pa_regs[pj]); \
+		for (unsigned int pj = 0; pj < 21; pj++) \
+			store(pa_mmio, pa_bases[pi]+0x880+4*pj, 0xa5000000 | pi << 12 | (0x880+4*pj)); \
 		input.pa_mode[pi] = 0xdeadbeef; input.pa_hold[pi] = 0xdeadbeef; \
 	} \
 	catalog = (struct dpu_mdss_cfg){3,dspp_cfg}; kms.catalog = &catalog; kms.mmio = pa_mmio; \
@@ -926,6 +947,72 @@ static void power_lifetime(void)
 		assert(trigger_count==1&&!dma.power_held&&runtime_usage==1);
 		_dpu_kms_mmu_destroy(&kms);assert(releases==1&&vm.references==0);vm.references=1;
 	}
+	const unsigned int protections[]={0,1,2,4,8,16,32,63};
+	const unsigned int protection_modes[]={0,0x400000,0x800000,0x1000000,0x40000,0x20000,8,0x1c60008};
+	const unsigned int region_modes[]={0x20,0x80,0x40};
+	unsigned int memory_cases=0;
+	for(unsigned int m=0;m<3;m++)for(unsigned int six=0;six<2;six++)
+	for(unsigned int hsic_on=0;hsic_on<2;hsic_on++)for(unsigned int enabled=0;enabled<8;enabled++)
+	for(unsigned int prot=0;prot<8;prot++) {
+		RESET_POWER();SETUP_PA();setup_memory(enabled,protections[prot]);
+		input.memory=memory_data;input.memory_bytes=sizeof(memory_data);expected_command_mask=pa_masks[m];
+		if(!six){input.sixzone=NULL;input.sixzone_bytes=0;}
+		if(!hsic_on)memset(hsic_data,0,sizeof(hsic_data));
+		unsigned char original[sizeof(input)];memcpy(original,&input,sizeof(input));
+		assert(!dpu_o82_power_upload(&kms,&ctl,&input,pa_masks[m]));
+		assert(load(registers,0x1004)==((1U<<24)|(1U<<22)|((six?41488U:37580U)/4)));
+		assert(!memcmp(original,&input,sizeof(input)));
+		assert(pa_reads==(six?70U:58U)&&trigger_count==1&&!dma.power_held&&runtime_usage==1);
+		unsigned int owned=(six?0xe0000000U:0)|(hsic_on?0x1e000000U:0)|protection_modes[prot],hold=0;
+		for(unsigned int i=0;i<3;i++)if(enabled&BIT(i)){owned|=region_modes[i];hold|=(1+5*i)<<(4*i);}
+		for(unsigned int half=0;half<3;half++) {
+			if(!(pa_masks[m]&BIT(half))) {
+				assert(load(pa_mmio,pa_bases[half]+0x800)==(0x24100101|(half?BIT(5):0)));
+				assert(load(pa_mmio,pa_bases[half]+0x840)==0xaaaa0123+half*0x100);
+				for(unsigned int j=0;j<21;j++)
+					assert(load(pa_mmio,pa_bases[half]+0x880+4*j)==(0xa5000000|half<<12|(0x880+4*j)));
+				continue;
+			}
+			assert(load(pa_mmio,pa_bases[half]+0x800)==(0x101|owned|(owned?0x100000:0)));
+			assert(load(pa_mmio,pa_bases[half]+0x840)==(hold|(six?0x9000:0)));
+			for(unsigned int i=0;i<3;i++) {
+				unsigned int at=16+32*i;
+				const unsigned int offsets[]={0,4,20,24,28,8,12};
+				const unsigned int regs[]={0x880+20*i,0x884+20*i,0x888+20*i,0x88c+20*i,
+					0x890+20*i,0x8bc+8*i,0x8c0+8*i};
+				for(unsigned int j=0;j<7;j++)assert(load(pa_mmio,pa_bases[half]+regs[j])==load(memory_data,at+offsets[j]));
+			}
+		}
+		_dpu_kms_mmu_destroy(&kms);assert(releases==1&&vm.references==0);vm.references=1;memory_cases++;
+	}
+	for(unsigned int enabled=0;enabled<2;enabled++)for(unsigned int half=0;half<2;half++)
+	for(unsigned int reg=0;reg<21;reg++) {
+		RESET_POWER();SETUP_PA();setup_memory(enabled?7:0,63);
+		input.memory=memory_data;input.memory_bytes=sizeof(memory_data);
+		dropped_pa_dspp=half;dropped_pa_reg=0x880+4*reg;
+		assert(dpu_o82_power_upload(&kms,&ctl,&input,3)==-EIO);
+		assert(trigger_count==1&&!dma.power_held&&runtime_usage==1);
+		_dpu_kms_mmu_destroy(&kms);assert(releases==1&&vm.references==0);vm.references=1;
+	}
+	for(unsigned int defect=0;defect<7;defect++) {
+		RESET_POWER();SETUP_PA();setup_memory(7,63);
+		input.memory=memory_data;input.memory_bytes=sizeof(memory_data);
+		if(defect==0)input.memory=NULL;
+		if(defect==1)input.memory_bytes--;
+		if(defect==2)store(memory_data,0,8);
+		if(defect==3)store(memory_data,4,64);
+		if(defect==4)store(memory_data,8,2);
+		if(defect==5)store(memory_data,28,0);
+		if(defect==6)input.pa_managed=false;
+		assert(dpu_o82_power_upload(&kms,&ctl,&input,3)==-EINVAL);
+		assert(!pa_reads&&!allocations&&!trigger_count&&!dma.power_held&&runtime_usage==1);
+	}
+	RESET_POWER();SETUP_PA();setup_memory(7,63);input.memory=memory_data;input.memory_bytes=sizeof(memory_data);
+	outcome=TIMEOUT;fail_reset_from=1;
+	assert(dpu_o82_power_upload(&kms,&ctl,&input,3)==-ETIMEDOUT);
+	assert(pa_reads==4&&dma.power_held&&dma.command_bo&&vm.references==2);
+	fail_reset_from=0;_dpu_kms_mmu_destroy(&kms);assert(releases==1&&vm.references==0);vm.references=1;
+	printf("Actual memory/protection power path: %u paired mode/hold cases, all21 register readbacks, both-half ignored active/neutral writes, malformed refusal and failed-stop retention passed; fake MMIO only\n",memory_cases);
 	RESET_POWER(); SETUP_PA(); outcome = TIMEOUT; fail_reset_from = 1;
 	assert(dpu_o82_power_upload(&kms, &ctl, &input, 3) == -ETIMEDOUT);
 	assert(pa_reads == 4 && dma.power_held && dma.command_bo && vm.references == 2);

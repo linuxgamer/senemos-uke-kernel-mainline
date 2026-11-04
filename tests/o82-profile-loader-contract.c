@@ -112,6 +112,7 @@ int main(void)
 			assert(!dpu_o82_profiles_input(&profiles, wide, pq, &input));
 			assert(input.primaries == 1 && input.igc && input.gamut && input.gc);
 			assert(input.pa_managed && !input.sixzone && !input.sixzone_bytes);
+			assert(!input.memory && !input.memory_bytes);
 			assert(input.hsic && input.hsic_bytes == O82_HSIC_BYTES && o82_hsic_valid(input.hsic, input.hsic_bytes));
 			assert(!o82_hdr_u32(input.hsic));
 			assert(input.gamut == bytes + 417 + 2 * O82_COLOR_FW_CURVE_BYTES + wide * O82_COLOR_FW_CUBE_BYTES);
@@ -140,6 +141,7 @@ int main(void)
 		for (unsigned int pq = 0; pq < 2; pq++) {
 			assert(!dpu_o82_profiles_input(&profiles, wide, pq, &input));
 			assert(input.pa_managed && input.sixzone_bytes == O82_SIXZONE_BYTES);
+			assert(!input.memory && !input.memory_bytes);
 			assert(o82_sixzone_valid(input.sixzone, input.sixzone_bytes));
 			assert(input.sixzone[O82_SIXZONE_HEADER + 4] == 23);
 			for (unsigned int i = 0; i < 3; i++) assert(!input.pa_mode[i] && !input.pa_hold[i]);
@@ -157,6 +159,7 @@ int main(void)
 		assert(o82_hdr_u32(input.hsic) == 15 && o82_hdr_u32(input.hsic+4) == 0xb3);
 		assert(o82_hdr_u32(input.hsic+8) == 0x7f20 && o82_hdr_u32(input.hsic+16) == 0xe0);
 		assert(!!input.sixzone == !!six);
+		assert(!input.memory && !input.memory_bytes);
 		dpu_o82_profiles_unload(&profiles);
 	}
 	memcpy(bytes, "O82COLR3", 8); word(8, 3);

@@ -11,6 +11,7 @@
 #include "dpu_o82_profiles.h"
 #include "dpu_o82_lutbus.h"
 #include "o82-hsic-format.h"
+#include "o82-memory-format.h"
 
 #define O82_IGC_ENTRIES (257U * 3)
 #define O82_GAMUT_ENTRIES (4913U * 3)
@@ -27,9 +28,11 @@ _Static_assert(DPU_O82_LUTBUS_BYTES ==
 	8 + (8 + O82_IGC_PAD_ENTRIES * 2 + 12 + 8) +
 	(8 + O82_GAMUT_PAD_ENTRIES * 2 + 12 + 8) + 3 * (8 + 8 + 512 * 4) + 16,
 	"Cliffs LUT command stream size must include padding and workaround NOPs");
-_Static_assert(DPU_O82_LUTBUS_MAX_BYTES == DPU_O82_LUTBUS_BYTES +
+_Static_assert(DPU_O82_LUTBUS_SIXZONE_BYTES == DPU_O82_LUTBUS_BYTES +
 	4 * 8 + 8 + 384 * 5 * 2 + 12 + 6 * 8 + 2 * (8 + 12 + 12),
 	"PA includes four HSIC words, SixZone and individual shared mode modifies");
+_Static_assert(DPU_O82_LUTBUS_MAX_BYTES == DPU_O82_LUTBUS_SIXZONE_BYTES + 3 * 7 * 8,
+	"Memory adds seven broadcast register writes for each region");
 
 struct o82_stream {
 	u8 *data;
@@ -117,17 +120,34 @@ static void o82_pa(struct o82_stream *stream,
 			o82_write(stream, 0x908 + 4 * i, o82_hdr_u32(data + 4 + 4 * i));
 		o82_write(stream, 0x920, (o82_hdr_u32(data) >> 3) & 1);
 	}
+	if (input->memory) {
+		unsigned int region;
+
+		for (region = 0; region < O82_MEMORY_REGIONS; region++) {
+			const u8 *p = o82_memory_region(input->memory, region);
+
+			o82_write(stream, 0x880 + 20 * region, o82_hdr_u32(p));
+			o82_write(stream, 0x884 + 20 * region, o82_hdr_u32(p + 4));
+			for (i = 0; i < 3; i++)
+				o82_write(stream, 0x888 + 20 * region + 4 * i, o82_hdr_u32(p + 20 + 4 * i));
+			o82_write(stream, 0x8bc + 8 * region, o82_hdr_u32(p + 8));
+			o82_write(stream, 0x8c0 + 8 * region, o82_hdr_u32(p + 12));
+		}
+	}
 	for (i = 0; i < 3; i++) {
 		if (!(mask & (1U << i)))
 			continue;
 		o82_put32(stream, O82_REGDMA_DECODE);
 		o82_put32(stream, (1U << i) << 17);
-		if (data) {
-			value = (unsigned int)data[24] << 12 | (unsigned int)data[25] << 14;
-			o82_modify(stream, 0x840, O82_PA_HOLD_PRESERVE, value);
+		if (data || input->memory) {
+			unsigned int preserve = o82_memory_hold_preserve(data, input->memory);
+
+			value = o82_memory_pa_hold(input->pa_hold[i], data, input->memory) & ~preserve;
+			o82_modify(stream, 0x840, preserve, value);
 		}
-		value = o82_pa_mode(input->pa_mode[i], data, input->hsic) & ~O82_PA_FULL_MODE_PRESERVE;
-		o82_modify(stream, 0x800, O82_PA_FULL_MODE_PRESERVE, value);
+		value = input->memory ? O82_PA_MEMORY_MODE_PRESERVE : O82_PA_FULL_MODE_PRESERVE;
+		o82_modify(stream, 0x800, value,
+			o82_memory_pa_mode(input->pa_mode[i], data, input->hsic, input->memory) & ~value);
 	}
 }
 
@@ -152,8 +172,13 @@ int dpu_o82_lutbus_build(const struct dpu_o82_color_input *input,
 	if ((input->pa_managed || input->hsic || input->hsic_bytes) &&
 	    (!input->pa_managed || !o82_hsic_valid(input->hsic, input->hsic_bytes)))
 		return -EINVAL;
+	if ((input->memory || input->memory_bytes) &&
+	    (!input->pa_managed || !o82_memory_valid(input->memory, input->memory_bytes)))
+		return -EINVAL;
 	needed = !input->pa_managed ? DPU_O82_LUTBUS_BYTES : input->sixzone ?
-		 DPU_O82_LUTBUS_MAX_BYTES : DPU_O82_LUTBUS_PA_OFF_BYTES;
+		 DPU_O82_LUTBUS_SIXZONE_BYTES : DPU_O82_LUTBUS_PA_OFF_BYTES;
+	if (input->memory)
+		needed += 168 + (input->sixzone ? 0 : 24);
 	if (capacity < needed)
 		return -ENOSPC;
 	table[0] = input->igc; table[1] = input->gamut; table[2] = input->gc;
@@ -171,6 +196,9 @@ int dpu_o82_lutbus_build(const struct dpu_o82_color_input *input,
 		return -EINVAL;
 	if (input->hsic && (!o82_disjoint(buffer, needed, input->hsic, input->hsic_bytes) ||
 	    !o82_disjoint(bytes, sizeof(*bytes), input->hsic, input->hsic_bytes)))
+		return -EINVAL;
+	if (input->memory && (!o82_disjoint(buffer, needed, input->memory, input->memory_bytes) ||
+	    !o82_disjoint(bytes, sizeof(*bytes), input->memory, input->memory_bytes)))
 		return -EINVAL;
 	/* IGC4's257th sample is the explicit full-scale endpoint in the OEM ABI. */
 	for (channel = 0; channel < 3; channel++)

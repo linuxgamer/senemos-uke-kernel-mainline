@@ -82,6 +82,7 @@ int dpu_o82_upload(struct dpu_o82_regdma *dma, struct drm_device *drm,
 	if (ret)
 		goto out;
 	if (bytes != DPU_O82_LUTBUS_BYTES && bytes != DPU_O82_LUTBUS_PA_OFF_BYTES &&
+	    bytes != DPU_O82_LUTBUS_SIXZONE_BYTES && bytes != DPU_O82_LUTBUS_MEMORY_BYTES &&
 	    bytes != DPU_O82_LUTBUS_MAX_BYTES) {
 		ret = -EIO;
 		goto out;
