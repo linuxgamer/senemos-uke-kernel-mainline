@@ -1,0 +1,285 @@
+From: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+Subject: [PATCH] drm/msm/dpu: apply private Uke color through paired atomic state
+
+Reserve paired DSPPs, validate both stopped video interfaces, compose client
+gamma with factory GC and stage all IGC/gamut/GC flush bits. Block physical
+enable and kickoff after failed upload. The initial preset is empty by default
+and native HDR advertisement remains disabled pending full qualification.
+
+Signed-off-by: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
+---
+diff --git a/drivers/gpu/drm/msm/Makefile b/drivers/gpu/drm/msm/Makefile
+index 0e47eeb..f546c56 100644
+--- a/drivers/gpu/drm/msm/Makefile
++++ b/drivers/gpu/drm/msm/Makefile
+@@ -100,6 +100,8 @@ msm-display-$(CONFIG_DRM_MSM_DPU) += \
+ 	disp/dpu1/dpu_o82_lutbus.o \
+ 	disp/dpu1/dpu_o82_upload.o \
+ 	disp/dpu1/dpu_o82_power.o \
++	disp/dpu1/dpu_o82_color.o \
++	disp/dpu1/dpu_o82_profiles.o \
+ 	disp/dpu1/dpu_plane.o \
+ 	disp/dpu1/dpu_rm.o \
+ 	disp/dpu1/dpu_vbif.o \
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c
+index 9907bc3..089f549 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c
+@@ -30,6 +30,7 @@
+ #include "dpu_crtc.h"
+ #include "dpu_plane.h"
+ #include "dpu_encoder.h"
++#include "dpu_o82_color.h"
+ #include "dpu_vbif.h"
+ #include "dpu_core_perf.h"
+ #include "dpu_trace.h"
+@@ -858,6 +859,8 @@ static void _dpu_crtc_setup_cp_blocks(struct drm_crtc *crtc)
+ 
+ 	if (!state->color_mgmt_changed && !drm_atomic_crtc_needs_modeset(state))
+ 		return;
++	if (dpu_o82_color_commit(crtc))
++		return;
+ 
+ 	for (i = 0; i < cstate->num_mixers; i++) {
+ 		ctl = mixer[i].lm_ctl;
+@@ -879,14 +882,22 @@ static void _dpu_crtc_setup_cp_blocks(struct drm_crtc *crtc)
+ 				mixer[i].hw_dspp->idx, DPU_DSPP_PCC);
+ 		}
+ 
+-		if (dspp->ops.setup_gc) {
+-			if (!state->gamma_lut) {
++		if (dspp->ops.setup_gc &&
++		    (!cstate->o82_native_color || !drm_atomic_crtc_needs_modeset(state))) {
++			if (!state->gamma_lut && !cstate->o82_native_color) {
+ 				dspp->ops.setup_gc(dspp, NULL);
+ 			} else {
+ 				gc_lut = kzalloc_obj(*gc_lut);
+ 				if (!gc_lut)
+ 					continue;
+-				_dpu_crtc_get_gc_lut(state, gc_lut);
++				if (cstate->o82_native_color) {
++					if (dpu_o82_color_gc(crtc, gc_lut)) {
++						kfree(gc_lut);
++						continue;
++					}
++				} else {
++					_dpu_crtc_get_gc_lut(state, gc_lut);
++				}
+ 				dspp->ops.setup_gc(dspp, gc_lut);
+ 				kfree(gc_lut);
+ 			}
+@@ -1423,7 +1434,8 @@ static struct msm_display_topology dpu_crtc_get_topology(
+ 	else
+ 		topology.num_lm = 1;
+ 
+-	if (crtc_state->ctm || crtc_state->gamma_lut)
++	if (crtc_state->ctm || crtc_state->gamma_lut ||
++	    dpu_o82_color_requested(crtc_state))
+ 		topology.num_dspp = topology.num_lm;
+ 
+ 	return topology;
+@@ -1485,13 +1497,17 @@ static int dpu_crtc_assign_resources(struct drm_crtc *crtc,
+ 	}
+ 
+ 	cstate->num_mixers = num_lm;
++	cstate->num_ctls = num_ctl;
++	for (i = 0; i < ARRAY_SIZE(cstate->hw_ctls); i++)
++		cstate->hw_ctls[i] = i < num_ctl ? to_dpu_hw_ctl(hw_ctl[i]) : NULL;
+ 
+ 	return 0;
+ }
+ 
+ static bool dpu_crtc_needs_dspp(const struct drm_crtc_state *crtc_state)
+ {
+-	return crtc_state->ctm || crtc_state->gamma_lut;
++	return crtc_state->ctm || crtc_state->gamma_lut ||
++		dpu_o82_color_requested(crtc_state);
+ }
+ 
+ static bool dpu_crtc_has_dspp(const struct drm_crtc_state *crtc_state)
+@@ -1526,6 +1542,8 @@ int dpu_crtc_check_mode_changed(struct drm_crtc_state *old_crtc_state,
+ 
+ 	DRM_DEBUG_ATOMIC("%d\n", crtc->base.id);
+ 
++	dpu_o82_color_mode_changed(new_crtc_state);
++
+ 	/* Reserve new DSPPs only when the encoder is reprogrammed too. */
+ 	if (dpu_crtc_needs_dspp(new_crtc_state) &&
+ 	    !dpu_crtc_has_dspp(old_crtc_state))
+@@ -1566,6 +1584,10 @@ static int dpu_crtc_atomic_check(struct drm_crtc *crtc,
+ 			return rc;
+ 	}
+ 
++	rc = dpu_o82_color_check(crtc, crtc_state);
++	if (rc)
++		return rc;
++
+ 	if (crtc_state->planes_changed || crtc_state->zpos_changed) {
+ 		if (dpu_use_virtual_planes)
+ 			rc = dpu_crtc_reassign_planes(crtc, crtc_state);
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.h b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.h
+index 6eaba56..765260a 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.h
+@@ -207,6 +207,9 @@ struct dpu_crtc {
+  */
+ struct dpu_crtc_state {
+ 	struct drm_crtc_state base;
++	bool o82_native_color;
++	bool o82_bt2020;
++	bool o82_pq;
+ 
+ 	bool bw_control;
+ 	bool bw_split_vote;
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c
+index 1f20695..315f8db 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c
+@@ -31,6 +31,7 @@
+ #include "dpu_hw_cdm.h"
+ #include "dpu_formats.h"
+ #include "dpu_encoder_phys.h"
++#include "dpu_o82_color.h"
+ #include "dpu_crtc.h"
+ #include "dpu_trace.h"
+ #include "dpu_core_irq.h"
+@@ -1333,6 +1334,40 @@ out:
+ 	mutex_unlock(&dpu_enc->enc_lock);
+ }
+ 
++int dpu_encoder_o82_stopped(struct drm_encoder *encoder)
++{
++	struct dpu_encoder_virt *enc = to_dpu_encoder_virt(encoder);
++	struct dpu_hw_intf_status status;
++	unsigned int i, mask = 0;
++	int ret = -EBUSY;
++
++	if (encoder->encoder_type != DRM_MODE_ENCODER_DSI)
++		return -EINVAL;
++	mutex_lock(&enc->enc_lock);
++	if (enc->enabled || enc->num_phys_encs != 2)
++		goto out;
++	for (i = 0; i < 2; i++) {
++		struct dpu_encoder_phys *phys = enc->phys_encs[i];
++
++		if (!phys || phys->parent != encoder ||
++		    phys->intf_mode != INTF_MODE_VIDEO ||
++		    phys->enable_state != DPU_ENC_DISABLED || !phys->hw_intf ||
++		    !phys->hw_intf->ops.get_status ||
++		    (phys->hw_intf->idx != INTF_1 && phys->hw_intf->idx != INTF_2) ||
++		    (mask & BIT(phys->hw_intf->idx)))
++			goto out;
++		memset(&status, 0, sizeof(status));
++		phys->hw_intf->ops.get_status(phys->hw_intf, &status);
++		if (status.is_en)
++			goto out;
++		mask |= BIT(phys->hw_intf->idx);
++	}
++	ret = mask == (BIT(INTF_1) | BIT(INTF_2)) ? 0 : -EINVAL;
++out:
++	mutex_unlock(&enc->enc_lock);
++	return ret;
++}
++
+ static void dpu_encoder_virt_atomic_enable(struct drm_encoder *drm_enc,
+ 					struct drm_atomic_commit *state)
+ {
+@@ -1341,6 +1376,8 @@ static void dpu_encoder_virt_atomic_enable(struct drm_encoder *drm_enc,
+ 	struct drm_display_mode *cur_mode = NULL;
+ 
+ 	dpu_enc = to_dpu_encoder_virt(drm_enc);
++	if (dpu_o82_color_blocked(drm_enc))
++		return;
+ 	dpu_enc->dsc = dpu_encoder_get_dsc_config(drm_enc);
+ 
+ 	atomic_set(&dpu_enc->frame_done_timeout_cnt, 0);
+@@ -2075,6 +2112,8 @@ void dpu_encoder_prepare_for_kickoff(struct drm_encoder *drm_enc)
+ 
+ 	dpu_enc = to_dpu_encoder_virt(drm_enc);
+ 
++	if (dpu_o82_color_blocked(drm_enc))
++		return;
+ 	trace_dpu_enc_prepare_kickoff(DRMID(drm_enc));
+ 
+ 	/* prepare for next kickoff, may include waiting on previous kickoff */
+@@ -2157,6 +2196,8 @@ void dpu_encoder_kickoff(struct drm_encoder *drm_enc)
+ 	struct dpu_encoder_phys *phys;
+ 	unsigned int i;
+ 
++	if (dpu_o82_color_blocked(drm_enc))
++		return;
+ 	DPU_ATRACE_BEGIN("encoder_kickoff");
+ 	dpu_enc = to_dpu_encoder_virt(drm_enc);
+ 
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.h b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.h
+index f45faf8..05c5076 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.h
+@@ -82,6 +82,8 @@ enum {
+ enum {
+ 	DPU_DSPP_PCC = 0x1,
+ 	DPU_DSPP_GC,
++	DPU_DSPP_IGC,
++	DPU_DSPP_GAMUT,
+ 	DPU_DSPP_MAX
+ };
+ 
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_ctl.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_ctl.c
+index e8729fe..e48ccc1 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_ctl.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_ctl.c
+@@ -393,13 +393,19 @@ static void dpu_hw_ctl_update_pending_flush_dspp(struct dpu_hw_ctl *ctx,
+ static void dpu_hw_ctl_update_pending_flush_dspp_sub_blocks(
+ 	struct dpu_hw_ctl *ctx,	enum dpu_dspp dspp, u32 dspp_sub_blk)
+ {
+-	if (dspp >= DSPP_MAX)
++	if (dspp < DSPP_0 || dspp >= DSPP_MAX)
+ 		return;
+ 
+ 	switch (dspp_sub_blk) {
+ 	case DPU_DSPP_PCC:
+ 		ctx->pending_dspp_flush_mask[dspp - DSPP_0] |= BIT(4);
+ 		break;
++	case DPU_DSPP_IGC:
++		ctx->pending_dspp_flush_mask[dspp - DSPP_0] |= BIT(2);
++		break;
++	case DPU_DSPP_GAMUT:
++		ctx->pending_dspp_flush_mask[dspp - DSPP_0] |= BIT(3);
++		break;
+ 	case DPU_DSPP_GC:
+ 		ctx->pending_dspp_flush_mask[dspp - DSPP_0] |= BIT(5);
+ 		break;
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
+index b37382c..32be3bd 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
+@@ -34,6 +34,7 @@
+ #include "dpu_hw_vbif.h"
+ #include "dpu_kms.h"
+ #include "dpu_o82_platform.h"
++#include "dpu_o82_color.h"
+ #include "dpu_plane.h"
+ #include "dpu_vbif.h"
+ #include "dpu_writeback.h"
+@@ -824,6 +825,9 @@ static int _dpu_kms_drm_obj_init(struct dpu_kms *dpu_kms)
+ 	 * bridges and connectors
+ 	 */
+ 	ret = _dpu_kms_setup_displays(dev, priv, dpu_kms);
++	if (ret)
++		return ret;
++	ret = dpu_o82_color_connectors_init(dpu_kms);
+ 	if (ret)
+ 		return ret;
+ 
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.h b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.h
+index 4de82d9..5684ebe 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.h
+@@ -84,6 +84,7 @@ struct dpu_kms {
+ 	struct dpu_hw_vbif *hw_vbif;
+ 	struct dpu_hw_mdp *hw_mdp;
+ 	struct dpu_o82_regdma *o82_regdma;
++	struct dpu_o82_color *o82_color;
+ 
+ 	bool has_danger_ctrl;
+ 

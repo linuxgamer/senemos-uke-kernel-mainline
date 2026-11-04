@@ -28,7 +28,7 @@ struct dpu_o82_regdma { void *regs; bool busy,power_held; struct dpu_kms *kms_ow
 struct dpu_kms { struct platform_device *pdev; struct dpu_o82_regdma *o82_regdma; };
 static struct {
  bool board,soc,node,no_mdp,no_dma,no_memory;
- int map_error;
+ int map_error,color_error;
  unsigned int lookups,allocations,maps,inits;
  struct resource mdp,dma;
  struct dpu_o82_regdma allocation;
@@ -52,6 +52,8 @@ static void dpu_o82_regdma_init(struct dpu_o82_regdma *dma,void *regs)
 static bool dpu_o82_regdma_can_unmap(struct dpu_o82_regdma *dma) { return !dma->busy; }
 static int dpu_o82_upload_release(struct dpu_o82_regdma *dma)
 { assert(dma->kms_owner);return dma->busy?-EBUSY:0; }
+static int dpu_o82_color_init(struct dpu_kms *kms)
+{ assert(kms->o82_regdma&&kms->o82_regdma->kms_owner==kms);return fixture.color_error; }
 #include "functions.h"
 static void reset(struct dpu_kms *kms)
 {
@@ -83,6 +85,7 @@ int main(void)
  reset(&kms);fixture.no_dma=true;assert(dpu_o82_platform_init(&kms)==-ENODEV&&!fixture.maps);
  reset(&kms);fixture.no_memory=true;assert(dpu_o82_platform_init(&kms)==-ENOMEM&&!kms.o82_regdma&&!fixture.maps);
  reset(&kms);fixture.map_error=-EBUSY;assert(dpu_o82_platform_init(&kms)==-EBUSY&&!kms.o82_regdma&&!fixture.inits);
+ reset(&kms);fixture.color_error=-EBADMSG;assert(dpu_o82_platform_init(&kms)==-EBADMSG&&kms.o82_regdma&&fixture.inits==1);
  reset(&kms);assert(!dpu_o82_platform_init(&kms)&&kms.o82_regdma==&fixture.allocation&&fixture.inits==1);
  assert(fixture.allocation.kms_owner==&kms);
  assert(dpu_o82_platform_init(&kms)==-EALREADY&&fixture.inits==1&&fixture.maps==1);

@@ -148,6 +148,7 @@ EOF
         "$kernel/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_vbif.c"
     sed -n '/^int dpu_o82_platform_suspend(/,/^}/p' "$root/src/display/dpu_o82_platform.c"
     printf '%s\n' 'static void msleep(unsigned int milliseconds);' \
+        'static void dpu_o82_color_fini(struct dpu_kms *kms);' \
         'static void test_drain_error(struct device *dev, int error);' \
         '#define dev_err_once(dev,fmt,error) test_drain_error(dev,error)'
     sed -n '/^void dpu_o82_platform_fini(/,/^}/p' "$root/src/display/dpu_o82_platform.c"

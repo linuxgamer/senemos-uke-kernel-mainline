@@ -32,12 +32,16 @@ git -C "$owner" archive --prefix=native-addon/ HEAD \
     src/display/dpu_o82_regdma.c src/display/dpu_o82_regdma.h src/display/o82-regdma.h \
     src/display/dpu_o82_upload.c src/display/dpu_o82_upload.h \
     src/display/dpu_o82_power.c src/display/dpu_o82_power.h \
+    src/display/dpu_o82_color.c src/display/dpu_o82_color.h \
+    src/display/dpu_o82_profiles.c src/display/o82-color-firmware.h \
     src/display/dpu_o82_lutbus.c src/display/dpu_o82_lutbus.h src/display/dpu_o82_profiles.h \
     src/display/uke-o82-hdr-format.h src/display/prepare-o82-regdma.sh \
     src/display/sm7675-uke-native-display.dtso src/display/bindings/qcom,sm7675-dpu.yaml \
     patches/display/0072-o82-regdma-resource.patch \
     patches/display/0073-o82-regdma-power.patch \
     patches/display/0074-o82-regdma-close.patch \
+    patches/display/0075-o82-atomic-color.patch \
+    tests/o82-atomic-contract.c tests/o82-atomic-contract.sh \
     tests/o82-platform-contract.sh tests/o82-lutbus-contract.c tests/o82-lutbus-contract.sh \
     tests/o82-regdma-transport-contract.c tests/o82-regdma-transport-contract.sh \
     packaging/native/check-o82-kms.sh LICENSE LICENSES/GPL-2.0-only.txt | \
@@ -50,7 +54,7 @@ spec=$output/uke-o82-kms-check.spec
 awk '
  /^%description/ {exit}
  /^Name:/ {$0="Name: uke-o82-kms-check"}
- /^Release:/ {$0="Release: 9%{?dist}"}
+ /^Release:/ {$0="Release: 10%{?dist}"}
  /^Summary:/ {$0="Summary: Retained Uke DPU KMS and REGDMA source integration check"}
  /^(Requires|Provides|Recommends):/ {next}
  {print}
@@ -87,6 +91,10 @@ test -s %{buildroot}%{_docdir}/%{name}/checks.txt
 %{_docdir}/%{name}/checks.txt
 
 %changelog
+* Wed Nov 04 2026 Uke contributors - 7.3.1-10
+- Connect private profiles to real paired CRTC modesets and standard wire state.
+- Check both physical stop states, composed gamma and complete feature flush masks.
+
 * Wed Nov 04 2026 Uke contributors - 7.3.1-9
 - Integrate the REGDMA drain with the retained KMS lifecycle cleanup.
 - Require drain before hardware pointers are cleared in probe unwind.
@@ -123,4 +131,4 @@ test -s %{buildroot}%{_docdir}/%{name}/checks.txt
 SPEC
 sha256sum -c "$stage/retained.sha256"
 rm "$parent"
-[[ $(rpmspec --target aarch64 -q --srpm --qf '%{NAME}-%{VERSION}-%{RELEASE}' "$spec") == uke-o82-kms-check-7.3.1-9.fc46 ]]
+[[ $(rpmspec --target aarch64 -q --srpm --qf '%{NAME}-%{VERSION}-%{RELEASE}' "$spec") == uke-o82-kms-check-7.3.1-10.fc46 ]]

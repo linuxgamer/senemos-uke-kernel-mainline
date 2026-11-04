@@ -2,8 +2,9 @@
 
 4 November 2026. POCO Pad X1 / Xiaomi Pad 7, SM7675, pinned Linux 7.3.1.
 This report describes main source and remote checks. Normal retained kernel
-candidates keep color DMA and native HDR advertisement disabled. There is no
-atomic caller for the full private color-profile upload.
+candidates keep color DMA and native HDR advertisement disabled. Source now
+contains an experimental paired CRTC caller; its complete retained qualification
+is pending. The initial `o82_color_profile` parameter is empty by default.
 
 ## Source implementation
 
@@ -16,6 +17,14 @@ DB queue 0 when SB queue 1 is unsupported; the native transport implements DB.
 
 The current source provides these components:
 
+- `dpu_o82_color.c` loads the matching private bundle for one enabled O82 DT
+  variant and selects the explicit initial preset. Atomic checking reserves
+  two distinct DSPPs and one bonded CTL. Full modesets require both physical
+  video interfaces to be disabled in software and hardware before upload.
+  Standard connector colorspace/HDR metadata selects the wire gamut/transfer;
+  PQ advertisement remains disabled. Failure blocks physical enable and kickoff.
+  Factory GC composes with the client's gamma; gamma-only changes use the
+  existing shadowed GC path, while PCC/CTM retains its native atomic path.
 - `dpu_o82_platform.c` admits only the bound Uke/SM7675 DPU and its separate
   MDP/VBIF/REGDMA resources. Init reserves/maps resources without programming
   color. REGDMA spans 0x0af80000..0x0af86fff.
@@ -92,10 +101,10 @@ journal. No native compilation or device activation ran on the tablet.
 ## Required integration and inputs
 
 The existing native CRTC already supplies GC1.8 with 1024 entries and CTM programming.
-Full-profile application must coordinate with that atomic path, reserve the
-paired DSPPs and prove both output halves stopped. It must also establish
-private firmware lifetime, independent native/BT.2020 and gamma2.2/PQ selection,
-and all required picture/HDR operations.
+The experimental caller coordinates those paths and stages IGC/gamut/GC flush
+bits for both DSPPs. Its complete source/link/fault checks and recoverable
+physical trial remain required. Dynamic preset control, private data delivery,
+all remaining picture/HDR operations and truthful HDR admission remain open.
 An unsupported preset must not alias a different transform.
 
 `dpu_o82_profiles.c` validates a fixed PA/PB v2 bundle before publishing state

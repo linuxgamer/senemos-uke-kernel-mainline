@@ -13,6 +13,7 @@
 #include "dpu_o82_power.h"
 #include "dpu_o82_regdma.h"
 #include "dpu_o82_upload.h"
+#include "dpu_o82_color.h"
 
 int dpu_o82_platform_init(struct dpu_kms *kms)
 {
@@ -43,7 +44,7 @@ int dpu_o82_platform_init(struct dpu_kms *kms)
 	dpu_o82_regdma_init(dma, regs);
 	dma->kms_owner = kms;
 	kms->o82_regdma = dma;
-	return 0;
+	return dpu_o82_color_init(kms);
 }
 
 int dpu_o82_platform_suspend(struct dpu_kms *kms)
@@ -66,4 +67,5 @@ void dpu_o82_platform_fini(struct dpu_kms *kms)
 		dev_err_once(&kms->pdev->dev, "REGDMA drain pending: %d\n", ret);
 		msleep(20);
 	}
+	dpu_o82_color_fini(kms);
 }

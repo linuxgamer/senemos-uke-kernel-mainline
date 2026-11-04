@@ -13,6 +13,7 @@ printf 'REGDMA extension source: '; cat "$addon/source-commit"
 bash "$addon/tests/o82-platform-contract.sh"
 bash "$addon/tests/o82-lutbus-contract.sh"
 bash "$addon/tests/o82-regdma-transport-contract.sh" "$addon" "$kernel"
+bash "$addon/tests/o82-atomic-contract.sh" "$addon" "$kernel"
 # Check the real caller's order and unwind, in addition to testing the helpers.
 awk '
  /dpu_kms->hw_vbif = hw;/ {vbif=NR}
@@ -56,10 +57,13 @@ readelf -h "$linked" | grep -E 'Machine:.*AArch64'
 for function in dpu_o82_platform_init dpu_o82_platform_suspend dpu_o82_regdma_init \
     dpu_o82_regdma_can_unmap dpu_o82_upload dpu_o82_upload_release \
     dpu_o82_power_upload dpu_o82_power_recover dpu_o82_power_close \
-    dpu_o82_platform_fini dpu_o82_regdma_reset_isolated; do
+    dpu_o82_platform_fini dpu_o82_regdma_reset_isolated \
+    dpu_o82_color_init dpu_o82_color_connectors_init dpu_o82_color_check \
+    dpu_o82_color_commit dpu_o82_color_gc dpu_o82_color_blocked \
+    dpu_encoder_o82_stopped dpu_o82_color_fini; do
     llvm-nm --defined-only "$linked" | awk -v name="$function" '$2 ~ /^[tT]$/ && $3==name {found=1} END {exit !found}'
 done
-! llvm-nm --undefined-only "$linked" | grep -E ' dpu_o82_(platform|regdma|upload|lutbus|power)_'
+! llvm-nm --undefined-only "$linked" | grep -E ' dpu_o82_(platform|regdma|upload|lutbus|power|color|profiles)_'
 # Rebuild the actual paired overlays after the retained preparation, changing
 # only the explicitly declared base DT. No retained hash receipt is rewritten.
 install -m644 "$addon/src/display/sm7675-uke-native-display.dtso" \

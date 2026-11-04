@@ -50,6 +50,14 @@ static unsigned int allocations, releases;
 static int allocation_error;
 static u64 allocation_iova = 0x1000;
 
+static void dpu_o82_color_fini(struct dpu_kms *kms)
+{
+	struct dpu_o82_regdma *dma = kms->o82_regdma;
+
+	assert(dma && dma->closing && !dma->command_bo && !dma->power_held);
+	assert(dpu_o82_regdma_can_unmap(dma));
+}
+
 struct drm_gpuvm *drm_gpuvm_get(struct drm_gpuvm *vm)
 {
 	assert(command_owner->lock.locked && vm->references);
