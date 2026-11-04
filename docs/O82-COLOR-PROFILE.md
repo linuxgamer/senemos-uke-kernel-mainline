@@ -6,8 +6,8 @@ run in COPR. Optical color and HDR acceptance require separate measurements.
 
 4 November development update: the tablet now runs `7.3.1-7200-unstable`.
 New kernel candidates use `senemos-uke-linux-kernel-mainline-unstable` and an
-`-unstable` ABI. The active v4 candidate retains that booting source and its
-camera admission boundaries. Normal-family changes require an explicit request
+`-unstable` ABI. The active v4 candidate retains separately installed7300, its
+read-only RTC gate and camera admission boundaries. Normal-family changes require an explicit request
 and physical stability/feature validation before promotion. Earlier `1500`
 observations below retain their dated scope.
 
@@ -30,7 +30,9 @@ qualification of `7.3.1-7600-unstable` passed
 [COPR11259981](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11259981/):
 Image, linked/signed modules, both supplier DTs and matched boot/RPM checks.
 All six AArch64 packages and SRC are present in checksum-verified repository
-metadata. Physical color/HDR acceptance remains open. Historical normal 7500
+metadata. This7200-based trial is held from delivery because it lacks the
+later7300 RTC gate. The active7300-based source requires fresh full-kernel
+qualification. Physical color/HDR acceptance remains open. Historical normal 7500
 is software evidence from before the channel change and does not authorize
 stable promotion. Delivered `7001`
 continues to require v3; private v4 delivery and physical acceptance are open.

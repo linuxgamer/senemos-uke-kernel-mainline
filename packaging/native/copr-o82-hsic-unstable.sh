@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# COPR only: retain booting7200 and qualify composed HSIC/SixZone in the unstable family.
+# COPR only: retain installed7300 and qualify composed HSIC/SixZone in the unstable family.
 set -Eeuo pipefail
 trap 'o82_source_status=$?; printf "O82 source preparation failed at line %s (status%s)\n" "$LINENO" "$o82_source_status" >&2; exit "$o82_source_status"' ERR
 test ! -e /etc/senemos/kernel-update.conf
 [[ $(rpm --eval '%{_host_cpu}') == aarch64 && $(rpm --eval '%{fedora}') == 46 ]]
 owner=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 output=$(realpath -m "${1:?Pass the remote source result directory}")
-revision=${2:?Pass a fresh kernel revision of at least 7601}
-[[ $revision =~ ^[1-9][0-9]{3,4}$ && $revision -ge 7601 ]]
+revision=${2:?Pass a fresh kernel revision of at least 10000}
+[[ $revision =~ ^[1-9][0-9]{3,4}$ && $revision -ge 10000 ]]
 manifest=manifests/o82-hsic-unstable-source-20261104.json
 (cd "$owner"; jq -r '.imports[]|.sha256+"  "+.path' "$manifest" | sha256sum -c --strict --quiet -)
 (cd "$owner"; jq -r '.qualified_profile_compiler.inputs[]|.sha256+"  "+.path' "$manifest" | sha256sum -c --strict --quiet -)
-# Admit the qualified complete7200 source by its full-file digest, RPM
+# Admit the qualified complete7300 source by its full-file digest, RPM
 # identity, exact source commit and retained profile/boot/configuration receipts.
-for pair in 11253922:uke-o82-color-profile:0.5.0-1; do
+for pair in 11253922:uke-o82-color-profile:0.5.0-1 11259919:senemos-uke-linux-kernel-mainline-unstable:7.3.1-7300; do
     build=${pair%%:*} rest=${pair#*:}
     name=${rest%%:*} version=${rest#*:}
     curl -fsSL --max-time 45 "https://copr.fedorainfracloud.org/api_3/build/$build" | \
@@ -32,7 +32,7 @@ parent_hash=$(jq -er .kernel_parent.sha256 "$owner/$manifest")
 curl -fLsS --retry 2 --max-time 1200 --proto '=https' --proto-redir '=https' \
     "$parent_url" -o "$stage/parent.src.rpm"
 printf '%s  %s\n' "$parent_hash" "$stage/parent.src.rpm" | sha256sum -c --strict -
-[[ $(rpm -qp --qf '%{NAME}-%{VERSION}-%{RELEASE}' "$stage/parent.src.rpm") == senemos-uke-linux-kernel-mainline-unstable-7.3.1-7200.fc46 ]]
+[[ $(rpm -qp --qf '%{NAME}-%{VERSION}-%{RELEASE}' "$stage/parent.src.rpm") == senemos-uke-linux-kernel-mainline-unstable-7.3.1-7300.fc46 ]]
 rpmkeys --checksig --nosignature --verbose "$stage/parent.src.rpm"
 rpm2cpio "$stage/parent.src.rpm" > "$stage/parent.cpio"
 cpio -t --quiet < "$stage/parent.cpio" > "$stage/entries"
@@ -57,6 +57,8 @@ boot=$stage/unpacked/boot-recipe
 (cd "$boot"; jq -r '.source_assets[]|.sha256+"  "+.path' lock.json | sha256sum -c --strict --quiet -)
 cmp "$boot/lock.json" "$output/boot-payload.json"
 cmp "$profile/native.config" "$boot/packaging/native/native.config"
+composition_hash=$(jq -er .kernel_parent.composition_sha256 "$owner/$manifest")
+printf '%s  %s\n' "$composition_hash" "$profile/source-composition.json" | sha256sum -c --strict -
 # The qualified camera controller appends CONFIG_SM_CAMCC_7675=y. Its raw
 # configuration digest is recorded by the fully pinned parent's composition.
 native_config_hash=$(jq -er .native_config_sha256 "$profile/source-composition.json")
@@ -67,9 +69,12 @@ printf '%s  %s\n' "$native_config_hash" \
 printf '%s  %s\n' f81f42c2622a6eb671fd7ca11fbb0ce700b6f5a7589a43cb379b5baa7cdfb1ca \
     "$profile/src/input/nt36532-uke-protocol.c" | sha256sum -c --strict -
 jq -e '.source_mode=="withdrawn6000-with-isolated-boot-admission-bisection" and
- .kernel_release=="7.3.1-7200-unstable" and .diagnostic_camera_stage==0 and
- .diagnostic_producer_commit=="d3dcaaf3f4fca6bd9efbc7c4ebf6e6ba212ac609" and
+ .kernel_release=="7.3.1-7300-unstable" and .diagnostic_camera_stage==0 and
+ .diagnostic_producer_commit=="00ebf622ca473b9b7a799b2f531b4871ddc70497" and
  .diagnostic_pstore_panic_layout and (.camcc_boot_fdt_activation|not) and
+ .rtc_backend=="pmic-read-only-counter" and .rtc_offset_write_readback==false and
+ .rtc_secure_offset_boot_activation==false and .rtc_secure_provider_qualified==false and
+ .rtc_utc_calendar_qualified==false and
  (.o82_color_initial_preset // "")=="" and .native_ssc_iio_abi==1 and
  (.front_geni_dt_activation|not) and (.front_eeprom_dt_activation|not) and .front_eeprom_read_only and
  .front_eeprom_size==8192 and (.camera_sensor_dt_activation|not) and
@@ -82,7 +87,7 @@ jq -e '.source_mode=="withdrawn6000-with-isolated-boot-admission-bisection" and
  .touch_variants==["tianma","csot"] and (.o82_color_dma_enabled|not) and
  (.native_hdr_advertised|not) and (.physical_acceptance|not)' \
     "$profile/source-composition.json" >/dev/null
-# Retain the one preparation call and PA flush patches from qualified7200;
+# Retain the one preparation call and PA flush patches from qualified7300;
 # the updated helper also stages the new shared HSIC format.
 [[ $(grep -Fxc 'bash "$profile/src/display/prepare-o82-regdma.sh" "$kernel"' "$profile/prepare.sh") == 1 ]]
 cp "$profile/SHA256SUMS" "$stage/parent-profile.sha256"
@@ -113,8 +118,8 @@ for tree in "$profile" "$boot"; do
         install -Dm644 "$profile/$audio_path" "$tree/$audio_path"
         continue
     fi
-    [[ $(grep -Fo 'uke7.3.1-7200u' "$tree/$audio_path" | wc -l) == 2 ]]
-    sed "s/uke7[.]3[.]1-7200u/uke$audio_release/g" "$tree/$audio_path" > "$stage/audio-card.c"
+    [[ $(grep -Fo 'uke7.3.1-7300u' "$tree/$audio_path" | wc -l) == 2 ]]
+    sed "s/uke7[.]3[.]1-7300u/uke$audio_release/g" "$tree/$audio_path" > "$stage/audio-card.c"
     install -m644 "$stage/audio-card.c" "$tree/$audio_path"
 done
 printf '%s\n' "$audio_path" >> "$stage/overlays"
@@ -152,7 +157,7 @@ jq -e --slurpfile old "$stage/parent-boot-lock.json" --rawfile overlays "$stage/
    any($old[0].source_assets[];.path==$p) or ($allowed|index($p)!=null)) and
  ((.source_assets|map(.path)|length)==(.source_assets|map(.path)|unique|length))' \
     "$boot/lock.json" >/dev/null
-cp "$profile/source-composition.json" "$profile/source-composition-before7600.json"
+cp "$profile/source-composition.json" "$profile/source-composition-before10000.json"
 install -Dm644 "$owner/$manifest" "$profile/$manifest"
 commit=$(git -C "$owner" rev-parse HEAD)
 epoch=$(git -C "$owner" show -s --format=%ct HEAD)
@@ -165,11 +170,11 @@ jq --arg commit "$commit" --arg revision "$revision" --arg hash "$parent_hash" -
  source_commit:$commit,kernel_release:("7.3.1-"+$revision+"-unstable"),rpm_revision:$revision,
  package_family:"senemos-uke-linux-kernel-mainline-unstable",kernel_abi_suffix:"-unstable",
  diagnostic_audio_driver:$audio,normal_kernel_promotion:false,
- source_mode:"unstable7200-with-composed-hsic-sixzone-v4-color-caller",
- parent_copr_build:11259638,parent_srpm_sha256:$hash,
+ source_mode:"unstable7300-with-composed-hsic-sixzone-v4-color-caller",
+ parent_copr_build:11259919,parent_srpm_sha256:$hash,
  parent_source_commit:"bf1f6634bafc214219de1c48b3fc72a181485343",
- parent_producer_commit:"d3dcaaf3f4fca6bd9efbc7c4ebf6e6ba212ac609",
- parent_composition:"source-composition-before7600.json",overlays:$overlays[0],
+ parent_producer_commit:"00ebf622ca473b9b7a799b2f531b4871ddc70497",
+ parent_composition:"source-composition-before10000.json",overlays:$overlays[0],
  o82_atomic_source_manifest:"manifests/o82-hsic-unstable-source-20261104.json",
  historical_o82_kms_check:11253082,
  historical_o82_kms_source_commit:"48aa87956b9d59c09dd8e0a82279c757cd59fb03",
@@ -204,7 +209,7 @@ jq --arg commit "$commit" --arg revision "$revision" --arg hash "$parent_hash" -
  "drivers/gpu/drm/msm/disp/dpu1/o82-hsic-format.h",
  "drivers/gpu/drm/msm/disp/dpu1/uke-o82-hdr-format.h"],
  native_hdr_advertised:false,device_installation:false,physical_acceptance:false
-}' "$profile/source-composition-before7600.json" > "$profile/source-composition.json"
+}' "$profile/source-composition-before10000.json" > "$profile/source-composition.json"
 (cd "$profile"; find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 (cd "$boot"; jq -r '.source_assets[]|.sha256+"  "+.path' lock.json | sha256sum -c --strict --quiet -)
 for tree in native-profile boot-recipe; do
@@ -214,7 +219,7 @@ for tree in native-profile boot-recipe; do
         -cJf "$output/$archive" -C "$stage/unpacked" "$tree"
 done
 install -m644 "$boot/lock.json" "$output/boot-payload.json"
-[[ $(grep -Fxc '%global senemos_build_release 7200' "$spec") == 1 && $(grep -Fxc '%check' "$spec") == 1 ]]
+[[ $(grep -Fxc '%global senemos_build_release 7300' "$spec") == 1 && $(grep -Fxc '%check' "$spec") == 1 ]]
 # Preserve all parent checks; add the new color checks only when absent.
 [[ $(grep -Fxc '%build' "$spec") == 1 ]]
 [[ $(awk '/^%check$/{f=1;next} /^%files/{f=0} f&&/^bash native-profile\/tests\/unstable-boot-family731-contract.sh /{n++} END{print n+0}' "$spec") == 1 ]]
@@ -252,11 +257,11 @@ awk -v revision="$revision" -v checks="$stage/missing-color-checks" '
  }
  /^%check$/ {checking=1}
  checking && /^%files($|[[:space:]])/ {for(i=1;i<=n;i++)print extra[i];checking=0}
- /^%global senemos_build_release 7200$/ {$0="%global senemos_build_release "revision}
+ /^%global senemos_build_release 7300$/ {$0="%global senemos_build_release "revision}
  /Final-source v3 loader/ {gsub(/Final-source v3 loader/, "Final-source v4 loader")}
  /^%changelog$/ {
   print;print "* Wed Nov 04 2026 Uke contributors - 7.3.1-"revision
-  print "- Retain the complete 7200 camera, touch, sensor, power and display sources."
+  print "- Retain the complete 7300 camera, touch, sensor, power and display sources."
   print "- Add explicit HSIC v4 data and compose paired HSIC/SixZone state with readback."
   print "- Preserve disabled initial selection and require matching private v4 input."
   print "- Verify full module linkage, failure ownership and both supplier DTs."

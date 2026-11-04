@@ -15,10 +15,12 @@ Linux kernel adaptations, device trees and Fedora RPM packaging for Xiaomi Pad 7
 `senemos-uke-linux-kernel-mainline-unstable` with an `-unstable` Image ABI.
 POCO Pad X1 currently boots `7.3.1-7200-unstable`. Normal-family updates require
 an explicit request and physical stability/feature validation before promotion.
-The active color candidate retains that booting source and its camera admission
-boundaries. `7.3.1-7600-unstable` passed
+The active color candidate retains separately installed7300, its read-only
+RTC gate and the camera admission boundaries. `7.3.1-7600-unstable` passed
 [COPR11259981](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11259981/)
 with Image, linked/signed modules, both supplier DTs and boot/RPM checks.
+That7600 trial retains7200 and is held from delivery because it lacks the later
+7300 RTC gate. A fresh7300-based candidate requires full qualification.
 Physical boot, full peripheral and color acceptance remain open.
 
 31 October 2026. `main` is the continuation branch. Microphone capture, power management, bounded boot-watchdog and optional gaming sources are integrated. The complete combined source still requires fresh release admission and a qualified COPR build; retained candidate packages do not establish that result.

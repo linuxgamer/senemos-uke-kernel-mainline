@@ -1,22 +1,23 @@
 {
   "schema_version": 1,
   "date": "2026-11-04",
-  "scope": "Unstable-only composed HSIC/SixZone v4 candidate retaining the booting7200 profile",
+  "scope": "Unstable-only composed HSIC/SixZone v4 candidate retaining installed7300 and its read-only RTC gate",
   "kernel_parent": {
-    "build": 11259638,
+    "build": 11259919,
     "package_family": "senemos-uke-linux-kernel-mainline-unstable",
-    "release": "7.3.1-7200",
-    "kernel_abi": "7.3.1-7200-unstable",
+    "release": "7.3.1-7300",
+    "kernel_abi": "7.3.1-7300-unstable",
     "source_commit": "bf1f6634bafc214219de1c48b3fc72a181485343",
-    "producer_commit": "d3dcaaf3f4fca6bd9efbc7c4ebf6e6ba212ac609",
-    "url": "https://download.copr.fedorainfracloud.org/results/mcc45tr/uke-linux-unstable/fedora-rawhide-aarch64/Packages/s/senemos-uke-linux-kernel-mainline-unstable-7.3.1-7200.fc46.src.rpm",
-    "sha256": "ed57663d3bb109cb3c00132cd24ec6495cab2abc9082bc72f6166889787f6b9b",
+    "producer_commit": "00ebf622ca473b9b7a799b2f531b4871ddc70497",
+    "url": "https://download.copr.fedorainfracloud.org/results/mcc45tr/uke-linux-unstable/fedora-rawhide-aarch64/Packages/s/senemos-uke-linux-kernel-mainline-unstable-7.3.1-7300.fc46.src.rpm",
+    "sha256": "bd63b0c67bf15a012d470da0e68b913b660ca67cbf1ac92ee4b831daaa2b1b01",
     "native_config_sha256": "26f2c7612028efd7bd7e79261de5f48de619f19ac231a42b6d65d6e381a78841",
     "native_config_identity": "native-profile/native.config",
     "effective_config_sha256": "7f1e3f7a5be62396b2b36534780aeb561dfbf7e0a10698677b860cbc91efbd38",
-    "primary_sha256": "fc940b79858a4edf279e46907ba0af15f8c2e70e61e8a6c96b83d2fd7a53e4db"
+    "primary_sha256": "7687ecbef289ca99d0e3ff906e912a28ab440e42ddc3bf36dbdc287616b0c2d5",
+    "composition_sha256": "758b4880da102746d0540f88b15f5338312d1f9533c18cf6bf862f39af463fa2"
   },
-  "minimum_fresh_revision": 7601,
+  "minimum_fresh_revision": 10000,
   "release_history_guard_unchanged": true,
   "imports": [
     {
@@ -404,10 +405,10 @@
     ]
   },
   "previous_kernel_qualification": {
-    "build": 11259638,
-    "release": "7.3.1-7200-unstable",
-    "producer_commit": "d3dcaaf3f4fca6bd9efbc7c4ebf6e6ba212ac609",
-    "scope": "Existing package cohort; currently running, without full feature acceptance"
+    "build": 11259919,
+    "release": "7.3.1-7300-unstable",
+    "producer_commit": "00ebf622ca473b9b7a799b2f531b4871ddc70497",
+    "scope": "Installed7300 source and successful package checks; currently running7200"
   },
   "private_color_bundle_version": 4,
   "command_bytes": {
@@ -418,7 +419,40 @@
   "shared_pa_flush_bit": 0,
   "default_preset": "",
   "native_hdr_advertisement": false,
-  "kernel_qualification": {
+  "kernel_qualification": "pending",
+  "physical_acceptance": false,
+  "private_inputs_included": false,
+  "package_family": "senemos-uke-linux-kernel-mainline-unstable",
+  "kernel_abi_suffix": "-unstable",
+  "generated_changes": [
+    {
+      "path": "src/audio/uke-audio-card.c",
+      "before_identity": "uke7.3.1-7300u",
+      "after_identity": "uke7.3.1-REVISIONu",
+      "exact_occurrences": 2,
+      "scope": "Compact ALSA driver identity only, matching the retained generic UCM/topology recipe"
+    }
+  ],
+  "retained_boot_admission": {
+    "camera_stage": 0,
+    "camcc_boot_fdt_activation": false,
+    "front_geni_dt_activation": false,
+    "front_eeprom_dt_activation": false,
+    "pstore_panic_layout": true,
+    "automatic_kernel_activation": false,
+    "rtc_backend": "pmic-read-only-counter",
+    "rtc_secure_offset_boot_activation": false,
+    "rtc_secure_provider_qualified": false,
+    "rtc_utc_calendar_qualified": false
+  },
+  "pre_policy_color_software_reference": {
+    "build": 11259599,
+    "release": "7.3.1-7500",
+    "source_commit": "8dd80a957f8094a8a41dfa7967391d1567c68f8d",
+    "scope": "Normal-family software checks only; not stable promotion or the boot parent"
+  },
+  "normal_family_update_requires_explicit_request": true,
+  "previous_color_qualification": {
     "build": 11259981,
     "release": "7.3.1-7600",
     "kernel_abi": "7.3.1-7600-unstable",
@@ -431,34 +465,8 @@
     "core_rpm_sha256": "28d2c2441cc08e907b439381a45844a906c87abea01c50815d47761d3ceba628",
     "aarch64_packages": 6,
     "source_packages": 1,
-    "physical_acceptance": false
-  },
-  "physical_acceptance": false,
-  "private_inputs_included": false,
-  "package_family": "senemos-uke-linux-kernel-mainline-unstable",
-  "kernel_abi_suffix": "-unstable",
-  "generated_changes": [
-    {
-      "path": "src/audio/uke-audio-card.c",
-      "before_identity": "uke7.3.1-7200u",
-      "after_identity": "uke7.3.1-REVISIONu",
-      "exact_occurrences": 2,
-      "scope": "Compact ALSA driver identity only, matching the retained generic UCM/topology recipe"
-    }
-  ],
-  "retained_boot_admission": {
-    "camera_stage": 0,
-    "camcc_boot_fdt_activation": false,
-    "front_geni_dt_activation": false,
-    "front_eeprom_dt_activation": false,
-    "pstore_panic_layout": true,
-    "automatic_kernel_activation": false
-  },
-  "pre_policy_color_software_reference": {
-    "build": 11259599,
-    "release": "7.3.1-7500",
-    "source_commit": "8dd80a957f8094a8a41dfa7967391d1567c68f8d",
-    "scope": "Normal-family software checks only; not stable promotion or the boot parent"
-  },
-  "normal_family_update_requires_explicit_request": true
+    "physical_acceptance": false,
+    "delivery_held": true,
+    "reason": "Retains7200 and lacks the separately installed7300 read-only RTC gate"
+  }
 }
