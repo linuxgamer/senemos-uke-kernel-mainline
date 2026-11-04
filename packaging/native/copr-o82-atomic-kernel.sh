@@ -173,7 +173,8 @@ awk -v revision="$revision" '
   print "CXX=clang++ bash native-profile/tests/dpu-video-timing-contract.sh \"$PWD\""
   print "CC=clang bash native-profile/tests/msm-retirement-proof-contract.sh \"$PWD\""
   print "CC=clang bash native-profile/tests/dpu-reservation-contract.sh \"$PWD\" \"$PWD/native-generated/dpu-reservation-before56\""
-  print "printf '\''Final-source legacy AVR/video/retirement/reservation color preflight passed\\n'\''"
+  print "CC=clang bash native-profile/tests/dpu-color-topology-contract.sh \"$PWD/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c\""
+  print "printf '\''Final-source legacy AVR/video/retirement/reservation/topology color preflight passed\\n'\''"
   print;next
  }
  /^%check$/ {

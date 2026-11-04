@@ -231,6 +231,11 @@
       "path": "tests/dpu-reservation-contract.sh",
       "sha256": "a154e7a30831149e63cddadf7ca1beea126fd496938920b326ec0b4547b1409d",
       "qualification": "historical fixture extended with color admission/refusal; final-source preflight required"
+    },
+    {
+      "path": "tests/dpu-color-topology-contract.sh",
+      "sha256": "e96ef23e2159073f3f89581690d05e3536d0360a2fe3aebcfd1e182cd4fb6368",
+      "qualification": "historical topology fixture extended with independent native color requests; final-source preflight required"
     }
   ]
 }
