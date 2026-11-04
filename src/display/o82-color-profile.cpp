@@ -146,9 +146,11 @@ struct Profile {
         std::array<unsigned, 3> lower{};
         Vec fraction{}, result{};
         for (size_t channel = 0; channel < 3; ++channel) {
-            const double at = std::clamp(rgb[channel], 0.0, 1.0) * 16;
-            lower[channel] = std::min(static_cast<unsigned>(at), 15u);
-            fraction[channel] = at - lower[channel];
+            // OEM FillRgbInEntries uses 0,256,...,3840,4095, with R fastest.
+            const double code = std::clamp(rgb[channel], 0.0, 1.0) * 4095;
+            lower[channel] = std::min(static_cast<unsigned>(code) / 256, 15u);
+            fraction[channel] = (code - lower[channel] * 256) /
+                                (lower[channel] == 15 ? 255.0 : 256.0);
         }
         for (unsigned corner = 0; corner < 8; ++corner) {
             unsigned index = 0, stride = 1;
@@ -170,6 +172,10 @@ struct Profile {
         return result;
     }
 };
+double gamut_knot(unsigned at) {
+    require(at <= 16, "invalid gamut knot");
+    return std::min(at * 256, 4095u) / 4095.0;
+}
 Profile load_pipeline(json_object *igc, json_object *gc, json_object *gamut) {
     require(enabled(igc) && enabled(gc), "inactive IGC or output gamma");
     require(number(field(gc, "bitsRounding")) == 10, "unsupported output precision");
@@ -185,7 +191,7 @@ Profile load_pipeline(json_object *igc, json_object *gc, json_object *gamut) {
         for (unsigned blue = 0; blue < 17; ++blue)
             for (unsigned green = 0; green < 17; ++green)
                 for (unsigned red = 0; red < 17; ++red)
-                    result.gamut.push_back({red / 16.0, green / 16.0, blue / 16.0});
+                    result.gamut.push_back({gamut_knot(red), gamut_knot(green), gamut_knot(blue)});
     return result;
 }
 Profile load(json_object *document, const char *panel) {
@@ -401,7 +407,7 @@ std::vector<unsigned char> native_hdr(const Profile &factory, unsigned panel, st
     for (unsigned blue = 0; blue < 17; blue++)
         for (unsigned green = 0; green < 17; green++)
             for (unsigned red = 0; red < 17; red++) {
-                const Vec input{red / 16.0, green / 16.0, blue / 16.0};
+                const Vec input{gamut_knot(red), gamut_knot(green), gamut_knot(blue)};
                 Vec result{};
                 cmsDoTransform(transform.get(), input.data(), result.data(), 1);
                 for (size_t channel = 0; channel < 3; channel++) {
@@ -454,7 +460,7 @@ std::vector<unsigned char> native_tables(const Profile &factory, unsigned primar
         for (unsigned blue = 0; blue < 17; blue++)
             for (unsigned green = 0; green < 17; green++)
                 for (unsigned red = 0; red < 17; red++) {
-                    const Vec input{red / 16.0, green / 16.0, blue / 16.0};
+                    const Vec input{gamut_knot(red), gamut_knot(green), gamut_knot(blue)};
                     Vec result = input;
                     if (wide) cmsDoTransform(transform.get(), input.data(), result.data(), 1);
                     for (size_t channel = 0; channel < 3; channel++) {
@@ -727,7 +733,7 @@ void preset_self_test(const Profile &identity) {
     seal(); assert(!o82_color_fw_valid(bundle.data(), bundle.size(), 0x42));
     auto p3_tables = native_tables(identity, O82_COLOR_P3);
     const unsigned node = (2 * 17 + 4) * 17 + 8;
-    const double expected = 1.055 * std::pow(0.5, 1 / 2.4) - 0.055;
+    const double expected = 1.055 * std::pow(gamut_knot(8), 1 / 2.4) - 0.055;
     assert(std::abs(o82_hdr_u16(p3_tables.data() + 2 * O82_COLOR_FW_CURVE_BYTES + node * 6) / 4095.0 - expected) < 0.0003);
     std::cout << "Native preset bundle: distinct gamuts, all four wire inputs, neutral SixZone, explicit unsupported operations and parser bounds passed\n";
 }
@@ -739,7 +745,8 @@ void self_test() {
     }
     for (unsigned blue = 0; blue < 17; ++blue)
         for (unsigned green = 0; green < 17; ++green)
-            for (unsigned red = 0; red < 17; ++red) identity.gamut.push_back({red / 16.0, green / 16.0, blue / 16.0});
+            for (unsigned red = 0; red < 17; ++red)
+                identity.gamut.push_back({gamut_knot(red), gamut_knot(green), gamut_knot(blue)});
     const std::array<Vec, 11> inputs{{{0,0,0}, {1,1,1}, {0.1,0.2,0.3}, {1,0,0}, {0,1,0}, {0,0,1},
         {0.01,0.01,0.01}, {0.05,0.05,0.05}, {0.18,0.18,0.18}, {0.5,0.5,0.5}, {0.75,0.75,0.75}}};
     for (const Vec input : inputs) {

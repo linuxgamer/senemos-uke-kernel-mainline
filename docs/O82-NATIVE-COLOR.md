@@ -22,8 +22,9 @@ The current source provides these components:
 - `dpu_o82_lutbus.c` builds a stream of 37,316 bytes for two DSPPs,
   covering IGC4/gamut4.3/GC1.8,
   including endpoint/alignment padding and the three-NOP LUTBUS workaround.
-  GC packing uses G/B/R. Synthetic packing checks do not prove the remaining
-  logical gamut RGB-to-c0/c2_c1 component mapping.
+  GC packing uses G/B/R. Exact stock conversion and the shared ABI establish
+  gamut c0=R, c2_c1 high=G, low=B, with R-fast bank-interleaved input. The
+  [source record](../manifests/o82-gamut-source-20261104.json) records that chain.
 - `dpu_o82_upload.c` owns one bounded WC MSM GEM command buffer and a reference
   to the admitted KMS's managed display VM. Encoding, reuse and submission share
   the transport mutex; foreign KMS/VM arguments are refused before allocation.
@@ -86,7 +87,7 @@ journal. No native compilation or device activation ran on the tablet.
 The existing native CRTC already supplies GC1.8 with 1024 entries and CTM programming.
 Full-profile application must coordinate with that atomic path, reserve the
 paired DSPPs and prove both output halves stopped. It must also establish the
-logical gamut component mapping, private firmware lifetime, independent
+private firmware lifetime, independent
 native/BT.2020 and gamma2.2/PQ selection, and all required picture/HDR operations.
 An unsupported preset must not alias a different transform.
 

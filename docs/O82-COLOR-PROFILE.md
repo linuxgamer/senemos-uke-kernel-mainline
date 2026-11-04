@@ -9,6 +9,14 @@ package and both fixed native v2 firmware files are absent. The ICC reports
 below describe their dated trials and do not establish the current root's
 profile selection. Full private-profile application and native HDR remain open.
 
+The `0.3.0-5` source corrects factory gamut interpolation and native sampling
+to the OEM 12-bit coordinates 0,256,...,3840,4095, including the shorter final
+interval. Earlier generated ICC and native data require regeneration with the
+corrected utility. The accepted input hashes and file formats remain unchanged.
+The [source record](../manifests/o82-gamut-source-20261104.json) distinguishes
+this protocol evidence from optical validation. Remote regression qualification
+of this correction is pending.
+
 The initial `0.1.0-2` passed numerical checks and saved ICC selection, but its
 serialized stage order was rejected when original KWin rendered the output.
 User photographs reported crushed shadows and excessive contrast/saturation.
@@ -57,7 +65,7 @@ submission, completion/error polling, checked reset and a failed-stop latch.
 Its actual C source is checked against deterministic MMIO in COPR; it has no
 live atomic color caller. Main now contains bound-KMS GEM/VM, runtime-power,
 clock/QoS and explicit MMU-drain ownership, qualified by COPR 11252759. Paired
-atomic application, gamut component mapping, all preset operations and the
+atomic application, all preset operations and the
 four compositor input combinations still require integration. Native HDR
 advertisement remains disabled. See the
 [native transport contract](O82-NATIVE-COLOR.md) for the current boundary.

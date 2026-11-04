@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-04",
+  "scope": "Static source and ABI evidence for O82 gamut packing and input coordinates",
+  "sources": [
+    {
+      "repository": "Xiaomi-Pad-7-Development/android_vendor_xiaomi_uke",
+      "commit": "6739c8ec275318a156aa3a65f04f54f8dad82926",
+      "stock_release": "POCO Uke Global OS3.0.304.0.WOZMIXM",
+      "classification": "third-party-retained exact-model proprietary OEM reference",
+      "files": [
+        {
+          "path": "proprietary/vendor/lib64/libsdm-color.so",
+          "git_blob": "489a2a1c0b929e1f867cae4bf7199ee7fd605270",
+          "sha256": "99f02b1114ffa3886e921353ddd54842c66a55871d4a58b2b1e340789a3f1c05",
+          "bytes": 466936
+        },
+        {
+          "path": "proprietary/vendor/lib64/libqdcm-json-mode-parser.so",
+          "git_blob": "b92dd188aa9c6ed9e523a14265e8c808cefc7830",
+          "sha256": "00b1a5fcfe89e1a67834cba59115e8a0460a29daf10c250787587d5efa4d0f75",
+          "bytes": 553632
+        }
+      ],
+      "redistribution_reviewed": false,
+      "executed_or_installed": false,
+      "reference_bytes_published": false
+    },
+    {
+      "repository": "LineageOS/android_vendor_qcom_opensource_display-commonsys-intf",
+      "commit": "fbd3e92a492a2d192595e6ae0237cc5eb32f74cb",
+      "path": "include/display_color_processing.h",
+      "git_blob": "f01cb520109b573d7a256ec3a2ce3c675e5baa9f",
+      "classification": "Qualcomm shared public RGB ABI, not Uke board configuration",
+      "license_observation": "File-level BSD redistribution notices; no code copied"
+    },
+    {
+      "repository": "LineageOS/android_hardware_qcom_display",
+      "commit": "fd1cfe095f3cb4073f2ac6216e4d4457ba50f312",
+      "files": [
+        {"path": "sdm/include/private/color_params.h", "git_blob": "2eef7270def59d1a72e06fb54e25f8859abad99a"},
+        {"path": "sdm/libs/core/drm/hw_color_manager_drm.cpp", "git_blob": "640a8432fcd1dee06810be90d8dad06eee057a8e"}
+      ],
+      "classification": "Shared SDEGamutCfg layout and unchanged UAPI copy, not Uke board configuration"
+    },
+    {
+      "repository": "MiCode/vendor_opensource_display-drivers",
+      "commit": "44275c404a677d9d9e5230fedd1af2ef02fc7b9a",
+      "path": "msm/sde/sde_hw_reg_dma_v1_color_proc.c",
+      "function": "reg_dmav2_setup_dspp_3d_gamutv43",
+      "classification": "Exact Uke GPL-2.0-only LUTBUS writer"
+    }
+  ],
+  "established_protocol": {
+    "logical_order": "R fastest, then G, then B",
+    "input_codes": [0,256,512,768,1024,1280,1536,1792,2048,2304,2560,2816,3072,3328,3584,3840,4095],
+    "bank": "logical_index modulo 4",
+    "bank_entry": "logical_index divided by 4",
+    "c0": "output R",
+    "c2_c1_high": "output G",
+    "c2_c1_low": "output B",
+    "lutbus_order": "R, G, B; each 12-bit component shifted left by 4"
+  },
+  "limits": [
+    "Static reference and interface evidence does not establish optical interpolation or live atomic ownership",
+    "No factory calibration arrays or proprietary implementation are included",
+    "Existing accepted PA/PB input hashes and active source locks are unchanged",
+    "Native HDR and all unsupported picture operations remain unqualified"
+  ]
+}
