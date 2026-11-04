@@ -151,7 +151,7 @@ EOF
         'static void test_drain_error(struct device *dev, int error);' \
         '#define dev_err_once(dev,fmt,error) test_drain_error(dev,error)'
     sed -n '/^void dpu_o82_platform_fini(/,/^}/p' "$root/src/display/dpu_o82_platform.c"
-    sed -n '/^static void _dpu_kms_mmu_destroy(/,/^}/p' \
+    sed -n '/^static void _dpu_kms_mmu_destroy(.*)$/,/^}/p' \
         "$kernel/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c"
     cat "$kernel/o82-mmu-destroy-before.h"
 } > "$scratch/shared-helpers.h"
