@@ -6,10 +6,14 @@ test ! -e /etc/senemos/kernel-update.conf
 owner=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 output=$(realpath -m "${1:?Pass the remote source result directory}")
 revision=${2:?Pass a fresh kernel revision above 6000}
-[[ $revision =~ ^[1-9][0-9]{3,4}$ && $revision -gt 6000 ]]
+[[ $revision =~ ^[1-9][0-9]{3,4}$ && $revision -gt 6500 ]]
 manifest=manifests/o82-atomic-source-20261104.json
 (cd "$owner"; jq -r '.imports[]|.sha256+"  "+.path' "$manifest" | sha256sum -c --strict --quiet -)
-for pair in 11252822:senemos-uke-linux-kernel-mainline:7.3.1-6000 11253082:uke-o82-kms-check:7.3.1-11; do
+# The 6000 history object is no longer available, while its exact source RPM
+# remains archived. Admit that immutable artifact only by the full-file digest,
+# RPM identity and complete profile/boot receipts below. A missing mutable API
+# object does not replace any of those identity checks.
+for pair in 11253082:uke-o82-kms-check:7.3.1-11; do
     build=${pair%%:*} rest=${pair#*:}
     name=${rest%%:*} version=${rest#*:}
     curl -fsSL --max-time 45 "https://copr.fedorainfracloud.org/api_3/build/$build" | \

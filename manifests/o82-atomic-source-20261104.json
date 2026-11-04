@@ -10,6 +10,14 @@
     "native_config_identity": "SHA-256 recorded in the fully pinned parent source-composition.json native_config_sha256 field",
     "effective_config_sha256": "7f1e3f7a5be62396b2b36534780aeb561dfbf7e0a10698677b860cbc91efbd38"
   },
+  "parent_history_availability": {
+    "observed": "2026-11-04",
+    "build_api": "11252822 returns 404; the pinned source RPM remains reachable",
+    "admission": "Full-file SHA-256, RPM identity and complete retained profile/boot receipts; no replacement artifact",
+    "later_consumption": "11253131 verified this exact parent, completed Image/module compilation and passed the new module/DT/config checks; final legacy AVR fixture failed",
+    "minimum_fresh_revision": 6501,
+    "release_history_guard_unchanged": true
+  },
   "qualified_color": {
     "build": 11253082,
     "release": "7.3.1-11",
