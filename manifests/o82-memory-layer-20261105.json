@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-05",
+  "scope": "Native memory/protection and v5 loader source layer on cumulative unstable profiles; no boot admission change",
+  "qualified_sources": {
+    "memory_native": {
+      "source_commit": "6763763a216d648928377f451fa0a4e4fd8cc746",
+      "copr_build": 11260889
+    },
+    "v5_loader": {
+      "source_commit": "f6aa6d96cfa467e3617d33219ab1441d92aabd4e",
+      "copr_build": 11261036
+    },
+    "json_utility": {
+      "source_commit": "8bf314f6aac5249781e9fc2c95fd6b8448d7d75b",
+      "copr_build": 11261174,
+      "version": "0.6.0-3"
+    }
+  },
+  "source_policy": {
+    "all_preimages_checked_before_mutation": true,
+    "all_undeclared_source_and_config_retained": true,
+    "boot_mirrors_updated_only_when_present": true,
+    "existing_feature_and_admission_fields_preserved": true,
+    "only_declared_color_composition_fields_extended": true,
+    "exact_idempotence": true,
+    "private_firmware_not_included": true,
+    "no_kernel_revision_reserved": true,
+    "no_image_module_boot_or_device_operation": true
+  },
+  "imports": [
+    {
+      "path": "src/display/dpu_o82_profiles.h",
+      "sha256": "9396a72dc5e4104f3e67566a74b666d47267fd292339858484a626a9e4106e68",
+      "before_sha256": "330ca002e70fc697d41ce050bdfa25dd5c0e420c24cfcc4bf1dbc1637e10648a"
+    },
+    {
+      "path": "src/display/dpu_o82_lutbus.c",
+      "sha256": "96206e9ff6e3a56ab86df64f5d0188ca3187aa19e942ab79ed1ff5b5fd6d162a",
+      "before_sha256": "2c0e88a8309a1cd2237c06c311b2be1f3799f3a228ee8d861f5811c7ef5d5077"
+    },
+    {
+      "path": "src/display/dpu_o82_lutbus.h",
+      "sha256": "b30f36d17cc3700b3bbaa6eb0469d82b9f0289fbdb8da337d560bc447018c7dd",
+      "before_sha256": "d4ee6aa1322f9ecb096104d6587d20263905fd72b60fbae1889bf8dd985104de"
+    },
+    {
+      "path": "src/display/dpu_o82_upload.c",
+      "sha256": "8060ecdc74c792fe5126f818237ac7e5d413e0755ea81ee8b24ef56fe0ca90c5",
+      "before_sha256": "91ebecd09896d765cc6aad0515cb08867244e0d2bea0ff0f2ddb07fb45ae0145"
+    },
+    {
+      "path": "src/display/dpu_o82_power.c",
+      "sha256": "5e37041ea46d689793a2c686c210ef8c532183c6cb10acd968f94584cf98394b",
+      "before_sha256": "9f90407033d2cf2ef704539ab5330cd9676cd5fbcad9c70291c92178fcdd3661"
+    },
+    {
+      "path": "src/display/o82-memory-format.h",
+      "sha256": "af2008725d1e642c507eac3ca100c4a3d88214ef0702e6e5b7b2b871441b4efa",
+      "before_sha256": null
+    },
+    {
+      "path": "src/display/dpu_o82_profiles.c",
+      "sha256": "98382e04a21af440ae69672b878d267c7049d23bf517a754388a16ee9d0c6ae3",
+      "before_sha256": "0461e362a8e3f658d0c492ac5dcb28061e5421c65ef7118392c6abc4db4ac576"
+    },
+    {
+      "path": "src/display/o82-color-firmware.h",
+      "sha256": "d9a4b176ad7be2334b5cf79af1f3a59185cf5304bf22247ea427bfb8839ae48a",
+      "before_sha256": "d4fb3ae5ff6f5f1299e839dbeaa253af95c601eab209013af90e91c2e8240131"
+    },
+    {
+      "path": "src/display/prepare-o82-regdma.sh",
+      "sha256": "74ed6ce15e3a054e8ad887159df11a854be6a1be97fb21f2e23b831709073e63",
+      "before_sha256": "8357a7fe06724fa79ca1de1238b002e5548084eb6a512b207967ce2d06c1ab42"
+    },
+    {
+      "path": "tests/o82-profile-loader-contract.c",
+      "sha256": "6efbef54ba1403df09218e3bed9b0320b6cd73b6782ec70a02c9d17943feef66",
+      "before_sha256": "8ff8d1046e83311610b1193d238f2ee766cfe2b5ba86f9eca600dbe808e9e4db",
+      "scope": "Retain and extend the inherited actual-source preflight for changed native interfaces"
+    },
+    {
+      "path": "tests/o82-lutbus-contract.c",
+      "sha256": "9d01b20e6e545750cbf2bf891b856e4b4d55ca92a5011a55e87ffe8db501b7e4",
+      "before_sha256": "4d21178bec26481d9e108a5f97f4bded7c7cef62a92705f1e3f84fc8a8ee2b3b",
+      "scope": "Retain and extend the inherited actual-source preflight for changed native interfaces"
+    },
+    {
+      "path": "tests/o82-regdma-transport-contract.c",
+      "sha256": "7db7296bba4a32a6294a8953a043f1e7bdf80cb15dc25059567dfd58601f1f2d",
+      "before_sha256": "12636bebaf2fc99cfa9d28caafb8d6b2de58cf2f422e3b18aa4070a02b68f62e",
+      "scope": "Retain and extend the inherited actual-source preflight for changed native interfaces"
+    }
+  ]
+}
