@@ -27,12 +27,16 @@ awk '
 awk '
  /^static void _dpu_kms_mmu_destroy\(/ && !/;$/ {mmu=1}
  /^static void _dpu_kms_hw_destroy\(/ {hw=1}
+ /^err_mmu_destroy:/ {unwind=1}
  mmu && /dpu_o82_platform_fini\(dpu_kms\);/ {drain_mmu=NR}
  mmu && /mmu->funcs->detach\(mmu\);/ {detach=NR}
  hw && /dpu_o82_platform_fini\(dpu_kms\);/ {drain_hw=NR}
  hw && /dpu_kms->hw_intr = NULL;/ {destroy_hw=NR}
+ unwind && /dpu_o82_platform_fini\(dpu_kms\);/ {drain_unwind=NR}
+ unwind && /dpu_kms->hw_vbif = NULL;/ {clear_unwind=NR;unwind=0}
  /^}/ {mmu=hw=0}
- END {exit !(drain_mmu && drain_mmu<detach && drain_hw && drain_hw<destroy_hw)}
+ END {exit !(drain_mmu && drain_mmu<detach && drain_hw && drain_hw<destroy_hw &&
+             drain_unwind && drain_unwind<clear_unwind)}
 ' "$kernel/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c"
 mkdir -p "$out"
 cp "$profile/native.config" "$out/.config"

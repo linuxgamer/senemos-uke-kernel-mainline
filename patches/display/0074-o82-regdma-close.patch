@@ -25,9 +25,17 @@ Signed-off-by: MCC45TR <75160848+MCC45TR@users.noreply.github.com>
  {
 +	dpu_o82_platform_fini(dpu_kms);
 +
- 	dpu_kms->hw_intr = NULL;
+ 	dpu_kms_self_refresh_cleanup(dpu_kms);
  
- 	/* safe to call these more than once during shutdown */
+ 	dpu_kms->hw_intr = NULL;
+@@ -1220,6 +1224,7 @@
+ 	dpu_kms_self_refresh_cleanup(dpu_kms);
+ err_mmu_destroy:
++	dpu_o82_platform_fini(dpu_kms);
+ 	dpu_kms->hw_intr = NULL;
+ 	dpu_kms->hw_vbif = NULL;
+ 	dpu_kms->hw_mdp = NULL;
+ 	_dpu_kms_mmu_destroy(dpu_kms);
 --- a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_vbif.c
 +++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_vbif.c
 @@ -10,6 +10,7 @@
