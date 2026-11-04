@@ -5,8 +5,8 @@ test ! -e /etc/senemos/kernel-update.conf
 [[ $(rpm --eval '%{_host_cpu}') == aarch64 && $(rpm --eval '%{fedora}') == 46 ]]
 owner=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 output=$(realpath -m "${1:?Pass the remote source result directory}")
-revision=${2:?Pass a fresh kernel revision above 6000}
-[[ $revision =~ ^[1-9][0-9]{3,4}$ && $revision -gt 6500 ]]
+revision=${2:?Pass a fresh kernel revision above 6501}
+[[ $revision =~ ^[1-9][0-9]{3,4}$ && $revision -gt 6501 ]]
 manifest=manifests/o82-atomic-source-20261104.json
 (cd "$owner"; jq -r '.imports[]|.sha256+"  "+.path' "$manifest" | sha256sum -c --strict --quiet -)
 # The 6000 history object is no longer available, while its exact source RPM
@@ -136,6 +136,8 @@ jq --arg commit "$commit" --arg revision "$revision" --arg hash "$parent_hash" \
  o82_atomic_source_manifest:"manifests/o82-atomic-source-20261104.json",
  qualified_o82_kms_check:11253082,
  qualified_o82_source_commit:"48aa87956b9d59c09dd8e0a82279c757cd59fb03",
+ o82_after_reference_changes:["explicit signed ARRAY_SIZE bound for the existing int CTL index"],
+ o82_final_kernel_qualification_required:true,
  o82_atomic_color_caller:true,o82_color_initial_preset:"",
  o82_color_private_firmware_required:true,o82_color_dma_enabled:false,
  kernel_driver_source_unchanged:false,

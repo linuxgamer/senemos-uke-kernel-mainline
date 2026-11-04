@@ -15,7 +15,7 @@
     "build_api": "11252822 returns 404; the pinned source RPM remains reachable",
     "admission": "Full-file SHA-256, RPM identity and complete retained profile/boot receipts; no replacement artifact",
     "later_consumption": "11253131 verified this exact parent, completed Image/module compilation and passed the new module/DT/config checks; final legacy AVR fixture failed",
-    "minimum_fresh_revision": 6501,
+    "minimum_fresh_revision": 6502,
     "release_history_guard_unchanged": true
   },
   "qualified_color": {
@@ -169,9 +169,10 @@
     },
     {
       "path": "patches/display/0075-o82-atomic-color.patch",
-      "sha256": "629a5b5e9ecce9a1b75299642075e34feb3cb5f4824d6d18d498cee941d70267",
-      "reference_blob": "f9a22fadcac0a9d945b8e5a0baf1173cd494658e",
-      "qualification": "11253082"
+      "sha256": "75c5bf4041f59ecf1e90cc3a9681a80d90965358cc62c28818a1b754e855b673",
+      "reference_blob": "58ea0dc5a7fd0136553125ecb2c6989e430eb4d6",
+      "qualification": "11253082 basis plus explicit signed ARRAY_SIZE bound; complete replacement kernel qualification required",
+      "basis_blob": "f9a22fadcac0a9d945b8e5a0baf1173cd494658e"
     },
     {
       "path": "tests/o82-platform-contract.sh",
@@ -237,7 +238,7 @@
     },
     {
       "path": "tests/dpu-reservation-contract.sh",
-      "sha256": "a154e7a30831149e63cddadf7ca1beea126fd496938920b326ec0b4547b1409d",
+      "sha256": "e0ae4b39e038a30612349a452653ebdfcd8db66819c5138981184dfe615fcb6f",
       "qualification": "historical fixture extended with color admission/refusal; final-source preflight required"
     },
     {

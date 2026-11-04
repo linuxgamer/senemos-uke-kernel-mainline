@@ -85,7 +85,8 @@ static int counts[BLOCK_TYPES],reserves,releases,reserve_error,bounds_error,perf
 static unsigned modesets,seamless;
 static bool dfps_failed,dfps_pending,encoder_modeset;
 static bool color_requested,color_wire_changed;
-static int color_error;
+static int color_error,retire_error;
+static unsigned color_checks;
 static const bool dpu_use_virtual_planes=false;
 static void log_message(const char *message,...) {(void)message;}
 #define DPU_ERROR(...) log_message(__VA_ARGS__)
@@ -141,7 +142,8 @@ static int drm_atomic_helper_check(struct drm_device *d,struct drm_atomic_commit
 static int drm_dp_mst_atomic_check(struct drm_atomic_commit *s) {(void)s;return mst_error;}
 static bool dpu_o82_color_requested(const struct drm_crtc_state *s) {(void)s;return color_requested;}
 static void dpu_o82_color_mode_changed(struct drm_crtc_state *s) {if(color_wire_changed)s->mode_changed=true;}
-static int dpu_o82_color_check(struct drm_crtc *c,struct drm_crtc_state *s) {(void)c;(void)s;return color_error;}
+static int dpu_o82_color_check(struct drm_crtc *c,struct drm_crtc_state *s) {(void)c;(void)s;++color_checks;return color_error;}
+static int dpu_crtc_retire_check(struct drm_crtc *c,struct drm_crtc_state *s) {(void)c;(void)s;return retire_error;}
 C
 cat > "$work/cases.c" <<'C'
 static void fake_modeset(struct dpu_encoder_phys *p,struct drm_crtc_state *s,struct drm_connector_state *c) {(void)p;(void)s;(void)c;++modesets;}
@@ -153,7 +155,7 @@ static void reset(void) {
  memset(&fixture_encoder,0,sizeof(fixture_encoder));memset(physical,0,sizeof(physical));memset(&commit,0,sizeof(commit));
  memset(counts,0,sizeof(counts));reserves=releases=reserve_error=bounds_error=perf_error=mst_error=0;
  dfps_failed=dfps_pending=encoder_modeset=false;modesets=seamless=0;
- color_requested=color_wire_changed=false;color_error=0;
+ color_requested=color_wire_changed=false;color_error=retire_error=0;color_checks=0;
  kms=(struct dpu_kms){.base={&funcs}};priv=(struct msm_drm_private){&kms.base};dev.dev_private=&priv;
  fixture_crtc=(struct drm_crtc){.dev=&dev,.base={1}};commit.dev=&dev;
  commit.old.base=(struct drm_crtc_state){.crtc=&fixture_crtc,.state=&commit,.active=true,.enable=true,.encoder_mask=1};
@@ -227,7 +229,8 @@ static void run(const char *which) {
  assert(commit.next.mixers[0].hw_dspp&&commit.next.mixers[1].hw_dspp);
  reset();color_wire_changed=true;
  assert(!dpu_crtc_check_mode_changed(&commit.old.base,&commit.next.base)&&commit.next.base.mode_changed);
- reset();color_error=-EIO;assert(msm_atomic_check(&dev,&commit)==-EIO);
+ reset();color_error=-EIO;assert(msm_atomic_check(&dev,&commit)==-EIO&&color_checks==1);
+ reset();retire_error=-EIO;assert(msm_atomic_check(&dev,&commit)==-EIO&&!color_checks&&!kms.bandwidth_ref);
 #endif
  puts("Actual DPU color/resource admission, caller modeset flag, stale CWB/CDM/DSC/DSPP and Uke/MST/error paths passed; no hardware opened");
 }

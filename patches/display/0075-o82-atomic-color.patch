@@ -94,7 +94,7 @@ index 23aba68..3f34550 100644
  
  	cstate->num_mixers = num_lm;
 +	cstate->num_ctls = num_ctl;
-+	for (i = 0; i < ARRAY_SIZE(cstate->hw_ctls); i++)
++	for (i = 0; i < (int)ARRAY_SIZE(cstate->hw_ctls); i++)
 +		cstate->hw_ctls[i] = i < num_ctl ? to_dpu_hw_ctl(hw_ctl[i]) : NULL;
  
  	return 0;
