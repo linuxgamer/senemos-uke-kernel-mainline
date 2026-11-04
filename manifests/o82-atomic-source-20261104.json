@@ -15,7 +15,7 @@
     "build_api": "11252822 returns 404; the pinned source RPM remains reachable",
     "admission": "Full-file SHA-256, RPM identity and complete retained profile/boot receipts; no replacement artifact",
     "later_consumption": "11253131 verified this exact parent, completed Image/module compilation and passed the new module/DT/config checks; final legacy AVR fixture failed",
-    "minimum_fresh_revision": 6502,
+    "minimum_fresh_revision": 6503,
     "release_history_guard_unchanged": true
   },
   "qualified_color": {
@@ -238,7 +238,7 @@
     },
     {
       "path": "tests/dpu-reservation-contract.sh",
-      "sha256": "e0ae4b39e038a30612349a452653ebdfcd8db66819c5138981184dfe615fcb6f",
+      "sha256": "0f99c8c6cc9b6e09812b23fc2c15b140b887a86558adf08f135344e1cbe35319",
       "qualification": "historical fixture extended with color admission/refusal; final-source preflight required"
     },
     {

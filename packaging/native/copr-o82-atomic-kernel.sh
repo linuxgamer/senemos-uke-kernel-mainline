@@ -5,8 +5,8 @@ test ! -e /etc/senemos/kernel-update.conf
 [[ $(rpm --eval '%{_host_cpu}') == aarch64 && $(rpm --eval '%{fedora}') == 46 ]]
 owner=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 output=$(realpath -m "${1:?Pass the remote source result directory}")
-revision=${2:?Pass a fresh kernel revision above 6501}
-[[ $revision =~ ^[1-9][0-9]{3,4}$ && $revision -gt 6501 ]]
+revision=${2:?Pass a fresh kernel revision above 6502}
+[[ $revision =~ ^[1-9][0-9]{3,4}$ && $revision -gt 6502 ]]
 manifest=manifests/o82-atomic-source-20261104.json
 (cd "$owner"; jq -r '.imports[]|.sha256+"  "+.path' "$manifest" | sha256sum -c --strict --quiet -)
 # The 6000 history object is no longer available, while its exact source RPM

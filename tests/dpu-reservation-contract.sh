@@ -86,7 +86,7 @@ static unsigned modesets,seamless;
 static bool dfps_failed,dfps_pending,encoder_modeset;
 static bool color_requested,color_wire_changed;
 static int color_error,retire_error;
-static unsigned color_checks;
+static unsigned color_checks __attribute__((unused));
 static const bool dpu_use_virtual_planes=false;
 static void log_message(const char *message,...) {(void)message;}
 #define DPU_ERROR(...) log_message(__VA_ARGS__)
