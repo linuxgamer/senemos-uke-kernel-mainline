@@ -173,6 +173,13 @@ cover the selected stream length. Complete remote qualification is pending;
 private data delivery, all remaining picture/HDR operations and physical
 acceptance remain open.
 
+The separate [HSIC source record](../manifests/o82-hsic-source-20261104.json)
+traces exact OEM scalar ranges and signed packing. Its saturation/contrast
+inputs use a normalized domain, value uses a signed brightness domain and
+saturation threshold shares the saturation word. SixZone percent scaling and
+rounded fixed-point helpers do not implement those operations. Complete
+enable/action routing and one composed shared PA state remain required.
+
 The 4 November tablet inspection found neither fixed native bundle nor the
 `uke-o82-color-profile` package installed. Earlier private ICC trials describe
 their dated environment, not the current root. Factory inputs and generated

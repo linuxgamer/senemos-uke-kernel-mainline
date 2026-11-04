@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-04",
+  "scope": "Static HSIC1.7 scalar conversion and shared PA protocol; native integration pending",
+  "exact_uke_driver": {
+    "repository": "MiCode/vendor_opensource_display-drivers",
+    "commit": "44275c404a677d9d9e5230fedd1af2ef02fc7b9a",
+    "files": [
+      "msm/sde/sde_hw_reg_dma_v1_color_proc.c",
+      "msm/sde/sde_hw_color_proc_common_v4.h",
+      "include/uapi/display/drm/msm_drm_pp.h"
+    ],
+    "function": "reg_dmav1_setup_dspp_pa_hsicv17",
+    "license": "GPL-2.0-only; UAPI has Linux-syscall-note",
+    "hsic_base": "0x800 relative to DSPP",
+    "register_offsets": {"hue": "0x1c", "saturation": "0x20", "value": "0x24", "contrast": "0x28"},
+    "register_masks": {"hue": "0x0fff", "saturation": "0xffff", "value": "0xff", "contrast": "0xff"},
+    "uapi_enable_bits": {"hue": 0, "saturation": 1, "value": 2, "contrast": 3},
+    "hardware_enable_bits": {"hue": 25, "saturation": 26, "value": 27, "contrast": 28},
+    "shared_pa_enable_bit": 20,
+    "shared_mode_preserve_mask": "0xe1efffff",
+    "shared_flush_bit": 0
+  },
+  "shared_hal": {
+    "repository": "AOSPA/android_hardware_qcom_display",
+    "commit": "d40d593a63a56ae7a7e9616518c7158fbb27e447",
+    "path": "sdm/libs/dal/hw_color_manager_drm.cpp",
+    "blob": "b14345e25501a1e8dbc1edae0008e06c53d15542",
+    "license": "Foundation/QIC BSD redistribution notices",
+    "classification": "Shared ABI; not an exact Uke product build",
+    "function": "HWColorManagerDrm::GetDrmPAHsic",
+    "SDEPaData_mode_bits": {"hue": 12, "saturation": 13, "value": 14, "contrast": 15},
+    "transfer": "Copy hue_adj/sat_adj/val_adj/cont_adj into corresponding UAPI fields under enable flags"
+  },
+  "retained_oem_binary": {
+    "repository": "Xiaomi-Pad-7-Development/android_vendor_xiaomi_uke",
+    "commit": "6739c8ec275318a156aa3a65f04f54f8dad82926",
+    "path": "proprietary/vendor/lib64/libsdm-color.so",
+    "sha256": "99f02b1114ffa3886e921353ddd54842c66a55871d4a58b2b1e340789a3f1c05",
+    "provenance": "Third-party-retained proprietary binary; no redistribution permission inferred",
+    "inspection": "Static ELF instructions, Android APS2 relocations and constructor constants only; no execution or emulation",
+    "global_converter": "ComputeGlobalPAParams public0x6df20 -> body0x57d3c",
+    "constructor": "0x2da58..0x2db08 initializes the five protocol ranges",
+    "got_bindings": {
+      "0x70dd8": "PPAlgorithm::kHue at0x73d10",
+      "0x70de0": "PPAlgorithm::kSaturation at0x73d2c",
+      "0x70de8": "PPAlgorithm::kBright at0x73d48",
+      "0x70df0": "PPAlgorithm::kContrast at0x73d64",
+      "0x70df8": "PPAlgorithm::kSatThreshold at0x73d80"
+    },
+    "table_entry": "pa_sub_block_config_ at0x70008: enable0xf0, SDE mode0xf000, relocated ComputeGlobalPAParams pointer at0x70010",
+    "hue": {"entry": "0x6dd70 -> 0x4fe60", "input_domain": [-180, 180], "conversion": "Clamp integer input, multiply768, signed divide180 toward zero, mask12 bits"},
+    "saturation": {"entry": "0x6dd98 -> 0x4fec8", "input_domain": [-1, 1], "conversion": "Single-precision clamp, multiply65/divide1, truncate signed toward zero, mask8 bits"},
+    "value": {"entry": "0x6dda0 -> 0x4ff00", "input_domain": [-255, 255], "conversion": "Single-precision clamp, multiply65/divide255, truncate signed toward zero, mask8 bits"},
+    "contrast": {"entry": "0x6dda8 -> 0x4ff38", "input_domain": [-1, 1], "conversion": "Single-precision clamp, multiply65/divide1, truncate signed toward zero, mask8 bits"},
+    "saturation_threshold": {"entry": "0x6ddb0 -> 0x4ff70", "input_domain": [0, 1], "conversion": "Single-precision clamp, multiply255/divide1, truncate, mask8 bits and shift8"},
+    "packed_saturation": "Low8 signed saturation code OR high8 threshold code; initialize a fresh output word",
+    "limit": "These are generic protocol ranges/scales, not preset settings or calibration coefficients; SixZone percent scaling and generic rounded fixed-point helpers are different operations"
+  },
+  "remaining_work": [
+    "Prove complete JSON field-type and enable/action routing for full and neutral HSIC state",
+    "Qualify the native converter and extend private input without admitting unsupported operations",
+    "Compose one final shared PA mode with SixZone before encoding paired changes",
+    "Implement explicit neutral state and complete memory/protection/HDR operations",
+    "Require native kernel/package checks and separate physical acceptance"
+  ],
+  "private_inputs_included": false,
+  "oem_code_executed": false,
+  "native_hsic_enabled": false,
+  "physical_acceptance": false
+}
