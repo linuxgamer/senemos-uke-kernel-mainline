@@ -182,6 +182,14 @@ parser reads hue as an integer and the other four scalars as single precision;
 any nonzero typed scalar sets its global PA flag. Outer action/disable routing
 and one composed shared PA state remain required.
 
+The typed pure HSIC converter passed41,340 synthetic checks per GCC optimized
+and Clang ASan/UBSan run in
+[COPR11253747](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11253747/).
+An independent integer IEEE754 reference checks the single-precision operations;
+wide intermediates and rounded conversion differ in128 and1,540 required
+negative cases. Its receipt-only RPM contains no executable or private input.
+JSON/wire/loader integration and paired HSIC programming remain unimplemented.
+
 The 4 November tablet inspection found neither fixed native bundle nor the
 `uke-o82-color-profile` package installed. Earlier private ICC trials describe
 their dated environment, not the current root. Factory inputs and generated

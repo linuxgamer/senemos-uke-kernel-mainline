@@ -91,15 +91,31 @@
     "implementation": "src/display/o82-hsic.h",
     "fixture": "tests/o82-hsic-contract.cpp",
     "remote_source_producer": "packaging/native/copr-o82-hsic-check.sh",
-    "status": "Implemented typed pure converter; remote qualification pending",
+    "status": "Pure typed converter passed remote optimized and sanitizer checks",
     "scope": "Integer hue and single-precision scalar conversion only; no JSON/wire/loader/PA integration",
     "refusals": "Nonfinite inputs and a non-nearest floating-point rounding mode leave output unchanged",
     "oracle": "Independent integer IEEE754 product/quotient rounding; hand words, ULP neighborhoods, deterministic bit patterns and wide/rounded negative alternatives",
     "private_data_or_hardware": false
   },
+  "pure_converter_qualification": {
+    "build": 11253747,
+    "release": "1.0-1",
+    "source_commit": "0f2dc2eb174ee6381a61dcc419c8fde1d1ec799e",
+    "checks_per_run": 41340,
+    "compilers": [
+      "GCC optimized",
+      "Clang ASan/UBSan"
+    ],
+    "observed_wrong_alternative_differences": {
+      "wide_intermediates": 128,
+      "rounded_instead_of_truncated": 1540
+    },
+    "scope": "Pure scalar conversion and hosted synthetic fixtures only; no JSON/wire/loader/shared-PA or physical acceptance",
+    "native_hsic_enabled": false
+  },
   "remaining_work": [
     "Complete outer enable/action routing and full/neutral state semantics; scalar JSON types and the global body flag are established",
-    "Qualify the native converter and extend private input without admitting unsupported operations",
+    "Extend private input and native wire/loader/PA integration after the qualified pure converter; keep unsupported operations refused",
     "Compose one final shared PA mode with SixZone before encoding paired changes",
     "Implement explicit neutral state and complete memory/protection/HDR operations",
     "Require native kernel/package checks and separate physical acceptance"
