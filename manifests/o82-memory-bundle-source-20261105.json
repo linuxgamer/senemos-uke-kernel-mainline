@@ -38,10 +38,23 @@
     "initial_selection_changed": false
   },
   "qualification": {
-    "state": "pending",
+    "state": "succeeded",
     "package": "uke-o82-memory-bundle-check",
     "release": "1.0-1",
-    "scope": "Actual validator, loader and command encoder with synthetic firmware; no full Image/MSM qualification, JSON mapping, private profiles or hardware"
+    "scope": "Actual validator, loader and command encoder with synthetic firmware; no full Image/MSM qualification, JSON mapping, private profiles or hardware",
+    "copr_build": 11261036,
+    "source_commit": "f6aa6d96cfa467e3617d33219ab1441d92aabd4e",
+    "worker": "fedora-rawhide-aarch64",
+    "optimized_gcc": true,
+    "clang_asan_ubsan": true,
+    "paired_panel_loader_cases_per_compiler": 2048,
+    "wire_lookups_per_compiler": 8192,
+    "command_encoder_cases_per_compiler": 6144,
+    "old_v4_actual_loader": "passed",
+    "repaired_crc_tampering": "passed",
+    "strict_filename_versions": "passed",
+    "enoent_only_fallback": "passed",
+    "only_receipt_and_source_packages": true
   },
   "delivery": {
     "independent_full_kernel": false,
