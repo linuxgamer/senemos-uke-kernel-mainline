@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-04",
+  "scope": "Generic typed memory-color conversion; JSON mapping, private format, shared PA integration and hardware acceptance remain incomplete",
+  "retained_oem_binary": {
+    "repository": "Xiaomi-Pad-7-Development/android_vendor_xiaomi_uke",
+    "commit": "6739c8ec275318a156aa3a65f04f54f8dad82926",
+    "path": "proprietary/vendor/lib64/libsdm-color.so",
+    "sha256": "99f02b1114ffa3886e921353ddd54842c66a55871d4a58b2b1e340789a3f1c05",
+    "inspection": "Static instructions, APS2 relocations and generic constructor constants; no execution, emulation, redistribution or private preset values",
+    "function": "ComputeMemoryColorParams public0x6df10 -> body0x588e0..0x59010",
+    "constructor": "0x2dbb0..0x2dbf0",
+    "got_bindings": {
+      "0x70e28": "kMCHueConstraints at0x76230, initialized from0x15bc0: integer0..360,1536/360",
+      "0x70e20": "kHueConstraints at0x76240, initialized from0x15bb0: integer-180..180,1536/360",
+      "0x70e08": "kMemColorSat at0x73db8; generic adjustment limits at+8/+12 initialized from0x15c60: float-100..100",
+      "0x70db8": "kMCSatValConstraints at0x76250, initialized from0x15bf0: float0..100,255/100"
+    },
+    "protocol": {
+      "minimum_scaled_extent": 8,
+      "hue_ratio": "binary64 divide -> binary32 -> multiply256 -> ties-away integer -> signed16 saturation",
+      "adjustments": "binary32 (clamp(x,-100,100)+100)/100-1, multiply262144/divide scaled hue extent, add+0.5 for both signs, truncate, signed16 saturation",
+      "reciprocal": "binary64 65536/extent+0.5, truncate, cap32767; different from SixZone floor",
+      "blend": "binary32 2^31 divided by binary32 product of three scaled extents; truncate",
+      "hue_region": "For negative integer endpoints add360 once; clamp0..360 and scale1536/360; maximum low11, minimum high11",
+      "sat_val_region": "binary32 clamp0..100,multiply255/divide100/truncate; maximum low8,minimum next8,scaled extent next8",
+      "holds": "Unsigned control0/1/2 maps3/2/1; >=3 maps0"
+    },
+    "typed_interface": "Semantic conversion fields only; not a binary copy of PAMemColorConfig and not a JSON-to-PAMem mapping"
+  },
+  "exact_uke_driver": {
+    "repository": "MiCode/vendor_opensource_display-drivers",
+    "commit": "44275c404a677d9d9e5230fedd1af2ef02fc7b9a",
+    "path": "msm/sde/sde_hw_reg_dma_v1_color_proc.c",
+    "blob": "76530c34430bfc095f25819e27a06cefaf216f81",
+    "functions": [
+      "__setup_dspp_memcol",
+      "reg_dmav1_setup_dspp_memcol_skinv17",
+      "reg_dmav1_setup_dspp_memcol_skyv17",
+      "reg_dmav1_setup_dspp_memcol_folv17",
+      "reg_dmav1_setup_dspp_memcol_protv17"
+    ],
+    "license": "GPL-2.0-only Foundation/QIC notices",
+    "scope": "Native programming/ownership reference only; no writer added by this converter"
+  },
+  "same_soc_comparison": {
+    "repository": "OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm7675",
+    "commit": "1138e00fee63582a0cc6a53af3286621786827b7",
+    "path": "vendor/qcom/opensource/display-drivers/msm/sde/sde_hw_reg_dma_v1_color_proc.c",
+    "blob": "fa8f951582003084bee74e30c73a7ec4d599bf7a",
+    "all_five_functions_byte_identical": true,
+    "board_values_imported": false
+  },
+  "upstream": {
+    "repository": "gregkh/linux",
+    "commit": "79a907609d53d5cd645b42c11550d295d43abf99",
+    "path": "drivers/gpu/drm/msm/disp/dpu1/dpu_hw_dspp.h",
+    "blob": "b47b7788064b2c7e231a632967d12e2e2671dc6a",
+    "scope": "Inspected DSPP operations expose PCC/GC and no memory-color writer; do not infer native programming support"
+  },
+  "shared_hal": {
+    "repository": "AOSPA/android_hardware_qcom_display",
+    "commit": "d40d593a63a56ae7a7e9616518c7158fbb27e447",
+    "path": "sdm/include/private/color_params.h",
+    "blob": "0028afa8be90c3986d135b62458d84fb4aa955b1",
+    "scope": "32-byte SDEPaMemColorData semantic output layout only; not proprietary input layout or exact Uke product build"
+  },
+  "pure_converter": {
+    "implementation": "src/display/o82-memory-color.h",
+    "fixture": "tests/o82-memory-color-contract.cpp",
+    "producer": "packaging/native/copr-o82-memory-color-check.sh",
+    "state": "pending remote qualification",
+    "oracle": "Independent integer rational IEEE754 rounding for binary32/binary64; hand words, clamp/extents/holds/hue wrap, deterministic bit patterns and wrong-alternative differences",
+    "refusals": "Nonfinite inputs or non-nearest rounding leave caller output unchanged",
+    "activation_changed": false
+  },
+  "qualification": {
+    "state": "pending",
+    "release": "1.0-1",
+    "scope": "Arithmetic only; no native writer, private firmware, JSON mapping or physical acceptance"
+  },
+  "delivery": {
+    "coordinated_kernel_queue_required": true,
+    "independent_full_kernel_submission": false,
+    "physical_acceptance": false,
+    "private_data_included": false
+  },
+  "inputs": [
+    {
+      "path": "src/display/o82-memory-color.h",
+      "sha256": "effff5eaf12e25f6ee99a4e020d16e626992e15e580f7ad9b88f95e34b7cd4da"
+    },
+    {
+      "path": "tests/o82-memory-color-contract.cpp",
+      "sha256": "11198d7b04b585fbabc2eb823083a5149f1be2212d3caff23606d0d37d3f98c1"
+    }
+  ]
+}
