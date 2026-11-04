@@ -76,7 +76,7 @@ compile() {
     "${CXX:-g++}" -std=c++20 -O1 -g -Wall -Wextra -Werror -Wno-sign-compare -fsanitize=address,undefined -fno-omit-frame-pointer "$work/$2.cpp" -o "$work/$2"
 }
 compile "$kernel" fixed
-ASAN_OPTIONS=detect_leaks=1 "$work/fixed"
+ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1} "$work/fixed"
 if [[ -n $baseline ]]; then
     compile "$baseline" original
     # The original helper has no independent-array allocation failure case.

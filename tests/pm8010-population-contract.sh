@@ -126,5 +126,5 @@ for active in 1 0; do
     "${CC:-cc}" -std=c11 -O2 -g -Wall -Wextra -Werror -Wno-unused-parameter \
         -Wno-unused-function -fsanitize=address,undefined -fno-omit-frame-pointer \
         -DTEST_ACTIVE="$active" "$work/test.c" -o "$work/test-$active"
-    ASAN_OPTIONS=detect_leaks=1 "$work/test-$active"
+    ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1} "$work/test-$active"
 done

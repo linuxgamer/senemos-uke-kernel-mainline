@@ -80,4 +80,4 @@ int main(void) {
 }
 C
 ${CC:-clang} -std=gnu11 -O1 -g -Wall -Wextra -Werror -Wno-unused-function -fsanitize=address,undefined "$work/test.c" -o "$work/test"
-ASAN_OPTIONS=detect_leaks=1 "$work/test"
+ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1} "$work/test"
