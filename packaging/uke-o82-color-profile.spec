@@ -1,6 +1,6 @@
 Name: uke-o82-color-profile
 Version: 0.3.0
-Release: 5%{?dist}
+Release: 6%{?dist}
 Summary: Generate private O82 OEM color mappings and native preset data
 License: MIT
 URL: https://github.com/MCC45TR/senemos-uke-kernel-mainline
@@ -72,15 +72,15 @@ g++ -std=c++20 -O2 -UNDEBUG -Wall -Wextra -Werror -I. \
 ./edid-contract
 bash tests/o82-profile-loader-contract.sh .
 g++ -std=c++20 -O2 -UNDEBUG -Wall -Wextra -Werror -I. \
-    o82-gamut-grid-contract.cpp $(pkg-config --cflags --libs json-c lcms2 openssl) -o gamut-grid
+    -Wl,--wrap=main o82-gamut-grid-contract.cpp $(pkg-config --cflags --libs json-c lcms2 openssl) -o gamut-grid
 ./gamut-grid
 clang++ -std=c++20 -O1 -g -UNDEBUG -Wall -Wextra -Werror -I. \
     -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer \
-    o82-gamut-grid-contract.cpp $(pkg-config --cflags --libs json-c lcms2 openssl) -o gamut-grid-sanitized
+    -Wl,--wrap=main o82-gamut-grid-contract.cpp $(pkg-config --cflags --libs json-c lcms2 openssl) -o gamut-grid-sanitized
 ./gamut-grid-sanitized
 g++ -std=c++20 -O2 -UNDEBUG -Wall -Wextra -Werror -I. \
     -DO82_COLOR_IMPLEMENTATION='"o82-color-before-grid.cpp"' \
-    o82-gamut-grid-contract.cpp $(pkg-config --cflags --libs json-c lcms2 openssl) -o gamut-grid-before
+    -Wl,--wrap=main o82-gamut-grid-contract.cpp $(pkg-config --cflags --libs json-c lcms2 openssl) -o gamut-grid-before
 set +e
 ./gamut-grid-before > gamut-grid-before.log 2>&1
 before_status=$?
@@ -94,6 +94,9 @@ grep -E '^OEM gamut grid regression rejected: [1-9][0-9]*/[0-9]+ checks failed$'
 %{_bindir}/uke-o82-color-profile
 
 %changelog
+* Wed Nov 04 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 0.3.0-6
+- Redirect only the fixture entry at link time and retain strict production diagnostics.
+
 * Wed Nov 04 2026 MCC45TR <75160848+MCC45TR@users.noreply.github.com> - 0.3.0-5
 - Use the OEM 12-bit input grid for factory interpolation and native LUT sampling.
 - Require independent synthetic regressions and rejection of the actual former source.

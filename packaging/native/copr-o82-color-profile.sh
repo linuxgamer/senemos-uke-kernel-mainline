@@ -34,4 +34,4 @@ test "$(git -C "$owner" hash-object "$output/o82-color-before-grid.cpp")" = \
 printf 'Color utility source %s; actual pre-fix source %s\n' \
     "$(git -C "$owner" rev-parse HEAD)" "$before"
 test "$(rpmspec --target aarch64 -q --srpm --qf '%{NAME}-%{VERSION}-%{RELEASE}' \
-    "$output/uke-o82-color-profile.spec")" = uke-o82-color-profile-0.3.0-5.fc46
+    "$output/uke-o82-color-profile.spec")" = uke-o82-color-profile-0.3.0-6.fc46

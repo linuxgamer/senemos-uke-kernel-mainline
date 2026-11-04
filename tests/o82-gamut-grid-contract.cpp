@@ -3,9 +3,7 @@
 #ifndef O82_COLOR_IMPLEMENTATION
 #define O82_COLOR_IMPLEMENTATION "o82-color-profile.cpp"
 #endif
-#define main o82_profile_program_main
 #include O82_COLOR_IMPLEMENTATION
-#undef main
 
 namespace {
 constexpr unsigned knots[]{0, 256, 512, 768, 1024, 1280, 1536, 1792, 2048,
@@ -77,7 +75,8 @@ void check_native_sampling() {
             }
 }
 }
-int main() {
+// Redirect the CRT entry at link time, preserving C++ main's implicit return.
+extern "C" int __wrap_main(int, char **) {
     check_interpolation();
     check_native_sampling();
     if (failures) {
@@ -85,4 +84,5 @@ int main() {
         return 1;
     }
     std::printf("OEM gamut grid: %u asymmetric knot, midpoint, endpoint and native RGB sampling checks passed\n", checks);
+    return 0;
 }
