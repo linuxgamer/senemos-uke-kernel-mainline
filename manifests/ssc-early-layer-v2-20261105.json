@@ -43,7 +43,7 @@
   "check_inputs": [
     {
       "path": "packaging/native/overlay-ssc-early731.sh",
-      "sha256": "a491327cf79b345baf2f0fe516a66302bd88f8715efc245a3c7282f92f2fc622"
+      "sha256": "1e73e13cd0219804dbd2970f19828173c829af7aee14fe20817850fe2181a926"
     },
     {
       "path": "packaging/native/check-ssc-early731.sh",

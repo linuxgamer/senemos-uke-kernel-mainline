@@ -22,7 +22,7 @@ jq -e '.package_family=="senemos-uke-linux-kernel-mainline-unstable" and
 stage=$(mktemp -d)
 trap 'find "$stage" -depth -delete' EXIT
 mapfile -t paths < <(jq -r '.assets[].path' "$owner/$manifest"; printf '%s\n' "$manifest")
-if [[ $(jq -r '.ssc_early_sample_layer // 0' "$profile/source-composition.json") == 1 ]]; then
+if [[ $(jq -r '.ssc_early_sample_layer // 0' "$profile/source-composition.json") == 2 ]]; then
     for path in "${paths[@]}"; do
         for tree in "$profile" "$boot"; do
             [[ -f $tree/$path && ! -L $tree/$path ]]
