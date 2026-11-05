@@ -1,0 +1,28 @@
+From: Uke Linux contributors
+Subject: [PATCH] iio: uke-ssc: accept the observed STK3BCx front-light vector
+
+Retain the standard two-field ALS contract. The exact Uke stk_stk3bcx
+ambient_light endpoint also reports six finite values; consume only its
+first lux field. Keep metadata, status, ownership and all other shapes strict.
+
+--- a/src/sensors/uke-ssc-iio.c
++++ b/src/sensors/uke-ssc-iio.c
+@@ -515,7 +515,17 @@
+ 	}
+ 	if (event->message != 1025)
+ 		return -ENOMSG;
+-	ret = uke_ssc_decode_sample(event->payload, d->dimensions, &sample);
++	/* This Uke front ALS also reports six fields; the first remains lux.
++	 * Do not assign units to them or admit this shape for another sensor.
++	 */
++	if (d->kind == SSC_LIGHT && !strcmp(d->datatype, "ambient_light") &&
++	    !strcmp(s->attributes.name, "stk_stk3bcx")) {
++		ret = uke_ssc_decode_sample(event->payload, 0, &sample);
++		if (!ret && sample.count != 2 && sample.count != 6)
++			ret = -EBADMSG;
++	} else {
++		ret = uke_ssc_decode_sample(event->payload, d->dimensions, &sample);
++	}
+ 	if (ret || !sample.status)
+ 		return ret ? ret : -EAGAIN;
+ 	/* This API specifies HIGH for valid data and UNRELIABLE while stabilizing. */
