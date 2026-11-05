@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-05",
+  "purpose": "Typed offline logarithmic HDR luminance core required before complete native XML/matrix/metadata integration",
+  "reference_review": "manifests/o82-hdr-tonemap-review-20261105.json",
+  "algorithm": {
+    "coordinates": "base10 logarithms of cd/m2",
+    "source_coordinate": "absolute linear XYZ Y divided by10000",
+    "panel_coordinate": "relative linear panel luminance",
+    "points": "2..17; strict source, nondecreasing panel with plateau ownership",
+    "inverse": "left generalized inverse; first matching input including terminal plateaus",
+    "numeric_floor_bits": "0x3356bf96",
+    "precision": "separate IEEE754 binary32 operations, FE_TONEAREST",
+    "private_values_included": false
+  },
+  "inputs": [
+    {
+      "path": "src/display/o82-hdr-tonemap.h",
+      "sha256": "ae9c4d4aad1083e8b4e83bc43910450cfb6edd99b4edf8118ea258fa8fe01446"
+    },
+    {
+      "path": "tests/o82-hdr-curve-contract.cpp",
+      "sha256": "9461cf538948a339f5a38573ef42c0431ac21b0171f6f11dd0ebcacda7fef37c"
+    },
+    {
+      "path": "docs/O82-HDR-TONEMAP-REVIEW.md",
+      "sha256": "9fbfcc5ac2e9935cec4ff743c217662e8ec78163862c7ea9872761aaae3aa560"
+    }
+  ],
+  "producer": {
+    "path": "packaging/native/copr-o82-hdr-curve-check.sh",
+    "sha256": "6a6df1769e20649257350175fe872595d91a3f5f5289e8bebafac6bcaa806ec6"
+  },
+  "qualification": {
+    "state": "pending",
+    "scope": "synthetic integer IEEE754 and independent analytic luminance only",
+    "source_or_full_kernel_integration": false,
+    "physical_acceptance": false
+  },
+  "remaining": [
+    "typed XML and matrix conversion",
+    "metadata/brightness/statistics lifecycle",
+    "native paired DSPP integration and private bundle versioning",
+    "full cumulative COPR kernel and package qualification",
+    "physical HDR/color and recovery acceptance"
+  ],
+  "hardware_defaults_changed": false
+}
