@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-05",
+  "scope": "Production source preparation for qualified geometry and GMU on retained complete12101/touch/memory-v5; no hardware admission change",
+  "prerequisites": {
+    "baseline": 11260781,
+    "touch": 11261044,
+    "memory_v5": 11261282,
+    "geometry": 11261165,
+    "gmu": 11261342,
+    "dnf": 11261509
+  },
+  "imports": [
+    {
+      "commit": "9398700a6375a309f572d588a9e448cdbc4b0736",
+      "path": "src/camera/sensors/0005-ov08d10-selection731.patch",
+      "sha256": "1fc8b19a865c6ff118bae8b516fae9b709c326c944fcf201971594c119c6eae9"
+    },
+    {
+      "commit": "9398700a6375a309f572d588a9e448cdbc4b0736",
+      "path": "tests/camera-geometry731-contract.sh",
+      "sha256": "11053da8ccf5b7a1820730afbae4acbe6c4812163217b3838a439f85add5d129"
+    },
+    {
+      "commit": "9398700a6375a309f572d588a9e448cdbc4b0736",
+      "path": "tests/camera-geometry731-object.sh",
+      "sha256": "fcde5a9b27490287726f63b70d2257bfaf7a4e85223a431bc9a000b1b2369c8b"
+    },
+    {
+      "commit": "9398700a6375a309f572d588a9e448cdbc4b0736",
+      "path": "tests/fixtures/camera-geometry731.c",
+      "sha256": "ac36845c233fddcfeb60d732f92c19bfebc9ebb8b657c989053c5c36e86c3b32"
+    },
+    {
+      "commit": "9398700a6375a309f572d588a9e448cdbc4b0736",
+      "path": "docs/OV08D10-GEOMETRY731.md",
+      "sha256": "cedb4bb4f13babeaeb4792524ebfdd4d4ea82c28ae7047f105d264da5188f2b0"
+    },
+    {
+      "commit": "9398700a6375a309f572d588a9e448cdbc4b0736",
+      "path": "manifests/camera-geometry731-20261105.json",
+      "sha256": "e6500516f4b2aeedf0289f76dc62c2637d6f190da8ee28ca2bc73406e4e8b29d"
+    },
+    {
+      "commit": "e6c122e2cd30fbf6ff5bec796f117da1afc97cb1",
+      "path": "patches/gpu/0075-gmu-hfi-irq-owned-status.patch",
+      "sha256": "bbe81a1b5b7abb663204f3d496efb6e1012b2bb34d04d8729d7173c67f28a29c"
+    },
+    {
+      "commit": "e6c122e2cd30fbf6ff5bec796f117da1afc97cb1",
+      "path": "tests/gmu-hfi-irq-contract.sh",
+      "sha256": "6d81e50b06be97206631c0ce7f38cfc02034229b4f6eb1f1f7dddeb556575a3d"
+    },
+    {
+      "commit": "e6c122e2cd30fbf6ff5bec796f117da1afc97cb1",
+      "path": "tests/fixtures/gmu-hfi-irq-check.c",
+      "sha256": "1a1a96bbc2071ca9dca58dbe4ecf46bfaccc4816bbe59f57b89877cd9853d638"
+    }
+  ],
+  "owned_assets": [
+    {
+      "path": "packaging/native/prepare-queued-kernel731.sh",
+      "sha256": "8e99e90e733cd2d2be18242c5df181d4f7c81d53d9fccf4d30832c5ab97edd0d"
+    },
+    {
+      "path": "packaging/native/overlay-queued-kernel731.sh",
+      "sha256": "ebdd5eea6d006f39f6d62d830b114145957cfd6364a4107f65dccf67134f735c"
+    }
+  ],
+  "source_prep": "One fresh prep invocation; original GMU assertion/control precedes exact production patch",
+  "initial_color_selection": "",
+  "native_hdr_advertised": false,
+  "full_kernel_and_physical_acceptance_pending": true
+}
