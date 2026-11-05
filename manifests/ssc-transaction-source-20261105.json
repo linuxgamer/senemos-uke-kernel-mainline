@@ -34,9 +34,60 @@
     "regression": "Every valid allocated ID, normal/error/cancellation ownership, former production guard and retained observation/protocol controls"
   },
   "qualification": {
-    "state": "pending",
+    "state": "qualified-source-and-native-object-only",
     "package": "uke-ssc-transaction-check",
-    "version": "7.3.1-1"
+    "version": "7.3.1-1",
+    "copr_build": 11261868,
+    "source_commit": "b38a29f2a1ce52fa1b1ce0d0843a927b3525fc8a",
+    "source_log_sha256": "b8dec48113f5e91145a83b67fb610ca98f239ab1770e6885287cc4df8c66cfb9",
+    "native_log_sha256": "95ed9a8a9ebd6d31072c6106858085583ba86865ee34122a63fa0c5412e43788",
+    "source_layer": {
+      "required_refusals": 2,
+      "refusal_preserves_every_file": true,
+      "exact_repeat": true,
+      "production_spec_and_undeclared_sources_retained": true
+    },
+    "callbacks": {
+      "valid_transaction_ids_per_compiler": 65535,
+      "compilers": [
+        "gcc",
+        "clang"
+      ],
+      "sanitizers": [
+        "address",
+        "undefined"
+      ],
+      "exact_former_guard_rejected_by_both": true,
+      "previous_wire_ownership_and_observation_controls_retained": true
+    },
+    "native_objects": {
+      "architecture": "AArch64",
+      "type": "REL",
+      "ssc_sha256": "68b2f821a63900db0328b4cd126476be11030a5c81b6c73640bea7f5ed1002a0",
+      "ssc_prepared_source_sha256": "8c5a6faae5c22b3ca9850d9a7b14500b5cafae2e10ccb208b60da55f7121e7eb",
+      "msm_sha256": "6d878f5029be88c099bfe9ae22bebe1aaffbe5e75c43d024aa3264fc663751ae",
+      "raw_config_sha256": "739882b3a07fc6a701bae81ac6623a4b576871bd4289de3a095acabc20d49d34",
+      "independent_effective_config_sha256": "d072e81029da4b6719a9afe3f73fed687908dfbb87277af15d0e30a29d3495e6",
+      "complete_effective_config_equality": true,
+      "both_supplier_dt_resources_retained": true,
+      "all_previous_geometry_gmu_memory_v5_controls": true
+    },
+    "package_receipt": {
+      "primary_sha256": "97ca3266319e5e8575e4a5b0800c5248478097c653c2bf011d2907d18e20dfd3",
+      "primary_open_sha256": "1c752a7ae6ca39de801ce88aa99ed1742c8b5fd4e33b28ccb4fd6fedc5779985",
+      "rpm_sha256": "8b07e5b17d6f6571dc93e81c9e5f4283674d529054e42b90a0296bd1ca39ca8b",
+      "rpm_bytes": 45264,
+      "source_rpm": {
+        "url": "https://download.copr.fedorainfracloud.org/results/mcc45tr/uke-linux-unstable/fedora-rawhide-aarch64/Packages/u/uke-ssc-transaction-check-7.3.1-1.fc46.src.rpm",
+        "sha256": "ef93cc3235ad4feb6032cb2a41475f6a87c66b1a335836787fa132a5f4939070",
+        "bytes": 164497247
+      },
+      "composition_sha256": "73d8b419692346ad5d85e91b05f2bed5c0359575c5059a86f1cfc0c8d130037e",
+      "checks_sha256": "289fb407a06faf799dce7a414c08befbf4ac3aa1a6fdc61e4ee2e1354c36981c",
+      "production_spec_sha256": "4596f6fbf1efbfe67949e314d2731f2a4c1e269c14ed101d9692cf90c7b3c547",
+      "signature_and_digest_verified": true,
+      "payload": "Four documentation records and two licenses only"
+    }
   },
   "delivery": {
     "coordinator_full_kernel_required": true,

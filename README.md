@@ -17,7 +17,7 @@ Normal-family updates require an explicit request and physical qualification
 before promotion. The legacy upstream-update workflow and normal COPR webhook
 rebuilds are disabled.
 
-The tablet now runs `7.3.1-11003-unstable`, qualified in
+Cumulative baseline `7.3.1-11003-unstable` passed
 [COPR 11260288](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11260288/).
 Its complete source combines the read-only RTC gate, CAMCC stage1, paired
 HSIC/SixZone v4 color source, CDSP/pogo, corrected network configuration and
@@ -41,9 +41,11 @@ present in checksum-verified root metadata. The packaged composition preserves
 acceptance is pending. This build predates the shared integration directive;
 the camera conversation owns further cumulative builds and delivery.
 
-The coordinator has staged `7.3.1-12101-unstable` through DNF; an observed boot
-is pending. Future integration preserves that candidate and subsequent feature
-handoffs. The older SSC-only source producer is held to prevent regression.
+On 5 November 2026, the tablet runs `7.3.1-12101-unstable`, delivered through
+DNF. Its cached SSC observations show one service and eight declared sensors,
+with no connected client or registered motion/light IIO devices. Native sensor
+publication remains unqualified. Future integration preserves that candidate
+and subsequent feature handoffs. The older SSC-only producer remains held.
 
 5 November 2026. Native memory-color/protection programming passed
 [COPR 11260889](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11260889/):
@@ -75,7 +77,7 @@ unchanged repeated preparation, failed-write cleanup and concurrent publication,
 with retained color conversion and actual kernel-loader checks. The native RPM
 is available in verified root unstable metadata and contains no factory tables.
 The [source manifest](manifests/o82-stock-profile-source-20261105.json) records
-the exact inputs. Coordinator DNF integration, device-local preparation and
+the exact inputs. Full kernel integration, device-local preparation and
 physical acceptance remain pending; kernel/profile selection is unchanged.
 
 Private preparation now has a qualified DNF integration path in boot userspace
@@ -94,6 +96,15 @@ the full effective configuration matches independently normalized input.
 The [source layer and receipt](manifests/coordinated-union731-20261105.json)
 preserve both supplier DTs and existing gates. Only text receipts are packaged.
 The coordinator's full kernel, final module and physical acceptance remain open.
+
+The SSC caller now accepts positive successful QMI transaction IDs. The previous
+fake provider returned zero and masked that API mismatch. Both compilers pass
+all 65,535 valid IDs and reject the former guard in
+[COPR 11261868](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11261868/).
+Real AArch64 SSC, MSM and camera-sensor objects pass on the retained union.
+The [qualified source layer](manifests/ssc-transaction-source-20261105.json)
+is queued for the coordinator's next full kernel; native IIO publication on
+the tablet remains unproven.
 
 31 October 2026. `main` is the continuation branch. Microphone capture, power management, bounded boot-watchdog and optional gaming sources are integrated. The complete combined source still requires fresh release admission and a qualified COPR build; retained candidate packages do not establish that result.
 

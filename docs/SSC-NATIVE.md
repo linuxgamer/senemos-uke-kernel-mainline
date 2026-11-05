@@ -149,3 +149,25 @@ Immutable kernel1900 predates this correction. The1910 producer retains that
 complete cohort and adds only the checked SSC sources and fixture, waiting for
 the complete parent build before preparation. Full1910 delivery and corrected
 native IIO publication remain pending.
+
+## Positive transaction IDs, 5 November 2026
+
+Running `7.3.1-12101-unstable` exposes all ten cached discovery attributes:
+one service, no lookup fault or suspend, eight declared sensors, no connected
+client or discovered/ready/registered sensors, and error `0/none`.
+
+The source caller incorrectly treats a positive successful `qmi_txn_init()`
+return as failure. [Linux 7.3.1](https://github.com/torvalds/linux/blob/79a907609d53d5cd645b42c11550d295d43abf99/drivers/soc/qcom/qmi_interface.c#L308)
+returns the allocated transaction ID. The previous fake provider returned zero
+regardless of ID and masked that contract. The correction refuses only negative
+results and makes the test provider return its ID. Both compiler fixtures now
+cover all 65,535 valid IDs and reject the exact former guard.
+
+[COPR 11261868](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11261868/)
+passed both compiler/sanitizer fixtures and the real AArch64 SSC/MSM/sensor
+objects on the complete qualified source union. The
+[source layer](../manifests/ssc-transaction-layer-20261105.json) retains all
+other source, configuration, DT, firmware and hardware gates. Full kernel
+delivery and observed native sensor publication remain separate requirements.
+The [qualification receipt](../manifests/ssc-transaction-source-20261105.json)
+records source `b38a29f`, retained configuration and the signed text-only package.
