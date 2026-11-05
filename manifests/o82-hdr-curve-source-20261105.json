@@ -24,7 +24,7 @@
     },
     {
       "path": "docs/O82-HDR-TONEMAP-REVIEW.md",
-      "sha256": "9fbfcc5ac2e9935cec4ff743c217662e8ec78163862c7ea9872761aaae3aa560"
+      "sha256": "1bb27294bb6e2f39cc210c0f2524d4f839064e0bbbf49389b5bfa0ad1340b33c"
     }
   ],
   "producer": {
@@ -32,9 +32,32 @@
     "sha256": "a25179d3aa657034bda90f6fd1387c1a6b0e1d3d9b6a0e20b3cb1bccf9ee0eb9"
   },
   "qualification": {
-    "state": "pending",
-    "scope": "synthetic integer IEEE754 and independent analytic luminance only",
-    "source_or_full_kernel_integration": false,
+    "state": "succeeded",
+    "scope": "typed arithmetic only: independent integer IEEE754 and analytic luminance; exact controlled inverse refusal",
+    "source_commit": "2730b7c287c6e19c91b4a890aba8ce6c42135233",
+    "copr_build": 11264550,
+    "package": "uke-o82-hdr-curve-check 1.0-2.fc46.noarch",
+    "elapsed_seconds": 65,
+    "compiler_modes": [
+      "GCC optimized",
+      "GCC ASan/UBSan",
+      "Clang optimized",
+      "Clang ASan/UBSan"
+    ],
+    "exact_integer_cases_per_mode": 341032,
+    "analytic_luminance_cases_per_mode": 24582,
+    "refusal_cases_per_mode": 26,
+    "wider_arithmetic_differences_per_mode": 22972,
+    "exact_mutant_refusals": 2,
+    "native_log_sha256": "b6eb4ed458e36b37e7e0c50b572dcb9971d561d25c063179d42b5f80dd548838",
+    "source_log_sha256": "a5ad87e18b3cc26f3c81f87f8f2dc92514ad3c3cc7bcdcbbc2c9343686741d70",
+    "signed_text_rpm_bytes": 10097,
+    "signed_text_rpm_sha256": "b533ed37e79da1d14305fd546ba2611e1ccd4f083914ca5538aa5d18a21be45d",
+    "qualified_input_manifest_sha256": "77e43afda1e11cf0be5f9cfa4f4edffcfd973764aafc74e8292ce606ff27a929",
+    "raw_source_identity": "uke-o82-hdr-curve-check 1.0-2",
+    "binary_identity_verified": true,
+    "production_integration": false,
+    "full_kernel": false,
     "physical_acceptance": false,
     "previous_trials": [
       {

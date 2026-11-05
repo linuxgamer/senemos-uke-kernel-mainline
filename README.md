@@ -12,6 +12,13 @@ Linux kernel adaptations, device trees and Fedora RPM packaging for Xiaomi Pad 7
 
 ## Development status
 
+5 November 2026. The typed offline HDR luminance core passes
+[COPR 11264550](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11264550/):
+four compiler modes, independent integer/analytic checks and inverse-plateau
+refusals. [The source review](docs/O82-HDR-TONEMAP-REVIEW.md) separates this
+arithmetic result from unfinished XML/matrix/metadata and live DSPP integration.
+HDR advertisement and display defaults remain unchanged.
+
 5 November 2026. The named SIP1328 logical rear-light endpoint passes
 [COPR 11264114](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11264114/)
 on complete 12204 with the qualified front-light correction. Exact metadata

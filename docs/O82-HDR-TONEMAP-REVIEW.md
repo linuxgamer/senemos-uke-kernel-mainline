@@ -51,3 +51,30 @@ Brightness/statistics lifecycle and physical optical/color acceptance remain
 separate requirements. Initial selection, DMA admission and HDR advertisement
 remain unchanged. This review builds no kernel and changes no target profile,
 firmware, display output or boot selection.
+
+## Typed luminance core qualification
+
+The offline C++ luminance core now implements two to 17 typed logarithmic
+knots, forward mapping and a left generalized inverse that preserves the
+first input of internal and terminal output plateaus. It keeps separate
+binary32 operations, source XYZ Y/10000 and panel-relative normalization,
+endpoint/black handling and unchanged output on rejected inputs. XML/enum,
+matrix, metadata/brightness/statistics and live DSPP integration remain open.
+The production generator still refuses its unsupported HDR presets.
+
+[COPR 11264550](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11264550/)
+succeeded in 65 seconds at exact producer
+`2730b7c287c6e19c91b4a890aba8ce6c42135233`. GCC and Clang each pass optimized
+and ASan/UBSan runs: 341,032 integer IEEE754 comparisons, 24,582 independent
+analytic luminance checks and 26 refusal cases per mode. The integer oracle
+finds 22,972 cases where wider arithmetic changes the result. Both compilers
+reject a controlled wrong-owner inverse at its required plateau assertion.
+No private input or OEM code executes in these checks.
+
+The independently verified trusted signed 10,097-byte RPM contains only three
+text receipts and a license, with no scriptlets or executable payload. It
+records the exact source/manifest and four actual compiler-mode results. The
+[source manifest](../manifests/o82-hdr-curve-source-20261105.json) preserves
+exact digests and the initial source-worker failure. This qualifies the typed
+arithmetic core; complete native HDR output and physical optical acceptance
+remain unproven.
