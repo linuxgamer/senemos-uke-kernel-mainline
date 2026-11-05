@@ -616,6 +616,13 @@ static void ssc_report(struct qmi_handle *qmi, struct sockaddr_qrtr *peer,
 				}
 				continue;
 			}
+			/* Metadata replacement or a fault invalidates an earlier sample,
+			 * even when a later attributes event makes this sensor ready again.
+			 */
+			if ((event->message == 128 || event->message == 130) && c->pending_sensor == s) {
+				c->pending_sample_valid = false;
+				memset(c->pending_sample, 0, sizeof(c->pending_sample));
+			}
 			if (event->message == 128) {
 				ret = uke_ssc_decode_attributes(event->payload, s->description->datatype,
 							 s->description->api, &attributes);

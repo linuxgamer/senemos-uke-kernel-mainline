@@ -7,7 +7,7 @@ owner=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 output=$(realpath -m "${1:?Remote source result directory}")
 revision=${2:-1}
 [[ $revision =~ ^[1-9][0-9]*$ ]]
-manifest=$owner/manifests/ssc-early-layer-20261105.json
+manifest=$owner/manifests/ssc-early-layer-v2-20261105.json
 [[ ! -e $output || (-d $output && -z $(find "$output" -mindepth 1 -maxdepth 1 -print -quit)) ]]
 bash "$owner/packaging/native/refuse-published-release.sh" uke-ssc-early-check "7.3.1-$revision"
 (cd "$owner"; jq -r '.assets[],.check_inputs[]|.sha256+"  "+.path' "$manifest" | sha256sum -c --strict --quiet -)
@@ -48,6 +48,17 @@ done
 # The negative control retains the exact old production/script but uses the
 # same new behavioral assertions as the corrected consumer.
 install -m644 "$owner/tests/ssc-native-contract.c" "$addon/original/tests/ssc-native-contract.c"
+superseded=$(jq -er .superseded.source_commit "$manifest")
+[[ $superseded == 0dcfd5bcd42867dbf15853fa20e9e64b18ce136e ]]
+git -C "$owner" cat-file -e "$superseded^{commit}" 2>/dev/null || git -C "$owner" fetch --depth=1 origin "$superseded"
+mkdir -p "$addon/v1/src/sensors" "$addon/v1/tests"
+for path in src/sensors/uke-ssc-protocol.c src/sensors/uke-ssc-protocol.h tests/ssc-native-host.h; do
+    install -m644 "$profile/$path" "$addon/v1/$path"
+done
+for path in src/sensors/uke-ssc-iio.c tests/ssc-native-contract.sh; do
+    git -C "$owner" show "$superseded:$path" > "$addon/v1/$path"
+done
+install -m644 "$owner/tests/ssc-native-contract.c" "$addon/v1/tests/ssc-native-contract.c"
 snapshot()
 {
     for tree in "$profile" "$boot"; do
@@ -92,7 +103,7 @@ for tree in native-profile boot-recipe; do
     tar --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner \
         -cJf "$output/$archive" -C "$stage/unpacked" "$tree"
 done
-mapfile -t assets < <(jq -r '.assets[].path,.check_inputs[].path' "$manifest"; printf '%s\n' manifests/ssc-early-layer-20261105.json LICENSE LICENSES/GPL-2.0-only.txt)
+mapfile -t assets < <(jq -r '.assets[].path,.check_inputs[].path' "$manifest"; printf '%s\n' manifests/ssc-early-layer-v2-20261105.json LICENSE LICENSES/GPL-2.0-only.txt)
 git -C "$owner" archive HEAD "${assets[@]}" | tar -xf - -C "$addon"
 git -C "$owner" rev-parse HEAD > "$addon/source-commit"
 tar --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner \

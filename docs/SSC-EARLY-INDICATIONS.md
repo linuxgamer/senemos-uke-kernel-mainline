@@ -44,3 +44,16 @@ must compile for AArch64 with -Werror; complete effective config comparison is
 retained. This check packages text receipts only and builds no Image or final
 module. Physical ALS, rear light/SAR, mounting, suspend and calibration remain
 open until a subsequent coordinated kernel and device measurements establish them.
+
+Revision 1 / COPR 11263021 passed the initial 112 ordering cases, then review
+identified an uncovered fault → valid attributes → successful ACK sequence.
+Source 0dcfd5b can publish the sample staged before that fault because metadata
+recovery restores readiness without changing its revision. It is withdrawn from
+full-kernel integration. Revision 2 discards staged data when the pending sensor
+receives either a fault or any attributes replacement. The existing revision
+and metadata admission remain unchanged. Actual callback tests cover 48 recovery
+orders, including invalid metadata, fresh data after recovery and unrelated
+sensor metadata that must preserve the pending sample. Both compilers must
+reach the recovery assertion with the exact revision-1 source as an additional
+negative control. The original pre-ACK-loss control and all previous tests remain.
+Use the immutable `ssc-early-layer-v2-20261105.json`; revision 1 is historical.

@@ -9,29 +9,37 @@ owner=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 profile=$kernel/native-profile
 stage=$(mktemp -d)
 trap 'find "$stage" -depth -delete' EXIT
-manifest=$owner/manifests/ssc-early-layer-20261105.json
-jq -e '.ssc_early_sample_layer==1 and .ssc_early_sample_requires_ack and
+manifest=$owner/manifests/ssc-early-layer-v2-20261105.json
+jq -e '.ssc_early_sample_layer==2 and .ssc_early_sample_requires_ack and
  (.ssc_early_sample_physical_acceptance|not) and .ssc_transaction_layer==1 and
  .ssc_qmi_transaction_id_returns_id' "$profile/source-composition.json" >/dev/null
 cmp "$profile/src/sensors/uke-ssc-iio.c" "$kernel/drivers/iio/common/uke-ssc/uke-ssc-iio.c"
 
 # Reproduce the exact former production source with the new behavioral fixture.
 # Each compiler must reach the early-report assertion, rather than fail to build.
-cp -a "$owner/original" "$stage/original"
-while IFS=$'\t' read -r path digest; do
-    [[ $path != tests/ssc-native-contract.c ]] || continue
-    printf '%s  %s\n' "$digest" "$stage/original/$path" | sha256sum -c --strict -
-done < <(jq -r '.preimages[]|[.path,.sha256]|@tsv' "$manifest")
-for compiler in gcc clang; do
-    sed "s/for compiler in gcc clang; do/for compiler in $compiler; do/" \
-        "$stage/original/tests/ssc-native-contract.sh" > "$stage/original/tests/original-order.sh"
-    if (ulimit -c 0; bash "$stage/original/tests/original-order.sh" "$kernel") \
-        > "$stage/original-$compiler.log" 2>&1; then
-        printf 'Original SSC source unexpectedly retained an early indication: %s\n' "$compiler" >&2
-        exit 1
+for control in original v1; do
+    cp -a "$owner/$control" "$stage/$control"
+    selection=.preimages
+    expected='early_reports.*Assertion.*sample_sequence == 10'
+    if [[ $control == v1 ]]; then
+        selection=.superseded.preimages
+        expected='metadata_recovery.*Assertion.*sample_sequence == 9'
     fi
-    grep -q 'early_reports.*Assertion.*sample_sequence == 10' "$stage/original-$compiler.log"
-    printf 'Original SSC source loses the pre-acknowledgement indication as required: %s\n' "$compiler"
+    while IFS=$'\t' read -r path digest; do
+        [[ $path != tests/ssc-native-contract.c ]] || continue
+        printf '%s  %s\n' "$digest" "$stage/$control/$path" | sha256sum -c --strict -
+    done < <(jq -r "$selection[]|[.path,.sha256]|@tsv" "$manifest")
+    for compiler in gcc clang; do
+        sed "s/for compiler in gcc clang; do/for compiler in $compiler; do/" \
+            "$stage/$control/tests/ssc-native-contract.sh" > "$stage/$control/tests/original-order.sh"
+        if (ulimit -c 0; bash "$stage/$control/tests/original-order.sh" "$kernel") \
+            > "$stage/$control-$compiler.log" 2>&1; then
+            printf 'SSC fixture missed the %s regression: %s\n' "$control" "$compiler" >&2
+            exit 1
+        fi
+        grep -q "$expected" "$stage/$control-$compiler.log"
+        printf 'Exact SSC %s regression reproduced at its required assertion: %s\n' "$control" "$compiler"
+    done
 done
 bash "$profile/tests/ssc-native-contract.sh" "$kernel"
 bash "$profile/packaging/native/check-cumulative-camera731.sh" "$kernel" "$output" prepared

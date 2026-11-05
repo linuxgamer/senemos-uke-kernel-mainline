@@ -5,7 +5,7 @@ test ! -e /etc/senemos/kernel-update.conf
 owner=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 profile=$(realpath "${1:?Pass the complete native profile}")
 boot=$(realpath "${2:?Pass the complete boot recipe}")
-manifest=manifests/ssc-early-layer-20261105.json
+manifest=manifests/ssc-early-layer-v2-20261105.json
 (cd "$owner"; jq -r '.assets[]|.sha256+"  "+.path' "$manifest" | sha256sum -c --strict --quiet -)
 (cd "$profile"; sha256sum -c --strict --quiet SHA256SUMS)
 (cd "$boot"; jq -r '.source_assets[]|.sha256+"  "+.path' lock.json | sha256sum -c --strict --quiet -)
@@ -17,7 +17,7 @@ jq -e '.package_family=="senemos-uke-linux-kernel-mainline-unstable" and
  .gmu_irq_owned_acknowledgement==true and .o82_private_color_bundle_version==5 and
  .o82_color_initial_preset=="" and .o82_color_dma_enabled==false and
  .native_hdr_advertised==false and (.ssc_transaction_layer==1 and .ssc_qmi_transaction_id_returns_id==true) and
- ((.ssc_early_sample_layer // 0)==0 or .ssc_early_sample_layer==1)' \
+ ((.ssc_early_sample_layer // 0)==0 or .ssc_early_sample_layer==2)' \
  "$profile/source-composition.json" >/dev/null
 stage=$(mktemp -d)
 trap 'find "$stage" -depth -delete' EXIT
@@ -33,7 +33,7 @@ if [[ $(jq -r '.ssc_early_sample_layer // 0' "$profile/source-composition.json")
           'any(.source_assets[];.path==$path and .sha256==$sha)' "$boot/lock.json" >/dev/null
     done
     jq -e '.ssc_early_sample_requires_ack==true and .ssc_early_sample_physical_acceptance==false and
-      .ssc_early_sample_layer_manifest=="manifests/ssc-early-layer-20261105.json"' \
+      .ssc_early_sample_layer_manifest=="manifests/ssc-early-layer-v2-20261105.json"' \
       "$profile/source-composition.json" >/dev/null
     printf 'SSC early-indication source layer already exact; no mutation\n'
     exit 0
@@ -68,8 +68,8 @@ for path in "${paths[@]}"; do
       else .source_assets += [{path:$path,sha256:$sha}] end' "$boot/lock.json" > "$stage/next.lock"
     install -m644 "$stage/next.lock" "$boot/lock.json"
 done
-jq '. + {ssc_early_sample_layer:1,ssc_early_sample_requires_ack:true,
- ssc_early_sample_layer_manifest:"manifests/ssc-early-layer-20261105.json",
+jq '. + {ssc_early_sample_layer:2,ssc_early_sample_requires_ack:true,
+ ssc_early_sample_layer_manifest:"manifests/ssc-early-layer-v2-20261105.json",
  ssc_early_sample_physical_acceptance:false}' "$stage/composition.json" > "$stage/next.composition"
 install -m644 "$stage/next.composition" "$profile/source-composition.json"
 for doc in "$stage/composition.json" "$profile/source-composition.json"; do
