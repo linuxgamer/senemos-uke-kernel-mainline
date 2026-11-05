@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-05",
+  "scope": "Actual SSC transaction-ID correction and complete cumulative source/native-object qualification; no full kernel",
+  "parent": {
+    "copr_build": 11261650,
+    "source_commit": "d602010745633e88f1ab3c3431ec56ad24d00758",
+    "release": "uke-coordinated-union-check-7.3.1-2.fc46",
+    "url": "https://download.copr.fedorainfracloud.org/results/mcc45tr/uke-linux-unstable/fedora-rawhide-aarch64/Packages/u/uke-coordinated-union-check-7.3.1-2.fc46.src.rpm",
+    "sha256": "26e2c01867cc7c781459316ee6543b303cd208a471e7c7260f64d8e79acd4f1a",
+    "bytes": 164492317,
+    "primary_sha256": "f0dc01a470367a18abd3773b3f7c39e3a59ebaca831acaa837a6b1b0b410147f"
+  },
+  "immutable_layer_manifest": "manifests/ssc-transaction-layer-20261105.json",
+  "observed_runtime": {
+    "kernel": "7.3.1-12101-unstable",
+    "source_commit": "bba194e74ab97dcb848887fa62430c20f9d755d9",
+    "service_count": 1,
+    "lookup_fault": 0,
+    "suspended": 0,
+    "connected": 0,
+    "declared_sensors": 8,
+    "discovered_sensors": 0,
+    "ready_sensors": 0,
+    "registered_sensors": 0,
+    "last_error": 0,
+    "last_stage": "none",
+    "scope": "Cached read-only observations only; no client IDs, SUIDs, samples or calibration"
+  },
+  "defect": {
+    "production": "Treats positive allocated transaction IDs as errors",
+    "fixture": "Previously returned zero for successful allocation regardless of the allocated ID",
+    "correction": "Refuse only negative allocation results; the test provider returns the actual ID",
+    "regression": "Every valid allocated ID, normal/error/cancellation ownership, former production guard and retained observation/protocol controls"
+  },
+  "qualification": {
+    "state": "pending",
+    "package": "uke-ssc-transaction-check",
+    "version": "7.3.1-1"
+  },
+  "delivery": {
+    "coordinator_full_kernel_required": true,
+    "no_kernel_revision_or_image_or_final_module": true,
+    "no_target_install_or_boot_change": true,
+    "physical_sensor_and_full_goal_acceptance": false
+  },
+  "owned_inputs": [
+    {
+      "path": "src/sensors/uke-ssc-iio.c",
+      "sha256": "8c5a6faae5c22b3ca9850d9a7b14500b5cafae2e10ccb208b60da55f7121e7eb"
+    },
+    {
+      "path": "tests/ssc-native-contract.c",
+      "sha256": "ff0129123b7764db9d20259fb80bff04d0707cba3a1aa816f8f44adc3096b829"
+    },
+    {
+      "path": "tests/ssc-native-contract.sh",
+      "sha256": "0ab2854782730ccb08e7663ea7204b7a53c5328fedb6a7849d843d2c9c6ffb37"
+    },
+    {
+      "path": "packaging/native/overlay-ssc-transaction731.sh",
+      "sha256": "f4b3e331ddb32822183ae91918215fa255394bcc46bb0712c869089f0a61b97f"
+    },
+    {
+      "path": "packaging/native/check-ssc-transaction731.sh",
+      "sha256": "c560f8801a51d3a355f1e2802452821190afcbe73adb73377f9dc74242e3b438"
+    },
+    {
+      "path": "manifests/ssc-transaction-layer-20261105.json",
+      "sha256": "3748dd1b622b1347a82c854f582491831654185b2cc7cc09027f5a890b8334a9"
+    },
+    {
+      "path": "packaging/native/copr-ssc-transaction731-check.sh",
+      "sha256": "e1f4a93ccd557dcb5fbfc661112d33521f4e9b820404a5d75c0f877d25d91d66"
+    }
+  ]
+}

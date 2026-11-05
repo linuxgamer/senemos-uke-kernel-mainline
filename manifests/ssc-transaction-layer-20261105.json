@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-05",
+  "scope": "Correct qmi_txn_init positive-ID admission after the complete qualified source union; no sensor wire, DT, firmware or hardware gate change",
+  "api": {
+    "repository": "torvalds/linux",
+    "commit": "79a907609d53d5cd645b42c11550d295d43abf99",
+    "path": "drivers/soc/qcom/qmi_interface.c",
+    "blob": "16e2e24b60968abad39065e77ca444a1562d65d1",
+    "contract": "qmi_txn_init returns the allocated transaction ID on success and negative errno on failure",
+    "valid_ids": {
+      "first": 0,
+      "last": 65534
+    },
+    "license": "GPL-2.0"
+  },
+  "preimages": [
+    {
+      "path": "src/sensors/uke-ssc-iio.c",
+      "sha256": "cfe9b4fb1740aa33133544d0b122af5c306d42040797e8210af2299bc9479c20"
+    },
+    {
+      "path": "tests/ssc-native-contract.c",
+      "sha256": "2e61285a49debaa9cc6db91b3f0e0a936571e19d630b0f5ee4ebd930e44f460a"
+    },
+    {
+      "path": "tests/ssc-native-contract.sh",
+      "sha256": "90c59d7f4c05037b62e015ace749e1156539130d6e067745d64f1e9dedc3e1ea"
+    }
+  ],
+  "assets": [
+    {
+      "path": "src/sensors/uke-ssc-iio.c",
+      "sha256": "8c5a6faae5c22b3ca9850d9a7b14500b5cafae2e10ccb208b60da55f7121e7eb"
+    },
+    {
+      "path": "tests/ssc-native-contract.c",
+      "sha256": "ff0129123b7764db9d20259fb80bff04d0707cba3a1aa816f8f44adc3096b829"
+    },
+    {
+      "path": "tests/ssc-native-contract.sh",
+      "sha256": "0ab2854782730ccb08e7663ea7204b7a53c5328fedb6a7849d843d2c9c6ffb37"
+    },
+    {
+      "path": "packaging/native/overlay-ssc-transaction731.sh",
+      "sha256": "f4b3e331ddb32822183ae91918215fa255394bcc46bb0712c869089f0a61b97f"
+    },
+    {
+      "path": "packaging/native/check-ssc-transaction731.sh",
+      "sha256": "c560f8801a51d3a355f1e2802452821190afcbe73adb73377f9dc74242e3b438"
+    }
+  ],
+  "retained": {
+    "complete12101": true,
+    "touch_geometry_memory_v5_gmu_dnf_union": true,
+    "wire_and_sample_admission": true,
+    "driver_observation_abi": 1,
+    "raw_config": true,
+    "all_dt_and_firmware_paths": true,
+    "empty_color_selection": true,
+    "native_hdr_advertised": false,
+    "physical_acceptance": false
+  }
+}

@@ -417,7 +417,8 @@ static int ssc_request(struct ssc_controller *c, struct ssc_sensor *sensor,
 		return ret;
 	request.length = bytes;
 	ret = qmi_txn_init(&c->client, &txn, NULL, NULL);
-	if (ret)
+	/* Success returns the allocated transaction ID, including positive IDs. */
+	if (ret < 0)
 		return ret;
 	spin_lock_irqsave(&c->state, flags);
 	if (!ssc_current(c)) {

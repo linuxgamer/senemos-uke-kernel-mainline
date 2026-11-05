@@ -87,6 +87,20 @@ for compiler in gcc clang; do
     "$compiler" "${common[@]}" "$stage/check.c" \
         "$root/src/sensors/uke-ssc-protocol.c" "$stage/qmi.o" -o "$stage/check"
     ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 "$stage/check"
+    # Restore only the former production guard. Positive IDs must expose it
+    # with the same real callback fixture under both compilers/sanitizers.
+    sed '/ret = qmi_txn_init(&c->client, &txn, NULL, NULL);/,/return ret;/s/if (ret < 0)/if (ret)/' \
+        "$stage/check.c" > "$stage/positive-id-negative.c"
+    ! cmp -s "$stage/check.c" "$stage/positive-id-negative.c"
+    "$compiler" "${common[@]}" "$stage/positive-id-negative.c" \
+        "$root/src/sensors/uke-ssc-protocol.c" "$stage/qmi.o" -o "$stage/positive-id-negative"
+    if (ulimit -c 0; ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 \
+        "$stage/positive-id-negative") > "$stage/positive-id-negative.log" 2>&1; then
+        printf 'SSC fixture missed the former positive transaction-ID refusal\n' >&2
+        exit 1
+    fi
+    grep -q 'Assertion.*failed' "$stage/positive-id-negative.log"
+    printf 'Actual SSC original guard rejected by positive transaction-ID control: %s\n' "$compiler"
     if [[ $compiler == gcc ]]; then
         for fault in stale-error stale-status; do
             if [[ $fault == stale-error ]]; then

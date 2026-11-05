@@ -5,6 +5,7 @@ static struct {
 	int handle_error,register_error;
 	unsigned int live,cancelled,released,sent,pushed,decoded;
 	unsigned int handles,registrations;
+	u16 transaction_id;
 	bool no_ack,foreign,changed_client,stale_on_wait;
 	bool metadata_timeout,metadata_invalid,stale_registration;
 	unsigned int last_command;
@@ -65,11 +66,12 @@ static int qmi_txn_init(struct qmi_handle *qmi, struct qmi_txn *txn, const void 
 {
 	(void)ei; (void)dest;
 	assert(qmi->live);
-	if (fixture.init_error) return fixture.init_error;
-	*txn = (struct qmi_txn){ .qmi=qmi,.id=17 };
+	if (fixture.init_error) { assert(fixture.init_error < 0); return fixture.init_error; }
+	*txn = (struct qmi_txn){ .qmi=qmi,.id=fixture.transaction_id };
 	qmi->txns.txn=txn;
 	fixture.live++;
-	return 0;
+	/* Match qmi_txn_init(): the allocated ID, not normalized zero. */
+	return txn->id;
 }
 static int qmi_send_request(struct qmi_handle *qmi, struct sockaddr_qrtr *peer,
 	struct qmi_txn *txn, int message, size_t maxlen, const void *ei, const void *body)
@@ -82,6 +84,8 @@ static int qmi_send_request(struct qmi_handle *qmi, struct sockaddr_qrtr *peer,
 	assert(!IS_ERR(wire) && message == SSC_QMI_REQUEST && size == request->length + 16);
 	assert(maxlen == UKE_SSC_REQUEST_MAX + 9 && request->report_type_valid && request->report_type == 1);
 	assert(wire[0] == QMI_REQUEST && wire[3] == 0x20 && wire[7] == 1);
+	assert(txn->id == fixture.transaction_id &&
+	       (wire[1] | (unsigned int)wire[2] << 8) == fixture.transaction_id);
 	assert((wire[10] | (unsigned int)wire[11] << 8) == request->length);
 	assert(!memcmp(wire+12,request->payload,request->length));
 	assert(wire[size-4]==0x10 && wire[size-3]==1 && !wire[size-2] && wire[size-1]==1);
@@ -128,7 +132,7 @@ static void setup(struct ssc_controller *c)
 	static struct workqueue_struct queue;
 	unsigned int i;
 	memset(c,0,sizeof(*c));memset(&fixture,0,sizeof(fixture));memset(&queue,0,sizeof(queue));
-	fixture.controller=c;c->workqueue=&queue;c->control.locked=true;
+	fixture.controller=c;fixture.transaction_id=17;c->workqueue=&queue;c->control.locked=true;
 	c->client_open=true;c->client.live=true;c->endpoint_count=1;
 	c->generation=c->client_generation=1;
 	c->peer=(struct sockaddr_qrtr){AF_QIPCRTR,3,4};
@@ -281,6 +285,24 @@ static void discovery_failure_contract(void)
 	}
 	puts("Actual SSC reconcile: client, lookup, attributes, registration and stale-generation failures retain the correct stage; valid metadata still registers IIO");
 }
+static void transaction_ids(void)
+{
+	struct ssc_controller c;
+	const struct uke_ssc_suid lookup = { 0xababababababababULL, 0xababababababababULL };
+
+	/* Upstream idr_alloc_cyclic(..., 0, U16_MAX, ...) admits 0 through 65534. */
+	for (unsigned int id = 0; id < 65535; id++) {
+		setup(&c);
+		fixture.transaction_id = id;
+		assert(!ssc_request(&c, NULL, UKE_SSC_LOOKUP, lookup, "accel", 0));
+		assert(fixture.sent == 1 && !fixture.live && !fixture.cancelled &&
+		       !c.pending && !c.pending_sensor && c.client_known);
+		ssc_close_client(&c);
+		assert(fixture.released == 1 && !c.client_open);
+	}
+	puts("Actual SSC request: all65535 allocated QMI transaction IDs complete discovery requests without leaked transactions");
+}
+
 static void ownership(void)
 {
 	struct ssc_controller c;
@@ -546,7 +568,7 @@ static void temperature(void)
 }
 int main(void)
 {
-	qmi_wire();ownership();large_discovery_metadata();reports();units_and_rates();temperature();
+	transaction_ids();qmi_wire();ownership();large_discovery_metadata();reports();units_and_rates();temperature();
 	observation_contract();discovery_failure_contract();
 	puts("Actual native SSC: upstream QMI wire round trips, acknowledgements, client/peer/generation guards, request faults, socket cleanup, sample admission, error release and IIO units passed; fake providers only");
 	return 0;
