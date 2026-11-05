@@ -42,5 +42,6 @@ sha256sum -c --quiet "$work/profile.before"
 rpmspec --parse "$spec" > "$work/parsed.spec"
 grep -Fx 'Requires: uke-kernel-update(o82-private-color-v5) >= 1' "$work/parsed.spec"
 grep -Fx 'Requires: uke-o82-color-profile >= 0.7.0-1' "$work/parsed.spec"
-grep -Fx '/usr/bin/uke-kernel-update transaction /usr/lib/senemos/kernel-updates/7.3.1-12101-unstable || exit 1' "$work/parsed.spec"
-printf 'Actual complete12101/v5 DNF packaging: three mandatory refusals, exact idempotence, unchanged profile/config and retained transaction passed; no kernel build\n'
+grep -Fx 'Requires: uke-kernel-update(final-transaction-v2) >= 1' "$work/parsed.spec"
+! grep -q '^%posttrans' "$work/parsed.spec"
+printf 'Actual complete12101/v5 DNF packaging: three mandatory refusals, exact idempotence, unchanged profile/config and retained final-transaction dependency without a new scriptlet passed; no kernel build\n'
