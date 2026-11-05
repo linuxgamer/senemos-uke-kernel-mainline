@@ -29,13 +29,24 @@
   ],
   "producer": {
     "path": "packaging/native/copr-o82-hdr-curve-check.sh",
-    "sha256": "6a6df1769e20649257350175fe872595d91a3f5f5289e8bebafac6bcaa806ec6"
+    "sha256": "a25179d3aa657034bda90f6fd1387c1a6b0e1d3d9b6a0e20b3cb1bccf9ee0eb9"
   },
   "qualification": {
     "state": "pending",
     "scope": "synthetic integer IEEE754 and independent analytic luminance only",
     "source_or_full_kernel_integration": false,
-    "physical_acceptance": false
+    "physical_acceptance": false,
+    "previous_trials": [
+      {
+        "copr_build": 11264540,
+        "source_commit": "b480b781d0fdb3463ddbae5bda2c9be6e02454e3",
+        "release": "1.0-1",
+        "state": "failed in source preparation before SRPM/native tests",
+        "source_log_sha256": "42e25d59c83909f98156f2e5ce36c0dc5a770d5855b681b6f9aefc568d22eb8f",
+        "observation": "freshness guard admitted1.0-1; following producer has no tracing or actual-NEVRA diagnostic",
+        "correction": "Print exact name/EVR and admit only the expected raw or.fc46 source-worker identity; native RPM suffix still requires separate admission"
+      }
+    ]
   },
   "remaining": [
     "typed XML and matrix conversion",

@@ -77,5 +77,10 @@ install -m644 manifests/o82-hdr-curve-source-20261105.json %{buildroot}%{_docdir
 - Check typed HDR luminance conversion without private inputs or target changes.
 SPEC
 sed -i "s/@REVISION@/$revision/g" "$output/uke-o82-hdr-curve-check.spec"
-[[ $(rpmspec --target aarch64 -q --srpm --qf '%{VERSION}-%{RELEASE}' \
-    "$output/uke-o82-hdr-curve-check.spec") == "1.0-$revision.fc46" ]]
+actual=$(rpmspec --target aarch64 -q --srpm --qf '%{NAME} %{VERSION}-%{RELEASE}' \
+    "$output/uke-o82-hdr-curve-check.spec")
+printf 'Source package identity: %s\n' "$actual"
+case "$actual" in
+    "uke-o82-hdr-curve-check 1.0-$revision"|"uke-o82-hdr-curve-check 1.0-$revision.fc46") ;;
+    *) echo 'Unexpected HDR source package identity' >&2; exit 1 ;;
+esac
