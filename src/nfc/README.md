@@ -1,5 +1,13 @@
 # Uke NFC tag and infrared integration
 
+5 November 2026. On POCO Pad X1 with Fedora Rawhide AArch64,
+`7.3.1-11003-unstable` and native client `1.1.0-2`, the regular-user INFO
+query reports ABI1 and a bounded one-byte I2C read at the existing OEM probe
+address succeeds through the memory-read ioctl. Response shape and length
+are checked without retaining or publishing the byte. No NDEF/UID read,
+EEPROM write or RF exchange is performed. External RF/wake and IR optical
+acceptance remain open; this transport result does not establish them.
+
 3 November 2026. Linux 7.3.1 source candidate. Compilation runs only in COPR;
 source checks, linked packages and physical acceptance are separate results.
 
