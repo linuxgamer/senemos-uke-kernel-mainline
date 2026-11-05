@@ -1,8 +1,8 @@
 # Full Type-C FDT host fixture
 
-18 October2026. The source-only fixture is prepared for coordinator execution;
-it was not compiled or run by the USB source conversation. It adds no production
-DT, boot input or hardware result. Existing peripheral fixtures are unchanged.
+18 October 2026. The source fixture is prepared for validation but has not been
+compiled or executed. It adds no production DT, boot input or hardware result.
+Existing peripheral fixtures are unchanged.
 
 ```sh
 CC=clang CXX=clang++ bash tests/usb-typec-fdt-contract.sh \

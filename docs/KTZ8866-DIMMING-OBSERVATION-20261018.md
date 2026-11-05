@@ -100,7 +100,7 @@ before formatting. The fixture now uses Linux-width `1UL` and gives its
 the same mismatch with warnings retained. No warning suppression, output
 format or hardware behavior changes. The original source receipt is retained;
 the coordinator must regenerate the revised patch and repeat the focused
-fixture and actual translation-unit check. This source conversation ran neither.
+fixture and actual translation-unit check. Neither check ran for this revision.
 
 The coordinator subsequently withdrew the first fixture PASS report. Its
 orchestration continued to the kernel translation unit after the host fixture
