@@ -92,7 +92,18 @@
   "qualification": {
     "state": "pending",
     "package": "uke-coordinated-union-check",
-    "version": "7.3.1-1"
+    "version": "7.3.1-2",
+    "previous_attempts": [
+      {
+        "copr_build": 11261611,
+        "source_commit": "cf6b5a3260ae52e730f972c90315a8f3dd11246c",
+        "version": "7.3.1-1",
+        "state": "failed",
+        "phase": "native configuration comparison after successful sensor/MSM objects and all retained controls",
+        "native_log_sha256": "df446dc572b4793bcc0d4c2a51df67dfe85aa5ab7fc4cbfe86e78d76fa3e6ba9",
+        "correction": "Compare the entire effective object configuration with an independently normalized copy of the immutable raw input, using the same object-only initramfs setting. No feature exclusions."
+      }
+    ]
   },
   "delivery": {
     "single_full_kernel_coordinator": true,
@@ -117,7 +128,7 @@
     },
     {
       "path": "packaging/native/check-coordinated-union731.sh",
-      "sha256": "c892436be3f38e2a11f9e1d1225e73a09783e190c5368543a5694d8fa495085b"
+      "sha256": "0be2f994e940e2ed2895e7042ef1c1a354f6deb5052d48d21420868cbc31a4d6"
     },
     {
       "path": "packaging/native/check-o82-memory-cumulative.sh",
@@ -125,7 +136,7 @@
     },
     {
       "path": "packaging/native/copr-coordinated-union731-check.sh",
-      "sha256": "e269a6a8208ff25df795ad5b15f79df1decdd33bb49b4497fc1889100e1d6cce"
+      "sha256": "cb14df3e3463d389c0e0eb01b78ec1ded058a9110bdc53f04731a1bb1fd8d94f"
     },
     {
       "path": "packaging/native/copr-o82-memory-cumulative-check.sh",
@@ -401,7 +412,7 @@
     },
     {
       "path": "packaging/native/check-coordinated-union731.sh",
-      "sha256": "c892436be3f38e2a11f9e1d1225e73a09783e190c5368543a5694d8fa495085b"
+      "sha256": "0be2f994e940e2ed2895e7042ef1c1a354f6deb5052d48d21420868cbc31a4d6"
     },
     {
       "path": "packaging/native/check-o82-memory-cumulative.sh",
@@ -409,7 +420,7 @@
     },
     {
       "path": "packaging/native/copr-coordinated-union731-check.sh",
-      "sha256": "e269a6a8208ff25df795ad5b15f79df1decdd33bb49b4497fc1889100e1d6cce"
+      "sha256": "cb14df3e3463d389c0e0eb01b78ec1ded058a9110bdc53f04731a1bb1fd8d94f"
     },
     {
       "path": "packaging/native/copr-o82-memory-cumulative-check.sh",

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# COPR only: preserve complete12101 plus qualified touch/geometry and add memory.
+# COPR only: retain complete12101 and qualify the queued source/object union.
 set -Eeuo pipefail
 test ! -e /etc/senemos/kernel-update.conf
 [[ $(rpm --eval '%{_host_cpu}') == aarch64 && $(rpm --eval '%{fedora}') == 46 ]]

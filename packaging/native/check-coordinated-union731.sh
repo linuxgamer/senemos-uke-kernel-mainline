@@ -31,14 +31,21 @@ llvm-nm --defined-only "$object" > "$work/symbols"
 for symbol in a6xx_hfi_irq a6xx_gmu_resume a6xx_hfi_set_freq msm_gpu_fault_crashstate_capture; do
     grep -E "[[:space:]][Tt][[:space:]]+$symbol$" "$work/symbols"
 done
-# Compare hardware/feature assignments; only the object initramfs settings and
-# Kconfig-generated tool-version fields may differ on a different worker.
-for source in "$kernel/native-profile/native.config" "$output/.config"; do
-    awk '/^CONFIG_/||/^# CONFIG_.* is not set$/ {
-      if($0!~/^CONFIG_(INITRAMFS_[A-Z0-9_]+|CC_VERSION_TEXT|GCC_VERSION|CLANG_VERSION|AS_VERSION|LD_VERSION|LLD_VERSION|PAHOLE_VERSION|RUSTC_VERSION)=/)print
-    }' "$source" | sort > "$work/$(basename "$source").features"
-done
-cmp "$work/native.config.features" "$work/.config.features"
+# The pinned input predates this worker's Kconfig normalization. Independently
+# normalize the same immutable input and object-only initramfs setting, then
+# compare the complete effective configuration without an option allowlist.
+reference=$work/reference-config
+mkdir "$reference"
+install -m644 "$kernel/native-profile/native.config" "$reference/.config"
+bash "$kernel/scripts/config" --file "$reference/.config" --set-str INITRAMFS_SOURCE ''
+make -s -C "$kernel" ARCH=arm64 LLVM=1 LLVM_IAS=1 O="$reference" olddefconfig
+if ! cmp -s "$reference/.config" "$output/.config"; then
+    diff -u --label expected-effective-config --label object-effective-config \
+        "$reference/.config" "$output/.config" || true
+    exit 1
+fi
+printf 'Complete effective config matches independent olddefconfig of pinned input; no feature exclusions\n'
+sha256sum "$kernel/native-profile/native.config" "$reference/.config" "$output/.config"
 for flag in CONFIG_DRM_MSM=m CONFIG_DRM_MSM_KMS=y CONFIG_DRM_MSM_GPU_STATE=y CONFIG_LTO_NONE=y; do
     grep -Fx "$flag" "$output/.config"
 done
