@@ -78,6 +78,14 @@ The [source manifest](manifests/o82-stock-profile-source-20261105.json) records
 the exact inputs. Coordinator DNF integration, device-local preparation and
 physical acceptance remain pending; kernel/profile selection is unchanged.
 
+Private preparation now has a qualified DNF integration path in boot userspace
+`1.8.95`, [COPR 11261509](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11261509/).
+The [kernel metadata layer](manifests/o82-private-dnf-source-20261105.json)
+adds exactly two boot dependencies and one RPM-owned manifest marker, retaining
+the final transaction path and every other spec/profile/config byte. The
+coordinator must include it in the next complete memory/v5 kernel; the installed
+12101 candidate is unchanged. No preset, DMA or HDR gate is enabled.
+
 31 October 2026. `main` is the continuation branch. Microphone capture, power management, bounded boot-watchdog and optional gaming sources are integrated. The complete combined source still requires fresh release admission and a qualified COPR build; retained candidate packages do not establish that result.
 
 On POCO Pad X1 with Fedora Rawhide AArch64 and kernel `7.3.1-102`, one named four-channel microphone input records all four paths. The operator accepts the ADC8/TX24 speech level. Signed candidate `7.3.1-105` passed package admission and was written, synced and read back in slot A; accepted `102` remains in B. The new candidate has not yet completed its physical boot and microphone checks. See [the engineering record](docs/MICROPHONE-BRINGUP-20261030.md) and [branch boundaries](docs/BRANCHES.md).

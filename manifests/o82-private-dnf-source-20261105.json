@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-05",
+  "scope": "Exactly three RPM metadata lines for private v5 preparation; no kernel/config/DT/boot-source mutation",
+  "source_commit": "5f5aaf3bfc64b3a44c66a6c235632d8b07fcfc5c",
+  "inputs": [
+    {
+      "path": "packaging/native/overlay-o82-private-dnf731.sh",
+      "sha256": "b48cc562e412e095165fd3b1f85722b122ecb9732e3eace973a855f4cbc87e48"
+    },
+    {
+      "path": "tests/o82-private-dnf-layer.sh",
+      "sha256": "ffe9686d55f5038d643958df67c915b635dd5288a447e78f745cbe57c0b4a4fd"
+    }
+  ],
+  "qualification": {
+    "state": "succeeded",
+    "copr_build": 11261509,
+    "package": "uke-boot-integration-1.8.95-1.fc46",
+    "support_source": "ae967e08dfc41b786d42316233f4d7089411eafe",
+    "parent_kernel_build": 11260781,
+    "parent_kernel_source_sha256": "8c436d285a39067097507972b7b1f8e4199e94f75abddf30d9fe35072449f342",
+    "profile_prerequisite": "Qualified O82 memory/v5 layer4800f0b",
+    "three_required_rejections": true,
+    "exact_idempotence": true,
+    "strip_three_lines_equals_original_spec": true,
+    "profile_ledger_and_configuration_retained": true,
+    "final_transaction_dependency_and_no_new_scriptlet": true,
+    "source_log_gzip_sha256": "7dd466b9fdf39348a4e3849e53a9eb5671d99f2aa30de512d2a1b9e047e1b858",
+    "native_kernel_build": false
+  },
+  "runtime": {
+    "updater_capability": "uke-kernel-update(o82-private-color-v5) >= 1",
+    "utility_requirement": "uke-o82-color-profile >= 0.7.0-1",
+    "manifest_marker": "o82_private_color=5",
+    "qualified_updater": "1.8.95-1.fc46"
+  },
+  "delivery": {
+    "single_coordinator_required": true,
+    "full_cumulative_kernel_pending": true,
+    "retain_all_touch_geometry_gmu_and_other_features": true,
+    "initial_color_selection": "",
+    "native_hdr_advertised": false,
+    "physical_color_acceptance": false
+  }
+}
