@@ -40,7 +40,7 @@
     },
     {
       "path": "docs/SSC-STK3BCX-ALS.md",
-      "sha256": "b549e69137b078738bba733e4d8ace26edfc8a1a2ad97340d6f30ca475c007f1"
+      "sha256": "96aaeff42c22fa06f13e7e40f8a2cd94088bc4ab13f086ee82ebb05423ad18c1"
     },
     {
       "path": "packaging/native/overlay-ssc-als731.sh",
@@ -62,5 +62,26 @@
     "copr_build": 11263691,
     "result": "failed after both exact former-vector refusals; new metadata fixture omitted declared flag before report",
     "native_log_sha256": "f8b59d0c6ec85d45f08322c4e8d2ea30e29bc98ce0b41557b578cfa0d765f51e"
+  },
+  "qualification": {
+    "source_commit": "9896de456f92c9a0a27c5509c80c6bbf38fc90b5",
+    "copr_build": 11263802,
+    "package": "uke-ssc-als-check7.3.1-2",
+    "state": "succeeded",
+    "native_log_sha256": "f2a10192fe023928d457108446bd591d7c87bb90a6d314eb207dbd375a580f63",
+    "signed_text_rpm_sha256": "c0eb58ecd08b35a509479993873373bf1084c6127d640bf4066be1b737cd79a7",
+    "signed_text_rpm_bytes": 47398,
+    "object_sha256": "5928259b06297a694fefd7bb29ed885f1ea5babfdda6969781ec56a136b986e8",
+    "config_sha256": "10107ff6078a75efdb16bfc2e7327da6a90e92e31bf7dd1123ec30fb58bc29a7",
+    "vector_cases_per_compiler": 186,
+    "metadata_report_ack_cases_per_compiler": 4,
+    "exact_old_refusal_compilers": [
+      "gcc",
+      "clang"
+    ],
+    "all_retained_controls": true,
+    "full_kernel": false,
+    "target_changed": false,
+    "physical_acceptance": false
   }
 }

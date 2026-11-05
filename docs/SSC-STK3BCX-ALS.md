@@ -38,7 +38,16 @@ full cumulative integration, a matching kernel boot and physical light/unit/
 lifecycle checks are separate gates. This source change alone does not prove
 that native ALS works or close the remaining sensor requirements.
 
-Initial check11263691 reproduces the old vector refusal under both compilers,
+Initial check 11263691 reproduces the old vector refusal under both compilers,
 then stops in the new metadata fixture: the synthetic sensor was not declared
 before its metadata report. The driver correctly ignores that undeclared
-sensor. Check revision2 declares it first; native qualification remains pending.
+sensor. Corrected check revision 2 declares it first.
+
+COPR [11263802](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11263802/)
+passes at source `9896de456f92c9a0a27c5509c80c6bbf38fc90b5`: both exact former-source
+compiler refusals,186 vector cases and4 real report/metadata/ACK cases per
+compiler, all retained cumulative controls and the AArch64 SSC composite
+object with `-Werror`. The signed 47,398-byte text RPM verifies the trusted
+repository key, exact source/spec/composition and header/payload digests.
+It has no scriptlets or executable payload and was not installed. Full
+cumulative kernel integration and physical ALS/unit/lifecycle tests remain open.

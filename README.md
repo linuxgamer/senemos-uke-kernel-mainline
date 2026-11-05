@@ -11,6 +11,15 @@ Linux kernel adaptations, device trees and Fedora RPM packaging for Xiaomi Pad 7
 > This is an experimental kernel. Keep a working boot image and matching modules before updating. Not every source change has been tested on the tablet.
 
 ## Development status
+
+5 November 2026. The named STK3BCx front-light correction passes
+[COPR 11263802](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11263802/)
+on the complete 12204 source: synthetic actual callbacks and a real AArch64
+SSC object. It admits the observed six-field event alongside the standard
+two-field event, retaining all sensor admission gates. See the
+[qualified source and limits](docs/SSC-STK3BCX-ALS.md). Full cumulative kernel
+integration and physical light/lifecycle acceptance remain pending.
+
 4 November 2026. New development and candidate builds use
 `senemos-uke-linux-kernel-mainline-unstable` with an `-unstable` Image ABI.
 Normal-family updates require an explicit request and physical qualification
