@@ -101,6 +101,7 @@ static void als_vector_reports(void)
 			c.client_id = response.client;
 			fixture.early_report_id = id;
 			s = &c.sensor[3];
+			s->declared = true;
 			s->ready = false;
 			string_attribute(&attrs, 0, "stk_stk3bcx");
 			string_attribute(&attrs, 2, "ambient_light");

@@ -32,7 +32,7 @@
     },
     {
       "path": "tests/ssc-als-vector-contract.c",
-      "sha256": "3b3e26e5d8f069e3f81284af68a88a5293ed0c7d6e6ab5e88971f90955ddcb45"
+      "sha256": "8192a58ae81de0e240e770952a84a85edec266a3918eb27c412d7854cbf48e5c"
     },
     {
       "path": "tests/ssc-als-vector-contract.sh",
@@ -40,7 +40,7 @@
     },
     {
       "path": "docs/SSC-STK3BCX-ALS.md",
-      "sha256": "8b3a2248bad0e90b964b2070fbe7daafb19a2802262df90635314d74cb5efb79"
+      "sha256": "b549e69137b078738bba733e4d8ace26edfc8a1a2ad97340d6f30ca475c007f1"
     },
     {
       "path": "packaging/native/overlay-ssc-als731.sh",
@@ -54,7 +54,13 @@
     },
     {
       "path": "packaging/native/copr-ssc-als731-check.sh",
-      "sha256": "93f95414d29cc98ac911c254aea8da01ebe7d04ef48b62db7d7aa41bc00a77da"
+      "sha256": "9cd3f5619e55f4df70087b41c39909a6086ec46d06bcd13d28d2d3b1fdd5e7e5"
     }
-  ]
+  ],
+  "superseded_check": {
+    "source": "9cac908afbf0c0fa2317db01d8043f4afe6daf47",
+    "copr_build": 11263691,
+    "result": "failed after both exact former-vector refusals; new metadata fixture omitted declared flag before report",
+    "native_log_sha256": "f8b59d0c6ec85d45f08322c4e8d2ea30e29bc98ce0b41557b578cfa0d765f51e"
+  }
 }

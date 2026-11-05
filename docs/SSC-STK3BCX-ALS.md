@@ -37,3 +37,8 @@ before ACK. They contain no device values or identifiers. COPR compilation,
 full cumulative integration, a matching kernel boot and physical light/unit/
 lifecycle checks are separate gates. This source change alone does not prove
 that native ALS works or close the remaining sensor requirements.
+
+Initial check11263691 reproduces the old vector refusal under both compilers,
+then stops in the new metadata fixture: the synthetic sensor was not declared
+before its metadata report. The driver correctly ignores that undeclared
+sensor. Check revision2 declares it first; native qualification remains pending.

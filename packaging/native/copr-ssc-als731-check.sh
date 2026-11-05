@@ -5,7 +5,7 @@ test ! -e /etc/senemos/kernel-update.conf
 [[ $(rpm --eval '%{_host_cpu}') == aarch64 ]]
 owner=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 output=$(realpath -m "${1:?Remote source result directory}")
-revision=${2:-1}
+revision=${2:-2}
 [[ $revision =~ ^[1-9][0-9]*$ ]]
 manifest=$owner/manifests/ssc-stk3bcx-als-layer-20261105.json
 [[ ! -e $output || (-d $output && -z $(find "$output" -mindepth 1 -maxdepth 1 -print -quit)) ]]
