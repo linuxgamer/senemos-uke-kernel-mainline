@@ -1,0 +1,44 @@
+From: Uke Linux contributors
+Subject: [PATCH] iio: uke-ssc: admit the named virtual rear-light endpoint
+
+The available SIP1328 ambient_light_back endpoint advertises physical=false
+and emits a six-value standard event. Admit only that named logical ALS,
+retain all other physical/API/stream gates and publish only its first lux
+field. Preserve the qualified front-light path and standard two-value events.
+
+--- a/src/sensors/uke-ssc-iio.c
++++ b/src/sensors/uke-ssc-iio.c
+@@ -515,11 +515,14 @@
+ 	}
+ 	if (event->message != 1025)
+ 		return -ENOMSG;
+-	/* This Uke front ALS also reports six fields; the first remains lux.
+-	 * Do not assign units to them or admit this shape for another sensor.
++	/* These identified Uke ALS endpoints also report six fields.
++	 * Publish only the first lux field; other channels retain unknown units.
+ 	 */
+-	if (d->kind == SSC_LIGHT && !strcmp(d->datatype, "ambient_light") &&
+-	    !strcmp(s->attributes.name, "stk_stk3bcx")) {
++	if (d->kind == SSC_LIGHT &&
++	    ((!strcmp(d->datatype, "ambient_light") &&
++	      !strcmp(s->attributes.name, "stk_stk3bcx")) ||
++	     (!strcmp(d->datatype, "ambient_light_back") &&
++	      !strcmp(s->attributes.name, "sip1328 back ambient")))) {
+ 		ret = uke_ssc_decode_sample(event->payload, 0, &sample);
+ 		if (!ret && sample.count != 2 && sample.count != 6)
+ 			ret = -EBADMSG;
+@@ -543,8 +546,13 @@
+ 				 const struct uke_ssc_attributes *attributes)
+ {
+ 	bool streaming = description->dimensions == 3 || description->kind == SSC_TEMPERATURE;
++	bool logical_rear = description->kind == SSC_LIGHT &&
++		!strcmp(description->datatype, "ambient_light_back") &&
++		!strcmp(attributes->name, "sip1328 back ambient");
+ 
+-	return attributes->available && attributes->physical && !attributes->hlos_incompatible &&
++	/* The available OEM rear ALS explicitly advertises physical=false. */
++	return attributes->available && (attributes->physical || logical_rear) &&
++	       !attributes->hlos_incompatible &&
+ 	       attributes->stream_type <= 1 && (attributes->stream_type || ssc_rate(attributes)) &&
+ 	       (!streaming || !attributes->stream_type);
+ }

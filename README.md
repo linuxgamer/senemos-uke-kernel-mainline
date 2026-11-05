@@ -12,6 +12,15 @@ Linux kernel adaptations, device trees and Fedora RPM packaging for Xiaomi Pad 7
 
 ## Development status
 
+5 November 2026. The named SIP1328 logical rear-light endpoint passes
+[COPR 11264114](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11264114/)
+on complete 12204 with the qualified front-light correction. Exact metadata
+and two/six-value compatibility are limited to this named endpoint; other
+sensors retain their physical/API/stream gates. Both compiler refusal controls,
+actual callback cases and the real AArch64 SSC object pass. See the
+[source evidence and limits](docs/SSC-SIP1328-ALS.md). Full cumulative kernel
+integration, matching boot and physical light/lifecycle acceptance remain open.
+
 5 November 2026. The named STK3BCx front-light correction passes
 [COPR 11263802](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11263802/)
 on the complete 12204 source: synthetic actual callbacks and a real AArch64
