@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-05",
+  "scope": "Static OEM HDR policy and native implementation gaps; no executable change or hardware qualification",
+  "vendor_reference": {
+    "repository": "Xiaomi-Pad-7-Development/android_vendor_xiaomi_uke",
+    "commit": "6739c8ec275318a156aa3a65f04f54f8dad82926",
+    "provenance": "Third-party-retained proprietary OEM material; official binary provenance and redistribution permission are not established",
+    "attribution": "Qualcomm/Snapdragon display HDR implementation retained in the Uke vendor image; ELF metadata is comparison evidence only",
+    "code_executed": false,
+    "code_imported": false,
+    "references": [
+      {
+        "path": "proprietary/vendor/lib64/libhdr_tm.so",
+        "bytes": 382096,
+        "git_blob": "4395c10be5bf3c8057b38546f262628f633ad10c",
+        "sha256": "42ed49d8b0f79b319107a4ce70cf6ee25ca75888929335b1e1e78702bc9b0f3b"
+      },
+      {
+        "path": "proprietary/vendor/lib64/libhdr_stub.so",
+        "bytes": 36856,
+        "git_blob": "3eca07c55c5c59c0fdaf0e722ed73a8d73b159a3",
+        "sha256": "f7d52dd557e29461d457abeb4261c9c92f31c8568ab4c2dfe71feb47f84a5f8c"
+      },
+      {
+        "path": "proprietary/vendor/lib64/libhdr_backlight_adapter.so",
+        "bytes": 48288,
+        "git_blob": "9a81d34883744f3b71ac3b8e6e69d15ed0159558",
+        "sha256": "8cda2421cec803a0b444a438c4a35216b9f3ad82f2454e8ea79e1657539e72e0"
+      }
+    ]
+  },
+  "retained_references": [
+    {
+      "path": "proprietary/vendor/lib64/libsdm-color.so",
+      "sha256": "99f02b1114ffa3886e921353ddd54842c66a55871d4a58b2b1e340789a3f1c05"
+    },
+    {
+      "path": "proprietary/vendor/lib64/libqdcm-json-mode-parser.so",
+      "sha256": "00b1a5fcfe89e1a67834cba59115e8a0460a29daf10c250787587d5efa4d0f75"
+    }
+  ],
+  "private_input_review": {
+    "panel": 66,
+    "sha256": "2b6442ce0e8fef6d1b008cdeca3838450282868d385f6e3056c0a4ce2b8949d8",
+    "hdr_records": 2,
+    "xy_points_per_record": 17,
+    "pcc_coefficients_per_record": 33,
+    "extra_constant_or_nonlinear_coefficients": 24,
+    "extra_nonzero_terms_observed": false,
+    "one_record_has_adaptive_schema": true,
+    "raw_values_published": false,
+    "other_panel_reviewed": false
+  },
+  "functions": [
+    {
+      "name": "sdm::HdrImp::SetHdrBlob",
+      "address": "0x3adc0",
+      "bytes": 268
+    },
+    {
+      "name": "HDRXml::LoadTmParams",
+      "address": "0x4c7b0",
+      "bytes": 4392
+    },
+    {
+      "name": "sdm::HdrImp::DsppToneMap",
+      "address": "0x3e1e0",
+      "bytes": 852
+    },
+    {
+      "name": "TMC::ToneMapping_3DLuts",
+      "address": "0x42264",
+      "bytes": 4692
+    },
+    {
+      "name": "tone_mapping_core_static",
+      "address": "0x574ac",
+      "bytes": 324
+    },
+    {
+      "name": "unnamed forward/inverse luminance helper",
+      "address": "0x575f0",
+      "bytes": 820
+    }
+  ],
+  "inspection": "Read-only ELF64 load bounds, AArch64 BL/ADRP/LDR and actual JUMP_SLOT resolution; private JSON/XML structural and numeric-shape checks",
+  "exact_uke_oss": {
+    "repository": "MiCode/vendor_opensource_display-drivers",
+    "commit": "44275c404a677d9d9e5230fedd1af2ef02fc7b9a",
+    "path": "msm/sde/sde_hw_reg_dma_v1_color_proc.c",
+    "license": "GPL-2.0-only",
+    "attribution": "Qualcomm Innovation Center, Inc. and The Linux Foundation",
+    "role": "Exact native PCC4.0/IGC4.0/gamut4.3 register and payload contracts; not the proprietary HDR policy"
+  },
+  "same_soc_comparison": {
+    "repository": "OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm7675",
+    "commit": "1138e00fee63582a0cc6a53af3286621786827b7",
+    "existing_review": "manifests/o82-hsic-source-20261104.json",
+    "limit": "Shared SM7675 display IP does not define the Uke OEM HDR XML policy"
+  },
+  "upstream_comparison": {
+    "repository": "torvalds/linux",
+    "commit": "05441d697f7f9a927264f4058cbbc6a03dfcac9d",
+    "path": "drivers/gpu/drm/msm/disp/dpu1/dpu_hw_dspp.h",
+    "git_blob": "b47b7788064b2c7e231a632967d12e2e2671dc6a",
+    "license": "GPL-2.0-only",
+    "observed_callbacks": [
+      "setup_pcc",
+      "setup_gc"
+    ],
+    "scope": "Inspected DSPP header only; no claim of absent upstream HDR support"
+  },
+  "active_queue_comparison": {
+    "repository": "https://gitlab.freedesktop.org/drm/msm.git",
+    "branch": "msm-next",
+    "commit": "d024361c631b3f020a26c07d683e5103404b0fbf",
+    "path": "drivers/gpu/drm/msm/disp/dpu1/dpu_hw_dspp.h",
+    "git_blob": "b47b7788064b2c7e231a632967d12e2e2671dc6a",
+    "sha256": "42078196aa2a08a277c3cd7638c9a92d439f6e2ce36350f4c64d7557d190f34b",
+    "observed_callbacks": [
+      "setup_pcc",
+      "setup_gc"
+    ]
+  },
+  "remaining_requirements": [
+    "Typed XML units/enums and matrix normalization",
+    "Forward/inverse logarithmic curve and complete output quantization",
+    "Metadata, brightness and statistics lifecycle",
+    "Compose panel matrix with client CTM without discarding unsupported terms",
+    "Integrate with retained paired atomic/DSPP path and private source format",
+    "Independent synthetic controls and complete cumulative COPR qualification",
+    "Physical optical/color/HDR and recovery acceptance"
+  ],
+  "native_state": {
+    "initial_selection_changed": false,
+    "dma_admission_changed": false,
+    "hdr_advertisement_changed": false,
+    "full_kernel_built": false,
+    "target_changed": false,
+    "physical_acceptance": false
+  },
+  "document_sha256": "9fbfcc5ac2e9935cec4ff743c217662e8ec78163862c7ea9872761aaae3aa560"
+}
