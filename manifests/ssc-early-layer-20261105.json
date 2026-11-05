@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-05",
+  "scope": "Bounded staging of valid SSC indications until the matching enable acknowledgement; no format, unit, admission or hardware-policy relaxation",
+  "parent": {
+    "build": 11262313,
+    "source": "45d8355e366e6b75e43f441ca99b517302adf522",
+    "url": "https://download.copr.fedorainfracloud.org/results/mcc45tr/uke-linux-unstable/srpm-builds/11262313/senemos-uke-linux-kernel-mainline-unstable-7.3.1-12203.src.rpm",
+    "sha256": "db31b8a612b3caf5aedbfb681eb1140688072cb6dffaa104946877c65d341b57"
+  },
+  "preimages": [
+    {
+      "path": "src/sensors/uke-ssc-iio.c",
+      "sha256": "8c5a6faae5c22b3ca9850d9a7b14500b5cafae2e10ccb208b60da55f7121e7eb"
+    },
+    {
+      "path": "tests/ssc-native-contract.c",
+      "sha256": "ff0129123b7764db9d20259fb80bff04d0707cba3a1aa816f8f44adc3096b829"
+    },
+    {
+      "path": "tests/ssc-native-contract.sh",
+      "sha256": "0ab2854782730ccb08e7663ea7204b7a53c5328fedb6a7849d843d2c9c6ffb37"
+    }
+  ],
+  "assets": [
+    {
+      "path": "src/sensors/uke-ssc-iio.c",
+      "sha256": "7feb09c352deac2b63ff4e23d725dfdb80b051363afb461159a40fc28da6ceb2"
+    },
+    {
+      "path": "tests/ssc-native-contract.c",
+      "sha256": "1581a4f73b435287727f5d6dfdd68d15d557670837d523a9ed91e3ab84a6d342"
+    },
+    {
+      "path": "tests/ssc-native-contract.sh",
+      "sha256": "540e9b9d60056395fddb63a2106fb99e42213ca6602d8fa47fbcaec473bbd435"
+    },
+    {
+      "path": "docs/SSC-EARLY-INDICATIONS.md",
+      "sha256": "689f1dd5708c62981fe50cd9342bb944f5b2dfb4816361797d1e296a286a037f"
+    }
+  ],
+  "check_inputs": [
+    {
+      "path": "packaging/native/overlay-ssc-early731.sh",
+      "sha256": "ecc85d7975a08e006f196690e9f521fd5885830862f99875e142fc7880912e08"
+    },
+    {
+      "path": "packaging/native/check-ssc-early731.sh",
+      "sha256": "99dec7f419fdae0fe6da09b5f12f725791e1791cce5d4372473426a34c91ca2c"
+    },
+    {
+      "path": "packaging/native/copr-ssc-early731-check.sh",
+      "sha256": "ecfa72cba280e9cb4c3f3aab87a6a88a621251d156597bf531d8bf9228c51762"
+    },
+    {
+      "path": "packaging/native/refuse-published-release.sh",
+      "sha256": "8ebb19b5e63a57df661b1401620766ae1519a154b32127a2d17733761b64eb23"
+    }
+  ],
+  "maximum_staged_samples": 1,
+  "successful_matching_ack_required": true,
+  "exact_api_and_units_retained": true,
+  "source_config_dt_firmware_retained": true,
+  "physical_als_causality_established": false,
+  "physical_acceptance": false
+}

@@ -51,7 +51,7 @@ cp "$root/tests/ssc-native-host.h" "$stage/include/ssc-native-host.h"
         "$root/src/sensors/uke-ssc-iio.c"
     printf '%s\n' 'static void ssc_close_client(struct ssc_controller *c);'
     for name in ssc_uid_equal ssc_current ssc_observe ssc_record_failure ssc_failure_name ssc_schedule_locked ssc_invalidate_locked \
-        ssc_response ssc_request ssc_rate ssc_sample_values ssc_attributes_usable ssc_read_scale ssc_report ssc_message \
+        ssc_publish_locked ssc_response ssc_request ssc_rate ssc_sample_values ssc_attributes_usable ssc_read_scale ssc_report ssc_message \
         ssc_start ssc_stop ssc_close_client; do
         awk -v name="$name" '
           $0 ~ "^static .*([[:space:]]|[*])" name "\\(" && $0 !~ /;/ {emit=1;found=1}

@@ -9,9 +9,13 @@ static struct {
 	bool no_ack,foreign,changed_client,stale_on_wait;
 	bool metadata_timeout,metadata_invalid,stale_registration;
 	unsigned int last_command;
+	unsigned int early_fault, early_sensor, early_report_id;
+	bool early_report, early_many;
 	struct ssc_controller *controller;
 	s64 pushed_value[3];
 } fixture;
+
+static void early_indication(struct ssc_controller *c);
 
 static int qmi_handle_init(struct qmi_handle *qmi, size_t maximum,
 			   const void *ops, const void *handlers)
@@ -93,6 +97,8 @@ static int qmi_send_request(struct qmi_handle *qmi, struct sockaddr_qrtr *peer,
 	fixture.last_command = request->payload[21] | (unsigned int)request->payload[22] << 8;
 	fixture.sent++;
 	if (fixture.send_error) return fixture.send_error;
+	if (fixture.early_report && (fixture.last_command == 513 || fixture.last_command == 514))
+		early_indication(fixture.controller);
 	if (!fixture.no_ack) {
 		if (fixture.foreign) sender.sq_node++;
 		if (fixture.changed_client) response.client++;
@@ -439,6 +445,97 @@ static void string_attribute(struct fixture_bytes *b,unsigned int id,const char 
 	struct fixture_bytes primitive={};
 	put_field(&primitive,2,text,strlen(text)+1);attribute(b,id,primitive.data,primitive.size);
 }
+static void early_indication(struct ssc_controller *c)
+{
+	static const u8 light[] = {13,0,0,0x7a,0x43,13,0,0,0x80,0x3f,16,3};
+	static const u8 xyz[] = {13,0,0,0x80,0x3f,13,0,0,0x20,0xc0,13,0,0,0,0xbf,16,3};
+	struct ssc_sensor *s = &c->sensor[fixture.early_sensor];
+	struct ssc_qmi_report *r = calloc(1, sizeof(*r));
+	struct sockaddr_qrtr peer = c->peer;
+	struct uke_ssc_suid uid = s->suid;
+	bool pending = c->pending;
+	const u8 *payload = fixture.early_sensor ? light : xyz;
+	size_t length = fixture.early_sensor ? sizeof(light) : sizeof(xyz);
+
+	assert(r && !s->stream_active && !s->sample_done.done);
+	if (fixture.early_fault == 1) peer.sq_node++;
+	if (fixture.early_fault == 2) uid.low++;
+	if (fixture.early_fault == 4) length--;
+	if (fixture.early_fault == 6) c->pending = false;
+	for (unsigned int i = 0; i < (fixture.early_many ? 3U : 1U); i++) {
+		const u64 ticks[] = {200, 199, 201};
+		struct fixture_bytes b = event_uid(uid, 1025,
+			fixture.early_fault == 5 ? 0 : ticks[i], payload, length);
+		size_t size = SSC_QMI_REPORT_MAX;
+		u8 *wire;
+
+		r->client_valid = r->payload_valid = 1;
+		r->client = c->client_id + (fixture.early_fault == 3);
+		r->length = b.size;
+		memcpy(r->payload, b.data, b.size);
+		wire = qmi_encode_message(QMI_INDICATION, fixture.early_report_id,
+			&size, 0, ssc_report_ei, r);
+		assert(!IS_ERR(wire));
+		ssc_message(&c->client, &peer, wire, size);
+		free(wire);
+		/* Nothing may escape before the matching, successful acknowledgement. */
+		assert(s->sample_sequence == 9 && !s->sample_done.done && !fixture.pushed);
+	}
+	c->pending = pending;
+	if (fixture.early_fault == 7) s->revision++;
+	if (fixture.early_fault == 8) s->ready = false;
+	if (fixture.early_fault == 9) ssc_invalidate_locked(c);
+	free(r);
+}
+
+static void early_reports(void)
+{
+	unsigned int checks = 0;
+
+	for (unsigned int sensor = 0; sensor < 2; sensor++) {
+		for (unsigned int id = SSC_QMI_REPORT_SMALL; id <= SSC_QMI_REPORT_LARGE; id++) {
+			for (unsigned int buffered = 0; buffered < 2; buffered++) {
+				for (unsigned int fault = 0; fault < 14; fault++) {
+					struct ssc_controller c;
+					struct ssc_sensor *s;
+					int ret;
+
+					setup(&c);
+					fixture.early_sensor = sensor ? 3 : 0;
+					s = &c.sensor[fixture.early_sensor];
+					c.client_known = true;
+					c.client_id = 0x123456789ULL;
+					s->declared = s->registered = true;
+					s->buffered = buffered;
+					s->attributes.stream_type = sensor;
+					fixture.early_report = true;
+					fixture.early_report_id = id;
+					fixture.early_fault = fault < 10 ? fault : 0;
+					fixture.early_many = fault == 13;
+					if (fault == 10) fixture.protobuf_error = 6;
+					if (fault == 11) fixture.no_ack = true;
+					if (fault == 12) fixture.changed_client = true;
+					ret = ssc_start(s);
+					if (!fault || fault == 13) {
+						assert(!ret && s->stream_active);
+						assert(s->sample_sequence == 10 && s->sample_done.done == 1);
+						assert(s->sample[0] == (sensor ? 250000000 : 1000000));
+						assert(s->ticks == (fault == 13 ? 201 : 200));
+						assert(fixture.pushed == buffered);
+					} else {
+						assert(s->sample_sequence == 9 && !fixture.pushed);
+						assert((ret < 0) == (fault >= 9 && fault <= 12));
+					}
+					ssc_close_client(&c);
+					assert(!c.pending && !fixture.live && fixture.released == 1);
+					checks++;
+				}
+			}
+		}
+	}
+	printf("Actual SSC early indications: %u request/response order, stream/on-change, direct/buffered, peer/client/SUID, metadata, fault and newest-sample checks passed\n", checks);
+}
+
 static void dispatch_large(struct ssc_controller *c,struct fixture_bytes *b,bool reject_unknown)
 {
 	struct ssc_qmi_report *r=calloc(1,sizeof(*r));
@@ -568,7 +665,7 @@ static void temperature(void)
 }
 int main(void)
 {
-	transaction_ids();qmi_wire();ownership();large_discovery_metadata();reports();units_and_rates();temperature();
+	early_reports();transaction_ids();qmi_wire();ownership();large_discovery_metadata();reports();units_and_rates();temperature();
 	observation_contract();discovery_failure_contract();
 	puts("Actual native SSC: upstream QMI wire round trips, acknowledgements, client/peer/generation guards, request faults, socket cleanup, sample admission, error release and IIO units passed; fake providers only");
 	return 0;
