@@ -86,6 +86,15 @@ the final transaction path and every other spec/profile/config byte. The
 coordinator must include it in the next complete memory/v5 kernel; the installed
 12101 candidate is unchanged. No preset, DMA or HDR gate is enabled.
 
+The combined source passed
+[COPR 11261650](https://copr.fedorainfracloud.org/coprs/mcc45tr/uke-linux-unstable/build/11261650/)
+on 5 November 2026: complete12101, touch, camera geometry, memory/v5, corrected
+GMU and DNF metadata. One AArch64 MSM object contains both GPU/color paths;
+the full effective configuration matches independently normalized input.
+The [source layer and receipt](manifests/coordinated-union731-20261105.json)
+preserve both supplier DTs and existing gates. Only text receipts are packaged.
+The coordinator's full kernel, final module and physical acceptance remain open.
+
 31 October 2026. `main` is the continuation branch. Microphone capture, power management, bounded boot-watchdog and optional gaming sources are integrated. The complete combined source still requires fresh release admission and a qualified COPR build; retained candidate packages do not establish that result.
 
 On POCO Pad X1 with Fedora Rawhide AArch64 and kernel `7.3.1-102`, one named four-channel microphone input records all four paths. The operator accepts the ADC8/TX24 speech level. Signed candidate `7.3.1-105` passed package admission and was written, synced and read back in slot A; accepted `102` remains in B. The new candidate has not yet completed its physical boot and microphone checks. See [the engineering record](docs/MICROPHONE-BRINGUP-20261030.md) and [branch boundaries](docs/BRANCHES.md).

@@ -90,7 +90,7 @@
   },
   "qualified_code_only": true,
   "qualification": {
-    "state": "pending",
+    "state": "qualified-source-and-native-object-only",
     "package": "uke-coordinated-union-check",
     "version": "7.3.1-2",
     "previous_attempts": [
@@ -103,7 +103,41 @@
         "native_log_sha256": "df446dc572b4793bcc0d4c2a51df67dfe85aa5ab7fc4cbfe86e78d76fa3e6ba9",
         "correction": "Compare the entire effective object configuration with an independently normalized copy of the immutable raw input, using the same object-only initramfs setting. No feature exclusions."
       }
-    ]
+    ],
+    "copr_build": 11261650,
+    "source_commit": "d602010745633e88f1ab3c3431ec56ad24d00758",
+    "source_log_sha256": "b03072466212d3fcf1e7f44ec5ef514c22525ed90364ea7415f2d6766b58839c",
+    "native_log_sha256": "6f1034876eeb9bbf68ca980d06d2fc09f7d0c9ea878c11474aec8dc572528445",
+    "source_overlay": {
+      "required_refusals": 4,
+      "exact_repeated_layer": true,
+      "original_profile_boot_spec_retained": true,
+      "inherited_preparation_and_original_negative_controls": true
+    },
+    "native_object": {
+      "architecture": "AArch64",
+      "type": "REL",
+      "msm_sha256": "6d878f5029be88c099bfe9ae22bebe1aaffbe5e75c43d024aa3264fc663751ae",
+      "raw_config_sha256": "739882b3a07fc6a701bae81ac6623a4b576871bd4289de3a095acabc20d49d34",
+      "independent_effective_config_sha256": "d072e81029da4b6719a9afe3f73fed687908dfbb87277af15d0e30a29d3495e6",
+      "full_effective_equality_without_feature_exclusions": true,
+      "gmu_prepared_source_sha256": "eae5fe8991ffdc51079eed3d24857ecbfd39a3faa4ff016c68296fd1eb27a4bf",
+      "ov08d10_prepared_source_sha256": "df7ce54741d6a08c09ff607b86ce33c2057bb05c52b4d1a21d98b5be3395700e",
+      "both_panel_dt_resources_retained": true,
+      "memory_and_gmu_symbols_defined": true,
+      "unexpected_private_or_floating_undefined_symbols": false
+    },
+    "package_receipt": {
+      "primary_sha256": "f0dc01a470367a18abd3773b3f7c39e3a59ebaca831acaa837a6b1b0b410147f",
+      "primary_open_sha256": "eb9d1f21deab44a1e51b1e193f95fb59c45969ce3e3a7746e992b428df74076e",
+      "rpm_sha256": "7fc73cc45b016a172f7974402354b528fe055decbe24bc1eb859900ea77c25b1",
+      "rpm_bytes": 44781,
+      "composition_sha256": "749bf3fd58ef6fbe1252370cb98c529c277c0a394e93b7712a8f8ec980973e83",
+      "checks_sha256": "dbfbf9b3bb05a91c79c0345aef1e082956f700c3065e42e439605362cfdd5fca",
+      "production_spec_sha256": "4596f6fbf1efbfe67949e314d2731f2a4c1e269c14ed101d9692cf90c7b3c547",
+      "signature_and_digest_verified": true,
+      "payload": "Four documentation text files and two licenses only; no executable, firmware, Image, final module or boot payload"
+    }
   },
   "delivery": {
     "single_full_kernel_coordinator": true,
