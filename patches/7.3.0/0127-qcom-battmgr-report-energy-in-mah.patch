@@ -1,0 +1,91 @@
+diff --git a/drivers/power/supply/qcom_battmgr.c b/drivers/power/supply/qcom_battmgr.c
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -883,6 +883,22 @@
+ 	return ret;
+ }
+ 
++static int qcom_battmgr_bat_energy_uh(struct qcom_battmgr *battmgr,
++				      unsigned int charge_mah, int *val)
++{
++	s64 energy;
++
++	if (!battmgr->status.voltage_now)
++		return -ENODATA;
++
++	energy = div_s64((s64)charge_mah * battmgr->status.voltage_now, 1000);
++	if (energy > INT_MAX)
++		return -ERANGE;
++
++	*val = energy;
++	return 0;
++}
++
+ static int qcom_battmgr_bat_get_property(struct power_supply *psy,
+ 					 enum power_supply_property psp,
+ 					 union power_supply_propval *val)
+@@ -963,24 +979,56 @@
+ 		val->intval = battmgr->info.charge_count;
+ 		break;
+ 	case POWER_SUPPLY_PROP_ENERGY_FULL_DESIGN:
+-		if (unit != QCOM_BATTMGR_UNIT_mWh)
++		if (unit == QCOM_BATTMGR_UNIT_mWh) {
++			val->intval = battmgr->info.design_capacity;
++		} else if (unit == QCOM_BATTMGR_UNIT_mAh) {
++			ret = qcom_battmgr_bat_energy_uh(battmgr,
++							 battmgr->info.design_capacity,
++							 &val->intval);
++			if (ret)
++				return ret;
++		} else {
+ 			return -ENODATA;
+-		val->intval = battmgr->info.design_capacity;
++		}
+ 		break;
+ 	case POWER_SUPPLY_PROP_ENERGY_FULL:
+-		if (unit != QCOM_BATTMGR_UNIT_mWh)
++		if (unit == QCOM_BATTMGR_UNIT_mWh) {
++			val->intval = battmgr->info.last_full_capacity;
++		} else if (unit == QCOM_BATTMGR_UNIT_mAh) {
++			ret = qcom_battmgr_bat_energy_uh(battmgr,
++							 battmgr->info.last_full_capacity,
++							 &val->intval);
++			if (ret)
++				return ret;
++		} else {
+ 			return -ENODATA;
+-		val->intval = battmgr->info.last_full_capacity;
++		}
+ 		break;
+ 	case POWER_SUPPLY_PROP_ENERGY_EMPTY:
+-		if (unit != QCOM_BATTMGR_UNIT_mWh)
++		if (unit == QCOM_BATTMGR_UNIT_mWh) {
++			val->intval = battmgr->info.capacity_low;
++		} else if (unit == QCOM_BATTMGR_UNIT_mAh) {
++			ret = qcom_battmgr_bat_energy_uh(battmgr,
++							 battmgr->info.capacity_low,
++							 &val->intval);
++			if (ret)
++				return ret;
++		} else {
+ 			return -ENODATA;
+-		val->intval = battmgr->info.capacity_low;
++		}
+ 		break;
+ 	case POWER_SUPPLY_PROP_ENERGY_NOW:
+-		if (unit != QCOM_BATTMGR_UNIT_mWh)
++		if (unit == QCOM_BATTMGR_UNIT_mWh) {
++			val->intval = battmgr->status.capacity;
++		} else if (unit == QCOM_BATTMGR_UNIT_mAh) {
++			ret = qcom_battmgr_bat_energy_uh(battmgr,
++							 battmgr->status.capacity,
++							 &val->intval);
++			if (ret)
++				return ret;
++		} else {
+ 			return -ENODATA;
+-		val->intval = battmgr->status.capacity;
++		}
+ 		break;
+ 	case POWER_SUPPLY_PROP_CAPACITY:
+ 		if (battmgr->status.percent == (unsigned int)-1)

@@ -125,3 +125,4 @@
 0124-uke-reported-zero-cycle-count.patch
 0125-uke-ucsi-contract-cache.patch
 0126-uke-protocol-observation.patch
+0127-qcom-battmgr-report-energy-in-mah.patch

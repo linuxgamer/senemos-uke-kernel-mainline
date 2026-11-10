@@ -516,6 +516,10 @@
     {
       "path": "patches/7.3.0/0126-uke-protocol-observation.patch",
       "sha256": "f258a703f61b8ed94f59c59debd2b125e90464303f48e3cc99076c77c1efe716"
+    },
+    {
+      "path": "patches/7.3.0/0127-qcom-battmgr-report-energy-in-mah.patch",
+      "sha256": "4723015eb1b2a280511c7cb11f9cffa0a697d0a9ba21c4a341684107dfa590ad"
     }
   ],
   "dtb": "qcom/sm7675-xiaomi-uke.dtb",
