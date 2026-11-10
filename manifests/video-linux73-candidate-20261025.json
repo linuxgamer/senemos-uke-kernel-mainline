@@ -8,7 +8,7 @@
   "active_series": false,
   "dt_enabled": true,
   "iris_match_added": true,
-  "firmware_packaged": false,
+  "firmware_packaged": true,
   "tablet_codec_tested": false,
   "patches": [
     {
