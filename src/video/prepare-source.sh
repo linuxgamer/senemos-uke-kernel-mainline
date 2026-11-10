@@ -47,4 +47,20 @@ bash "$root/tests/videocc-vote-contract.sh" "$kernel/drivers/clk/qcom/uke-videoc
 bash "$root/tests/videocc-retention-contract.sh" "$kernel/drivers/clk/qcom/videocc-sm8550.c"
 bash "$root/tests/video-icc-topology-contract.sh" "$kernel"
 bash "$root/tests/video-gcc-config-contract.sh" "$kernel/drivers/clk/qcom/gcc-cliffs.c"
+if [[ ${UKE_VIDEO_OVERLAY:-0} == 1 ]]; then
+    header=$kernel/arch/arm64/kernel/uke-abl-overlays.h
+    [[ -f $header ]] || { echo 'ABL overlay header is missing; run boot preparation first' >&2; exit 1; }
+    work=$(mktemp -d)
+    trap 'rm -rf -- "$work"' EXIT
+    cpp -nostdinc -undef -D__DTS__ -x assembler-with-cpp -I "$kernel/include" \
+        "$root/src/video/sm7675-uke-native-video.dtso" > "$work/video.dts"
+    dtc -q -@ -I dts -O dtb -o "$work/video.dtbo" "$work/video.dts"
+    {
+        printf '#define UKE_VIDEO_OVERLAY 1\n'
+        printf 'static unsigned char uke_video_overlay[] __initdata __aligned(8) = {\n'
+        od -An -v -tx1 "$work/video.dtbo" | sed -E 's/[a-f0-9]{2}/0x&,/g'
+        printf '};\n'
+    } >> "$header"
+    sha256sum "$work/video.dtbo" > "$kernel/native-generated/video-overlay-SHA256SUMS"
+fi
 printf 'Native Cliffs source prepared; firmware and target acceptance remain separate\n'

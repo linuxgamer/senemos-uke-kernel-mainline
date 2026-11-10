@@ -180,16 +180,10 @@ for name in overlay check; do
 done
 header=$kernel/arch/arm64/kernel/uke-abl-overlays.h
 : > "$header"
-overlays=(ufs usb lights)
-if [[ ${UKE_VIDEO_OVERLAY:-0} == 1 ]]; then
-    overlays+=(video)
-    printf '#define UKE_VIDEO_OVERLAY 1\n' >> "$header"
-fi
-for name in "${overlays[@]}"; do
+for name in ufs usb lights; do
     source=$here/sm7675-uke-ufs.dtso
     [[ $name != usb ]] || source=$here/sm7675-uke-usb2.dtso
     [[ $name != lights ]] || source=$here/sm7675-uke-lights.dtso
-    [[ $name != video ]] || source=$here/../video/sm7675-uke-native-video.dtso
     if [[ $name == usb && $usb_profile == typec-v1 ]]; then source=$here/sm7675-uke-typec.dtso; fi
     cpp -nostdinc -undef -D__DTS__ -x assembler-with-cpp -I "$kernel/include" "$source" > "$output/$name.dts"
     dtc -q -@ -I dts -O dtb -o "$output/$name.dtbo" "$output/$name.dts"
@@ -201,7 +195,7 @@ for name in "${overlays[@]}"; do
 done
 printf '%s\n' "$usb_profile" > "$output/usb-profile"
 printf '%s\n' "$llcc_profile" > "$output/llcc-profile"
-(cd "$output"; sha256sum "${overlays[@]/%/.dtbo}" > overlay-SHA256SUMS)
+(cd "$output"; sha256sum ufs.dtbo usb.dtbo lights.dtbo > overlay-SHA256SUMS)
 sha256sum "$here/uke-abl.c" "$here/uke-ufs.h" "$here/uke-identity.c" "$here/uke-hardware.h" "$here/uke-bluetooth.h" "$here/vendor/fdt_check.c" "$here/vendor/source.json" \
     "$here/uke-pmic-adc.h" "$here/uke-cpu-thermal.h" "$here/uke-hall.h" \
     "$here/../../patches/boot/0001-arm64-uke-abl-dt-hook.patch" \
@@ -218,7 +212,6 @@ sha256sum "$here/sm7675-uke-pinctrl.dtsi" >> "$output/abl-source-SHA256SUMS"
 sha256sum "$here/uke-bwmon.h" >> "$output/abl-source-SHA256SUMS"
 sha256sum "$here/uke-cpu-bwmon.h" >> "$output/abl-source-SHA256SUMS"
 sha256sum "$here/uke-root-selector.h" "$here/../../patches/boot/0005-uke-root-selector.patch" >> "$output/abl-source-SHA256SUMS"
-[[ ${UKE_VIDEO_OVERLAY:-0} != 1 ]] || sha256sum "$here/../video/sm7675-uke-native-video.dtso" >> "$output/abl-source-SHA256SUMS"
 sha256sum "$here/../../patches/boot/0045-gunyah-arm-bounded-boot-watchdog.patch" >> "$output/abl-source-SHA256SUMS"
 sha256sum "$here/../../patches/boot/0006-uke-uart-wake-order.patch" >> "$output/abl-source-SHA256SUMS"
 sha256sum "$here/../../patches/boot/0007-uke-cpu-hardware-name.patch" >> "$output/abl-source-SHA256SUMS"
