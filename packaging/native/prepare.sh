@@ -95,6 +95,9 @@ git -C "$kernel" apply "$profile/patches/boot/0011-qcom-flash-torch-steps.patch"
 bash "$profile/tests/light-brightness.sh" "$kernel/drivers/leds/flash/leds-qcom-flash.c"
 bash "$profile/src/leds/prepare-source.sh" "$kernel"
 bash "$profile/src/display/prepare-source.sh" "$kernel"
+# Native Cliffs video candidate: source-level integration only. The boot overlay
+# stays gated behind UKE_VIDEO_OVERLAY until firmware and codec acceptance.
+bash "$profile/src/video/prepare-source.sh" "$kernel"
 reservation_baseline=$output/dpu-reservation-before56
 for relative in drivers/gpu/drm/msm/msm_atomic.c drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c; do
     install -Dm644 "$kernel/$relative" "$reservation_baseline/$relative"

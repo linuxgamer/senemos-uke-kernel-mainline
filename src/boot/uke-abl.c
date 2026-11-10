@@ -911,6 +911,10 @@ static int UKE_INIT uke_framebuffer(void *fdt)
  * write to the incoming bootloader FDT, including on partial overlay failure.
  */
 #ifdef __KERNEL__
+#include "uke-abl-overlays.h"
+#endif
+
+#ifdef __KERNEL__
 static
 #endif
 int UKE_INIT uke_abl_transform(void *output, size_t capacity,
@@ -957,6 +961,21 @@ int UKE_INIT uke_abl_transform(void *output, size_t capacity,
 	ret = fdt_overlay_apply(output, usb_overlay);
 	if (ret)
 		return ret;
+#ifdef UKE_VIDEO_OVERLAY
+	ret = fdt_overlay_apply(output, uke_video_overlay);
+	if (ret) {
+		pr_warn("Uke: native video overlay rejected (%d); keeping the OEM codec graph\n", ret);
+		ret = fdt_open_into(input, output, capacity);
+		if (ret)
+			return ret;
+		ret = fdt_overlay_apply(output, ufs_overlay);
+		if (ret)
+			return ret;
+		ret = fdt_overlay_apply(output, usb_overlay);
+		if (ret)
+			return ret;
+	}
+#endif
 #if defined(UKE_LLCC_NATIVE_PROFILE) && UKE_LLCC_NATIVE_PROFILE
 	ret = uke_llcc_apply(output);
 	if (ret)
@@ -1078,7 +1097,6 @@ int UKE_INIT uke_abl_transform(void *output, size_t capacity,
  * after free_initmem(). The original bootloader allocation stays reserved.
  */
 static unsigned char uke_fdt[UKE_FDT_CAPACITY] __ro_after_init __aligned(8);
-#include "uke-abl-overlays.h"
 #include "uke-lights.h"
 
 void *__init uke_abl_prepare_fdt(void *input, int size, phys_addr_t *physical)
