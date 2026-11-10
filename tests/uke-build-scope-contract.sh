@@ -16,7 +16,7 @@ grep -Fxq 'CONFIG_NR_CPUS=8' "$config"
 for symbol in SM_GPUCC_CLIFFS SM_DISPCC_8550 DRM_MSM DRM_PANEL_XIAOMI_O82 BACKLIGHT_KTZ8866 \
     I2C_QCOM_GENI SPI_QCOM_GENI QCOM_GPI_DMA QCOM_Q6V5_PAS QCOM_FASTRPC \
     BATTERY_QCOM_BATTMGR QCOM_SPMI_ADC5_GEN3 SENSORS_QCOM_SPMI_BCL INPUT_QCOM_SMP2P_SWITCH TOUCHSCREEN_NT36532_UKE \
-    SND_SOC_UKE SND_SEQUENCER USB_UAS USB_STORAGE USB_SERIAL_CP210X USB_SERIAL_FTDI_SIO \
+    SND_SOC_UKE SND_SEQUENCER ZRAM USB_UAS USB_STORAGE USB_SERIAL_CP210X USB_SERIAL_FTDI_SIO \
     USB_DWC3_QCOM USB_PHY_QCOM_UKE USB_REPEATER_QCOM_UKE TYPEC UCSI_PMIC_GLINK \
     PHY_QCOM_QMP_COMBO SCSI_UFS_QCOM UHID RC_CORE IR_SPI FM19511_UKE HW_RANDOM_QCOM \
     PINCTRL_PALAWAN_LPASS_LPI TYPEC_MUX_UKE_WCD939X QCOM_ICC_BWMON INTERCONNECT_QCOM_OSM_L3 QCOM_SM7675_LLCC_PMU; do
@@ -80,7 +80,7 @@ if [[ $# == 2 ]]; then
 fi
 if [[ $# == 0 ]]; then
     # shellcheck disable=SC2016
-    grep -Fxq 'make -C "$kernel" O="$out" LOCALVERSION="$localversion" -j"$jobs" Image modules qcom/sm7675-xiaomi-uke.dtb' "$root/src/boot/build-payload.sh"
+    grep -Fxq 'make -C "$kernel" O="$out" LOCALVERSION="$localversion" "${compiler_args[@]}" -j"$jobs" Image modules qcom/sm7675-xiaomi-uke.dtb' "$root/src/boot/build-payload.sh"
     grep -Fxq 'make O=%{_uke_out} LOCALVERSION=-senemos-uke -j%{_uke_jobs} Image qcom/sm7675-xiaomi-uke.dtb modules' "$root/configs/host/senemos-uke-linux-kernel-mainline.spec"
 fi
 echo 'Uke suppliers, root/recovery, USB peripherals, firewall and scoped DTB build passed; no tablet test.'

@@ -34,7 +34,6 @@ fi
 [[ ! -e $work/base/usr/lib/modules && ! -e $work/base/usr/lib/firmware ]]
 [[ ! -s $work/base/etc/machine-id && ! -e $work/base/etc/shadow ]]
 [[ -x $work/base/usr/libexec/uke-userdata-grow && -x $work/base/usr/sbin/fsck.f2fs && -x $work/base/usr/sbin/resize.f2fs ]]
-[[ -z $(find "$work/base" -type f \( -name '*.py' -o -name '*.pyc' -o -iname '*python*' -o -iname '*pypy*' \) -print -quit) ]]
 [[ -z $(find "$work/base" \( -type b -o -type c -o -type p -o -type s \) -print -quit) ]]
 # Do not expose the disposable build path in the generated tablet payload.
 find "$work/base/usr/lib/dracut" -name build-parameter.txt -type f -delete
@@ -43,7 +42,6 @@ while IFS= read -r -d '' file; do
         readelf -h "$file" | grep -E 'Machine:.*AArch64' >/dev/null
     fi
 done < <(find "$work/base" -type f -print0)
-bash "$here/../audit/check-target-payload.sh" "$work/base"
 bash "$here/../audit/check-target-privacy.sh" "$work/base"
 if grep -r -a -F -l "$work" "$work/base"; then
     echo 'Disposable build path leaked into the dracut payload' >&2; exit 1

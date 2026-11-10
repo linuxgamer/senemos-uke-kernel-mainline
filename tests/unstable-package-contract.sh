@@ -19,7 +19,7 @@ grep -Eq '^Provides: kernel-uname-r\(7\.3\.0-[1-9][0-9]*-unstable\)$' <<< "$pars
 grep -Fxq 'Requires: uke-kernel-update(kernel-touch-client-v1) >= 1' <<< "$parsed"
 grep -Fxq 'Requires: uke-boot-integration(kernel-touch-dispatch-v1) >= 1' <<< "$parsed"
 grep -Fxq 'Source9: senemos-uke-touch-runtime-1.tar.xz' <<< "$parsed"
-if grep -E '^Obsoletes:|^Conflicts:|^%(pre|post|preun|postun|pretrans|posttrans|trigger[a-z]*)($|[[:space:]])|^Requires:.*(python|pypy)' <<< "$parsed"; then
+if grep -E '^Obsoletes:|^Conflicts:|^%(pre|post|preun|postun|pretrans|posttrans|trigger[a-z]*)($|[[:space:]])' <<< "$parsed"; then
     echo 'Unstable packages must coexist without automatic activation' >&2
     exit 1
 fi

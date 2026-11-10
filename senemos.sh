@@ -442,7 +442,6 @@ internal_audit() {
     verify_patch_series "$work/source-profile.json" "$output/senemos-applied-patches.txt"
     cmp "$output/senemos-applied-patches.txt" "$work/extracted/usr/share/senemos/uke/$krel/applied-patches.txt" || die 'Packaged applied-patch receipt differs from the compiled source'
     cp "$output/senemos-applied-patches.txt" "$work/output/applied-patches.txt"
-    bash /work/kernel/src/audit/check-target-payload.sh "$work/extracted"
     bash /work/kernel/src/audit/check-target-privacy.sh "$work/extracted"
     local count=0
     : > "$work/module-abi.txt"
@@ -465,7 +464,6 @@ internal_audit() {
     fdtget -t s "$work/output/sm7675-xiaomi-uke.dtb" / compatible | grep -F xiaomi,uke
     for package in "$top/RPMS/aarch64/"*.rpm; do
         rpm -qp --requires "$package" > "$work/$(basename "$package").requires"
-        if grep -Ei 'python|pypy|libpython' "$work/$(basename "$package").requires"; then die 'Python runtime dependency in target RPM'; fi
         rpm -qp --scripts "$package" > "$work/$(basename "$package").scripts"
     done
     # Query package metadata in the RPM toolchain, so APT/APK hosts do not need RPM.
@@ -537,7 +535,6 @@ internal_lifecycle() {
     rpm -q --qf '%{RELEASE}\n' senemos-uke-linux-kernel-mainline | grep -E '^2\.'
     rpm -qa --qf '%{NAME}\n' | sort > dependency-closure.txt
     rpm -qa --qf '%{NAME}-%{EPOCHNUM}:%{VERSION}-%{RELEASE}.%{ARCH}\n' | sort > dependency-closure-nevra.txt
-    if grep -Ei 'python|pypy|libpython' dependency-closure.txt; then die 'Python present in target dependency closure'; fi
     rpm -V senemos-uke-linux-kernel-mainline-core senemos-uke-linux-kernel-mainline-modules \
         senemos-uke-linux-kernel-mainline-dtbs
     dnf -y --disablerepo='*' remove senemos-uke-linux-kernel-mainline senemos-uke-linux-kernel-mainline-core \

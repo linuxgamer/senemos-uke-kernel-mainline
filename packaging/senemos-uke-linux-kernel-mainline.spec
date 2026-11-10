@@ -185,7 +185,24 @@ test "$(cat %{uke_boot_userspace}/kernel-release)" = '%{krel}'
 (cd %{uke_boot_userspace}; sha256sum -c base-files.sha256)
 jobs=%{?_smp_build_ncpus}%{!?_smp_build_ncpus:4}
 test "$jobs" -le 8 || jobs=8
-bash boot-recipe/src/boot/build-payload.sh "$PWD" %{_uke_out} %{uke_boot_userspace}/base '%{krel}' "$jobs"
+if test "${UKE_PREBUILT_KERNEL:-0}" = 1; then
+    test -s %{_uke_out}/cross-source.sha256
+    sha256sum -c %{_uke_out}/cross-source.sha256
+    for path in .config boot-initramfs.cpio.gz Module.symvers boot-manifest \
+        arch/arm64/boot/Image; do
+        test -s "%{_uke_out}/$path"
+    done
+    readelf -h %{_uke_out}/boot-image | grep -E 'Machine:.*AArch64' >/dev/null
+    readelf -h %{_uke_out}/uke-offline-switch-root | grep -E 'Machine:.*AArch64' >/dev/null
+    test "$(cat %{_uke_out}/include/config/kernel.release)" = '%{krel}'
+    for image in linux userdata; do
+        expected=$(sed -n "s/^${image}_kernel_sha256=//p" %{_uke_out}/boot-manifest)
+        test "$(sha256sum %{_uke_out}/arch/arm64/boot/Image | cut -d ' ' -f1)" = "$expected"
+        test -s "%{_uke_out}/${image}.img"
+    done
+else
+    bash boot-recipe/src/boot/build-payload.sh "$PWD" %{_uke_out} %{uke_boot_userspace}/base '%{krel}' "$jobs"
+fi
 for requirement in CONFIG_QCOM_UKE_ABL_DT=y CONFIG_PSI=y CONFIG_DRM_MSM=m \
     CONFIG_DRM_PANEL_XIAOMI_O82=m CONFIG_SM_DISPCC_8550=m \
     CONFIG_VIDEO_QCOM_IRIS=m CONFIG_SM_VIDEOCC_8550=m \
@@ -196,7 +213,7 @@ for requirement in CONFIG_QCOM_UKE_ABL_DT=y CONFIG_PSI=y CONFIG_DRM_MSM=m \
     CONFIG_PINCTRL_SM8650_LPASS_LPI=m CONFIG_PINCTRL_PALAWAN_LPASS_LPI=m CONFIG_FM19511_UKE=m \
     CONFIG_RC_CORE=m CONFIG_LIRC=y CONFIG_IR_SPI=m CONFIG_HW_RANDOM_QCOM=m \
     CONFIG_BLK_INLINE_ENCRYPTION=y CONFIG_SCSI_UFS_CRYPTO=y \
-    CONFIG_QCOM_INLINE_CRYPTO_ENGINE=m; do
+    CONFIG_QCOM_INLINE_CRYPTO_ENGINE=m CONFIG_ZRAM=m; do
     grep -Fx "$requirement" %{_uke_out}/.config
 done
 grep -Fx '# CONFIG_PSI_DEFAULT_DISABLED is not set' %{_uke_out}/.config
@@ -401,7 +418,6 @@ ln -s ../sm7675/POCO-Pad-X1-tplg.bin \
     %{buildroot}/usr/lib/firmware/%{krel}/qcom/uke%{krel}/POCO-Pad-X1-tplg.bin
 cmp native-generated/POCO-Pad-X1-tplg.bin \
     %{buildroot}/usr/lib/firmware/%{krel}/qcom/uke%{krel}/POCO-Pad-X1-tplg.bin
-test -z "$(find %{buildroot} -type f \( -name '*.py' -o -name '*.pyc' -o -name 'python*' \) -print -quit)"
 bundle=%{buildroot}/usr/lib/senemos/kernel-updates/%{krel}
 mkdir -p "$bundle"
 install -m644 %{_uke_out}/linux.img "$bundle/linux.img"

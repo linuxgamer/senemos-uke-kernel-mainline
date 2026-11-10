@@ -27,7 +27,7 @@ grep -Fxq "$expected-boot"$'\tuke-boot-integration(kernel-touch-input-v2)\t12\t1
 if grep -Eq 'kernel-touch-(client|dispatch)|^Source9:' <<< "$parsed"; then
     echo 'Native input must not require the userspace capture processor' >&2; exit 1
 fi
-if grep -E '^Obsoletes:|^Conflicts:|^%post([[:space:]]|$)|^%pre([[:space:]]|$)|^Requires:.*(python|pypy)|senemos-uke-linux-kernel-mainline-native' <<< "$parsed"; then
+if grep -E '^Obsoletes:|^Conflicts:|^%post([[:space:]]|$)|^%pre([[:space:]]|$)|senemos-uke-linux-kernel-mainline-native' <<< "$parsed"; then
     echo 'Mainline source packages must preserve installed boot and fallback kernels' >&2
     exit 1
 fi

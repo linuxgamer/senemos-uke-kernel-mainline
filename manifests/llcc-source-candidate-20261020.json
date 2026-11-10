@@ -29,11 +29,11 @@
     },
     {
       "path": "packaging/native/native.config",
-      "sha256": "831ede0562eba19ad8713dfbbad39442d0a4aac65332ddfbc68e74402ced1343"
+      "sha256": "5a75325dc895b9515428a2231583c90f08cf8187d6fc74de2f1e0c129cc119ed"
     },
     {
       "path": "packaging/native/prepare.sh",
-      "sha256": "ccd54f9d70701d105e56c86dbcba2b2d8cdab280f5eacd29bdf60c636fb366fb"
+      "sha256": "86537a35c1ea416685c26b0e17e0d85f4c55f1b161441f5644c04664985bdce0"
     },
     {
       "path": "patches/boot/0014-uke-ufs-mcq-resources.patch",
@@ -269,7 +269,7 @@
     },
     {
       "path": "src/boot/build-payload.sh",
-      "sha256": "3eeceb5d479b5a1d20ea063f93cfa74e743201230485ab1be5bed7332eed06c6"
+      "sha256": "74d881576dff36897ffb3fee5e2e478b445491f2ae57e0c8711be2867641a736"
     },
     {
       "path": "src/boot/make-initramfs-cpio.sh",
@@ -357,7 +357,7 @@
     },
     {
       "path": "src/display/panel-xiaomi-o82.c",
-      "sha256": "6bd43e6ca73e7d795902c405bd60c93441bb466f80c6c25cc21afa0bab2e424c"
+      "sha256": "a74433c2fc70b680e08a20ec701b02a3a6fb674e1fb0b9c77acbb6165812fe2d"
     },
     {
       "path": "src/display/prepare-source.sh",
@@ -365,7 +365,7 @@
     },
     {
       "path": "src/display/uke-abl-native.h",
-      "sha256": "a4858b8928b6f4880d9ad4b05cd81b6229e7fd65c85cec599f7f4e9338285a79"
+      "sha256": "65970f0702b421c0e4409efd7020b8ba758664cc58f21f746af2b3786556dd8c"
     },
     {
       "path": "src/display/uke-o82-hdr-format.h",
@@ -385,7 +385,7 @@
     },
     {
       "path": "src/input/nt36532-uke-matrix.c",
-      "sha256": "50392408bd5b9eb41884ee791ebe9c9dc1186068b6ab73389635fc365760eb57"
+      "sha256": "7af80173cfa13bb2bdf9f7bc57279f3576b5c19996518f92cb9fe7da1431f75b"
     },
     {
       "path": "src/input/nt36532-uke-matrix.h",
@@ -393,15 +393,15 @@
     },
     {
       "path": "src/input/nt36532-uke-protocol.c",
-      "sha256": "cf33bab95023c620fda609ae1493660c3ba57d22aef6cb21929217abad2e5edd"
+      "sha256": "a6b7f99b8a226c54f36dea8c58ab0176bf44012086c6908e005e97ab1703e6e3"
     },
     {
       "path": "src/input/nt36532-uke-protocol.h",
-      "sha256": "04843dd877fa78925cee93e9c9eb08d29930a96c32bda006edaeaed9a465b5f4"
+      "sha256": "8c0aeddb7feaa9191b0e2409e43a05772ec320140ecd7c5ff95400281e982de5"
     },
     {
       "path": "src/input/nt36532-uke-spi.c",
-      "sha256": "ec80a9f5e7c72b04e2bb475d96ad3b37e8920ac1905b4ef6f63574892f446aab"
+      "sha256": "c68ae90d832e9b880fbf28840bedea56648df57afea262eea059e402c18af851"
     },
     {
       "path": "src/input/prepare-source.sh",
@@ -409,7 +409,7 @@
     },
     {
       "path": "src/input/sm7675-uke-thp.dtsi",
-      "sha256": "782109bd2357fb796a8e30ef7699735b6371c3692d0101fbf2d23c2cf0f07625"
+      "sha256": "7d0bc48e73f732d924712949f36e4ff945bf7a55f6a9c37b2e0bbf43a85af7b1"
     },
     {
       "path": "src/performance/prepare-llcc-dt.sh",
@@ -437,7 +437,7 @@
     },
     {
       "path": "src/power/uke-pm8010.h",
-      "sha256": "70548e41cd0b3d610c3298f3e8b88d3212d8195eaa0916873c861408af445cf4"
+      "sha256": "71c187985b08947607016f071da15f11e312e6438484273b62390a4212cec68f"
     },
     {
       "path": "tests/audio-eld-contract.sh",
@@ -601,7 +601,7 @@
     },
     {
       "path": "tests/mainline-package-contract.sh",
-      "sha256": "2f63c5d7aa9b9547c567ea54f6b6968281258884f37ac91471186f247c5b5062"
+      "sha256": "94e0ea19e11e3949c0d720d9aa6fb955ba0117222d595442da93d52e80415033"
     },
     {
       "path": "tests/mdt-memory-admission-contract.sh",
@@ -629,7 +629,7 @@
     },
     {
       "path": "tests/o82-panel-contract.sh",
-      "sha256": "2e524b0d316d9040fb5e7c68b60be1b3112487d73f1821aaa69694a826e00d1b"
+      "sha256": "bff7c858cfe63d96480130d378e9b0ee3121e92ae936eeb96bfa6dfbfde92b07"
     },
     {
       "path": "tests/o82-profile-loader-contract.c",
@@ -661,7 +661,7 @@
     },
     {
       "path": "tests/pm8010-population-contract.sh",
-      "sha256": "d1c85a96b167b6820373da95bebd3a37b8c1eefa10cb2da319a9f958c8b7c511"
+      "sha256": "e82f86346b90dc1c0d67f6599afe3fba67fa3ec976cc2313139c47d2b2d197b3"
     },
     {
       "path": "tests/qup-interconnect-contract.sh",
@@ -705,11 +705,11 @@
     },
     {
       "path": "tests/touch-dt-contract.sh",
-      "sha256": "9f7168db1774676084f33f233d984975b52436a28fabd9b998def938c1b45478"
+      "sha256": "8173cce009fafb9868bd6124df6e3f6e9dcba52523f256ac9a5619a05aa2d5af"
     },
     {
       "path": "tests/touch-gesture.c",
-      "sha256": "a907ac43cbb8a447656b3343722e09920bb81535dcf92385ed0022190b17e89f"
+      "sha256": "aac02125ee0b7f283c0141f7c490f96f20036ef465dc7f220b42e93d58c9f299"
     },
     {
       "path": "tests/touch-matrix.c",
@@ -717,7 +717,7 @@
     },
     {
       "path": "tests/touch-protocol-contract.sh",
-      "sha256": "0ef57c8df5328b3585936bc0bf905de39e1a704ec3ff5230d236c9d4c22a38a1"
+      "sha256": "3e62e261353e52f819168e43a1706dc10fa252d95787657e3003379b994e2d84"
     },
     {
       "path": "tests/touch-publish.c",
@@ -737,15 +737,15 @@
     },
     {
       "path": "tests/ufs-mcq-allocation-contract.sh",
-      "sha256": "750e060fd0e3d78f20754de245ffb58b8a160ed432116dbef0c5bde3b6249237"
+      "sha256": "32698594b24fac7fe5c83273f2c3673c990c18eceda697d171dcbbdedc32dc71"
     },
     {
       "path": "tests/ufs-mcq-contract.sh",
-      "sha256": "65e6f8ab12aac419b41f203ebaad2fa6bab3ed69de71983709d910ba2b870e51"
+      "sha256": "2552c28bd07e94f03caabbe83ad2272e23eb1eeea58c2129bde8a8e977681047"
     },
     {
       "path": "tests/uke-build-scope-contract.sh",
-      "sha256": "22a361acedc93654beb343b48929ba9f62e77234d6ba4354a2c5bb703fd338ed"
+      "sha256": "90bb7330e52227b17c5e1f2c6b75e079744e062805c381e2510878806ab9f75b"
     },
     {
       "path": "tests/uke-rpmh-resource-contract.sh",
@@ -761,7 +761,7 @@
     },
     {
       "path": "tests/usbss-reset-lifetime-contract.sh",
-      "sha256": "e2073e29cb9c8685f7ceb16a32abffb2c67d48c1970c856cc4e27e1856ebfb62"
+      "sha256": "b27216988679ff21a9bd0452e1e283ff02c31d5d69f669b664c73ae421d2eafe"
     },
     {
       "path": "tests/wcd939x-channel-switch-contract.sh",

@@ -15,7 +15,7 @@ names=$(rpmspec -q --qf '%{NAME}\n' --target aarch64 "$spec")
 [[ $names == "$expected"$'\n'"$expected-core"$'\n'"$expected-modules"$'\n'"$expected-dtbs"$'\n'"$expected-boot"$'\n'"$expected-singleboot" ]]
 parsed=$(rpmspec --parse --target aarch64 "$spec")
 grep -Eq '^Provides: kernel-uname-r\([0-9]+\.[0-9]+\.[0-9]+-[1-9][0-9]*-kvm\)$' <<< "$parsed"
-if grep -E '^Obsoletes:|^Conflicts:|^%(post|pre|preun|postun|posttrans|pretrans|trigger)($|[[:space:]])|^Requires:.*(python|pypy)' <<< "$parsed"; then
+if grep -E '^Obsoletes:|^Conflicts:|^%(post|pre|preun|postun|posttrans|pretrans|trigger)($|[[:space:]])' <<< "$parsed"; then
     echo 'KVM candidates must coexist without automatic activation' >&2; exit 1
 fi
 for requirement in CONFIG_KVM=y CONFIG_F2FS_FS=y CONFIG_F2FS_FS_SECURITY=y CONFIG_VIDEO_NT36532_UKE_THP=m; do

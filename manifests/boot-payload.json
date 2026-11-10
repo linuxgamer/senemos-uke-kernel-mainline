@@ -29,7 +29,7 @@
     },
     {
       "path": "packaging/native/native.config",
-      "sha256": "0228f8bdd711e918e3b4cdae3401df8b51d4c53c6e3b62c4e85a8398515639db"
+"sha256": "cfdd93a74b415482233e8ded4b31f050b28b715b31656c5841f8b61e15e9cae4"
     },
     {
       "path": "packaging/native/prepare.sh",
@@ -396,10 +396,6 @@
       "sha256": "7be538f696f79c114f2e140b3cbb72d8288dd2fc2558db8b690cd916771718f8"
     },
     {
-      "path": "src/audit/check-target-payload.sh",
-      "sha256": "e1f249804a3bbd35f33cc6941f7d41feeccfb3fed87b4733ac49eb7390a1c2f0"
-    },
-    {
       "path": "src/audit/check-target-privacy.sh",
       "sha256": "f581cdc9d1cbb174a5c80300242a6a43b4231392876c3ba9690d0ecba36576d3"
     },
@@ -413,7 +409,7 @@
     },
     {
       "path": "src/boot/build-payload.sh",
-      "sha256": "3eeceb5d479b5a1d20ea063f93cfa74e743201230485ab1be5bed7332eed06c6"
+      "sha256": "74d881576dff36897ffb3fee5e2e478b445491f2ae57e0c8711be2867641a736"
     },
     {
       "path": "src/boot/check-root-capability.sh",
@@ -473,7 +469,7 @@
     },
     {
       "path": "src/boot/make-initramfs-base.sh",
-      "sha256": "e85368a4a9dbf8f452cbacc8d9a51c117d74f56e9a0ef69011a0ad6759741772"
+      "sha256": "fbdce0627490d62743a0b39869839e0e64441079e03d421f76fce487afad62ae"
     },
     {
       "path": "src/boot/make-initramfs-cpio.sh",
@@ -773,7 +769,7 @@
     },
     {
       "path": "tests/mainline-package-contract.sh",
-      "sha256": "2f63c5d7aa9b9547c567ea54f6b6968281258884f37ac91471186f247c5b5062"
+      "sha256": "94e0ea19e11e3949c0d720d9aa6fb955ba0117222d595442da93d52e80415033"
     },
     {
       "path": "tests/mdt-memory-admission-contract.sh",
@@ -909,7 +905,7 @@
     },
     {
       "path": "tests/pm8010-population-contract.sh",
-      "sha256": "514b6340db247b32c3732bd8106b131527d55ed4e8a63fd07d4815aad73eef20"
+      "sha256": "e82f86346b90dc1c0d67f6599afe3fba67fa3ec976cc2313139c47d2b2d197b3"
     },
     {
       "path": "tests/qup-interconnect-contract.sh",
@@ -989,7 +985,7 @@
     },
     {
       "path": "tests/uke-build-scope-contract.sh",
-      "sha256": "22a361acedc93654beb343b48929ba9f62e77234d6ba4354a2c5bb703fd338ed"
+      "sha256": "90bb7330e52227b17c5e1f2c6b75e079744e062805c381e2510878806ab9f75b"
     },
     {
       "path": "tests/uke-rpmh-resource-contract.sh",
@@ -1005,7 +1001,7 @@
     },
     {
       "path": "tests/usbss-reset-lifetime-contract.sh",
-      "sha256": "e2073e29cb9c8685f7ceb16a32abffb2c67d48c1970c856cc4e27e1856ebfb62"
+      "sha256": "b27216988679ff21a9bd0452e1e283ff02c31d5d69f669b664c73ae421d2eafe"
     },
     {
       "path": "tests/userdata-grow-contract.sh",

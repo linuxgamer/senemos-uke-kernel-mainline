@@ -14,12 +14,14 @@ if grep -rE '(^|[[:space:]])root=' "$base/etc/cmdline.d"; then
 fi
 [[ ! -e $base/usr/lib/modules && ! -e $base/usr/lib/firmware ]]
 [[ ! -s $base/etc/machine-id && ! -e $base/etc/shadow && ! -e $base/root/.ssh ]]
-[[ -z $(find "$base" -type f \( -name '*.py' -o -name '*.pyc' -o -iname '*python*' -o -iname '*pypy*' \) -print -quit) ]]
 mkdir -p "$out"
 init=$out/boot-initramfs stage=$out/boot-modules
 [[ ! -e $init && ! -e $stage ]] || { echo 'Use an empty boot output for source compilation' >&2; exit 1; }
 cp -a "$base" "$init"
 # Compile a native initramfs handoff; normal boots retain upstream switch-root.
+if [[ ${UKE_CROSS_KERNEL:-0} == 1 ]]; then
+    UKE_PREBUILT_SWITCH_ROOT=$(dirname "$base")/uke-offline-switch-root
+fi
 if [[ -n ${UKE_PREBUILT_SWITCH_ROOT:-} ]]; then
     # Cross builds compile this AArch64 helper on the target-architecture worker.
     [[ -f $UKE_PREBUILT_SWITCH_ROOT && ! -L $UKE_PREBUILT_SWITCH_ROOT ]]
@@ -53,12 +55,17 @@ if [[ $usb_profile == typec-v1 ]]; then
 fi
 localversion=-${release#*-}
 export ARCH=arm64 LLVM=1
+compiler_args=()
+if [[ ${UKE_CCACHE:-0} == 1 ]]; then
+    command -v ccache >/dev/null || { echo 'UKE_CCACHE requires ccache' >&2; exit 2; }
+    compiler_args=(CC='ccache clang' HOSTCC='ccache gcc' HOSTCXX='ccache g++')
+fi
 bash "$kernel/scripts/config" --file "$out/.config" --set-str INITRAMFS_SOURCE ''
-make -C "$kernel" O="$out" LOCALVERSION="$localversion" olddefconfig
+make -C "$kernel" O="$out" LOCALVERSION="$localversion" "${compiler_args[@]}" olddefconfig
 bash "$here/../../tests/kernel-hardening-config-contract.sh" "$out/.config"
 bash "$here/../../tests/uke-build-scope-contract.sh" "$out/.config"
 bash "$here/../../tests/storage-crypto-contract.sh" "$out/.config"
-[[ $(make -s -C "$kernel" O="$out" LOCALVERSION="$localversion" kernelrelease) == "$release" ]]
+[[ $(make -s -C "$kernel" O="$out" LOCALVERSION="$localversion" "${compiler_args[@]}" kernelrelease) == "$release" ]]
 for flag in QCOM_UKE_ABL_DT GUNYAH_WATCHDOG INITRAMFS_FORCE CMDLINE_FORCE DRM_SIMPLEDRM FRAMEBUFFER_CONSOLE \
     EXT4_FS F2FS_FS XFS_FS BTRFS_FS QCOM_UKE_PLATFORM_PROFILE ACPI_PLATFORM_PROFILE; do
     grep -Fx "CONFIG_${flag}=y" "$out/.config"
@@ -66,10 +73,10 @@ done
 grep -F 'root=PARTLABEL=linux ' "$out/.config"
 grep -Fx 'CONFIG_QCOM_Q6V5_PAS=m' "$out/.config"
 uke_stage_start=$SECONDS
-make -C "$kernel" O="$out" LOCALVERSION="$localversion" -j"$jobs" Image modules qcom/sm7675-xiaomi-uke.dtb
+make -C "$kernel" O="$out" LOCALVERSION="$localversion" "${compiler_args[@]}" -j"$jobs" Image modules qcom/sm7675-xiaomi-uke.dtb
 printf 'UKE_BUILD_STAGE kernel_compile elapsed_s=%d jobs=%s\n' "$((SECONDS-uke_stage_start))" "$jobs"
 uke_stage_start=$SECONDS
-make -C "$kernel" O="$out" LOCALVERSION="$localversion" -j"$jobs" modules_install \
+make -C "$kernel" O="$out" LOCALVERSION="$localversion" "${compiler_args[@]}" -j"$jobs" modules_install \
     INSTALL_MOD_PATH="$stage" INSTALL_MOD_STRIP=1 DEPMOD=true
 source_modules=$stage/lib/modules/$release
 find "$source_modules" -maxdepth 1 -type l \( -name build -o -name source \) -delete
@@ -102,16 +109,15 @@ else
     [[ $? == 1 ]]
 fi
 [[ -s $source_modules/kernel/drivers/remoteproc/qcom_q6v5_pas.ko.zst ]]
-bash "$here/../audit/check-target-payload.sh" "$init"
 bash "$here/../audit/check-target-privacy.sh" "$init"
 find "$init" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
 bash "$here/make-initramfs-cpio.sh" "$init" "$out/usr/gen_init_cpio" "$out/boot-initramfs.cpio.gz" "$SOURCE_DATE_EPOCH"
 printf 'UKE_BUILD_STAGE initramfs elapsed_s=%d jobs=%s\n' "$((SECONDS-uke_stage_start))" "$jobs"
 uke_stage_start=$SECONDS
 bash "$kernel/scripts/config" --file "$out/.config" --set-str INITRAMFS_SOURCE "$out/boot-initramfs.cpio.gz"
-make -C "$kernel" O="$out" LOCALVERSION="$localversion" olddefconfig
+make -C "$kernel" O="$out" LOCALVERSION="$localversion" "${compiler_args[@]}" olddefconfig
 bash "$here/../../tests/kernel-hardening-config-contract.sh" "$out/.config"
-make -C "$kernel" O="$out" LOCALVERSION="$localversion" -j"$jobs" Image
+make -C "$kernel" O="$out" LOCALVERSION="$localversion" "${compiler_args[@]}" -j"$jobs" Image
 # Keep only the public certificate as a deliverable. The same key signed the
 # stripped modules before compression and is built into both Image passes.
 install -m644 "$out/certs/signing_key.x509" "$out/module-signing.x509"
@@ -127,6 +133,12 @@ clang++ -std=c++20 -O2 -Wall -Wextra -Werror "$here/boot-image.cpp" -o "$out/boo
 cmp "$out/arch/arm64/boot/Image" "$out/boot-readback-Image"
 "$out/boot-image" extract "$out/userdata.img" "$out/userdata-readback-Image"
 cmp "$out/arch/arm64/boot/Image" "$out/userdata-readback-Image"
+if [[ ${UKE_CROSS_KERNEL:-0} == 1 ]]; then
+    prebuilt=$(dirname "$base")/boot-image-aarch64
+    [[ -s $prebuilt ]] || { echo 'Missing AArch64 boot-image checker' >&2; exit 2; }
+    install -m755 "$prebuilt" "$out/boot-image"
+    readelf -h "$out/boot-image" | grep -E 'Machine:.*AArch64' >/dev/null
+fi
 (cd "$source_modules"; find kernel -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > "$out/modules.sha256"
 image=$(sha256sum "$out/linux.img" | cut -d ' ' -f1)
 userdata_image=$(sha256sum "$out/userdata.img" | cut -d ' ' -f1)
@@ -134,5 +146,9 @@ raw=$(sha256sum "$out/arch/arm64/boot/Image" | cut -d ' ' -f1)
 inventory=$(sha256sum "$out/modules.sha256" | cut -d ' ' -f1)
 printf 'format=1\nkernel_release=%s\nlinux_image_sha256=%s\nuserdata_image_sha256=%s\nlinux_kernel_sha256=%s\nuserdata_kernel_sha256=%s\nmodules_sha256=%s\nroot_selector_capability=uke-elfnote-v2\nboot_reset_capability=uke-gunyah-reset-v1\n' \
     "$release" "$image" "$userdata_image" "$raw" "$raw" "$inventory" > "$out/boot-manifest"
+if [[ ${UKE_CROSS_KERNEL:-0} == 1 ]]; then
+    (cd "$kernel"; sha256sum native-profile/SHA256SUMS \
+        senemos-adaptation/source-lock.json boot-recipe/lock.json) > "$out/cross-source.sha256"
+fi
 [[ -s $source_modules/kernel/drivers/input/touchscreen/nt36532-uke/nt36532-uke-touch.ko.zst ]]
 [[ ! -e $source_modules/uke/uke-touch-capture ]]

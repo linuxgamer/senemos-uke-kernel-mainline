@@ -531,7 +531,7 @@
     },
     {
       "path": "configs/fedora.config",
-      "sha256": "69208fd016401450f747595c936c98b756f70e8b055677f944e04e274688caad"
+      "sha256": "5d882a1a0008b9548a623757aefb7af3e195c48ab21611d887388a8fff1a8f99"
     }
   ],
   "patch_series": "7.3.0"
