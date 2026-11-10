@@ -29,11 +29,11 @@
     },
     {
       "path": "packaging/native/native.config",
-"sha256": "cfdd93a74b415482233e8ded4b31f050b28b715b31656c5841f8b61e15e9cae4"
+      "sha256": "cfdd93a74b415482233e8ded4b31f050b28b715b31656c5841f8b61e15e9cae4"
     },
     {
       "path": "packaging/native/prepare.sh",
-      "sha256": "9ecc01d380cb4fbd655ab0791576dd64e539780a3d1e3edc0307c04b8df4811a"
+      "sha256": "20105cb67fe247dd2e987d587139f21b69816351081a30bdf3eabfecd66a6f8b"
     },
     {
       "path": "patches/boot/0005-uke-root-selector.patch",
@@ -493,7 +493,7 @@
     },
     {
       "path": "src/boot/uke-abl.c",
-      "sha256": "7087568ac3f1e202989808007cbfef5490d774be98555b9e9c24cee73dce4877"
+      "sha256": "1e2abd818c4254e433037e88bfccadfb91b045ffb95d504a0818a7b68deba992"
     },
     {
       "path": "src/boot/uke-bwmon.h",
@@ -521,27 +521,27 @@
     },
     {
       "path": "src/display/dpu_o82_profiles.c",
-      "sha256": "65c963c6b2d63ecd1cbc76a1d7f58a8f5528c5b02fdc14eac67837d964f4b4c8"
+      "sha256": "98382e04a21af440ae69672b878d267c7049d23bf517a754388a16ee9d0c6ae3"
     },
     {
       "path": "src/display/dpu_o82_profiles.h",
-      "sha256": "53ef42517cbdad323069927efbef703359e797210aeb34b635f23c4a256ae489"
+      "sha256": "9396a72dc5e4104f3e67566a74b666d47267fd292339858484a626a9e4106e68"
     },
     {
       "path": "src/display/dpu_o82_regdma.c",
-      "sha256": "baa48492b21e5b21c27656cc342e86a66df9607bb1f4eb251ca63280194f4b72"
+      "sha256": "82b3b85f51fc27c75e911aa0557246ab449a6261840aeacc18c6460cf7dfdaa0"
     },
     {
       "path": "src/display/dpu_o82_regdma.h",
-      "sha256": "076ae17346d8d8e1e1b67f476183052aa2ecb2d601a5541369da018a22e3b1c3"
+      "sha256": "96e0e077f5735b61074817962baf976581f97d078182f96552e71d8114d809be"
     },
     {
       "path": "src/display/o82-color-firmware.h",
-      "sha256": "7cac536f24d45d5cba4a299d4a730a8036c6e20a313b09b333f5a4f804733131"
+      "sha256": "d9a4b176ad7be2334b5cf79af1f3a59185cf5304bf22247ea427bfb8839ae48a"
     },
     {
       "path": "src/display/o82-color-profile.cpp",
-      "sha256": "d1d7a30aa09e6c100e06adf971fe8ef43b0c0d0ca0d4854ce9b5ac25d5b59211"
+      "sha256": "89c8aae6054e016724ddf49b251a259298003286e2cc12a946f4e6fc30ad7392"
     },
     {
       "path": "src/display/o82-regdma.h",
@@ -581,7 +581,7 @@
     },
     {
       "path": "src/input/nt36532-uke-protocol.c",
-      "sha256": "a6b7f99b8a226c54f36dea8c58ab0176bf44012086c6908e005e97ab1703e6e3"
+      "sha256": "f81f42c2622a6eb671fd7ca11fbb0ce700b6f5a7589a43cb379b5baa7cdfb1ca"
     },
     {
       "path": "src/input/nt36532-uke-protocol.h",
@@ -589,7 +589,7 @@
     },
     {
       "path": "src/input/nt36532-uke-spi.c",
-      "sha256": "c68ae90d832e9b880fbf28840bedea56648df57afea262eea059e402c18af851"
+      "sha256": "f4be3266eb672c1e33f3d6358946db30839c6f5031bf1efbeda66c5496fcaa50"
     },
     {
       "path": "src/input/prepare-source.sh",
@@ -701,11 +701,11 @@
     },
     {
       "path": "tests/dpu-reservation-contract.sh",
-      "sha256": "c3bb8396ba174a38a22e96055bd09469a9af31627b116780bbe9f813cd63be06"
+      "sha256": "0f99c8c6cc9b6e09812b23fc2c15b140b887a86558adf08f135344e1cbe35319"
     },
     {
       "path": "tests/dpu-video-timing-contract.sh",
-      "sha256": "07ec8430e807e924da9875359f7b6bf8e453094493c9457c34e37c322d85a9d4"
+      "sha256": "172d3e8f9d50b164b698358a3d89c9a4cde548f04c3b3ca83a1803716ba63469"
     },
     {
       "path": "tests/dsi-color-depth-contract.sh",
@@ -837,7 +837,7 @@
     },
     {
       "path": "tests/msm-retirement-proof-contract.sh",
-      "sha256": "060ac6b7469c32125359bf8ca86f7c0c649a5c8d909d160239e5c565f1146f62"
+      "sha256": "b54c32638c3f9e56ee63d2caa430bf44ba03e61dfc605d70dd3eb12526fb6835"
     },
     {
       "path": "tests/msm-writeback-contract.sh",
@@ -853,7 +853,7 @@
     },
     {
       "path": "tests/o82-avr-contract.sh",
-      "sha256": "d84a5845ff6c40d4daf9f929738bc47b071a742e66a53620c8788b1cf599c465"
+      "sha256": "8d0e75faf0d1b64c27b3550cc9053372197264baa86cd71c8a63c78d5a40a2b7"
     },
     {
       "path": "tests/o82-hdr-edid-contract.cpp",
@@ -865,19 +865,19 @@
     },
     {
       "path": "tests/o82-profile-loader-contract.c",
-      "sha256": "3fca21eb7de8a41bcf908bdf0114c3eb60e659e6ffa92ef5899c21e4b316fb68"
+      "sha256": "6efbef54ba1403df09218e3bed9b0320b6cd73b6782ec70a02c9d17943feef66"
     },
     {
       "path": "tests/o82-profile-loader-contract.sh",
-      "sha256": "e9519ff2db8acea96c7f41c4973f41d968bca04935211793ae4534010a8cb6f8"
+      "sha256": "18e93120b593073d4c85e24c629cb2dc3ff7c64fa66a0b4297b5ff281db6b3cd"
     },
     {
       "path": "tests/o82-regdma-transport-contract.c",
-      "sha256": "c1932a846898898e4e3b84b28e7e7237535fc0d38e02766d415e2be56915a755"
+      "sha256": "7db7296bba4a32a6294a8953a043f1e7bdf80cb15dc25059567dfd58601f1f2d"
     },
     {
       "path": "tests/o82-regdma-transport-contract.sh",
-      "sha256": "b6c12a978f51e0a249d5d2735eb14d03c1cf058729f530b1d184eb9c66ee7dd0"
+      "sha256": "192732f05086ea7388345a06678d00187e07921ad364610bf3f30796b3d4f694"
     },
     {
       "path": "tests/o82-vrr-floor-contract.sh",
@@ -969,7 +969,7 @@
     },
     {
       "path": "tests/touch-protocol-contract.sh",
-      "sha256": "3e62e261353e52f819168e43a1706dc10fa252d95787657e3003379b994e2d84"
+      "sha256": "48f28e7d26b9f5dc714dfbb6e4f9d032846b6aaa6f76b3977178bf7ec27e1a0b"
     },
     {
       "path": "tests/touch-publish.c",
@@ -977,11 +977,11 @@
     },
     {
       "path": "tests/touch-transport-contract.sh",
-      "sha256": "ef55d62ae2d3286c010f4e2725861c293d3988dff4aafd207211537f6c62dac1"
+      "sha256": "fef82d0f4897938384686636b5afe447a88fffb2de3cf5f6022cf9112afc6466"
     },
     {
       "path": "tests/touch-transport.c",
-      "sha256": "85517289da7a9dca187562d33b67a415f2fe27a2cfa8cac2259078ba5309d8aa"
+      "sha256": "df4a8f0ebc02e3efff79146f4b60b55756cfe1ef627934dfbc7f94fb12b4611b"
     },
     {
       "path": "tests/uke-build-scope-contract.sh",
@@ -1109,11 +1109,11 @@
     },
     {
       "path": "src/sensors/prepare-source.sh",
-      "sha256": "64e4f764f3395014db7b153418c7b764c7401a70963080455bd2f30c0ec462b5"
+      "sha256": "10d7e641fd94781b6a50b796c1d62b4c6b4f35edc96929cc6486b4ba5379157c"
     },
     {
       "path": "src/sensors/uke-ssc-iio.c",
-      "sha256": "c352d1320186476975353b60ea501aa5140749aed557a218841cc7294b909ab9"
+      "sha256": "a1774b25995513cc9f86f541360b8a2fe8f5966c82af91698e7c6496552ac9c7"
     },
     {
       "path": "src/sensors/uke-ssc-protocol.c",
@@ -1141,15 +1141,15 @@
     },
     {
       "path": "tests/ssc-native-contract.c",
-      "sha256": "3d40482a1107f8a9023185f16c89fc1ce7423447631365d8afcff0c7feb62d3c"
+      "sha256": "32a3c55171343a2af5458fb9604ccfdef7195f4f34a35b8e8cdb1ed569405f4a"
     },
     {
       "path": "tests/ssc-native-contract.sh",
-      "sha256": "50c0485b04be784fc2e28b5761e07afe6882ae203e1355908184533fc87d9b95"
+      "sha256": "540e9b9d60056395fddb63a2106fb99e42213ca6602d8fa47fbcaec473bbd435"
     },
     {
       "path": "tests/ssc-native-host.h",
-      "sha256": "ee715775fd1fa8b7e5a570e9608801ec90b0d727a8383ab38f6ef6f5e9bc611f"
+      "sha256": "6ead3a1c624539d5f6ec3bb9e6cef3f43f9157087839c4118b3eefb7a08a85cd"
     },
     {
       "path": "src/boot/sm7675-uke-usb2.dtso",
@@ -1217,15 +1217,15 @@
     },
     {
       "path": "src/display/dpu_o82_platform.c",
-      "sha256": "a8a6db2f8218add640e0cd80e3050a95b08f4fb411b1bc87564747bb2484ffc6"
+      "sha256": "933b15a26ea11832b1dbe3ad1c2e65ac5404b45de434ef2140744dcfb1fc4484"
     },
     {
       "path": "src/display/dpu_o82_platform.h",
-      "sha256": "9be5b1246551e4c827161bf789f4378a6dd6e9b63c22575b7071ed758c54eea8"
+      "sha256": "23b6f1533f6b01c30a1ed2ad363b3def3ad7a3e3f3d456ee14da74ca2f6d1452"
     },
     {
       "path": "src/display/prepare-o82-regdma.sh",
-      "sha256": "b794c9653898a4937af8829db2490d7666d9a152285e5d7e55d223a3d5ca80d4"
+      "sha256": "74ed6ce15e3a054e8ad887159df11a854be6a1be97fb21f2e23b831709073e63"
     },
     {
       "path": "src/display/bindings/qcom,sm7675-dpu.yaml",
@@ -1233,11 +1233,11 @@
     },
     {
       "path": "patches/display/0072-o82-regdma-resource.patch",
-      "sha256": "579537deef614fbe2294d0f5117e5ed8835d947846d9b122426de3edd9a139ef"
+      "sha256": "8b25b0749be6d21d89f0227bb83646d17bcc6004e3886c4acdce844db7ae215c"
     },
     {
       "path": "tests/o82-platform-contract.sh",
-      "sha256": "1421b4bde41d75a57fc325f4c77b211b5266e020e11d622f189d9fccb93cdb24"
+      "sha256": "e358fedbc49f2edea90e2688cc0aea5ef77f33615d98fce14e80fbaa082b4512"
     },
     {
       "path": "tests/ssc-supplier-contract.sh",
