@@ -2,8 +2,6 @@ name: Verified upstream candidates and matched COPR profiles
 on:
   pull_request:
   workflow_dispatch:
-  schedule:
-    - cron: '23 5 * * *'
 permissions:
   contents: read
 concurrency:
@@ -18,65 +16,3 @@ jobs:
       - run: bash -n scripts/prepare-upstream-candidate.sh && bash tests/upstream-candidate-contract.sh
       - run: bash tests/prebuilt-helpers-contract.sh
       - run: bash tests/mainline-package-contract.sh
-  common:
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: check
-    permissions:
-      contents: write
-    runs-on: ubuntu-24.04
-    timeout-minutes: 150
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - role: common
-            branch: main
-            package: senemos-uke-linux-kernel-mainline
-          - role: kvm
-            branch: kvm
-            package: senemos-uke-linux-kernel-mainline-kvm
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          path: automation
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: ${{ matrix.branch }}
-          path: source
-      - run: sudo apt-get update && sudo apt-get install -y jq rpm gnupg xz-utils gcc g++ make device-tree-compiler libfdt-dev
-      - name: Verify upstream and prepare the actual source queue
-        id: candidate
-        env:
-          ROLE: ${{ matrix.role }}
-          BRANCH: ${{ matrix.branch }}
-        run: |
-          set -Eeuo pipefail
-          curl -fsSL --connect-timeout 20 --max-time 90 https://www.kernel.org/releases.json > "$GITHUB_WORKSPACE/releases.json"
-          bash automation/scripts/prepare-upstream-candidate.sh "$GITHUB_WORKSPACE/source" "$ROLE" "$GITHUB_WORKSPACE/releases.json" | tee "$GITHUB_WORKSPACE/candidate.log"
-          result=$(tail -1 "$GITHUB_WORKSPACE/candidate.log")
-          test "${result%%$'\t'*}" = prepared -o "${result%%$'\t'*}" = unchanged
-          printf 'evr=%s\n' "${result#*$'\t'}" >> "$GITHUB_OUTPUT"
-          if [[ $result == prepared$'\t'* ]]; then cd source; git push origin "HEAD:refs/heads/$BRANCH"; fi
-      - name: Wait for the matching successful common build
-        env:
-          PACKAGE: ${{ matrix.package }}
-          EVR: ${{ steps.candidate.outputs.evr }}
-        run: |
-          set -Eeuo pipefail
-          source automation/scripts/prepare-upstream-candidate.sh
-          # COPR auto-rebuild webhooks own submission. Never race a second POST.
-          for attempt in $(seq 1 90); do
-            builds=$(curl -fsSL --connect-timeout 20 --max-time 90 "https://copr.fedorainfracloud.org/api_3/build/list?ownername=mcc45tr&projectname=uke-linux-test&packagename=$PACKAGE&limit=30")
-            build=$(matching_build <(printf '%s\n' "$builds") "$PACKAGE" "$EVR")
-            state=$(jq -r .state <<< "$build")
-            case $state in
-              succeeded)
-                id=$(jq -r .id <<< "$build")
-                chroot=$(curl -fsSL --connect-timeout 20 --max-time 90 "https://copr.fedorainfracloud.org/api_3/build-chroot?build_id=$id&chrootname=fedora-rawhide-aarch64")
-                jq -e --arg url "https://download.copr.fedorainfracloud.org/results/mcc45tr/uke-linux-test/fedora-rawhide-aarch64/$id-$PACKAGE/" '.state=="succeeded" and .result_url==$url' <<< "$chroot"
-                exit 0;;
-              failed|canceled|skipped) echo "Matching common build is $state" >&2; exit 1;;
-            esac
-            sleep 60
-          done
-          echo 'Matching common build or COPR webhook is unavailable' >&2; exit 1
