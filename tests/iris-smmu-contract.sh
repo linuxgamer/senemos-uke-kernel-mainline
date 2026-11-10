@@ -45,7 +45,7 @@ static bool qcom_uke_display_domain(struct arm_smmu_device *s, struct device *d)
     (void)s; (void)d; return display;
 }
 static bool qcom_uke_display_actlr_matches(struct arm_smmu_device *s) { (void)s; return true; }
-static bool qcom_uke_sensor_cb(struct device *dev) { (void)dev; return false; }
+static bool __attribute__((unused)) qcom_uke_sensor_cb(struct device *dev) { (void)dev; return false; }
 static bool __attribute__((unused)) qcom_uke_hdmi_dma(struct device *dev) { (void)dev; return false; }
 static int __arm_smmu_alloc_bitmap(unsigned long *map, int start, unsigned count) {
     assert(map && start == 2 && count == 16); ++allocations; return 3;
