@@ -171,6 +171,7 @@ srpm: validate
 	mkdir -p "$$assets"
 	git archive HEAD src patches manifests/video-linux73-candidate-20261025.json tests | tar -xf - -C "$$assets"
 	install -m644 packaging/native/native.config packaging/native/README.md packaging/native/usb-profile packaging/native/audio-profile packaging/native/llcc-profile "$$assets/"
+	install -m644 manifests/kms57-parent-files.sha256 "$$assets/"
 	install -m755 packaging/native/prepare.sh "$$assets/"
 	git rev-parse HEAD > "$$assets/source-commit"
 	jq -n --arg commit "$$(git rev-parse HEAD)" '{schema_version:1,source_mode:"git-archive",source_commit:$$commit}' > "$$assets/source-composition.json"
