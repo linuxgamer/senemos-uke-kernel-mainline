@@ -28,7 +28,7 @@ unchanged. Source-derived fixtures exercise the actual worker, protocol callback
 and setter, including independent adapter values and a failed adapter query.
 
 The retained root-selector capability and guarded updater dependency are
-described in [the capability contract](ROOT-SELECTOR-CAPABILITY.md). This source
+described in the capability contract. This source
 does not qualify a physical boot, USB current or suspend transition.
 
 ## Observed limit
