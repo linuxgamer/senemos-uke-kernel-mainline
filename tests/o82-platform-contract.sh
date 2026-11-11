@@ -101,5 +101,5 @@ C
 for compiler in gcc clang; do
     "$compiler" -std=gnu11 -O1 -g -Wall -Wextra -Werror \
         -fsanitize=address,undefined -fno-omit-frame-pointer "$work/test.c" -o "$work/test"
-    ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 "$work/test"
+    ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1} UBSAN_OPTIONS=${UBSAN_OPTIONS:-halt_on_error=1} "$work/test"
 done

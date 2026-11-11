@@ -24,5 +24,5 @@ flags=(-std=gnu11 -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter
 read -r -a extra <<< "${CAMCC_NATIVE_TEST_FLAGS:-}"
 "${CC:-clang}" "${flags[@]}" "${extra[@]}" \
     "$project/tests/fixtures/camcc-native-check.c" -o "$work/native"
-ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 "$work/native"
+ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1:halt_on_error=1} "$work/native"
 printf 'Actual native CAMCC registration/handoff functions passed boundary models; hardware remains unqualified\n'

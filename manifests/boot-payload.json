@@ -877,7 +877,7 @@
     },
     {
       "path": "tests/o82-regdma-transport-contract.sh",
-      "sha256": "192732f05086ea7388345a06678d00187e07921ad364610bf3f30796b3d4f694"
+      "sha256": "89739dcf8c2fb71540f9b21c1a9eda206664f189488614ce79acc2801fb8d7ae"
     },
     {
       "path": "tests/o82-vrr-floor-contract.sh",
@@ -969,7 +969,7 @@
     },
     {
       "path": "tests/touch-protocol-contract.sh",
-      "sha256": "48f28e7d26b9f5dc714dfbb6e4f9d032846b6aaa6f76b3977178bf7ec27e1a0b"
+      "sha256": "0ec76fd0143a0a3b967531115bf89ed562b0e6a3262f5080b5ccd2d660998bdc"
     },
     {
       "path": "tests/touch-publish.c",
@@ -1137,7 +1137,7 @@
     },
     {
       "path": "tests/ssc-protocol-contract.sh",
-      "sha256": "dc866789c44ef080f01d362f3df950d83f0b42e56120e4adb2ad4947680d35fa"
+      "sha256": "937843558c70f0aa05516b77c439d78e7910f1eb715e5adf86f77b132fa7820c"
     },
     {
       "path": "tests/ssc-native-contract.c",
@@ -1145,7 +1145,7 @@
     },
     {
       "path": "tests/ssc-native-contract.sh",
-      "sha256": "540e9b9d60056395fddb63a2106fb99e42213ca6602d8fa47fbcaec473bbd435"
+      "sha256": "cc2489a6daa1058479f230e5f0da10e940c5b53ec6a486c1eaacf6faf291e811"
     },
     {
       "path": "tests/ssc-native-host.h",
@@ -1237,11 +1237,11 @@
     },
     {
       "path": "tests/o82-platform-contract.sh",
-      "sha256": "e358fedbc49f2edea90e2688cc0aea5ef77f33615d98fce14e80fbaa082b4512"
+      "sha256": "e72a60a90c0b9f01d4ec526852202d56356a616c7c231bdc56125d962725cfe8"
     },
     {
       "path": "tests/ssc-supplier-contract.sh",
-      "sha256": "0d8c84daa5e97798fe661921a0b6a4e0caff6220c7a7b1b2585f6d53f5d1d778"
+      "sha256": "73d77b74bcacff23fa4d821a81b8ffc3c11bd831ca160529498cec86740640a4"
     },
     {
       "path": "tests/hardware1900-package-contract.sh",

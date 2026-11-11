@@ -77,4 +77,4 @@ if [[ ${SANITIZE:-1} == 1 ]]; then
  flags+=(-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
 fi
 "${CC:-gcc}" "${flags[@]}" "$stage/check.c" -o "$stage/check"
-ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 "$stage/check" "${ATH11K_STATUS_MODE:-all}"
+ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1} UBSAN_OPTIONS=${UBSAN_OPTIONS:-halt_on_error=1} "$stage/check" "${ATH11K_STATUS_MODE:-all}"

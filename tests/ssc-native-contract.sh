@@ -86,7 +86,7 @@ for compiler in gcc clang; do
         "$kernel/drivers/soc/qcom/qmi_encdec.c" -o "$stage/qmi.o"
     "$compiler" "${common[@]}" "$stage/check.c" \
         "$root/src/sensors/uke-ssc-protocol.c" "$stage/qmi.o" -o "$stage/check"
-    ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 "$stage/check"
+    ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1} UBSAN_OPTIONS=${UBSAN_OPTIONS:-halt_on_error=1} "$stage/check"
     # Restore only the former production guard. Positive IDs must expose it
     # with the same real callback fixture under both compilers/sanitizers.
     sed '/ret = qmi_txn_init(&c->client, &txn, NULL, NULL);/,/return ret;/s/if (ret < 0)/if (ret)/' \
@@ -94,7 +94,7 @@ for compiler in gcc clang; do
     ! cmp -s "$stage/check.c" "$stage/positive-id-negative.c"
     "$compiler" "${common[@]}" "$stage/positive-id-negative.c" \
         "$root/src/sensors/uke-ssc-protocol.c" "$stage/qmi.o" -o "$stage/positive-id-negative"
-    if (ulimit -c 0; ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 \
+    if (ulimit -c 0; ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1} UBSAN_OPTIONS=${UBSAN_OPTIONS:-halt_on_error=1} \
         "$stage/positive-id-negative") > "$stage/positive-id-negative.log" 2>&1; then
         printf 'SSC fixture missed the former positive transaction-ID refusal\n' >&2
         exit 1
@@ -113,7 +113,7 @@ for compiler in gcc clang; do
             ! cmp -s "$stage/check.c" "$stage/negative.c"
             "$compiler" "${common[@]}" "$stage/negative.c" \
                 "$root/src/sensors/uke-ssc-protocol.c" "$stage/qmi.o" -o "$stage/negative"
-            if (ulimit -c 0; ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 \
+            if (ulimit -c 0; ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1} UBSAN_OPTIONS=${UBSAN_OPTIONS:-halt_on_error=1} \
                 "$stage/negative") > "$stage/negative.log" 2>&1; then
                 printf 'SSC observation fixture missed %s\n' "$fault" >&2
                 exit 1

@@ -71,7 +71,7 @@ fi
 "${CC:-cc}" -std=gnu11 -O2 -g -Wall -Wextra -Werror -Wconversion \
     -I "$stage" -I "$root/src/input" "$root/tests/touch-gesture.c" "$protocol" \
     "${sanitize[@]}" -o "$stage/gesture"
-ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 "$stage/gesture" "${UKE_TOUCH_GESTURE_MODE:-all}"
+ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1} UBSAN_OPTIONS=${UBSAN_OPTIONS:-halt_on_error=1} "$stage/gesture" "${UKE_TOUCH_GESTURE_MODE:-all}"
 if [[ $gesture_only == 1 ]]; then
     printf 'Actual touch gesture protocol: %s PASS; mandatory ACK/error/readiness and coordinate readback retained\n' "${UKE_TOUCH_GESTURE_MODE:-all}"
     exit 0

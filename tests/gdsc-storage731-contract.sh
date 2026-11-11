@@ -51,5 +51,5 @@ printf 'GDSC actual before-control: ASan identified published-provider use-after
 sed '/^#include /d' "$production/drivers/clk/qcom/gdsc.c" > "$work/gdsc-functions.c"
 read -r -a extra <<< "${GDSC_STORAGE_TEST_FLAGS:-}"
 "${CC:-clang}" "${flags[@]}" "${extra[@]}" "$fixture" -o "$work/candidate"
-ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 "$work/candidate"
+ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1:halt_on_error=1} "$work/candidate"
 printf 'GDSC permanent provider storage: actual production source/header match and lifetime assertions passed\n'

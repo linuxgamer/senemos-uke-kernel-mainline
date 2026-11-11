@@ -22,5 +22,5 @@ for compiler in gcc clang; do
         -I"$stage/include" -I"$root/src/sensors" \
         "$root/src/sensors/uke-ssc-protocol.c" "$root/tests/ssc-protocol-contract.c" \
         -lm -o "$stage/check"
-    ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 "$stage/check"
+    ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1} UBSAN_OPTIONS=${UBSAN_OPTIONS:-halt_on_error=1} "$stage/check"
 done

@@ -645,7 +645,7 @@
     },
     {
       "path": "tests/o82-regdma-transport-contract.sh",
-      "sha256": "192732f05086ea7388345a06678d00187e07921ad364610bf3f30796b3d4f694"
+      "sha256": "89739dcf8c2fb71540f9b21c1a9eda206664f189488614ce79acc2801fb8d7ae"
     },
     {
       "path": "tests/o82-vrr-floor-contract.sh",
@@ -717,7 +717,7 @@
     },
     {
       "path": "tests/touch-protocol-contract.sh",
-      "sha256": "48f28e7d26b9f5dc714dfbb6e4f9d032846b6aaa6f76b3977178bf7ec27e1a0b"
+      "sha256": "0ec76fd0143a0a3b967531115bf89ed562b0e6a3262f5080b5ccd2d660998bdc"
     },
     {
       "path": "tests/touch-publish.c",

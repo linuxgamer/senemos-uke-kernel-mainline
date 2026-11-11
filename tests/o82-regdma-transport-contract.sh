@@ -202,10 +202,10 @@ sources=("$root/src/display/dpu_o82_regdma.c" "$root/src/display/dpu_o82_upload.
 includes=(-I"$scratch" -I"$root/src/display")
 gcc -std=gnu11 -O1 -g -UNDEBUG -Wall -Wextra -Werror -fsanitize=address,undefined \
     -fno-omit-frame-pointer "${includes[@]}" "${sources[@]}" -o "$scratch/contract"
-ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 "$scratch/contract"
+ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1} UBSAN_OPTIONS=${UBSAN_OPTIONS:-halt_on_error=1} "$scratch/contract"
 clang -std=gnu11 -O1 -g -UNDEBUG -Wall -Wextra -Werror -fsanitize=address,undefined \
     -fno-omit-frame-pointer "${includes[@]}" "${sources[@]}" -o "$scratch/sanitized"
-ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 "$scratch/sanitized"
+ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1} UBSAN_OPTIONS=${UBSAN_OPTIONS:-halt_on_error=1} "$scratch/sanitized"
 for binary in contract sanitized; do
     set +e
     (ulimit -c 0; O82_UNSAFE_DETACH=1 "$scratch/$binary") > "$scratch/negative.log" 2>&1
