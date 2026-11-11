@@ -15,3 +15,4 @@ jobs:
       - run: bash tests/upstream-candidate-contract.sh
       - run: bash tests/prebuilt-helpers-contract.sh
       - run: bash tests/copr-only-preparation-contract.sh
+      - run: bash tests/native-prepare-steps-contract.sh

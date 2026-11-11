@@ -7,7 +7,11 @@ manifest=$root/manifests/video-linux73-candidate-20261025.json
 jq -e '.upstream_version == "7.3.0"' "$manifest" >/dev/null
 version=$(awk '/^VERSION =/{v=$3} /^PATCHLEVEL =/{p=$3} /^SUBLEVEL =/{s=$3} END{print v "." p "." s}' "$kernel/Makefile")
 case $version in 7.3.0|7.3.1) ;; *) exit 1;; esac
-[[ ! -e $kernel/include/linux/qcom-uke-video.h ]]
+if [[ -e $kernel/include/linux/qcom-uke-video.h ]]; then
+    printf 'Native video source is already prepared in %s; refusing a second preparation\n' \
+        "$kernel" >&2
+    exit 1
+fi
 # The mainline 7.3 preparation does not integrate the native display provider,
 # but the Cliffs video routes live in its interconnect header and its DPU/DSI
 # sources pull the display clock votes. Add that prerequisite first.

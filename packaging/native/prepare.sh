@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Prepare native source; the boot producer separately generates its initramfs.
 set -Eeuo pipefail
+# A failing step must name itself: the RPM %prep error otherwise reports only the
+# generated rpm script path, which hides the actual preparation step.
+trap 'status=$?; printf "native prepare failed: status=%s line=%s command=%s\n" \
+    "$status" "$LINENO" "$BASH_COMMAND" >&2' ERR
 kernel=$(realpath "${1:?Pass prepared kernel}")
 profile=$(cd -- "$(dirname -- "$0")" && pwd)
 output=$kernel/native-generated
@@ -156,7 +160,6 @@ if [[ $(cat "$profile/audio-profile") =~ ^(hdmi-only|speakers|microphones)$ ]]; 
         bash "$profile/tests/dp-eld-notification-contract.sh" "$kernel/sound/soc/codecs/hdmi-codec.c"
     fi
 fi
-bash "$profile/src/video/prepare-source.sh" "$kernel"
 # NSP shares SH1 with the native display and video paths prepared above.
 for cdsp_patch in 0025-cliffs-nsp-crypto-suppliers.patch \
     0026-cliffs-proxy-and-pas-stop-ownership.patch 0027-remoteproc-early-stop.patch \

@@ -33,7 +33,7 @@
     },
     {
       "path": "packaging/native/prepare.sh",
-      "sha256": "20105cb67fe247dd2e987d587139f21b69816351081a30bdf3eabfecd66a6f8b"
+      "sha256": "c21af686520987f652bec8a3c1e8c63f4bf9f3f794ed8575483f071ce4deac32"
     },
     {
       "path": "patches/boot/0014-uke-ufs-mcq-resources.patch",
