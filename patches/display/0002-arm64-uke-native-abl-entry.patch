@@ -10,10 +10,9 @@ evidence and must not be added to the normal release series.
 
 --- a/arch/arm64/kernel/uke-abl.c
 +++ b/arch/arm64/kernel/uke-abl.c
-@@ -1069,6 +1069,8 @@
+@@ -1069,5 +1069,7 @@
   */
  static unsigned char uke_fdt[UKE_FDT_CAPACITY] __ro_after_init __aligned(8);
- #include "uke-abl-overlays.h"
 +#include "uke-abl-native.h"
 +#include "uke-native-display.h"
  #include "uke-lights.h"
