@@ -7,7 +7,7 @@ destination=$(realpath "$1") lock=$root/manifests/touch-runtime.json
 jq -e '.schema==1 and .private_inputs==false' "$lock" >/dev/null
 commit=$(jq -er .owner_commit "$lock")
 [[ $commit =~ ^[a-f0-9]{40}$ ]]
-cache=$root/referances/touch-runtime
+cache=$root/source-cache/touch-runtime
 mkdir -p "$cache"
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
