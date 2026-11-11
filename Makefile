@@ -6,10 +6,14 @@ version := 7.3.1
 patch_series := 7.3.0
 patch_count := 128
 outdir ?= $(CURDIR)/build/srpm
-.PHONY: require-unstable-series
+.PHONY: refresh-pins check-pins require-unstable-series
+refresh-pins:
+	bash tools/refresh-source-pins.sh
+check-pins:
+	bash tools/refresh-source-pins.sh --check
 require-unstable-series:
 	bash scripts/require-unstable-series.sh "$(version)"
-validate: test-touch-protocol test-touch-transport
+validate: check-pins test-touch-protocol test-touch-transport
 	bash tests/storage-crypto-negative-contract.sh
 	bash tests/input-capability-inventory.sh
 	bash tests/kvm-source-contract.sh
