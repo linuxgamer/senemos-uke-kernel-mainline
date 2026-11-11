@@ -601,7 +601,7 @@
     },
     {
       "path": "tests/mainline-package-contract.sh",
-      "sha256": "8ca6b203929318c5526eda67a14d277161a46c3a3f861bb35a133c30191d5e2a"
+      "sha256": "357db976eeb2c2524b4c97e378a3595119d3353704862a083363a55a7bc24767"
     },
     {
       "path": "tests/mdt-memory-admission-contract.sh",
