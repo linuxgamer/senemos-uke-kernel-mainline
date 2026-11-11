@@ -96,12 +96,12 @@ driven from the umbrella; do not duplicate its rootfs logic here.
 - Keep proofs, logs and long trial histories in the private records, not in this
   public repository. Do not commit credentials, serial numbers, calibration,
   OEM blobs or home-directory paths.
-- Documents created before November 2026 were removed in the 2026-11-11
+- Do not recreate the `referances/` or `reports/` trees; downloaded
+  archives live in `source-cache/`. Documents created before November 2026 were removed in the 2026-11-11
   documentation cleanup; recover them from git history when needed.
 - Link only to files that exist in this repository or to absolute URLs of other
   repositories. Do not link to the umbrella `private/`, `build/` or
-  `artifacts/` paths, and do not recreate the removed `referances/README.md` or
-  `uke-linux-docs/` trees.
+  `artifacts/` paths, and do not recreate the removed `referances/` or `reports/` trees.
 
 Other engineering documents live under `docs/`. They are evidence records, not
 a second backlog; keep status and open tasks in the umbrella documents.

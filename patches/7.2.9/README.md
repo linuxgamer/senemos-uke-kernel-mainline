@@ -40,7 +40,7 @@ OEM effective tuning for both lanes, Gear 4/5 and Rate A/B. The UFS board node
 remains disabled until its GCC/GDSC, NoC, supplies, reset and SMMU chain has been
 ported and validated. The complete eight-patch Linux 7.2.9 build passed Image,
 DTB, 1,146 module, RPM/SRPM and AArch64 package lifecycle checks on October 6.
-See the [build record](../../reports/FIRST-CONSOLE-KERNEL-BUILD-2026-10-06.json).
+The build record was removed with the October reports; recover it from git history if needed.
 This establishes buildability, not a working board UFS link.
 
 The target base is Linux `v7.2.9`, commit

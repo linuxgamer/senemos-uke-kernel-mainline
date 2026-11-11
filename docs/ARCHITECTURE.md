@@ -9,7 +9,7 @@ separate ARM64, Uke and Fedora config fragments. This repository's standalone
 config, source/patch/toolchain identities and module ABI. Active development
 trees remain in `src/upstream/`; the earlier baseline is preserved.
 
-Keep pristine-baseline, donor-6.12 and forward-port builds separate. Record the final development commit, config hash, toolchain digest, source time and exported patch tree identity. Store reviewable patches under `patches/`; never develop in `referances/`.
+Keep pristine-baseline, donor-6.12 and forward-port builds separate. Record the final development commit, config hash, toolchain digest, source time and exported patch tree identity. Store reviewable patches under `patches/`; the removed `referances/` tree is not recreated, and downloaded archives live in `source-cache/`.
 
 Port binding/TLMM, clocks, RPMh/regulators/GDSC, USB interconnect, scoped SMMU handoff, eUSB2/repeater, WCD939x and DWC3 in dependency order. Test generic infrastructure changes on non-target configs as well as Uke. Review retry behavior and resource lifetimes rather than accepting a successful compile as sufficient.
 

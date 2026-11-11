@@ -53,7 +53,7 @@ At least 25 GiB free space is required. The script holds a workspace build lock,
 queues behind other compilers and pauses its own container if a recovery or
 other native build starts. It never pauses, kills or cleans another build.
 
-Verified archives remain in `referances/releases/`. RPM's
+Verified archives remain in `source-cache/releases/`. RPM's
 development sources and reusable output live below this component's ignored
 `build/fedora-rawhide/VERSION/`. Changed input identities preserve the old output
 as a saved directory before creating a clean output. An interrupted invocation

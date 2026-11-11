@@ -6,7 +6,7 @@ test ! -e /etc/senemos/kernel-update.conf
 owner=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 scratch=$(mktemp -d)
 trap 'find "$scratch" -depth -delete' EXIT
-archive=$owner/referances/releases/linux-7.3.1.tar.xz
+archive=$owner/source-cache/releases/linux-7.3.1.tar.xz
 mkdir -p "${archive%/*}"
 curl --fail --location --silent --show-error --retry 3 --proto '=https' --proto-redir '=https' \
     https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.3.1.tar.xz -o "$archive"

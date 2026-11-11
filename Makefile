@@ -143,7 +143,7 @@ test-o82-regdma:
 test-o82-profiles:
 	bash tests/o82-profile-loader-contract.sh
 srpm: validate
-	cache="$(CURDIR)/referances/releases"
+	cache="$(CURDIR)/source-cache/releases"
 	top="$$(realpath -m "$(outdir)/rpmbuild")"
 	mkdir -p "$$cache" "$$top"/{BUILD,BUILDROOT,RPMS,SRPMS,SOURCES,SPECS}
 	for name in linux-$(version).tar.xz linux-$(version).tar.sign; do

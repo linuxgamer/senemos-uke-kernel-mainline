@@ -195,7 +195,6 @@ Previous branch tips remain under `archive/` tags. Singleboot is a package profi
 - [Native packaging](packaging/native/README.md) — source integration and package details
 - [Architecture](docs/ARCHITECTURE.md) — kernel integration overview
 - [Automation](docs/AUTOMATION.md) — source updates and COPR workflow
-- [Reports](reports/) — technical findings and validation records
 
 Bug reports should include the device, kernel version, steps to reproduce and relevant logs. Use [GitHub Issues](https://github.com/MCC45TR/senemos-uke-kernel-mainline/issues) for bugs and [SECURITY.md](SECURITY.md) for security reports.
 
