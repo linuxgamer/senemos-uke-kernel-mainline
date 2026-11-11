@@ -7,20 +7,23 @@
     "source_commit": "9a66fdc0d7fd55f54235524a73435af99051e46f",
     "source_checkout": "src/upstream/linux-7.2.8",
     "config": "arm64 defconfig",
-    "targets": ["Image", "dtbs", "modules", "modules_install"],
+    "targets": [
+      "Image",
+      "dtbs",
+      "modules",
+      "modules_install"
+    ],
     "result": "passed",
     "uke_device_tree_built": false,
     "modules_built": true,
     "module_count": 1655,
-    "module_staging_verified": true,
-    "report": "reports/BASELINE-BUILDABILITY.md"
+    "module_staging_verified": true
   },
   "hardware_tested": false,
   "workspace": "https://github.com/MCC45TR/uke-linux",
   "sources": [
     {
       "id": "uke-linux",
-      "path": "referances/community/uke-linux",
       "url": "https://github.com/ztsubaki/uke-linux.git",
       "checkout": "refs/heads/master",
       "refs": {
@@ -34,7 +37,6 @@
     },
     {
       "id": "tb520fu-linux",
-      "path": "referances/donors/tb520fu-linux",
       "url": "https://github.com/nfe613920-cmyk/tb520fu-linux-kernel.git",
       "checkout": "refs/heads/main",
       "refs": {
@@ -48,7 +50,6 @@
     },
     {
       "id": "tb520fu-docs",
-      "path": "referances/donors/tb520fu-docs",
       "url": "https://github.com/nfe613920-cmyk/tb520fu-mainline-docs.git",
       "checkout": "refs/heads/main",
       "refs": {
@@ -62,7 +63,6 @@
     },
     {
       "id": "tab-s9-linux",
-      "path": "referances/donors/tab-s9-linux",
       "url": "https://github.com/agcarbajo/postmarketos-galaxy-tab-s9-ultra.git",
       "checkout": "refs/heads/master",
       "refs": {
@@ -76,7 +76,6 @@
     },
     {
       "id": "peridot-multiboot",
-      "path": "referances/donors/peridot-multiboot",
       "url": "https://github.com/dimivelev/peridot-multiboot.git",
       "checkout": "refs/heads/main",
       "refs": {
@@ -90,7 +89,6 @@
     },
     {
       "id": "xiaomi-devicetree",
-      "path": "referances/xiaomi/xiaomi-devicetree",
       "url": "https://github.com/MiCode/kernel_devicetree.git",
       "checkout": "refs/heads/uke-v-oss",
       "refs": {
@@ -104,7 +102,6 @@
     },
     {
       "id": "xiaomi-display-dt",
-      "path": "referances/xiaomi/xiaomi-display-dt",
       "url": "https://github.com/MiCode/vendor_qcom_proprietary_display-devicetree.git",
       "checkout": "refs/heads/uke-v-oss",
       "refs": {
@@ -118,7 +115,6 @@
     },
     {
       "id": "xiaomi-camera-dt",
-      "path": "referances/xiaomi/xiaomi-camera-dt",
       "url": "https://github.com/MiCode/vendor_qcom_proprietary_camera-devicetree.git",
       "checkout": "refs/heads/uke-v-oss",
       "refs": {
@@ -132,7 +128,6 @@
     },
     {
       "id": "xiaomi-build",
-      "path": "referances/xiaomi/xiaomi-build",
       "url": "https://github.com/MiCode/kernel_build.git",
       "checkout": "refs/heads/uke-v-oss",
       "refs": {
@@ -146,7 +141,6 @@
     },
     {
       "id": "novatek-touch",
-      "path": "referances/donors/novatek-touch",
       "url": "https://android.googlesource.com/kernel/google-modules/touch/novatek_touch",
       "checkout": "refs/heads/android-gs-tangorpro-6.1-android16",
       "refs": {
@@ -160,7 +154,6 @@
     },
     {
       "id": "xiaomi-kernel",
-      "path": "referances/xiaomi/xiaomi-kernel",
       "url": "https://github.com/MiCode/Xiaomi_Kernel_OpenSource.git",
       "checkout": "refs/heads/uke-v-oss",
       "refs": {
@@ -174,7 +167,6 @@
     },
     {
       "id": "xiaomi-audio",
-      "path": "referances/xiaomi/xiaomi-audio",
       "url": "https://github.com/MiCode/vendor_qcom_opensource_audio-kernel.git",
       "checkout": "refs/heads/uke-v-oss",
       "refs": {
@@ -188,7 +180,6 @@
     },
     {
       "id": "xiaomi-wlan",
-      "path": "referances/xiaomi/xiaomi-wlan",
       "url": "https://github.com/MiCode/vendor_qcom_opensource_wlan.git",
       "checkout": "refs/heads/uke-v-oss",
       "refs": {
@@ -202,7 +193,6 @@
     },
     {
       "id": "xiaomi-camera",
-      "path": "referances/xiaomi/xiaomi-camera",
       "url": "https://github.com/MiCode/vendor_qcom_opensource_camera-kernel.git",
       "checkout": "refs/heads/uke-v-oss",
       "refs": {
@@ -216,7 +206,6 @@
     },
     {
       "id": "xiaomi-display",
-      "path": "referances/xiaomi/xiaomi-display",
       "url": "https://github.com/MiCode/vendor_opensource_display-drivers.git",
       "checkout": "refs/heads/uke-v-oss",
       "refs": {
@@ -230,7 +219,6 @@
     },
     {
       "id": "lineage-kernel",
-      "path": "referances/community/lineage-kernel",
       "url": "https://github.com/LineageOS/android_kernel_xiaomi_sm8635.git",
       "checkout": "refs/heads/lineage-23.2",
       "refs": {
@@ -244,7 +232,6 @@
     },
     {
       "id": "lineage-modules",
-      "path": "referances/community/lineage-modules",
       "url": "https://github.com/LineageOS/android_kernel_xiaomi_sm8635-modules.git",
       "checkout": "refs/heads/lineage-23.2",
       "refs": {
@@ -258,7 +245,6 @@
     },
     {
       "id": "lineage-devicetrees",
-      "path": "referances/community/lineage-devicetrees",
       "url": "https://github.com/LineageOS/android_kernel_xiaomi_sm8635-devicetrees.git",
       "checkout": "refs/heads/lineage-23.2",
       "refs": {
@@ -272,7 +258,6 @@
     },
     {
       "id": "oneplus-kernel",
-      "path": "referances/donors/oneplus-kernel",
       "url": "https://github.com/OnePlusOSS/android_kernel_oneplus_sm7675.git",
       "checkout": "refs/heads/oneplus/sm7675_v_15.0.0_ace_3v",
       "refs": {
@@ -286,7 +271,6 @@
     },
     {
       "id": "oneplus-common",
-      "path": "referances/donors/oneplus-common",
       "url": "https://github.com/OnePlusOSS/android_kernel_common_oneplus_sm7675.git",
       "checkout": "refs/heads/oneplus/sm7675_v_15.0.0_ace_3v",
       "refs": {
@@ -300,7 +284,6 @@
     },
     {
       "id": "oneplus-modules-dt",
-      "path": "referances/donors/oneplus-modules-dt",
       "url": "https://github.com/OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm7675.git",
       "checkout": "refs/heads/oneplus/sm7675_v_15.0.0_ace_3v",
       "refs": {
@@ -314,7 +297,6 @@
     },
     {
       "id": "ack",
-      "path": "referances/android/ack",
       "url": "https://android.googlesource.com/kernel/common",
       "checkout": "refs/heads/android14-6.1",
       "refs": {
@@ -329,7 +311,6 @@
     },
     {
       "id": "ack-manifest",
-      "path": "referances/android/ack-manifest",
       "url": "https://android.googlesource.com/kernel/manifest",
       "checkout": "refs/heads/common-android14-6.1",
       "refs": {
@@ -343,7 +324,6 @@
     },
     {
       "id": "linux-stable",
-      "path": "referances/upstream/linux-stable",
       "url": "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git",
       "checkout": "refs/tags/v7.2.8",
       "refs": {
@@ -357,7 +337,6 @@
     },
     {
       "id": "linux-mainline",
-      "path": "referances/upstream/linux-mainline",
       "url": "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git",
       "checkout": "refs/tags/v7.3-rc5",
       "refs": {
@@ -372,7 +351,6 @@
     },
     {
       "id": "linux-qcom",
-      "path": "referances/upstream/linux-qcom",
       "url": "https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux.git",
       "checkout": "refs/heads/for-next",
       "refs": {
@@ -386,7 +364,6 @@
     },
     {
       "id": "nabu-kernel",
-      "path": "referances/donors/nabu-kernel",
       "url": "https://github.com/MCC45TR/nabu-linux-kernel.git",
       "checkout": "refs/heads/7.2.2",
       "refs": {
@@ -401,7 +378,6 @@
     },
     {
       "id": "dt-schema",
-      "path": "referances/tools/dt-schema",
       "url": "https://github.com/devicetree-org/dt-schema.git",
       "checkout": "refs/heads/main",
       "refs": {
@@ -415,7 +391,6 @@
     },
     {
       "id": "dtc",
-      "path": "referances/tools/dtc",
       "url": "https://git.kernel.org/pub/scm/utils/dtc/dtc.git",
       "checkout": "refs/heads/master",
       "refs": {

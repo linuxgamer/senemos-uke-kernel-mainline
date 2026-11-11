@@ -22,7 +22,7 @@ for path in "${overlays[@]}"; do
  test ! -e "$profile/$path"
  install -Dm644 "$owner/$path" "$profile/$path"
 done
-reference=$profile/referances/camera-phy221
+reference=$profile/reference-inputs/camera-phy221
 mkdir -p "$reference"
 base=https://raw.githubusercontent.com/MiCode/vendor_qcom_opensource_camera-kernel/699fa15a98abd40fbb94f3a6fc00f91723d29d35/drivers/cam_sensor_module/cam_csiphy
 curl --fail --location --silent --show-error "$base/include/cam_csiphy_2_2_1_hwreg.h" -o "$reference/cam_csiphy_2_2_1_hwreg.h"

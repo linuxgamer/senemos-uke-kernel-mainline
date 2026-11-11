@@ -9,7 +9,6 @@
       "commit": "87f59fc5c2ef1ee04e494e5258853d36a3346059",
       "file": "proprietary/odm/etc/audio/sku_cliffs/mixer_paths_overlay_static.xml",
       "sha256": "2cb2cfc48ff22b76e67783753203a0367f4e447b398db6d7eb61ef5a2e8a8b4c",
-      "local_path": "referances/uke-microphone-oem-20261031/mixer_paths_overlay_static.xml",
       "classification": "uke_oem_data_reference",
       "license": "Not established from file header; reference data not redistributed",
       "executed": false
@@ -20,7 +19,6 @@
       "commit": "0f03fdc4432a86e8aefa0b71d395391f18dc8ad5",
       "file": "configs/audio/resourcemanager_cliffs_mtp.xml",
       "sha256": "ec2fd1eea221ff0d7ade65f6054055fc3bb65dc4cc95c9914b1a75a321173e7b",
-      "local_path": "referances/uke-microphone-oem-20261031/resourcemanager_cliffs_mtp.xml",
       "classification": "uke_oem_data_reference",
       "executed": false
     },

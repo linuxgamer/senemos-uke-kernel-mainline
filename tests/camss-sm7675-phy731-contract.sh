@@ -6,7 +6,7 @@ kernel=$(realpath "$1")
 project=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 source=$kernel/drivers/media/platform/qcom/camss/camss-csiphy-3ph-1-0.c
 printf '%s  %s\n' 7b1fc8f45d02bd861455ab90ca509e3a688e1714290121e6f7319c8a10091d71 "$source" | sha256sum -c -
-oem=$project/referances/camera-phy221
+oem=$project/reference-inputs/camera-phy221
 printf '%s  %s\n' \
  5d5bc215b97bdec610ec4698c49a297c0ccdfab211fb4c3380b8555ef63ca99a "$oem/cam_csiphy_2_2_1_hwreg.h" \
  11f6a85cfb70ca7edbbe3a41c395fbe525c1db822f881171c527de652de78cb9 "$oem/cam_csiphy_core.c" \

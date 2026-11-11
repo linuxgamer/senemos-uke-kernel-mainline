@@ -738,7 +738,6 @@
       "tree": "bc1bda385d926a7bcc29828f7b6649a106f743e7",
       "committed_at": "2025-01-09T10:10:18+08:00",
       "classification": "direct_uke_oem",
-      "local_path": "referances/xiaomi/xiaomi-kernel",
       "acquisition": "existing_checkout",
       "remote_pin_matches": true,
       "inspection": "Selected subsystem files and release map; not whole-tree audit"
@@ -751,7 +750,6 @@
       "tree": "627a7ba6b99f0a5aa6308eeda3e6e81c642ee8e5",
       "committed_at": "2025-01-08T16:25:16+08:00",
       "classification": "direct_uke_oem",
-      "local_path": "referances/xiaomi/xiaomi-devicetree",
       "acquisition": "existing_checkout",
       "remote_pin_matches": true,
       "inspection": "Selected subsystem files and release map; not whole-tree audit"
@@ -764,7 +762,6 @@
       "tree": "ec82fe65b400a6f73827423872ca04a0b2af3fa2",
       "committed_at": "2025-01-08T16:23:42+08:00",
       "classification": "direct_uke_oem",
-      "local_path": "referances/xiaomi/xiaomi-build",
       "acquisition": "existing_checkout",
       "remote_pin_matches": true,
       "inspection": "Selected subsystem files and release map; not whole-tree audit"
@@ -777,7 +774,6 @@
       "tree": "2a2cb00ee7a2398858a10f0b619ae3d0d28b005d",
       "committed_at": "2025-01-08T16:32:15+08:00",
       "classification": "direct_uke_oem",
-      "local_path": "referances/xiaomi/xiaomi-audio",
       "acquisition": "existing_checkout",
       "remote_pin_matches": true,
       "inspection": "Selected subsystem files and release map; not whole-tree audit"
@@ -790,7 +786,6 @@
       "tree": "fded2778c452321479b337ec1820de491b115d89",
       "committed_at": "2025-01-08T16:35:07+08:00",
       "classification": "direct_uke_oem",
-      "local_path": "referances/xiaomi/xiaomi-wlan",
       "acquisition": "existing_checkout",
       "remote_pin_matches": true,
       "inspection": "Selected subsystem files and release map; not whole-tree audit"
@@ -803,7 +798,6 @@
       "tree": "11119e5b8dd007a6dcd2566f76f6dd398fa9ce61",
       "committed_at": "2025-01-08T16:26:10+08:00",
       "classification": "direct_uke_oem",
-      "local_path": "referances/xiaomi/xiaomi-camera",
       "acquisition": "existing_checkout",
       "remote_pin_matches": true,
       "inspection": "Selected subsystem files and release map; not whole-tree audit"
@@ -816,7 +810,6 @@
       "tree": "1dc1aa43171a0bd751e5dded1e5da6e64e01e4ec",
       "committed_at": "2025-01-08T16:40:15+08:00",
       "classification": "direct_uke_oem",
-      "local_path": "referances/xiaomi/xiaomi-camera-dt",
       "acquisition": "existing_checkout",
       "remote_pin_matches": true,
       "inspection": "Selected subsystem files and release map; not whole-tree audit"
@@ -829,7 +822,6 @@
       "tree": "4e4e3461b52db633e65e58fbc8820a8fbfe833b4",
       "committed_at": "2025-01-08T16:27:57+08:00",
       "classification": "direct_uke_oem",
-      "local_path": "referances/xiaomi/xiaomi-display",
       "acquisition": "existing_checkout",
       "remote_pin_matches": true,
       "inspection": "Selected subsystem files and release map; not whole-tree audit"
@@ -842,7 +834,6 @@
       "tree": "0a83b51efab9135d7cf8f41d2e28ad109877b549",
       "committed_at": "2025-01-08T16:46:06+08:00",
       "classification": "direct_uke_oem",
-      "local_path": "referances/xiaomi/xiaomi-display-dt",
       "acquisition": "existing_checkout",
       "remote_pin_matches": true,
       "inspection": "Selected subsystem files and release map; not whole-tree audit"
@@ -859,8 +850,6 @@
       "equivalent_tree_ref": "piano-w-oss",
       "equivalent_tree_commit": "6957f6b646d1c919e175e6f9000eb50c8635273c",
       "classification": "shared_controller_android_oem_not_uke_board",
-      "local_path": "referances/donors/micode-touch-pad8",
-      "prior_partial_path": "referances/community/micode-piano-touch-6957f6b",
       "prior_source_difference": "Existing flattened nt36xxx.c is byte-identical; acquisition adds complete Git tree and shared framework, not a new touch algorithm",
       "prior_nt36xxx_c_sha256": "a15a6571ecd817f5c0029c104fe840948743a89040b0bff818aefdc0e7427bfd",
       "tracked_file_count": 47,
@@ -910,7 +899,6 @@
       "commit": "43ed0711989186c8f71f16f33cb22448867344ad",
       "tree": "f0906fa58e4d8fb2d30171d580392c13ad2499c6",
       "classification": "direct_uke_oem_release_selection_not_verified",
-      "local_path": "referances/donors/micode-uke-ais",
       "prior_source_difference": "Absent from the nine existing MiCode Git checkouts; exact Uke AIS release now acquired",
       "inspected_paths": [
         "drivers/ais/ais_ife_dev.c",
